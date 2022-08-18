@@ -1,25 +1,27 @@
 use configparser::ini::Ini;
 
+use std::path::{Path,PathBuf};
+
 #[derive(Debug)]
 pub struct DebugSettings {
-    log_cutoff: i32,
-    send_logfile: i32,
-    send_message_box: i32,
-    send_debugger: i32,
-    delta_log1: i32,
-    delta_log0: i32,
+    pub log_cutoff: i32,
+    pub send_log_file: i32,
+    pub send_message_box: i32,
+    pub send_debugger: i32,
+    pub delta_log_1: i32,
+    pub delta_log_0: i32,
 }
 
-pub fn load_debug_settings() -> DebugSettings {
+pub fn load_debug_settings(ini_path: &Path) -> DebugSettings {
     let mut debug_settings = DebugSettings {
         log_cutoff: 9,
-        send_logfile: 0,
+        send_log_file: 0,
         send_message_box: 0,
         send_debugger: 0,
-        delta_log0: 0,
-        delta_log1: 0,
+        delta_log_0: 0,
+        delta_log_1: 0,
     };
-    debug_settings = load_debug_settings_from_ini(debug_settings);
+    debug_settings = load_debug_settings_from_ini(debug_settings, ini_path);
     return debug_settings;
 }
 
@@ -30,24 +32,24 @@ pub fn load_debug_settings() -> DebugSettings {
 //     return 1;
 // }
 
-fn load_debug_settings_from_ini(mut debug_settings: DebugSettings) -> DebugSettings {
+fn load_debug_settings_from_ini(mut debug_settings: DebugSettings, ini_path: &Path) -> DebugSettings {
     let mut zoo_ini = Ini::new();
     
-    zoo_ini.load("zoo.ini").unwrap();
+    zoo_ini.load(ini_path).unwrap();
 
     let debug_header = "Debug";
 
     debug_settings.log_cutoff = load_int_with_default(&zoo_ini, debug_header, "LogCutoff", debug_settings.log_cutoff);
 
-    debug_settings.send_logfile = load_int_with_default(&zoo_ini, debug_header, "SendLogfile", debug_settings.send_logfile);
+    debug_settings.send_log_file = load_int_with_default(&zoo_ini, debug_header, "SendLogfile", debug_settings.send_log_file);
 
     debug_settings.send_message_box = load_int_with_default(&zoo_ini, debug_header, "sendMessageBox", debug_settings.send_message_box);
 
     debug_settings.send_debugger = load_int_with_default(&zoo_ini, debug_header, "sendDebugger", debug_settings.send_debugger);
 
-    debug_settings.delta_log0 = load_int_with_default(&zoo_ini, debug_header, "deltaLog0", debug_settings.delta_log0);
+    debug_settings.delta_log_0 = load_int_with_default(&zoo_ini, debug_header, "deltaLog0", debug_settings.delta_log_0);
 
-    debug_settings.delta_log1 = load_int_with_default(&zoo_ini, debug_header, "deltaLog1", debug_settings.delta_log1);
+    debug_settings.delta_log_1 = load_int_with_default(&zoo_ini, debug_header, "deltaLog1", debug_settings.delta_log_1);
 
     return debug_settings;
 }

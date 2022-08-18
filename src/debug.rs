@@ -11,7 +11,7 @@ fn main() {
 
     env::set_current_dir(zoo_directory).unwrap();
 
-    let debug_settings = load_ini::load_debug_settings();
+    let debug_settings = load_ini::load_debug_settings(Path::new("zoo.ini"));
 
     println!("{:?}", debug_settings);
 

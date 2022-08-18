@@ -9,7 +9,7 @@ edition = "2021"
 configparser = "3.0.0"
 directories = "4.0"
 chrono = "0.4"
-winapi = {version = "0.3.9", features = ["winuser", "std"]}
+winapi = {version = "0.3.9", features = ["winuser", "std", "memoryapi"]}
 iced-x86 = "1.17.0"
 
 [lib]

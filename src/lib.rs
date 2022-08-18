@@ -10,6 +10,7 @@ mod linux {
 }
 
 mod debug_dll;
+mod load_ini;
 
 #[no_mangle]
 pub extern fn lib_test() {
@@ -64,7 +65,15 @@ extern "system" fn dll_ini_debug_log() {
 #[no_mangle]
 pub fn load_debug_settings_from_ini() {
     debug_dll::debug_logger("load_debug_settings_from_ini");
-    // debug_dll::load_debug_settings();
+    debug_dll::log_exe_location_memory_value();
+    debug_dll::log_debug_ini_memory_values();
+    let mut base_path = debug_dll::get_base_path();
+    base_path.push("zoo.ini");
+    let debug_settings = load_ini::load_debug_settings(base_path.as_path());
+    debug_dll::debug_logger("Saving debug ini settings");
+    debug_dll::save_debug_settings(debug_settings);
+    debug_dll::log_debug_ini_memory_values();
+    // debug_dll::exit_program(1);
 }
 
 #[no_mangle]
