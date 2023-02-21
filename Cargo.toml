@@ -2,15 +2,16 @@
 name = "openzt"
 version = "0.1.0"
 edition = "2021"
+# default-target = "i686-pc-windows-msvc"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 configparser = "3.0.0"
-directories = "4.0"
-chrono = "0.4"
 winapi = {version = "0.3.9", features = ["winuser", "std", "memoryapi"]}
-iced-x86 = "1.17.0"
+tracing-subscriber = "0.3.16"
+tracing = "0.1.37"
+retour = "0.1.0"
 
 [lib]
 name = "openzt"

@@ -1,6 +1,6 @@
 use configparser::ini::Ini;
 
-use std::path::{Path,PathBuf};
+use std::path::Path;
 
 #[derive(Debug)]
 pub struct DebugSettings {
@@ -54,7 +54,7 @@ fn load_debug_settings_from_ini(mut debug_settings: DebugSettings, ini_path: &Pa
     return debug_settings;
 }
 
-fn load_int_with_default(ini_file: &Ini, section: &str, key: &str, default: i32) -> i32 {
+pub fn load_int_with_default(ini_file: &Ini, section: &str, key: &str, default: i32) -> i32 {
     let value = ini_file.getint(section, key);
 
     match value {
@@ -65,5 +65,13 @@ fn load_int_with_default(ini_file: &Ini, section: &str, key: &str, default: i32)
             }
         },
         Err(_) => default,
+    }
+}
+
+pub fn load_string_with_default(ini_file: &Ini, section: &str, key: &str, default: &str) -> String {
+    let value = ini_file.get(section, key);
+    match value {
+        Some(parsed_value) => parsed_value,
+        None => default.to_string(),
     }
 }
