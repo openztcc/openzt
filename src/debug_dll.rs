@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::ptr;
 
-use tracing::{info, error, Level};
+use tracing::{info, debug};
 
 use crate::load_ini::DebugSettings;
 
@@ -9,7 +9,6 @@ use crate::load_ini::DebugSettings;
 use winapi::um::memoryapi::VirtualProtect;
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_READ};
-
 
 const SEND_DEBUGGER_ADDRESS: u32 = 0x00643e44;
 const SEND_LOG_FILE_ADDRESS: u32 = 0x00643e48;
@@ -19,7 +18,9 @@ const DELTA_LOG_1_ADDRESS: u32 = 0x0064bd7c;
 const LOG_CUTOFF_ADDRESS: u32 = 0x0063804c;
 
 pub const DEBUG_INI_LOAD_CALL_ADDRESS: u32 = 0x0057a218;
-pub const DEBUG_INI_LOAD_FUNCTION_ADDRESS: u32 = 0x00579f4c;
+pub const DEBUG_INI_LOAD_FUNCTION_ADDRESS: u32 = 0x00579f4c; 
+
+
 const DEBUG_INI_LOAD_FUNCTION_RETURN_ADDRESS: u32 = 0x0057a217;
 
 pub const EXE_LOCATION_ADDRESS: u32 = 0x0064BEDC;
@@ -67,14 +68,14 @@ pub fn log_exe_location_memory_value() {
 }
 
 pub fn get_string_from_memory(address: u32) -> String {
-    debug_logger(&format!("decoding string at address: {:p}", address as *const ()));
+    debug!("decoding string at address: {:p}", address as *const ());
     let mut string = String::new();
     let mut char_address = address;
     while { let byte = get_from_memory::<u8>(char_address); byte != 0 } {
         string.push(get_from_memory::<u8>(char_address) as char);
         char_address += 1;
     }
-    debug_logger(&format!("decoded: {}", string));
+    debug!("decoded: {}", string);
     return string;
 }
 

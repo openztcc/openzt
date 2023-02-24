@@ -4,11 +4,12 @@ use configparser::ini::Ini;
 
 use std::net::TcpStream;
 
-use retour::static_detour;
-
 use std::sync::Mutex;
 
-use tracing::{info, error};
+use tracing::{info, Level};
+
+use retour_utils::hook_module;
+
 
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
@@ -24,79 +25,37 @@ mod linux {
 mod debug_dll;
 mod load_ini;
 
-#[no_mangle]
-pub extern fn lib_test() {
-    debug_dll::debug_logger("Remote debug Test");
-    debug_dll::log_debug_ini_memory_values();
-    patch_load_debug_ini_call();
-    // patch_load_int_from_ini_call();
-    // patch_load_value_from_ini_call();
-}
 
 #[no_mangle]
 pub fn dll_first_load() {
 
     let stream = TcpStream::connect("127.0.0.1:1492").unwrap();
 
-    tracing_subscriber::fmt()
+    let subscriber = tracing_subscriber::fmt()
         .with_writer(Mutex::new(stream))
-        // .with_writer(stream)
-        //.with_max_level
-        .init();
+        .with_max_level(Level::INFO)
+        .finish();
 
-    info!("Remote Test");
+    tracing::subscriber::set_global_default(subscriber).unwrap_or_else(|error| {
+        panic!("Failed to init tracing: {error}")
+    });
 
-    debug_dll::debug_logger("Loaded");
+    info!("openzt.dll Loaded");
 }
 
-// static mut LOAD_DEBUG_SETTINGS_FROM_INI: Option<GenericDetour<extern "cdecl" fn()>> = None;
 
-// //DEBUG_INI_LOAD_FUNCTION_ADDRESS
+#[hook_module("zoo.exe")]
+mod zoo {
+    use tracing::{info};
 
+    use crate::load_debug_settings_from_ini;
 
-// // load_debug_settings_from_ini
-
-static_detour! {
-    static LoadDebugSettingsFromIniHook: unsafe extern "cdecl" fn();
-}
-
-type FnLoadDebugSettingsFromIni = unsafe extern "cdecl" fn();
-
-
-#[no_mangle]
-pub fn detour_logging_test() {
-    debug_dll::debug_logger("Attempting detour");
-
-    unsafe {
-        let target: FnLoadDebugSettingsFromIni = mem::transmute(debug_dll::DEBUG_INI_LOAD_FUNCTION_ADDRESS);
-
-        LoadDebugSettingsFromIniHook
-            .initialize(target, load_debug_settings_from_ini_log).expect("Failed to initialise detour")
-            .enable().expect("Failed to enable detour");
+    #[hook(unsafe extern "cdecl" LoadDebugSettingsFromIniHook, offset = 0x00179f4c)]
+    fn load_debug_settings_from_ini_detour() {
+        info!("Detour via macro (Debug Ini Settings)");
+        // unsafe { LoadDebugSettingsFromIniHook.call() }
+        load_debug_settings_from_ini();
     }
-}
-
-fn load_debug_settings_from_ini_log() {
-    info!("Calling load_debug_settings_from_ini_log");
-    unsafe { LoadDebugSettingsFromIniHook.call() }
-}
-
-#[no_mangle]
-pub fn detour_detour_test() {
-    debug_dll::debug_logger("Attempting detour");
-
-    unsafe {
-        let target: FnLoadDebugSettingsFromIni = mem::transmute(debug_dll::DEBUG_INI_LOAD_FUNCTION_ADDRESS);
-
-        LoadDebugSettingsFromIniHook
-            .initialize(target, load_debug_settings_from_ini_detour).expect("Failed to initialise detour")
-            .enable().expect("Failed to enable detour");
-    }
-}
-
-fn load_debug_settings_from_ini_detour() {
-    info!("Calling load_debug_settings_from_ini_detour");
-    load_debug_settings_from_ini();
 }
 
 
@@ -105,28 +64,23 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
             dll_first_load();
-            detour_detour_test();
-            debug_dll::debug_logger(&format!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved));
+            info!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved);
+
+            unsafe { zoo::init_detours().unwrap(); }
         }
         DLL_PROCESS_DETACH => {
-            debug_dll::debug_logger(&format!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved));
+            info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);
         }
         DLL_THREAD_ATTACH => {
-            debug_dll::debug_logger(&format!("DllMain: DLL_THREAD_ATTACH: {}, {} {}", module, reason, _reserved));
+            info!("DllMain: DLL_THREAD_ATTACH: {}, {} {}", module, reason, _reserved);
         }
         DLL_THREAD_DETACH => {
-            debug_dll::debug_logger(&format!("DllMain: DLL_THREAD_DETACH: {}, {} {}", module, reason, _reserved));
+            info!("DllMain: DLL_THREAD_DETACH: {}, {} {}", module, reason, _reserved);
         }
         _ => {
-            debug_dll::debug_logger(&format!("DllMain: Unknown: {}, {} {}", module, reason, _reserved));
+            info!("DllMain: Unknown: {}, {} {}", module, reason, _reserved);
         }
     }
-    1
-}
-
-#[no_mangle]
-extern "C" fn DllMainCRTStartup() -> i32 {
-    debug_dll::debug_logger("DllMainCRTStartup");
     1
 }
 

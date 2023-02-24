@@ -12,6 +12,7 @@ winapi = {version = "0.3.9", features = ["winuser", "std", "memoryapi"]}
 tracing-subscriber = "0.3.16"
 tracing = "0.1.37"
 retour = "0.1.0"
+retour-utils = "0.1.2"
 
 [lib]
 name = "openzt"
