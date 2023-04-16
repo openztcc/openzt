@@ -21,3 +21,8 @@ crate-type = ["cdylib"]
 [[bin]]
 name = "test"
 path = "src/debug.rs"
+
+[features]
+default = []
+ini = []
+bf_registry = []

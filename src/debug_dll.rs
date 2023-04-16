@@ -145,6 +145,7 @@ pub fn patch_calls(addresses: Vec<u32>, new_address: u32) {
 
 pub fn patch_nop(address: u32) {
     let opcode: u8 = get_from_memory::<u8>(address);
+    info!("Nop opcode: {:02x}", opcode);
     unsafe {
         #[cfg(target_os = "windows")]
         {

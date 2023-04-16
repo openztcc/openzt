@@ -3,6 +3,7 @@ use std::path::Path;
 
 mod load_ini;
 mod debug_dll;
+mod bfregistry;
 
 
 fn main() {

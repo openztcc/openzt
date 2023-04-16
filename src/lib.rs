@@ -1,4 +1,4 @@
-use std::mem;
+#![feature(abi_thiscall)]
 
 use configparser::ini::Ini;
 
@@ -9,6 +9,8 @@ use std::sync::Mutex;
 use tracing::{info, Level};
 
 use retour_utils::hook_module;
+
+mod bfregistry;
 
 
 #[cfg(target_os = "windows")]
@@ -45,10 +47,14 @@ pub fn dll_first_load() {
 
 
 #[hook_module("zoo.exe")]
-mod zoo {
+mod zoo_ini {
     use tracing::{info};
 
+    use crate::debug_dll::{get_string_from_memory, get_from_memory};
+
     use crate::load_debug_settings_from_ini;
+
+    use crate::cls_0x40190a;
 
     #[hook(unsafe extern "cdecl" LoadDebugSettingsFromIniHook, offset = 0x00179f4c)]
     fn load_debug_settings_from_ini_detour() {
@@ -56,6 +62,58 @@ mod zoo {
         // unsafe { LoadDebugSettingsFromIniHook.call() }
         load_debug_settings_from_ini();
     }
+
+    #[hook(unsafe extern "cdecl" LoadIniValueMaybeHook, offset = 0x0001b4bc)]
+    // fn load_ini_value_log_detour(class_ptr: u32, ini_section: LPCSTR, ini_key: LPCSTR, ini_default: LPCSTR) -> u32 {
+    fn load_ini_value_log_detour(class_ptr: u32, ini_section: u32, ini_key: u32, ini_default: u32) -> u32 {
+        info!("Detour via macro (LoadIniValueMaybeHook)");
+        let deref_class_ptr = get_from_memory::<u32>(class_ptr);
+        info!("class_ptr: {:#08x}", class_ptr);
+        info!("deref_class_ptr: {:#08x}", deref_class_ptr);
+
+        let cls_0x40190a_addr: *const cls_0x40190a = class_ptr as *const _;
+        let cls_0x40190a_obj = unsafe { &*cls_0x40190a_addr };
+        info!("cls_0x40190a_obj: {:#?}", cls_0x40190a_obj);
+
+        info!("ini_section: {}", get_string_from_memory(get_from_memory::<u32>(ini_section)));
+        info!("ini_key: {}", get_string_from_memory(get_from_memory::<u32>(ini_key)));
+        info!("ini_default: {}", get_string_from_memory(get_from_memory::<u32>(ini_default)));
+        let return_value = unsafe { LoadIniValueMaybeHook.call(class_ptr, ini_section, ini_key, ini_default) };
+        info!("return_value: {}", get_string_from_memory(get_from_memory::<u32>(return_value)));
+
+        let cls_0x40190a_addr: *const cls_0x40190a = class_ptr as *const _;
+        let cls_0x40190a_obj = unsafe { &*cls_0x40190a_addr };
+        info!("cls_0x40190a_obj: {:#?}", cls_0x40190a_obj);
+
+        return_value
+    }
+}
+
+#[hook_module("zoo.exe")]
+mod zoo_bf_registry {
+    use crate::debug_dll::{get_string_from_memory, get_from_memory};
+
+    use crate::bfregistry::{get_from_registry, add_to_registry};
+
+    #[hook(unsafe extern "thiscall" BFRegistry_prtGetHook, offset = 0x000bdd22)]
+    fn prt_get(_this_prt: u32, class_name: u32, _delimeter_maybe: u8) -> u32 {
+        get_from_registry(get_string_from_memory(get_from_memory::<u32>(class_name))).unwrap()
+    }
+
+    #[hook(unsafe extern "cdecl" BFRegistry_AddHook, offset = 0x001770e5)]
+    fn add_to_bfregistry(param_1: u32, param_2: u32) -> u32 {
+        let param_1_string = get_string_from_memory(get_from_memory::<u32>(param_1));
+        add_to_registry(&param_1_string, param_2);
+        0x638001
+    }
+
+    #[hook(unsafe extern "cdecl" BFRegistry_AddUIHook, offset = 0x001774bf)]
+    fn add_to_bfregistry_ui(param_1: u32, param_2: u32) -> u32  {
+        let param_1_string = get_string_from_memory(get_from_memory::<u32>(param_1));
+        add_to_registry(&param_1_string, param_2);
+        0x638001
+    }
+
 }
 
 
@@ -66,7 +124,14 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             dll_first_load();
             info!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved);
 
-            unsafe { zoo::init_detours().unwrap(); }
+            unsafe { 
+                if cfg!(feature = "ini") {
+                    zoo_ini::init_detours().unwrap();
+                }
+                if cfg!(feature = "bf_registry") {
+                    zoo_bf_registry::init_detours().unwrap();
+                }
+            }
         }
         DLL_PROCESS_DETACH => {
             info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);
