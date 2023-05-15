@@ -23,6 +23,7 @@ name = "test"
 path = "src/debug.rs"
 
 [features]
-default = []
+default = ["bf_registry"]
 ini = []
 bf_registry = []
+zoo_logging = []

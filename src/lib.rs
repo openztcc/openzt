@@ -12,6 +12,8 @@ use retour_utils::hook_module;
 
 mod bfregistry;
 
+mod capture_ztlog;
+
 
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
@@ -116,6 +118,20 @@ mod zoo_bf_registry {
 
 }
 
+#[hook_module("zoo.exe")]
+mod zoo_logging {
+    use tracing::info;
+    use crate::debug_dll::get_string_from_memory;
+    use crate::capture_ztlog::log_from_zt;
+
+    #[hook(unsafe extern "cdecl" ZooLogging_LogHook, offset = 0x00001363)]
+    fn zoo_log_func(source_file: u32, param_2: u32, param_3: u32, param_4: u8, param_5: u32, param_6: u32, log_message: u32) {
+        let source_file_string = get_string_from_memory(source_file);
+        let log_message_string = get_string_from_memory(log_message);
+        log_from_zt(&source_file_string, param_2, param_3, &log_message_string);
+    }
+}
+
 
 #[no_mangle]
 extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
@@ -126,10 +142,16 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
 
             unsafe { 
                 if cfg!(feature = "ini") {
+                    info!("Feature ini enabled");
                     zoo_ini::init_detours().unwrap();
                 }
                 if cfg!(feature = "bf_registry") {
+                    info!("Feature bf_registry enabled");
                     zoo_bf_registry::init_detours().unwrap();
+                }
+                if cfg!(feature = "zoo_logging") {
+                    info!("Feature zoo_logging enabled");
+                    zoo_logging::init_detours().unwrap();
                 }
             }
         }
