@@ -4,7 +4,7 @@ Very basic DLL for injection into [Zoo Tycoon (2001)](https://en.wikipedia.org/w
 
 ## Classes and functions
 
-This will be a rundown of classes as they are reverse engineered
+This will be a rundown of classes as they discovered and reimplemented.
 
 ### Legend
 ✅ = Reimplemented
