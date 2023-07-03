@@ -1,23 +1,40 @@
 use std::collections::HashMap;
 use std::cell::RefCell;
-use tracing::info;
+use tracing::{info, error};
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
 
-thread_local! {
-    static BF_REGISTRY: RefCell<HashMap<String, u32>> = RefCell::new(HashMap::new());
+static BF_REGISTRY: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+pub fn command_list_registry(args: Vec<&str>) -> Result<String, &'static str> {
+    list_registry()
+}
+
+pub fn list_registry() -> Result<String, &'static str> {
+    let data_mutex = BF_REGISTRY.lock().unwrap();
+    let mut string_array = Vec::new();
+    for (key, value) in data_mutex.iter() {
+        // info!("{}: {:#08x}", key, value);
+        string_array.push(format!("{}: {:#08x}", key, value));
+    }
+    Ok(string_array.join("\n"))
 }
 
 pub fn add_to_registry(key: &String, value: u32) {
-    BF_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(key.to_string(), value);
-    });
+    println!("Adding {} to registry", key);
+    let mut data_mutex = BF_REGISTRY.lock().unwrap();
+    data_mutex.insert(key.to_string(), value);
 }
 
 pub fn get_from_registry(key: String) -> Option<u32> {
-    return BF_REGISTRY.with(|registry| {
-        registry.borrow().get(&key).cloned()
-    });
+    println!("Getting {} from registry", key);
+    let data_mutex = BF_REGISTRY.lock().unwrap();
+    
+    data_mutex.get(&key).cloned()
 }
 
 pub fn read_bf_registry() {

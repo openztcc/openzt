@@ -168,3 +168,26 @@ pub fn patch_nops_series(patches: Vec<u32>) {
         patch_nops(patches[i], patches[i + 1]);
     }
 }
+
+pub fn read_string_array_from_memory(address: u32, size: u32) -> Vec<String> {
+    let mut strings: Vec<String> = Vec::new();
+    let mut string_address = address;
+    for _ in 0..size {
+        let string = get_string_from_memory(string_address);
+        strings.push(string);
+        string_address += 0x100;
+    }
+    return strings;
+}
+
+pub fn get_zt_string_array_from_memory(address: u32, end_address: u32) -> Vec<String> {
+    let mut strings: Vec<String> = Vec::new();
+    let array_length = (end_address - address) / 0xc;
+    let mut string_address = address;
+    for _ in 0..array_length {
+        let string = get_string_from_memory(get_from_memory::<u32>(string_address));
+        strings.push(string);
+        string_address += 0xc;
+    }
+    return strings;
+}

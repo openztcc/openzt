@@ -4,9 +4,10 @@ use configparser::ini::Ini;
 
 use std::net::TcpStream;
 
+use std::string;
 use std::sync::Mutex;
 
-use tracing::{info, Level};
+use tracing::{info, error, Level};
 
 use retour_utils::hook_module;
 
@@ -14,9 +15,18 @@ mod bfregistry;
 
 mod capture_ztlog;
 
+mod console;
+
+mod ztworldmgr;
 
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
+use crate::bfregistry::list_registry;
+use crate::debug_dll::{patch_calls, get_string_from_memory};
+
+use crate::console::{add_to_command_register, call_command, start_server};
+
+use crate::bfregistry::command_list_registry;
 
 #[cfg(not(target_os = "windows"))]
 mod linux {
@@ -148,10 +158,24 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 if cfg!(feature = "bf_registry") {
                     info!("Feature bf_registry enabled");
                     zoo_bf_registry::init_detours().unwrap();
+                    add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
+                }
+                if cfg!(feature = "zt_world_mgr") {
+                    use ztworldmgr::command_get_zt_world_mgr_entities;
+
+                    info!("Feature zt_world_mgr enabled");
+                    add_to_command_register("get_entities".to_owned(), command_get_zt_world_mgr_entities)
                 }
                 if cfg!(feature = "zoo_logging") {
                     info!("Feature zoo_logging enabled");
                     zoo_logging::init_detours().unwrap();
+                }
+                if cfg!(feature = "console") {
+                    info!("Feature console enabled");
+                    zoo_console::init_detours().unwrap();
+                    std::thread::spawn(|| {
+                        start_server();
+                    });
                 }
             }
         }
