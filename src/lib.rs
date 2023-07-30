@@ -68,7 +68,6 @@ mod zoo_ini {
 
     use crate::load_debug_settings_from_ini;
 
-    use crate::cls_0x40190a;
 
     #[hook(unsafe extern "cdecl" LoadDebugSettingsFromIniHook, offset = 0x00179f4c)]
     fn load_debug_settings_from_ini_detour() {
@@ -76,31 +75,6 @@ mod zoo_ini {
         // unsafe { LoadDebugSettingsFromIniHook.call() }
         load_debug_settings_from_ini();
     }
-
-    // #[hook(unsafe extern "cdecl" LoadIniValueMaybeHook, offset = 0x0001b4bc)]
-    // // fn load_ini_value_log_detour(class_ptr: u32, ini_section: LPCSTR, ini_key: LPCSTR, ini_default: LPCSTR) -> u32 {
-    // fn load_ini_value_log_detour(class_ptr: u32, ini_section: u32, ini_key: u32, ini_default: u32) -> u32 {
-    //     info!("Detour via macro (LoadIniValueMaybeHook)");
-    //     let deref_class_ptr = get_from_memory::<u32>(class_ptr);
-    //     info!("class_ptr: {:#08x}", class_ptr);
-    //     info!("deref_class_ptr: {:#08x}", deref_class_ptr);
-
-    //     let cls_0x40190a_addr: *const cls_0x40190a = class_ptr as *const _;
-    //     let cls_0x40190a_obj = unsafe { &*cls_0x40190a_addr };
-    //     info!("cls_0x40190a_obj: {:#?}", cls_0x40190a_obj);
-
-    //     info!("ini_section: {}", get_string_from_memory(get_from_memory::<u32>(ini_section)));
-    //     info!("ini_key: {}", get_string_from_memory(get_from_memory::<u32>(ini_key)));
-    //     info!("ini_default: {}", get_string_from_memory(get_from_memory::<u32>(ini_default)));
-    //     let return_value = unsafe { LoadIniValueMaybeHook.call(class_ptr, ini_section, ini_key, ini_default) };
-    //     info!("return_value: {}", get_string_from_memory(get_from_memory::<u32>(return_value)));
-
-    //     let cls_0x40190a_addr: *const cls_0x40190a = class_ptr as *const _;
-    //     let cls_0x40190a_obj = unsafe { &*cls_0x40190a_addr };
-    //     info!("cls_0x40190a_obj: {:#?}", cls_0x40190a_obj);
-
-    //     return_value
-    // }
 }
 
 #[hook_module("zoo.exe")]
@@ -127,7 +101,19 @@ mod zoo_bf_registry {
         add_to_registry(&param_1_string, param_2);
         0x638001
     }
+}
 
+#[hook_module("zoo.exe")]
+mod zoo_console {
+    use tracing::info;
+    use crate::debug_dll::{get_string_from_memory, get_from_memory};
+    use crate::console::call_next_command;
+    // use crate::console::add_to_console;    
+    #[hook(unsafe extern "thiscall" ZTApp_updateGame, offset = 0x0001a6d1)]
+    fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
+        call_next_command();
+        unsafe { ZTApp_updateGame.call(_this_ptr, param_2) }
+    }
 }
 
 #[hook_module("zoo.exe")]
