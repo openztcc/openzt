@@ -17,6 +17,21 @@ const DELTA_LOG_0_ADDRESS: u32 = 0x00638054;
 const DELTA_LOG_1_ADDRESS: u32 = 0x0064bd7c;
 const LOG_CUTOFF_ADDRESS: u32 = 0x0063804c;
 
+const SHOW_BUILDING_AI_INFO: u32 = 0x00638fc8;
+
+const ZTAIMGR_ADDRESS_PTR: u32 = 0x00638098;
+
+const SHOW_AI_INFO_OFFSET: u32 = 0xf4;
+const SHOW_NAME_OFFSET: u32 = 0xf8;
+const SHOW_POSITION_OFFSET: u32 = 0xfc;
+const SHOW_STATUS_VARS_OFFSET: u32 = 0x100;
+const SHOW_FUNCTION_CALL_OFFSET: u32 = 0x108;
+const SHOW_EVENTS_OFFSET: u32 = 0x10c;
+const SHOW_SELECTED_OFFSET: u32 = 0x104;
+const SHOW_FRAME_OFFSET: u32 = 0x114;
+const SHOW_GOAL_OFFSET: u32 = 0x118;
+const AI_INFO_NTH_OFFSET: u32 = 0x110;
+
 pub const DEBUG_INI_LOAD_CALL_ADDRESS: u32 = 0x0057a218;
 pub const DEBUG_INI_LOAD_FUNCTION_ADDRESS: u32 = 0x00579f4c; 
 
@@ -141,13 +156,17 @@ pub fn command_set_setting(args: Vec<&str>) -> Result<String, &'static str> {
     Ok(set_setting(setting, value))
 }
 
-pub fn set_setting(setting: String, value: String) -> String {
+fn set_setting(setting: String, value: String) -> String {
     match setting.as_str() {
-        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1" => {
+        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1" | "ShowBuildingAIInfo" => {
             handle_bool_setting(setting.as_str(), value)
         },
         "logCutoff" => {
             handle_u32_setting(setting.as_str(), value)
+        },
+        "ShowGoal" | "ShowFrame" | "ShowSelected" | "ShowEvents" | "ShowFunctionCall" | "ShowStatusVars" | "ShowPosition" | "ShowName" | "ShowAIInfo" => {
+            info!("handle_get_bool_zt_ai_mgr_setting");
+            handle_set_bool_zt_ai_mgr_setting(setting.as_str(), value)
         },
         _ => {
             format!("unknown setting: {}", setting)
@@ -199,13 +218,16 @@ pub fn command_get_setting(args: Vec<&str>) -> Result<String, &'static str> {
     Ok(get_setting(setting))
 }
 
-pub fn get_setting(setting: String) -> String {
+fn get_setting(setting: String) -> String {
     match setting.as_str() {
-        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1" => {
+        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1" | "ShowBuildingAIInfo" => {
             handle_get_bool_setting(setting.as_str())
         },
         "logCutoff" => {
             handle_get_u32_setting(setting.as_str())
+        },
+        "ShowGoal" | "ShowFrame" | "ShowSelected" | "ShowEvents" | "ShowFunctionCall" | "ShowStatusVars" | "ShowPosition" | "ShowName" | "ShowAIInfo" => {
+            handle_get_bool_zt_ai_mgr_setting(setting.as_str())
         },
         _ => {
             format!("unknown setting: {}", setting)
@@ -213,24 +235,36 @@ pub fn get_setting(setting: String) -> String {
     }
 }
 
-pub fn handle_get_bool_setting(setting: &str) -> String {
-    let address = match setting {
-        "send_debugger" => SEND_DEBUGGER_ADDRESS,
-        "send_log_file" => SEND_LOG_FILE_ADDRESS,
-        "send_message_box" => SEND_MESSAGE_BOX_ADDRESS,
-        "delta_log_0" => DELTA_LOG_0_ADDRESS,
-        "delta_log_1" => DELTA_LOG_1_ADDRESS,
+fn setting_to_address(setting: &str) -> u32 {
+    match setting {
+        "sendDebugger" => SEND_DEBUGGER_ADDRESS,
+        "sendLogFile" => SEND_LOG_FILE_ADDRESS,
+        "sendMessageBox" => SEND_MESSAGE_BOX_ADDRESS,
+        "deltaLog0" => DELTA_LOG_0_ADDRESS,
+        "deltaLog1" => DELTA_LOG_1_ADDRESS,
+        "logCutoff" => LOG_CUTOFF_ADDRESS,
+        "ShowBuildingAIInfo" => SHOW_BUILDING_AI_INFO,
+        "ShowGoal" => SHOW_GOAL_OFFSET,
+        "ShowFrame" => SHOW_FRAME_OFFSET,
+        "ShowSelected" => SHOW_SELECTED_OFFSET,
+        "ShowEvents" => SHOW_EVENTS_OFFSET,
+        "ShowFunctionCall" => SHOW_FUNCTION_CALL_OFFSET,
+        "ShowStatusVars" => SHOW_STATUS_VARS_OFFSET,
+        "ShowPosition" => SHOW_POSITION_OFFSET,
+        "ShowName" => SHOW_NAME_OFFSET,
+        "ShowAIInfo" => SHOW_AI_INFO_OFFSET,
         _ => unreachable!(), // This should never happen due to outer match
-    };
+    }
+}
+
+fn handle_get_bool_setting(setting: &str) -> String {
+    let address = setting_to_address(setting);
     let value: bool = get_from_memory::<bool>(address);
     format!("{}: {}", setting, value)
 }
 
-pub fn handle_get_u32_setting(setting: &str) -> String {
-    let address = match setting {
-        "log_cutoff" => LOG_CUTOFF_ADDRESS,
-        _ => unreachable!(), // This should never happen due to outer match
-    };
+fn handle_get_u32_setting(setting: &str) -> String {
+    let address = setting_to_address(setting);
     let value: u32 = get_from_memory::<u32>(address);
     format!("{}: {}", setting, value)
 }
@@ -249,6 +283,7 @@ pub fn show_settings() -> String {
     let delta_log_0: bool = get_from_memory::<bool>(DELTA_LOG_0_ADDRESS);
     let delta_log_1: bool = get_from_memory::<bool>(DELTA_LOG_1_ADDRESS);
     let log_cutoff: u32 = get_from_memory::<u32>(LOG_CUTOFF_ADDRESS);
+    let show_building_ai_info: bool = get_from_memory::<bool>(SHOW_BUILDING_AI_INFO);
     return format!("send_debugger: {}\nsend_log_file: {}\nsend_message: {}\ndelta_log_0: {}\ndelta_log_1: {}\nlog_cutoff: {}", send_debugger, send_log_file, send_message, delta_log_0, delta_log_1, log_cutoff);
 }
 
@@ -258,6 +293,28 @@ pub fn parse_bool(string: &String) -> Result<bool, String> {
         "false" | "0" => Ok(false),
         _ => Err("Invalid input".to_string()),
     }
+}
+
+fn handle_get_bool_zt_ai_mgr_setting(setting: &str) -> String {
+    let address = get_from_memory::<u32>(ZTAIMGR_ADDRESS_PTR);
+    let offset = setting_to_address(setting);
+    let value: bool = get_from_memory::<bool>(address + offset);
+    return format!("{}: {}", setting, value);
+}
+
+fn handle_set_bool_zt_ai_mgr_setting(setting: &str, value: String) -> String {
+    let address = get_from_memory::<u32>(ZTAIMGR_ADDRESS_PTR);
+    let offset = setting_to_address(setting);
+    match parse_bool(&value) {
+        Ok(setting_value) => {
+            save_to_memory::<bool>(address + offset, setting_value);
+            return format!("{} set to {}", setting, setting_value);
+        },
+        Err(_) => {
+            return format!("invalid value: {}", value);
+        }
+    }
+    return format!("{}: {}", setting, value);
 }
 
 pub fn get_base_path() -> PathBuf {
