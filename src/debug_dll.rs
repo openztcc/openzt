@@ -131,6 +131,135 @@ pub fn save_debug_settings(settings: DebugSettings) {
     save_to_memory::<bool>(DELTA_LOG_1_ADDRESS, settings.delta_log_1 != 0);
     save_to_memory::<u32>(LOG_CUTOFF_ADDRESS, settings.log_cutoff as u32);
 }
+
+pub fn command_set_setting(args: Vec<&str>) -> Result<String, &'static str> {
+    if args.len() != 2 {
+        return Err("Invalid number of arguments");
+    }
+    let setting = args[0].to_string();
+    let value = args[1].to_string();
+    Ok(set_setting(setting, value))
+}
+
+pub fn set_setting(setting: String, value: String) -> String {
+    match setting.as_str() {
+        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1" => {
+            handle_bool_setting(setting.as_str(), value)
+        },
+        "logCutoff" => {
+            handle_u32_setting(setting.as_str(), value)
+        },
+        _ => {
+            format!("unknown setting: {}", setting)
+        }
+    }
+}
+
+fn handle_bool_setting(setting: &str, value: String) -> String {
+    match parse_bool(&value) {
+        Ok(setting_value) => {
+            let address = match setting {
+                "sendDebugger" => SEND_DEBUGGER_ADDRESS,
+                "sendLogFile" => SEND_LOG_FILE_ADDRESS,
+                "sendMessageBox" => SEND_MESSAGE_BOX_ADDRESS,
+                "deltaLog0" => DELTA_LOG_0_ADDRESS,
+                "deltaLog1" => DELTA_LOG_1_ADDRESS,
+                _ => unreachable!(), // This should never happen due to outer match
+            };
+            save_to_memory::<bool>(address, setting_value);
+            format!("{} set to {}", setting, setting_value)
+        },
+        Err(_) => {
+            format!("invalid value: {}", value)
+        }
+    }
+}
+
+fn handle_u32_setting(setting: &str, value: String) -> String {
+    match value.parse::<u32>() {
+        Ok(setting_value) => {
+            let address: u32 = match setting {
+                "logCutoff" => LOG_CUTOFF_ADDRESS,
+                _ => unreachable!(), // This should never happen due to outer match
+            };
+            save_to_memory::<u32>(address, setting_value);
+            format!("{} set to {}", setting, setting_value)
+        },
+        Err(_) => {
+            format!("invalid value: {}", value)
+        }
+    }
+}
+
+pub fn command_get_setting(args: Vec<&str>) -> Result<String, &'static str> {
+    if args.len() != 1 {
+        return Err("Invalid number of arguments");
+    }
+    let setting = args[0].to_string();
+    Ok(get_setting(setting))
+}
+
+pub fn get_setting(setting: String) -> String {
+    match setting.as_str() {
+        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1" => {
+            handle_get_bool_setting(setting.as_str())
+        },
+        "logCutoff" => {
+            handle_get_u32_setting(setting.as_str())
+        },
+        _ => {
+            format!("unknown setting: {}", setting)
+        }
+    }
+}
+
+pub fn handle_get_bool_setting(setting: &str) -> String {
+    let address = match setting {
+        "send_debugger" => SEND_DEBUGGER_ADDRESS,
+        "send_log_file" => SEND_LOG_FILE_ADDRESS,
+        "send_message_box" => SEND_MESSAGE_BOX_ADDRESS,
+        "delta_log_0" => DELTA_LOG_0_ADDRESS,
+        "delta_log_1" => DELTA_LOG_1_ADDRESS,
+        _ => unreachable!(), // This should never happen due to outer match
+    };
+    let value: bool = get_from_memory::<bool>(address);
+    format!("{}: {}", setting, value)
+}
+
+pub fn handle_get_u32_setting(setting: &str) -> String {
+    let address = match setting {
+        "log_cutoff" => LOG_CUTOFF_ADDRESS,
+        _ => unreachable!(), // This should never happen due to outer match
+    };
+    let value: u32 = get_from_memory::<u32>(address);
+    format!("{}: {}", setting, value)
+}
+
+pub fn command_show_settings(args: Vec<&str>) -> Result<String, &'static str> {
+    if args.len() != 0 {
+        return Err("Invalid number of arguments");
+    }
+    Ok(show_settings())
+}
+
+pub fn show_settings() -> String {
+    let send_debugger: bool = get_from_memory::<bool>(SEND_DEBUGGER_ADDRESS);
+    let send_log_file: bool = get_from_memory::<bool>(SEND_LOG_FILE_ADDRESS);
+    let send_message: bool = get_from_memory::<bool>(SEND_MESSAGE_BOX_ADDRESS);
+    let delta_log_0: bool = get_from_memory::<bool>(DELTA_LOG_0_ADDRESS);
+    let delta_log_1: bool = get_from_memory::<bool>(DELTA_LOG_1_ADDRESS);
+    let log_cutoff: u32 = get_from_memory::<u32>(LOG_CUTOFF_ADDRESS);
+    return format!("send_debugger: {}\nsend_log_file: {}\nsend_message: {}\ndelta_log_0: {}\ndelta_log_1: {}\nlog_cutoff: {}", send_debugger, send_log_file, send_message, delta_log_0, delta_log_1, log_cutoff);
+}
+
+pub fn parse_bool(string: &String) -> Result<bool, String> {
+    match string.trim() {
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        _ => Err("Invalid input".to_string()),
+    }
+}
+
 pub fn get_base_path() -> PathBuf {
     let mut exe_location = std::env::current_exe().unwrap();
     exe_location.pop();

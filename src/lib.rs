@@ -28,6 +28,8 @@ use crate::console::{add_to_command_register, call_command, start_server};
 
 use crate::bfregistry::command_list_registry;
 
+use crate::debug_dll::{command_show_settings, command_get_setting, command_set_setting};
+
 #[cfg(not(target_os = "windows"))]
 mod linux {
     const DLL_PROCESS_DETACH: u32 = 0;
@@ -60,7 +62,7 @@ pub fn dll_first_load() {
 
 #[hook_module("zoo.exe")]
 mod zoo_ini {
-    use tracing::{info};
+    use tracing::info;
 
     use crate::debug_dll::{get_string_from_memory, get_from_memory};
 
@@ -75,30 +77,30 @@ mod zoo_ini {
         load_debug_settings_from_ini();
     }
 
-    #[hook(unsafe extern "cdecl" LoadIniValueMaybeHook, offset = 0x0001b4bc)]
-    // fn load_ini_value_log_detour(class_ptr: u32, ini_section: LPCSTR, ini_key: LPCSTR, ini_default: LPCSTR) -> u32 {
-    fn load_ini_value_log_detour(class_ptr: u32, ini_section: u32, ini_key: u32, ini_default: u32) -> u32 {
-        info!("Detour via macro (LoadIniValueMaybeHook)");
-        let deref_class_ptr = get_from_memory::<u32>(class_ptr);
-        info!("class_ptr: {:#08x}", class_ptr);
-        info!("deref_class_ptr: {:#08x}", deref_class_ptr);
+    // #[hook(unsafe extern "cdecl" LoadIniValueMaybeHook, offset = 0x0001b4bc)]
+    // // fn load_ini_value_log_detour(class_ptr: u32, ini_section: LPCSTR, ini_key: LPCSTR, ini_default: LPCSTR) -> u32 {
+    // fn load_ini_value_log_detour(class_ptr: u32, ini_section: u32, ini_key: u32, ini_default: u32) -> u32 {
+    //     info!("Detour via macro (LoadIniValueMaybeHook)");
+    //     let deref_class_ptr = get_from_memory::<u32>(class_ptr);
+    //     info!("class_ptr: {:#08x}", class_ptr);
+    //     info!("deref_class_ptr: {:#08x}", deref_class_ptr);
 
-        let cls_0x40190a_addr: *const cls_0x40190a = class_ptr as *const _;
-        let cls_0x40190a_obj = unsafe { &*cls_0x40190a_addr };
-        info!("cls_0x40190a_obj: {:#?}", cls_0x40190a_obj);
+    //     let cls_0x40190a_addr: *const cls_0x40190a = class_ptr as *const _;
+    //     let cls_0x40190a_obj = unsafe { &*cls_0x40190a_addr };
+    //     info!("cls_0x40190a_obj: {:#?}", cls_0x40190a_obj);
 
-        info!("ini_section: {}", get_string_from_memory(get_from_memory::<u32>(ini_section)));
-        info!("ini_key: {}", get_string_from_memory(get_from_memory::<u32>(ini_key)));
-        info!("ini_default: {}", get_string_from_memory(get_from_memory::<u32>(ini_default)));
-        let return_value = unsafe { LoadIniValueMaybeHook.call(class_ptr, ini_section, ini_key, ini_default) };
-        info!("return_value: {}", get_string_from_memory(get_from_memory::<u32>(return_value)));
+    //     info!("ini_section: {}", get_string_from_memory(get_from_memory::<u32>(ini_section)));
+    //     info!("ini_key: {}", get_string_from_memory(get_from_memory::<u32>(ini_key)));
+    //     info!("ini_default: {}", get_string_from_memory(get_from_memory::<u32>(ini_default)));
+    //     let return_value = unsafe { LoadIniValueMaybeHook.call(class_ptr, ini_section, ini_key, ini_default) };
+    //     info!("return_value: {}", get_string_from_memory(get_from_memory::<u32>(return_value)));
 
-        let cls_0x40190a_addr: *const cls_0x40190a = class_ptr as *const _;
-        let cls_0x40190a_obj = unsafe { &*cls_0x40190a_addr };
-        info!("cls_0x40190a_obj: {:#?}", cls_0x40190a_obj);
+    //     let cls_0x40190a_addr: *const cls_0x40190a = class_ptr as *const _;
+    //     let cls_0x40190a_obj = unsafe { &*cls_0x40190a_addr };
+    //     info!("cls_0x40190a_obj: {:#?}", cls_0x40190a_obj);
 
-        return_value
-    }
+    //     return_value
+    // }
 }
 
 #[hook_module("zoo.exe")]
@@ -154,6 +156,9 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 if cfg!(feature = "ini") {
                     info!("Feature ini enabled");
                     zoo_ini::init_detours().unwrap();
+                    add_to_command_register("show_settings".to_owned(), command_show_settings);
+                    add_to_command_register("get_setting".to_owned(), command_get_setting);
+                    add_to_command_register("set_setting".to_owned(), command_set_setting);
                 }
                 if cfg!(feature = "bf_registry") {
                     info!("Feature bf_registry enabled");
