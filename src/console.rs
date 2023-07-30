@@ -1,23 +1,19 @@
 extern crate winapi;
 
 use std::collections::HashMap;
-// use std::error::Error;
-// use std::io::{self, Read, Write};
-// use std::str;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
 use std::sync::Mutex;
-use std::net::SocketAddr;
 use once_cell::sync::Lazy;
 use tracing::info;
 
-type command_callback = fn(args: Vec<&str>) -> Result<String, &'static str>;
+type CommandCallback = fn(args: Vec<&str>) -> Result<String, &'static str>;
 
-static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, command_callback>>> = Lazy::new(|| {
-    Mutex::new(HashMap::<String, command_callback>::new())
+static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, CommandCallback>>> = Lazy::new(|| {
+    Mutex::new(HashMap::<String, CommandCallback>::new())
 });
 
 static COMMAND_RESULTS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| {
@@ -28,7 +24,7 @@ static COMMAND_QUEUE: Lazy<Mutex<Vec::<String>>> = Lazy::new(|| {
     Mutex::new(Vec::<String>::new())
 });
 
-pub fn add_to_command_register(command_name: String, command_callback: command_callback) {
+pub fn add_to_command_register(command_name: String, command_callback: CommandCallback) {
     info!("Registring command {} to registry", command_name);
     let mut data_mutex = COMMAND_REGISTRY.lock().unwrap();
     data_mutex.insert(command_name, command_callback);

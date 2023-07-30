@@ -1,13 +1,13 @@
 #![feature(abi_thiscall)]
+#![allow(dead_code)]
 
 use configparser::ini::Ini;
 
 use std::net::TcpStream;
 
-use std::string;
 use std::sync::Mutex;
 
-use tracing::{info, error, Level};
+use tracing::{info, Level};
 
 use retour_utils::hook_module;
 
@@ -21,12 +21,9 @@ mod ztworldmgr;
 
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
-use crate::bfregistry::list_registry;
-use crate::debug_dll::{patch_calls, get_string_from_memory};
 
-use crate::console::{add_to_command_register, call_command, start_server};
+use crate::console::{add_to_command_register, start_server};
 
-use crate::bfregistry::command_list_registry;
 
 use crate::debug_dll::{command_show_settings, command_get_setting, command_set_setting};
 
@@ -62,17 +59,10 @@ pub fn dll_first_load() {
 
 #[hook_module("zoo.exe")]
 mod zoo_ini {
-    use tracing::info;
-
-    use crate::debug_dll::{get_string_from_memory, get_from_memory};
-
     use crate::load_debug_settings_from_ini;
-
 
     #[hook(unsafe extern "cdecl" LoadDebugSettingsFromIniHook, offset = 0x00179f4c)]
     fn load_debug_settings_from_ini_detour() {
-        info!("Detour via macro (Debug Ini Settings)");
-        // unsafe { LoadDebugSettingsFromIniHook.call() }
         load_debug_settings_from_ini();
     }
 }
@@ -105,10 +95,7 @@ mod zoo_bf_registry {
 
 #[hook_module("zoo.exe")]
 mod zoo_console {
-    use tracing::info;
-    use crate::debug_dll::{get_string_from_memory, get_from_memory};
     use crate::console::call_next_command;
-    // use crate::console::add_to_console;    
     #[hook(unsafe extern "thiscall" ZTApp_updateGame, offset = 0x0001a6d1)]
     fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
         call_next_command();
@@ -118,12 +105,11 @@ mod zoo_console {
 
 #[hook_module("zoo.exe")]
 mod zoo_logging {
-    use tracing::info;
     use crate::debug_dll::get_string_from_memory;
     use crate::capture_ztlog::log_from_zt;
 
     #[hook(unsafe extern "cdecl" ZooLogging_LogHook, offset = 0x00001363)]
-    fn zoo_log_func(source_file: u32, param_2: u32, param_3: u32, param_4: u8, param_5: u32, param_6: u32, log_message: u32) {
+    fn zoo_log_func(source_file: u32, param_2: u32, param_3: u32, _param_4: u8, _param_5: u32, _param_6: u32, log_message: u32) {
         let source_file_string = get_string_from_memory(source_file);
         let log_message_string = get_string_from_memory(log_message);
         log_from_zt(&source_file_string, param_2, param_3, &log_message_string);
@@ -142,12 +128,14 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 if cfg!(feature = "ini") {
                     info!("Feature ini enabled");
                     zoo_ini::init_detours().unwrap();
-                    add_to_command_register("show_settings".to_owned(), command_show_settings);
+                    add_to_command_register("list_settings".to_owned(), command_show_settings);
                     add_to_command_register("get_setting".to_owned(), command_get_setting);
                     add_to_command_register("set_setting".to_owned(), command_set_setting);
                 }
                 if cfg!(feature = "bf_registry") {
                     info!("Feature bf_registry enabled");
+                    use crate::bfregistry::command_list_registry;
+
                     zoo_bf_registry::init_detours().unwrap();
                     add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
                 }
@@ -155,7 +143,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                     use ztworldmgr::command_get_zt_world_mgr_entities;
 
                     info!("Feature zt_world_mgr enabled");
-                    add_to_command_register("get_entities".to_owned(), command_get_zt_world_mgr_entities)
+                    add_to_command_register("list_entities".to_owned(), command_get_zt_world_mgr_entities)
                 }
                 if cfg!(feature = "zoo_logging") {
                     info!("Feature zoo_logging enabled");

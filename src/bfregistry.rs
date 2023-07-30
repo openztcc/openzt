@@ -1,16 +1,15 @@
 use std::collections::HashMap;
-use std::cell::RefCell;
-use tracing::{info, error};
+use tracing::info;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
-use crate::debug_dll::{get_from_memory, get_string_from_memory};
+use crate::debug_dll::get_from_memory;
 
 static BF_REGISTRY: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| {
     Mutex::new(HashMap::new())
 });
 
-pub fn command_list_registry(args: Vec<&str>) -> Result<String, &'static str> {
+pub fn command_list_registry(_args: Vec<&str>) -> Result<String, &'static str> {
     list_registry()
 }
 
@@ -18,7 +17,6 @@ pub fn list_registry() -> Result<String, &'static str> {
     let data_mutex = BF_REGISTRY.lock().unwrap();
     let mut string_array = Vec::new();
     for (key, value) in data_mutex.iter() {
-        // info!("{}: {:#08x}", key, value);
         string_array.push(format!("{}: {:#08x}", key, value));
     }
     Ok(string_array.join("\n"))

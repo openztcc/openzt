@@ -1,5 +1,5 @@
 
-use crate::debug_dll::{get_from_memory, get_string_from_memory, get_zt_string_array_from_memory};
+use crate::debug_dll::{get_from_memory, get_string_from_memory};
 use tracing::info;
 use std::fmt;
 
@@ -29,7 +29,6 @@ struct zt_world_mgr {
 fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> zt_entity {
     let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
     let secondary_class = get_from_memory(inner_class_ptr);
-    let class_name_getter = get_from_memory::<u32>(secondary_class + 0x14);
 
     // info!("inner_class_ptr: {:#x}", inner_class_ptr);
     // info!("secondary_class: {:#x}", secondary_class);
@@ -89,8 +88,7 @@ fn log_zt_world_mgr_entities(zt_world_mgr: &zt_world_mgr) {
     }
 }
 
-pub fn command_get_zt_world_mgr_entities(args: Vec<&str>) -> Result<String, &'static str> {
-    // log_zt_world_mgr_entities(zt_world_mgr_from_global());
+pub fn command_get_zt_world_mgr_entities(_args: Vec<&str>) -> Result<String, &'static str> {
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let entities = get_zt_world_mgr_entities(&zt_world_mgr);
     info!("Found {} entities", entities.len());

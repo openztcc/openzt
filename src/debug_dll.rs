@@ -8,7 +8,7 @@ use crate::load_ini::DebugSettings;
 #[cfg(target_os = "windows")]
 use winapi::um::memoryapi::VirtualProtect;
 #[cfg(target_os = "windows")]
-use winapi::um::winnt::{PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_READ};
+use winapi::um::winnt::PAGE_EXECUTE_READWRITE;
 
 const SEND_DEBUGGER_ADDRESS: u32 = 0x00643e44;
 const SEND_LOG_FILE_ADDRESS: u32 = 0x00643e48;
@@ -284,7 +284,7 @@ pub fn show_settings() -> String {
     let delta_log_1: bool = get_from_memory::<bool>(DELTA_LOG_1_ADDRESS);
     let log_cutoff: u32 = get_from_memory::<u32>(LOG_CUTOFF_ADDRESS);
     let show_building_ai_info: bool = get_from_memory::<bool>(SHOW_BUILDING_AI_INFO);
-    return format!("send_debugger: {}\nsend_log_file: {}\nsend_message: {}\ndelta_log_0: {}\ndelta_log_1: {}\nlog_cutoff: {}", send_debugger, send_log_file, send_message, delta_log_0, delta_log_1, log_cutoff);
+    return format!("sendDebugger: {}\nsendLogFile: {}\nsendMessage: {}\ndeltaLog0: {}\ndeltaLog1: {}\nlogCutoff: {}\nShowBuildingAIInfo: {}", send_debugger, send_log_file, send_message, delta_log_0, delta_log_1, log_cutoff,show_building_ai_info);
 }
 
 pub fn parse_bool(string: &String) -> Result<bool, String> {
@@ -314,7 +314,6 @@ fn handle_set_bool_zt_ai_mgr_setting(setting: &str, value: String) -> String {
             return format!("invalid value: {}", value);
         }
     }
-    return format!("{}: {}", setting, value);
 }
 
 pub fn get_base_path() -> PathBuf {
