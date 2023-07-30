@@ -24,7 +24,7 @@ name = "test"
 path = "src/debug.rs"
 
 [features]
-default = ["bf_registry", "console"]
+default = ["bf_registry", "console", "ini", "zt_world_mgr"]
 console = []
 ini = []
 bf_registry = []

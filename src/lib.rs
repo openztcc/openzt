@@ -22,7 +22,7 @@ mod ztworldmgr;
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
-use crate::console::{add_to_command_register, start_server};
+use crate::console::{add_to_command_register, zoo_console};
 
 
 use crate::debug_dll::{command_show_settings, command_get_setting, command_set_setting};
@@ -93,15 +93,7 @@ mod zoo_bf_registry {
     }
 }
 
-#[hook_module("zoo.exe")]
-mod zoo_console {
-    use crate::console::call_next_command;
-    #[hook(unsafe extern "thiscall" ZTApp_updateGame, offset = 0x0001a6d1)]
-    fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
-        call_next_command();
-        unsafe { ZTApp_updateGame.call(_this_ptr, param_2) }
-    }
-}
+
 
 #[hook_module("zoo.exe")]
 mod zoo_logging {
@@ -126,14 +118,14 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
 
             unsafe { 
                 if cfg!(feature = "ini") {
-                    info!("Feature ini enabled");
+                    info!("Feature 'ini' enabled");
                     zoo_ini::init_detours().unwrap();
                     add_to_command_register("list_settings".to_owned(), command_show_settings);
                     add_to_command_register("get_setting".to_owned(), command_get_setting);
                     add_to_command_register("set_setting".to_owned(), command_set_setting);
                 }
                 if cfg!(feature = "bf_registry") {
-                    info!("Feature bf_registry enabled");
+                    info!("Feature 'bf_registry' enabled");
                     use crate::bfregistry::command_list_registry;
 
                     zoo_bf_registry::init_detours().unwrap();
@@ -142,20 +134,17 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 if cfg!(feature = "zt_world_mgr") {
                     use ztworldmgr::command_get_zt_world_mgr_entities;
 
-                    info!("Feature zt_world_mgr enabled");
+                    info!("Feature 'zt_world_mgr' enabled");
                     add_to_command_register("list_entities".to_owned(), command_get_zt_world_mgr_entities)
                 }
                 if cfg!(feature = "zoo_logging") {
-                    info!("Feature zoo_logging enabled");
+                    info!("Feature 'zoo_logging' enabled");
                     zoo_logging::init_detours().unwrap();
                 }
-                if cfg!(feature = "console") {
-                    info!("Feature console enabled");
-                    zoo_console::init_detours().unwrap();
-                    std::thread::spawn(|| {
-                        start_server();
-                    });
-                }
+            }
+            if cfg!(feature = "console") {
+                info!("Feature 'console' enabled");
+                zoo_console::init();
             }
         }
         DLL_PROCESS_DETACH => {

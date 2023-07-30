@@ -284,7 +284,16 @@ pub fn show_settings() -> String {
     let delta_log_1: bool = get_from_memory::<bool>(DELTA_LOG_1_ADDRESS);
     let log_cutoff: u32 = get_from_memory::<u32>(LOG_CUTOFF_ADDRESS);
     let show_building_ai_info: bool = get_from_memory::<bool>(SHOW_BUILDING_AI_INFO);
-    return format!("sendDebugger: {}\nsendLogFile: {}\nsendMessage: {}\ndeltaLog0: {}\ndeltaLog1: {}\nlogCutoff: {}\nShowBuildingAIInfo: {}", send_debugger, send_log_file, send_message, delta_log_0, delta_log_1, log_cutoff,show_building_ai_info);
+    let show_goal: String = handle_get_bool_zt_ai_mgr_setting("ShowGoal");
+    let show_frame: String = handle_get_bool_zt_ai_mgr_setting("ShowFrame");
+    let show_selected: String = handle_get_bool_zt_ai_mgr_setting("ShowSelected");
+    let show_events: String = handle_get_bool_zt_ai_mgr_setting("ShowEvents");
+    let show_function_call: String = handle_get_bool_zt_ai_mgr_setting("ShowFunctionCall");
+    let show_status_vars: String = handle_get_bool_zt_ai_mgr_setting("ShowStatusVars");
+    let show_position: String = handle_get_bool_zt_ai_mgr_setting("ShowPosition");
+    let show_name: String = handle_get_bool_zt_ai_mgr_setting("ShowName");
+    let show_ai_info: String = handle_get_bool_zt_ai_mgr_setting("ShowAIInfo");
+    format!("sendDebugger: {}\nsendLogFile: {}\nsendMessage: {}\ndeltaLog0: {}\ndeltaLog1: {}\nlogCutoff: {}\nShowBuildingAIInfo: {}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", send_debugger, send_log_file, send_message, delta_log_0, delta_log_1, log_cutoff,show_building_ai_info, show_goal, show_frame, show_selected, show_events, show_function_call, show_status_vars, show_position, show_name, show_ai_info)
 }
 
 pub fn parse_bool(string: &String) -> Result<bool, String> {

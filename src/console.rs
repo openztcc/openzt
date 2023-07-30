@@ -10,6 +10,27 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use tracing::info;
 
+use retour_utils::hook_module;
+
+#[hook_module("zoo.exe")]
+pub mod zoo_console {
+    use super::{call_next_command, start_server, add_to_command_register, command_list_commands};
+
+    #[hook(unsafe extern "thiscall" ZTApp_updateGame, offset = 0x0001a6d1)]
+    fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
+        call_next_command();
+        unsafe { ZTApp_updateGame.call(_this_ptr, param_2) }
+    }
+
+    pub fn init() {
+        unsafe { init_detours().unwrap() };
+        add_to_command_register("list_commands".to_owned(), command_list_commands);
+        std::thread::spawn(|| {
+            start_server();
+        });
+    }
+}
+
 type CommandCallback = fn(args: Vec<&str>) -> Result<String, &'static str>;
 
 static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, CommandCallback>>> = Lazy::new(|| {
@@ -30,16 +51,16 @@ pub fn add_to_command_register(command_name: String, command_callback: CommandCa
     data_mutex.insert(command_name, command_callback);
 }
 
-pub fn call_command(command_name: String, args: Vec<&str>) -> Result<String, &'static str> {
+fn call_command(command_name: String, args: Vec<&str>) -> Result<String, &'static str> {
     info!("Calling command {} with args {:?}", command_name, args);
-    let data_mutex = COMMAND_REGISTRY.lock().unwrap();
-    
-    let command = data_mutex.get(&command_name).cloned();
+    let command = {
+        let data_mutex = COMMAND_REGISTRY.lock().unwrap();
+        data_mutex.get(&command_name).cloned()
+    };
     match command {
         Some(command) => command(args),
         None => Err("Command not found")
     }
-    // data_mutex.get(&command_name).cloned().unwrap()(args)
 }
 
 pub fn call_next_command() { //} -> Result<String, &'static str> {
@@ -83,6 +104,35 @@ pub fn get_from_command_queue() -> Option<String> {
     let mut data_mutex = COMMAND_QUEUE.lock().unwrap();
     data_mutex.pop()
 }
+
+pub fn command_list_commands(_args: Vec<&str>) -> Result<String, &'static str> {
+    info!("Getting command list");
+    match COMMAND_REGISTRY.lock() {
+        Ok(data_mutex) => {
+            let mut result = String::new();
+            for command_name in data_mutex.keys() {
+                info!("Found command {}", command_name);
+                result.push_str(&format!("{}\n", command_name));
+            }
+            Ok(result)
+        },
+        Err(err) => {
+            info!("Error getting command list: {}", err);
+            Err("Error getting command list")
+        }
+    }
+}
+
+// fn call_command(command_name: String, args: Vec<&str>) -> Result<String, &'static str> {
+//     info!("Calling command {} with args {:?}", command_name, args);
+//     let data_mutex = COMMAND_REGISTRY.lock().unwrap();
+    
+//     let command = data_mutex.get(&command_name).cloned();
+//     match command {
+//         Some(command) => command(args),
+//         None => Err("Command not found")
+//     }
+// }
 
 fn handle_client(mut stream: TcpStream) {
     let mut buffer = [0; 1024]; // Buffer to store received data
