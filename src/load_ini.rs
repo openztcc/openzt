@@ -1,6 +1,40 @@
 use configparser::ini::Ini;
-
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 use std::path::Path;
+use std::env;
+
+const ZOO_INI: &str = "zoo.ini";
+
+static INI_FILE: Lazy<Mutex<Ini>> = Lazy::new(|| {
+    let mut config = Ini::new();
+    match env::current_exe() {
+        Ok(exe_path) => {
+            let exe_path = exe_path.to_str().unwrap();
+            let exe_path = Path::new(exe_path);
+            let exe_path = exe_path.parent().unwrap();
+            let exe_path = exe_path.join(ZOO_INI);
+            config.load(exe_path).unwrap();
+        }
+        Err(e) => println!("failed to get current exe path: {e}"),
+    };
+    Mutex::new(config)
+});
+
+pub fn load_from_zoo_ini<T: std::str::FromStr>(section: &str, key: &str, default: T) -> T {
+    let ini_file = INI_FILE.lock().unwrap();
+    let value = ini_file.get(section, key);
+    match value {
+        Some(value) => {
+            match value.parse::<T>() {
+                Ok(value) => value,
+                Err(e) => default
+            }
+        }
+        None => default
+    }
+
+}
 
 #[derive(Debug)]
 pub struct DebugSettings {
@@ -24,13 +58,6 @@ pub fn load_debug_settings(ini_path: &Path) -> DebugSettings {
     debug_settings = load_debug_settings_from_ini(debug_settings, ini_path);
     return debug_settings;
 }
-
-// pub unsafe fn zt_load_debug_settings() -> i32 {
-//     let 
-//     let debug_settings = load_debug_settings();
-
-//     return 1;
-// }
 
 fn load_debug_settings_from_ini(mut debug_settings: DebugSettings, ini_path: &Path) -> DebugSettings {
     let mut zoo_ini = Ini::new();
