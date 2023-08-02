@@ -19,11 +19,12 @@ mod console;
 
 mod ztworldmgr;
 
+mod resource_manager;
+
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
 use crate::console::{add_to_command_register, zoo_console};
-
 
 use crate::debug_dll::{command_show_settings, command_get_setting, command_set_setting};
 
@@ -145,6 +146,10 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             if cfg!(feature = "console") {
                 info!("Feature 'console' enabled");
                 zoo_console::init();
+            }
+            if cfg!(feature = "bf_resource_mgr") {
+                info!("Feature 'bf_resource_mgr' enabled");
+                resource_manager::init();
             }
         }
         DLL_PROCESS_DETACH => {
