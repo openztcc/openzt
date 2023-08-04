@@ -132,12 +132,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                     zoo_bf_registry::init_detours().unwrap();
                     add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
                 }
-                if cfg!(feature = "zt_world_mgr") {
-                    use ztworldmgr::command_get_zt_world_mgr_entities;
-
-                    info!("Feature 'zt_world_mgr' enabled");
-                    add_to_command_register("list_entities".to_owned(), command_get_zt_world_mgr_entities)
-                }
+                
                 if cfg!(feature = "zoo_logging") {
                     info!("Feature 'zoo_logging' enabled");
                     zoo_logging::init_detours().unwrap();
@@ -150,6 +145,10 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             if cfg!(feature = "bf_resource_mgr") {
                 info!("Feature 'bf_resource_mgr' enabled");
                 resource_manager::init();
+            }
+            if cfg!(feature = "zt_world_mgr") {
+                info!("Feature 'zt_world_mgr' enabled");
+                ztworldmgr::init();
             }
         }
         DLL_PROCESS_DETACH => {
