@@ -27,7 +27,8 @@ struct BFResourceDir {
     dir_name_string_start: u32,
     dir_name_string_end: u32,
     unknown_u32_2: u32,
-    num_bfr_zip: u32,
+    num_child_files: u32,
+    unknown_u32_3: u32,
 }
 
 #[derive(Debug)]
@@ -38,7 +39,7 @@ struct BFResourceZip {
     unknown_u32_2: u32,
     unknown_u32_3: u32,
     zip_name_string_start: u32,
-    second_class: u32,
+    contents_tree: u32, //? contents end?
 
 }
 
@@ -79,6 +80,7 @@ fn read_bf_resource_dir_contents_from_memory() -> Vec<BFResourceDirContents> {
             }
         }
     }
+    bf_resource_dir_contents.push(BFResourceDirContents { dir: current_bf_resource_dir, zips: bf_resource_zips });
     bf_resource_dir_contents
 }
 
@@ -91,14 +93,14 @@ impl fmt::Display for BFResourceMgr {
 impl fmt::Display for BFResourceDir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let dir_name_string = get_string_from_memory(self.dir_name_string_start);
-        write!(f, "BFResourceDir {{ class: 0x{:X}, unknown_u32_1: 0x{:X}, dir_name: {}, num_bfr_zip: 0x{:X}, unknown_u32_2: 0x{:X} }}", self.class, self.unknown_u32_1, dir_name_string, self.num_bfr_zip, self.unknown_u32_2)
+        write!(f, "BFResourceDir {{ class: 0x{:X}, unknown_u32_1: 0x{:X}, dir_name: {}, num_bfr_zip: 0x{:X}, unknown_u32_2: 0x{:X} }}", self.class, self.unknown_u32_1, dir_name_string, self.num_child_files, self.unknown_u32_2)
     }
 }
 
 impl fmt::Display for BFResourceZip {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let zip_name_string = get_string_from_memory(self.zip_name_string_start);
-        write!(f, "BFResourceZip {{ class: 0x{:X}, unknown_u32_1: 0x{:X}, unknown_u32_2: 0x{:X}, unknown_u32_3: 0x{:X}, zip_name: {}, second_class: 0x{:X} }}", self.class, self.unknown_u32_1, self.unknown_u32_2, self.unknown_u32_3, zip_name_string, self.second_class)
+        write!(f, "BFResourceZip {{ class: 0x{:X}, unknown_u32_1: 0x{:X}, unknown_u32_2: 0x{:X}, unknown_u32_3: 0x{:X}, zip_name: {}, contents_tree: 0x{:X} }}", self.class, self.unknown_u32_1, self.unknown_u32_2, self.unknown_u32_3, zip_name_string, self.contents_tree)
     }
 }
 
@@ -107,7 +109,7 @@ fn command_list_resources(_args: Vec<&str>) -> Result<String, &'static str> {
     let bf_resource_dir_contents = read_bf_resource_dir_contents_from_memory();
     for bf_resource_dir_content in bf_resource_dir_contents {
         let bf_resource_dir = bf_resource_dir_content.dir;
-        result_string.push_str(&format!("{} ({})\n", get_string_from_memory(bf_resource_dir.dir_name_string_start), bf_resource_dir.num_bfr_zip));
+        result_string.push_str(&format!("{} ({})\n", get_string_from_memory(bf_resource_dir.dir_name_string_start), bf_resource_dir.num_child_files));
         let bf_resource_zips = bf_resource_dir_content.zips;
         for bf_resource_zip in bf_resource_zips {
             result_string.push_str(&format!("{}\n", get_string_from_memory(bf_resource_zip.zip_name_string_start)));
