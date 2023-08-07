@@ -1,6 +1,8 @@
 
 use std::fmt;
 
+use retour_utils::hook_module;
+
 use tracing::{info, error};
 
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
@@ -43,6 +45,22 @@ struct BFResourceZip {
 
 }
 
+trait Name {
+    fn name(&self) -> String;
+}
+
+impl Name for BFResourceDir {
+    fn name(&self) -> String {
+        get_string_from_memory(self.dir_name_string_start)
+    }
+}
+
+impl Name for BFResourceZip {
+    fn name(&self) -> String {
+        get_string_from_memory(self.zip_name_string_start)
+    }
+}
+
 struct BFResourceDirContents {
     dir: BFResourceDir,
     zips: Vec<BFResourceZip>,
@@ -71,7 +89,9 @@ fn read_bf_resource_dir_contents_from_memory() -> Vec<BFResourceDirContents> {
                 bf_resource_dir_ptr += 4;
             }
             0x630b0c => {
-                bf_resource_zips.push(get_from_memory::<BFResourceZip>(get_from_memory::<u32>(bf_resource_dir_ptr)));
+                let zip = get_from_memory::<BFResourceZip>(get_from_memory::<u32>(bf_resource_dir_ptr));
+                info!("Found zip: {}, at {:X}", zip.name(), bf_resource_dir_ptr);
+                bf_resource_zips.push(zip);
                 bf_resource_dir_ptr += 4;
             }
             _ => {
@@ -126,4 +146,122 @@ fn command_get_bf_resource_mgr(_args: Vec<&str>) -> Result<String, &'static str>
 pub fn init() {
     add_to_command_register("list_resources".to_owned(), command_list_resources);
     add_to_command_register("get_bfresourcemgr".to_owned(), command_get_bf_resource_mgr);
+    unsafe { zoo_resource_mgr::init_detours().unwrap() };
+}
+
+#[hook_module("zoo.exe")]
+pub mod zoo_resource_mgr {
+    use tracing::info;
+
+    use super::{BFResourceZip, Name};
+
+    use crate::debug_dll::{get_from_memory, get_string_from_memory};
+
+    #[hook(unsafe extern "thiscall" BFResourceMgr_find, offset = 0x000b9a40)]
+    fn zoo_bf_resource_mgr_find(this_ptr: u32, buffer_ptr: u32, file_name: u32, file_extension: u32) -> u32 {
+        info!("BFResourceMgr::find({:X}, {:X}, {}, {})", this_ptr, buffer_ptr, get_string_from_memory(file_name), get_string_from_memory(file_extension));
+        let return_value = unsafe { BFResourceMgr_find.call(this_ptr, buffer_ptr, file_name, file_extension) };
+        info!("BFResourceMgr::find({:X}, {:X}, {}, {}) -> {:X} -> {:X}", this_ptr, buffer_ptr, get_string_from_memory(file_name), get_string_from_memory(file_extension), return_value, get_from_memory::<u32>(return_value));
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" BFResourceMgr_findall, offset = 0x000bf92b)]
+    fn zoo_bf_resource_mgr_findall(this_ptr: u32, buffer_ptr: u32, file_extension: u32) -> u32 {
+        info!("BFResourceMgr::findall({:X}, {:X}, {})", this_ptr, buffer_ptr, get_string_from_memory(file_extension));
+        let return_value = unsafe { BFResourceMgr_findall.call(this_ptr, buffer_ptr, file_extension) };
+        info!("BFResourceMgr::findall({:X}, {:X}, {}) -> {:X} -> {:X}", this_ptr, buffer_ptr, get_string_from_memory(file_extension), return_value, get_from_memory::<u32>(return_value));
+        info!("{:X}", get_from_memory::<u32>(buffer_ptr));
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" ZTFoodType_ZTFoodType, offset = 0x00065634)]
+    fn zt_food_type_zt_food_type(this_ptr: u32, param_1: u32, param_2: u32, param_3: u32) -> u32 {
+        let return_value = unsafe { ZTFoodType_ZTFoodType.call(this_ptr, param_1, param_2, param_3) };
+        info!("ZTFoodType::ZTFoodType({:X}, {}, {}, {}) -> {:X}", this_ptr, get_string_from_memory(get_from_memory::<u32>(param_1)), get_string_from_memory(get_from_memory::<u32>(param_2)), get_string_from_memory(param_3), return_value);
+        return_value
+    }
+
+    // #[hook(unsafe extern "thiscall" unknown_func_1, offset = 0x000b3805)]
+    // fn unknown_1(this_ptr: u32) -> u32 {
+    //     let return_value = unsafe { unknown_func_1.call(this_ptr) };
+    //     info!("unknown_1({:X}->{:X}) -> {:X} -> {:X}", this_ptr, get_from_memory::<u32>(this_ptr), return_value, get_from_memory::<u32>(return_value));
+    //     return_value
+    // }
+
+    // #[hook(unsafe extern "thiscall" unknown_func_2, offset = 0x0000a5bc)]
+    // fn unknown_2(this_ptr: u32) {
+    //     info!("unknown_2({:X} -> {:X})", this_ptr, get_from_memory::<u32>(this_ptr));
+    //     unsafe { unknown_func_2.call(this_ptr) };
+    // }
+
+    #[hook(unsafe extern "thiscall" BFResourceZip_BFResourceZip, offset = 0x000128ac1)]
+    fn bf_resource_zip_bf_resource_zip(this_ptr: u32, param_1: u32) -> u32 {
+        let return_value = unsafe { BFResourceZip_BFResourceZip.call(this_ptr, param_1) };
+        info!("BFResourceZip::BFResourceZip({:X}, {}) -> {:X}", this_ptr, get_string_from_memory(param_1), return_value);
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" BFResourceZip_unknown_1, offset = 0x0003a1c)] //load, getResourcePtr?
+    fn unknown_3(this_ptr: u32, param_1: u32, param_2: u32) -> u32 {
+        let return_value = unsafe { BFResourceZip_unknown_1.call(this_ptr, param_1, param_2) };
+        if return_value != 0 {
+            let name = get_from_memory::<BFResourceZip>(this_ptr).name();
+            info!("unknown_3({:X} ({}), {:X}, {:X}) -> {:X}", this_ptr, name, param_1, param_2, return_value);
+        }
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" BFResourceZip_unknown_2, offset = 0x000b9b73)]   //find("filename_prefix", "extension")
+    fn bf_resource_zip_load(this_ptr: u32, param_1: u32, param_2: u32, param_3: u32) -> u32 {
+        let return_value = unsafe { BFResourceZip_unknown_2.call(this_ptr, param_1, param_2, param_3) };
+        let name = get_from_memory::<BFResourceZip>(this_ptr).name();
+        info!("BFResourceZip::find({:X} ({}), {:X}, {}, {}) -> {:X} -> {}", this_ptr, name, param_1, get_string_from_memory(param_2), get_string_from_memory(param_3), return_value, get_string_from_memory(get_from_memory::<u32>(return_value)));
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" BFResourceZip_unknown_3, offset = 0x000bf9fb)]  //find("extenion") -> pointer to list?
+    fn unknown_5(this_ptr: u32, param_1: u32, param_2: u32) -> u32 {
+        let return_value = unsafe { BFResourceZip_unknown_3.call(this_ptr, param_1, param_2) };
+        let name = get_from_memory::<BFResourceZip>(this_ptr).name();
+        info!("BFResourceZip::findall({:X} ({}), {:X}, {}) -> {:X}", this_ptr, name, param_1, get_string_from_memory(param_2), return_value);
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" BFResourceZip_unknown_4, offset = 0x00017e351)]
+    fn unknown_6(this_ptr: u32, param_1: u32) -> u32 {
+        let name = get_from_memory::<BFResourceZip>(this_ptr).name();
+        let return_value = unsafe { BFResourceZip_unknown_4.call(this_ptr, param_1) };
+        info!("unknown_6({:X} ({}), {:X}) -> {:X}", this_ptr, name, param_1, return_value);
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" BFResourceZip_unknown_5, offset = 0x000202f65)]
+    fn unknown_7(this_ptr: u32, param_1: u32) -> u32 {
+        let return_value = unsafe { BFResourceZip_unknown_5.call(this_ptr, param_1) };
+        info!("unknown_7({:X}, {:X}) -> {:X}", this_ptr, param_1, return_value);
+        return_value
+    }
+
+    // thiscall 2 params offset 3b43
+    #[hook(unsafe extern "thiscall" BFResourceZip_unknown_6, offset = 0x0003b43)]
+    fn unknown_8(this_ptr: u32, param_1: u32, param_2: u32) -> u32 {
+        let return_value = unsafe { BFResourceZip_unknown_6.call(this_ptr, param_1, param_2) };
+        if return_value != 0 {
+            let name = get_from_memory::<BFResourceZip>(this_ptr).name();
+            info!("unknown_8({:X} ({}), {:X}, {:X}) -> {:X}", this_ptr, name, param_1, param_2, return_value);
+        }
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" BFResourceZip_unknown_7, offset = 0x00048da)]
+    fn unknown_9(this_ptr: u32, param_1: u32, param_2: u32, param_3: u32) -> u32 {
+        let return_value = unsafe { BFResourceZip_unknown_7.call(this_ptr, param_1, param_2, param_3) };
+        if return_value != 0 {
+            let name = get_from_memory::<BFResourceZip>(this_ptr).name();
+            info!("unknown_9({:X} ({}), {:X}, {:X}, {:X}) -> {:X}", this_ptr, name, param_1, param_2, param_3, return_value);
+        }
+        return_value
+    }
+
+
 }
