@@ -5,6 +5,7 @@ use crate::add_to_command_register;
 use tracing::info;
 use std::collections::HashMap;
 use std::fmt;
+use num_enum::FromPrimitive;
 
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
@@ -21,9 +22,8 @@ struct zt_entity {
     name: String,
 }
 
-#[derive(Debug)]
-#[derive(PartialEq)]
-#[derive(Clone)]
+#[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
+#[repr(u32)]
 enum ZtEntityTypeClass {
     Animal = 0x630268,
     Ambient = 0x62e1e8,
@@ -40,6 +40,7 @@ enum ZtEntityTypeClass {
     Keeper = 0x62e7d8,
     MaintenanceWorker = 0x62e704,
     DRT = 0x62e980,
+    #[num_enum(default)]
     Unknown = 0x0,
 }
 
@@ -73,18 +74,12 @@ fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> zt_entity {
     let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
     let secondary_class = get_from_memory(inner_class_ptr);
 
-    // info!("inner_class_ptr: {:#x}", inner_class_ptr);
-    // info!("secondary_class: {:#x}", secondary_class);
     info!("zt_entity_ptr: {:#x}", zt_entity_ptr);
-    // info!("inner_class_ptr: {:#x}", inner_class_ptr);
-    // info!("class_name_getter: {:#x}", class_name_getter);
 
     let ptr = get_from_memory::<u32>(secondary_class + 0x14) as *const ();
     let code: extern "thiscall" fn(u32) -> u32 = unsafe { std::mem::transmute(ptr) };
     let result = (code)(inner_class_ptr);
     
-    // info!("result: {:#x}", result);
-
     zt_entity{
         class: get_from_memory::<u32>(zt_entity_ptr + 0x0),
         // secondary_class: get_from_memory::<u32>(get_from_memory::<u32>(zt_entity_ptr + 0x128)),
@@ -105,27 +100,7 @@ fn log_zt_entity(zt_entity: &zt_entity) {
 
 fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZtEntityType {
     let class_string = get_from_memory::<u32>(zt_entity_type_ptr + 0x0);
-    let class = match class_string {
-        0x630268 => ZtEntityTypeClass::Animal,
-        0x62e1e8 => ZtEntityTypeClass::Ambient,
-        0x62e330 => ZtEntityTypeClass::Guest,
-        0x63034c => ZtEntityTypeClass::Fences,
-        0x62e8ac => ZtEntityTypeClass::TourGuide,
-        0x6307e4 => ZtEntityTypeClass::Building,
-        0x6303f4 => ZtEntityTypeClass::Scenery,
-        0x630544 => ZtEntityTypeClass::Food,
-        0x630694 => ZtEntityTypeClass::TankFilter,
-        0x63049c => ZtEntityTypeClass::Path,
-        0x63073c => ZtEntityTypeClass::Rubble,
-        0x6305ec => ZtEntityTypeClass::TankWall,
-        0x62e7d8 => ZtEntityTypeClass::Keeper,
-        0x62e704 => ZtEntityTypeClass::MaintenanceWorker,
-        0x62e980 => ZtEntityTypeClass::DRT,
-        _ => {
-            info!("Unknown class: {:#x}", class_string);
-            ZtEntityTypeClass::Unknown
-        },
-    };
+    let class = ZtEntityTypeClass::from(class_string);
 
     ZtEntityType{
         ptr: zt_entity_type_ptr,
@@ -232,7 +207,6 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, &'stat
 
 impl fmt::Display for zt_entity {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // write!(f, "Entity Type: {:#x}, Secondary Type: {:#x}", self.class, self.secondary_class)
         write!(f, "Entity Type: {:#x},Secondary Class Ptr: {:#x}, Secondary Type: {:#x}, ZT Class: {}, ZT Type: {}, ZT Sub Type: {}, Name: {}", self.class, self.secondary_class_ptr, self.secondary_class, self.zt_class, self.zt_type, self.zt_sub_type, self.name)
     }
 }
@@ -258,7 +232,6 @@ fn get_zt_world_mgr_entities(zt_world_mgr: &zt_world_mgr) -> Vec<zt_entity> {
     let mut entities: Vec<zt_entity> = Vec::new();
     let mut i = entity_array_start;
     while i < entity_array_end {
-        // info!("Reading entity at {:#x}; end {:#x}", i, entity_array_end);
         let zt_entity = read_zt_entity_from_memory(get_from_memory::<u32>(i));
         entities.push(zt_entity);
         i += 0x4;
