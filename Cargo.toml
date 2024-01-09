@@ -15,6 +15,7 @@ retour = "0.1.0"
 retour-utils = "0.1.2"
 once_cell = "1.18.0"
 num_enum = "0.6.1"
+ptree = "0.4.0"
 
 [lib]
 name = "openzt"
@@ -25,10 +26,11 @@ name = "test"
 path = "src/debug.rs"
 
 [features]
-default = ["bf_registry", "console", "ini", "zt_world_mgr", "bf_resource_mgr"]
+default = ["bf_registry", "console", "ini", "zt_world_mgr", "bf_resource_mgr", "bf_config"]
 console = []
 ini = []
 bf_registry = []
 bf_resource_mgr = []
 zt_world_mgr = []
 zoo_logging = []
+bf_config = []
