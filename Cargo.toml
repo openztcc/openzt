@@ -25,10 +25,11 @@ name = "test"
 path = "src/debug.rs"
 
 [features]
-default = ["bf_registry", "console", "ini", "zt_world_mgr", "bf_resource_mgr"]
+default = ["bf_registry", "console", "ini", "zt_world_mgr", "bf_resource_mgr", "ztui"]
 console = []
 ini = []
 bf_registry = []
 bf_resource_mgr = []
 zt_world_mgr = []
 zoo_logging = []
+ztui = []

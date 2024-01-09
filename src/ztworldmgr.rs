@@ -12,7 +12,7 @@ const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 
 #[derive(Debug)]
 #[repr(C)]
-struct zt_entity {
+pub struct zt_entity {
     class: u32,
     secondary_class_ptr: u32,
     secondary_class: u32,
@@ -70,7 +70,7 @@ pub fn init() {
 }
 
 
-fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> zt_entity {
+pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> zt_entity {
     let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
     let secondary_class = get_from_memory(inner_class_ptr);
 
