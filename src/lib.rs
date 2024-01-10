@@ -118,7 +118,6 @@ mod bf_version_info {
 
     #[hook(unsafe extern "cdecl" BFVersionInfo_GetVersionStringHook, offset = 0x000bdfd4)]
     fn bf_version_info_get_version_string_hook(param_1: u32, param_2: u32, param_3: u32) -> u32 {
-        info!("bf_version_info_get_version_string_hook: {:#x} : {} {:#x} : {} {:#x}: {} ", param_1, get_string_from_memory(param_1), param_2, get_string_from_memory(param_2), param_3, get_string_from_memory(param_3),);
         let return_value = unsafe { BFVersionInfo_GetVersionStringHook.call(param_1, param_2, param_3) };
         let version_string = get_string_from_memory(get_from_memory::<u32>(param_2));
         let version_length = version_string.len();
