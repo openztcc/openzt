@@ -108,6 +108,26 @@ mod zoo_zt_ui {
     }
 }
 
+#[hook_module("zoo.exe")]
+mod bf_version_info {
+    use crate::debug_dll::{get_string_from_memory, get_from_memory, save_string_to_memory, save_to_memory};
+
+    use tracing::info;
+
+    const OPENZT_VERSION_STR: &str = " OpenZT: 0.1.0";
+
+    #[hook(unsafe extern "cdecl" BFVersionInfo_GetVersionStringHook, offset = 0x000bdfd4)]
+    fn bf_version_info_get_version_string_hook(param_1: u32, param_2: u32, param_3: u32) -> u32 {
+        info!("bf_version_info_get_version_string_hook: {:#x} : {} {:#x} : {} {:#x}: {} ", param_1, get_string_from_memory(param_1), param_2, get_string_from_memory(param_2), param_3, get_string_from_memory(param_3),);
+        let return_value = unsafe { BFVersionInfo_GetVersionStringHook.call(param_1, param_2, param_3) };
+        let version_string = get_string_from_memory(get_from_memory::<u32>(param_2));
+        let version_length = version_string.len();
+        save_string_to_memory(get_from_memory::<u32>(param_2) + version_length as u32, OPENZT_VERSION_STR);
+        save_to_memory(param_3, (version_length + OPENZT_VERSION_STR.len() + 2) as u32);
+        return_value
+    }
+}
+
 
 
 #[hook_module("zoo.exe")]
@@ -146,6 +166,8 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                     zoo_bf_registry::init_detours().unwrap();
                     add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
                 }
+
+                bf_version_info::init_detours().unwrap();
                 
                 if cfg!(feature = "zoo_logging") {
                     info!("Feature 'zoo_logging' enabled");
