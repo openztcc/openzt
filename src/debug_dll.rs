@@ -356,7 +356,7 @@ pub fn patch_nop(address: u32) {
         {
             let mut old_protect: u32 = 0;
             VirtualProtect(address as *mut _, 1, PAGE_EXECUTE_READWRITE, &mut old_protect);
-            ptr::write(address as *mut _, 0x90);
+            ptr::write(address as *mut _, 0x90u8);
             VirtualProtect(address as *mut _, 1, old_protect, &mut old_protect);
         }
     }
