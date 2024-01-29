@@ -61,6 +61,17 @@ pub fn save_to_memory<T>(address: u32, value: T) {
     unsafe { ptr::write(address as *mut T, value)};
 }
 
+pub fn save_to_protected_memory<T>(address: u32, value: T) {
+    unsafe {
+        {
+            let mut old_protect: u32 = 0;
+            VirtualProtect(address as *mut _, std::mem::size_of::<T>() as usize, PAGE_EXECUTE_READWRITE, &mut old_protect);
+            ptr::write(address as *mut _, value);
+            VirtualProtect(address as *mut _, std::mem::size_of::<T>() as usize, old_protect, &mut old_protect);
+        }
+    }
+}
+
 pub fn log_debug_ini_memory_values() {
     let send_debugger: bool = get_from_memory::<bool>(SEND_DEBUGGER_ADDRESS);
     debug_logger(&format!("send_debugger: {}", send_debugger));
@@ -345,7 +356,7 @@ pub fn patch_nop(address: u32) {
         {
             let mut old_protect: u32 = 0;
             VirtualProtect(address as *mut _, 1, PAGE_EXECUTE_READWRITE, &mut old_protect);
-            ptr::write(address as *mut _, 0x90);
+            ptr::write(address as *mut _, 0x90u8);
             VirtualProtect(address as *mut _, 1, old_protect, &mut old_protect);
         }
     }
