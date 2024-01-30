@@ -55,7 +55,7 @@ struct ZtEntityType {
 
 #[derive(Debug)]
 #[repr(C)]
-struct zt_world_mgr {
+pub struct zt_world_mgr {
     entity_array_start: u32,
     entity_array_end: u32,
     entity_type_array_start: u32,
@@ -113,9 +113,12 @@ fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZtEntityType {
 
 
 
-fn read_zt_world_mgr_from_global() -> zt_world_mgr {
-    let zt_world_mgr_ptr = get_from_memory::<u32>(GLOBAL_ZTWORLDMGR_ADDRESS);
-    read_zt_world_mgr_from_memory(zt_world_mgr_ptr)
+pub fn read_zt_world_mgr_from_global() -> zt_world_mgr {
+    read_zt_world_mgr_from_memory(read_zt_world_mgr_ptr())
+}
+
+pub fn read_zt_world_mgr_ptr() -> u32 {
+    get_from_memory::<u32>(GLOBAL_ZTWORLDMGR_ADDRESS)
 }
 
 fn read_zt_world_mgr_from_memory(zt_world_mgr_ptr: u32) -> zt_world_mgr {

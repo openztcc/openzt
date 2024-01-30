@@ -25,6 +25,8 @@ mod ztui;
 
 mod bugfix;
 
+mod bfmap;
+
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
@@ -99,18 +101,6 @@ mod zoo_bf_registry {
 }
 
 #[hook_module("zoo.exe")]
-mod zoo_zt_ui {
-    use tracing::info;
-
-    #[hook(unsafe extern "cdecl" ZTUI_getSelectEntityHook, offset = 0x0010f84)]
-    fn ztui_get_select_entity_hook() -> u32 {
-        let return_value = unsafe { ZTUI_getSelectEntityHook.call() };
-        info!("ztui_get_select_entity_hook: {:#x}", return_value);
-        return_value
-    }
-}
-
-#[hook_module("zoo.exe")]
 mod bf_version_info {
     use crate::debug_dll::{get_string_from_memory, get_from_memory, save_string_to_memory, save_to_memory};
 
@@ -175,7 +165,6 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 }
                 if cfg!(feature = "ztui") {
                     info!("Feature 'ztui' enabled");
-                    zoo_zt_ui::init_detours().unwrap();
                     ztui::init();
                 }
             }
@@ -195,6 +184,11 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             if cfg!(feature = "bugfix") {
                 info!("Feature 'bugfix' enabled");
                 bugfix::init();
+            }
+
+            if cfg!(feature = "bfmap") {
+                info!("Feature 'bfmap' enabled");
+                bfmap::init();
             }
         }
         DLL_PROCESS_DETACH => {

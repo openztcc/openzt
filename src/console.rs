@@ -12,6 +12,10 @@ use tracing::info;
 
 use retour_utils::hook_module;
 
+#[derive(Debug)]
+pub struct ConsoleError(String);
+
+
 #[hook_module("zoo.exe")]
 pub mod zoo_console {
     use super::{call_next_command, start_server, add_to_command_register, command_list_commands};
