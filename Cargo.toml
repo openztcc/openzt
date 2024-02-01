@@ -1,6 +1,6 @@
 [package]
 name = "openzt"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 edition = "2021"
 # default-target = "i686-pc-windows-msvc"
 
@@ -25,7 +25,7 @@ name = "test"
 path = "src/debug.rs"
 
 [features]
-default = ["bf_registry", "console", "ini", "zt_world_mgr", "bf_resource_mgr", "ztui", "bugfix"]
+default = ["bf_registry", "console", "ini", "zt_world_mgr", "bf_resource_mgr", "ztui", "bugfix", "string_registry"]
 console = []
 ini = []
 bf_registry = []
@@ -34,3 +34,4 @@ zt_world_mgr = []
 zoo_logging = []
 ztui = []
 bugfix = []
+string_registry = []

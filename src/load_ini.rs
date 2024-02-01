@@ -75,3 +75,12 @@ pub fn load_string_with_default(ini_file: &Ini, section: &str, key: &str, defaul
         None => default.to_string(),
     }
 }
+
+pub fn load_items_from_section(ini_file: &Ini, section_name: &str) -> Vec<(String, Option<String>)> {
+    match ini_file.get_map_ref().get(section_name) {
+        Some(section) => {
+            Vec::from_iter(section.iter().map(|(key, value)| (key.to_string(), value.clone())))
+        },
+        None => Vec::new(),
+    }
+}

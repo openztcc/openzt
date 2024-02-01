@@ -25,6 +25,8 @@ mod ztui;
 
 mod bugfix;
 
+mod string_registry;
+
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
@@ -195,6 +197,11 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             if cfg!(feature = "bugfix") {
                 info!("Feature 'bugfix' enabled");
                 bugfix::init();
+            }
+
+            if cfg!(feature = "string_registry") {
+                info!("Feature 'string_registry' enabled");
+                string_registry::init();
             }
         }
         DLL_PROCESS_DETACH => {
