@@ -213,7 +213,7 @@ impl fmt::Display for zt_entity {
 
 impl fmt::Display for ZtEntityType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Class String: {:#x}, Class: {:?}, ZT Type: {}, ZT Sub Type: {}", self.class_string, self.class, self.zt_type, self.zt_sub_type)
+        write!(f, "Location: {:#x}, Class String: {:#x}, Class: {:?}, ZT Type: {}, ZT Sub Type: {}", self.ptr, self.class_string, self.class, self.zt_type, self.zt_sub_type)
     }
 }
 

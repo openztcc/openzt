@@ -1,4 +1,6 @@
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use std::sync::atomic::AtomicU32;
 use std::collections::HashMap;
 
 use once_cell::sync::Lazy;
@@ -15,9 +17,38 @@ use crate::debug_dll::get_base_path;
 
 use crate::load_ini::load_items_from_section;
 
+use bimap::BiMap;
+
+// Lazy mutexes are likely overkill, can remove once the central game struct is reimplemented 
+//  and we have a better understanding of how we are going to use mulithreading
 static STRING_REGISTRY: Lazy<Mutex<HashMap<u32, String>>> = Lazy::new(|| {
     Mutex::new(HashMap::new())
 });
+
+static STRING_ID_OVERRIDES: Lazy<Mutex<BiMap<u32, u32>>> = Lazy::new(|| {
+    Mutex::new(BiMap::new())
+});
+
+static NEXT_OVERRIDE_ID: AtomicU32 = AtomicU32::new(1);
+
+pub fn add_override(string_id: u32) -> u32 {
+    let override_id = NEXT_OVERRIDE_ID.fetch_add(1, Ordering::Relaxed);
+    info!("Adding string id override {} -> {}", string_id, override_id);
+    let mut data_mutex = STRING_ID_OVERRIDES.lock().unwrap();
+    data_mutex.insert(string_id, override_id);
+    override_id
+}
+
+pub fn get_override(string_id: u32) -> Option<u32> {
+    let data_mutex = STRING_ID_OVERRIDES.lock().unwrap();
+    data_mutex.get_by_left(&string_id).cloned()
+}
+
+pub fn get_original(override_id: u32) -> Option<u32> {
+    let data_mutex = STRING_ID_OVERRIDES.lock().unwrap();
+    data_mutex.get_by_right(&override_id).cloned()
+
+}
 
 pub fn add_to_string_registry(string_id: u32, string_val: String) {
     info!("Registring string {} to registry as id {}", string_val, string_id);
