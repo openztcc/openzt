@@ -25,6 +25,8 @@ mod ztui;
 
 mod bugfix;
 
+mod ztadvterrainmgr;
+
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
@@ -105,7 +107,9 @@ mod zoo_zt_ui {
     #[hook(unsafe extern "cdecl" ZTUI_getSelectEntityHook, offset = 0x0010f84)]
     fn ztui_get_select_entity_hook() -> u32 {
         let return_value = unsafe { ZTUI_getSelectEntityHook.call() };
-        info!("ztui_get_select_entity_hook: {:#x}", return_value);
+        if return_value != 0 {
+            info!("ztui_get_select_entity_hook: {:#x}", return_value);
+        }
         return_value
     }
 }
@@ -127,8 +131,6 @@ mod bf_version_info {
         return_value
     }
 }
-
-
 
 #[hook_module("zoo.exe")]
 mod zoo_logging {
@@ -183,19 +185,19 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 info!("Feature 'console' enabled");
                 zoo_console::init();
             }
-            if cfg!(feature = "bf_resource_mgr") {
-                info!("Feature 'bf_resource_mgr' enabled");
-                resource_manager::init();
-            }
-            if cfg!(feature = "zt_world_mgr") {
-                info!("Feature 'zt_world_mgr' enabled");
-                ztworldmgr::init();
-            }
 
             if cfg!(feature = "bugfix") {
                 info!("Feature 'bugfix' enabled");
                 bugfix::init();
             }
+
+            if cfg!(feature = "experimental") {
+                info!("Feature 'experimental' enabled");
+                ztadvterrainmgr::init();
+                ztworldmgr::init();
+                resource_manager::init();
+            }
+
         }
         DLL_PROCESS_DETACH => {
             info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);

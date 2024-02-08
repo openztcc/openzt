@@ -2,6 +2,7 @@
 use std::fmt;
 
 use tracing::{info, error};
+use retour_utils::hook_module;
 
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
 use crate::console::add_to_command_register;
@@ -46,6 +47,22 @@ struct BFResourceZip {
 struct BFResourceDirContents {
     dir: BFResourceDir,
     zips: Vec<BFResourceZip>,
+}
+
+trait Name {
+    fn name(&self) -> String;
+}
+
+impl Name for BFResourceDir {
+    fn name(&self) -> String {
+        get_string_from_memory(self.dir_name_string_start)
+    }
+}
+
+impl Name for BFResourceZip {
+    fn name(&self) -> String {
+        get_string_from_memory(self.zip_name_string_start)
+    }
 }
 
 fn read_bf_resource_mgr_from_memory() -> BFResourceMgr {
@@ -126,4 +143,58 @@ fn command_get_bf_resource_mgr(_args: Vec<&str>) -> Result<String, &'static str>
 pub fn init() {
     add_to_command_register("list_resources".to_owned(), command_list_resources);
     add_to_command_register("get_bfresourcemgr".to_owned(), command_get_bf_resource_mgr);
+    unsafe { zoo_resource_mgr::init_detours().unwrap() };
+}
+
+#[hook_module("zoo.exe")]
+pub mod zoo_resource_mgr {
+    use tracing::info;
+
+    use super::{BFResourceZip, Name};
+
+    use crate::debug_dll::{get_from_memory, get_string_from_memory};
+
+    #[hook(unsafe extern "thiscall" BFResourceMgr_find, offset = 0x000b9a40)]
+    fn zoo_bf_resource_mgr_find(this_ptr: u32, buffer_ptr: u32, file_name: u32, file_extension: u32) -> u32 {
+        info!("BFResourceMgr::find({:X}, {:X}, {}, {})", this_ptr, buffer_ptr, get_string_from_memory(file_name), get_string_from_memory(file_extension));
+        let return_value = unsafe { BFResourceMgr_find.call(this_ptr, buffer_ptr, file_name, file_extension) };
+        info!("BFResourceMgr::find({:X}, {:X}, {}, {}) -> {:X} -> {:X}", this_ptr, buffer_ptr, get_string_from_memory(file_name), get_string_from_memory(file_extension), return_value, get_from_memory::<u32>(return_value));
+        info!("BFConfigFile {}", get_string_from_memory(get_from_memory::<u32>(return_value) + 0x10));
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" ZTAdvTerrainMgr_loadTextures, offset = 0x001224b9)]
+    fn zoo_zt_adv_terrain_mgr_load_textures(this_ptr: u32) -> u32 {
+        info!("ZTAdvTerrainMgr::loadTextures({:X})", this_ptr);
+        let return_value = unsafe { ZTAdvTerrainMgr_loadTextures.call(this_ptr) };
+        info!("ZTAdvTerrainMgr::loadTextures({:X}) -> {:X}", this_ptr, return_value);
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" BFTerrainTypeInfo_initialize, offset = 0x00123c58)]
+    fn zoo_bf_terrain_type_info_initialize(this_ptr: u32, config_ptr: u32, name: u32) -> u32 {
+        info!("BFTerrainTypeInfo::initialize({:X}, {:X}, {})", this_ptr, config_ptr, get_string_from_memory(name));
+        let return_value = unsafe { BFTerrainTypeInfo_initialize.call(this_ptr, config_ptr, name) };
+        info!("BFTerrainTypeInfo::initialize({:X}, {:X}, {}) -> {:X}", this_ptr, config_ptr, get_string_from_memory(name), return_value);
+        return_value
+    }
+
+    #[hook(unsafe extern "thiscall" BFMap_paintCell, offset = 0x000f8fd8)]
+    fn zoo_bf_map_paint_cell(this_ptr: u32, bf_terrain_type_info_ptr: u32, param: bool) -> u32 {
+        info!("BFMap::paintCell({:X}, {:X}, {} -> {:X})", this_ptr, bf_terrain_type_info_ptr, param, get_from_memory::<u32>(bf_terrain_type_info_ptr));
+        let return_value = unsafe { BFMap_paintCell.call(this_ptr, bf_terrain_type_info_ptr, param) };
+        info!("BFMap::paintCell({:X}, {:X}, {}) -> {:X}", this_ptr, bf_terrain_type_info_ptr, param, return_value);
+        return_value
+    }
+
+    // #[hook(unsafe extern "thiscall" BFMap_paintCell2, offset = 0x000f17e0)]
+    // fn zoo_bf_tile_set_terrain_type(this_ptr: u32, bf_terrain_type_info_ptr: u32) -> u32 {
+    //     info!("BFTile::setTerrainType({:X}, {:X} -> {:X})", this_ptr, bf_terrain_type_info_ptr, get_from_memory(bf_terrain_type_info_ptr));
+    //     let return_value = unsafe { BFMap_paintCell.call(this_ptr, bf_terrain_type_info_ptr) };
+    //     info!("BFTile::setTerrainType({:X}, {:X}) -> {:X}", this_ptr, bf_terrain_type_info_ptr, return_value);
+    //     return_value
+    // } 
+
+
+
 }
