@@ -1,7 +1,8 @@
 use std::fmt;
 use std::path::Path;
+use std::path::PathBuf;
 
-// use walkdir::{DirEntry, WalkDir};
+use walkdir::{DirEntry, WalkDir};
 
 use retour_utils::hook_module;
 use tracing::{error, info};
@@ -162,15 +163,20 @@ pub fn init() {
     add_to_command_register("list_resources".to_owned(), command_list_resources);
     add_to_command_register("get_bfresourcemgr".to_owned(), command_get_bf_resource_mgr);
     unsafe { zoo_resource_mgr::init_detours().unwrap() };
+    //TODO: Load resources from ZTD files
 }
 
 #[hook_module("zoo.exe")]
 pub mod zoo_resource_mgr {
+    use std::ffi::CString;
+
     use tracing::info;
 
     use super::{BFResourceZip, Name};
 
-    use crate::debug_dll::{get_from_memory, get_string_from_memory};
+    use configparser::ini::Ini; //TODO: Replace with custom ini parser
+
+    use crate::debug_dll::{get_from_memory, get_ini_path, get_string_from_memory};
 
     #[hook(unsafe extern "thiscall" BFResourceMgr_find, offset = 0x000b9a40)]
     fn zoo_bf_resource_mgr_find(
@@ -278,7 +284,6 @@ pub mod zoo_resource_mgr {
         return_value
     }
 
-    // BFUIMgr::configureAndShowDialog(void *this,BFConfigFile *param_1,char *param_2,bool param_3)
     #[hook(unsafe extern "thiscall" BFUIMgr_configureAndShowDialog, offset = 0x001a1b15)]
     fn zoo_bf_ui_mgr_configure_and_show_dialog(
         this_ptr: u32,
@@ -307,7 +312,6 @@ pub mod zoo_resource_mgr {
         return_value
     }
 
-    // uint __thiscall BFApp::getInstalledExpansion(void *this,uint param_1)
     #[hook(unsafe extern "thiscall" BFApp_getInstalledExpansion, offset = 0x000ab32c)]
     fn zoo_bf_app_get_installed_expansion(this_ptr: u32, param_1: u32) -> u32 {
         info!(
@@ -324,24 +328,44 @@ pub mod zoo_resource_mgr {
         );
         return_value
     }
+    
+    #[hook(unsafe extern "thiscall" BFResourceMgr_constructor, offset = 0x0012903f)]
+    fn zoo_bf_resource_mgr_constructor(this_ptr: u32) -> u32 {
+        let return_value = unsafe { BFResourceMgr_constructor.call(this_ptr) };
+        let ini_path = get_ini_path();
+        let mut zoo_ini = Ini::new();                       //TODO: Load this once on startup; fix up load_ini to actually contain all the ini related functions
+        zoo_ini.load(ini_path).unwrap();
+        if let Some(paths) = zoo_ini.get("resource", "path") {
+            if !paths.split(';').any(|s| s.trim() == "./mods") {
+                info!("Adding mods directory to BFResourceMgr");
+                let add_path: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0052870b) };
+                if let Ok(mods_path) = CString::new("./mods") {
+                    add_path(this_ptr, mods_path.as_ptr() as u32);
+                }
+            }
+        }
+        return_value
+    }
 }
 
-//for entry in WalkDir::new("/Users/finnhartshorn/Projects/zootycoon/vanilla_install/Zoo Tycoon")
+// for entry in WalkDir::new("/Users/finnhartshorn/Projects/zootycoon/vanilla_install/Zoo Tycoon")
 
-// fn get_ztd_resources(dir: &Path, recursive: bool) {
-//     let walker = WalkDir::new(dir).follow_links(true);
-//     if !recursive {
-//         walker.max_depth(1);
-//     }
-//     for entry in walker {
-//         let entry = entry.unwrap();
-//         if entry
-//             .file_name()
-//             .to_str()
-//             .map(|s| s.ends_with(".ztd"))
-//             .unwrap_or(false)
-//         {
-//             println!("{}", entry.path().display());
-//         }
-//     }
-// }
+fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
+    let mut resources = Vec::new();
+    let walker = WalkDir::new(dir).follow_links(true).max_depth(if recursive { 0 } else { 1 });
+    for entry in walker {
+        let entry = entry.unwrap();
+        if entry
+            .file_name()
+            .to_str()
+            .map(|s| s.ends_with(".ztd"))
+            .unwrap_or(false)
+        {
+            println!("{}", &entry.path().display());
+            resources.push(entry.path().to_path_buf());
+        }
+    }
+    resources
+}
+
+// fn get_default_ztd_resources() -> Vec<PathBuf> {

@@ -342,6 +342,12 @@ pub fn get_base_path() -> PathBuf {
     return exe_location;
 }
 
+pub fn get_ini_path() -> PathBuf {
+    let mut exe_location = get_base_path();
+    exe_location.push("zoo.ini");
+    return exe_location;
+}
+
 pub fn patch_calls(addresses: Vec<u32>, new_address: u32) {
     for address in addresses {
         patch_call(address, new_address);
