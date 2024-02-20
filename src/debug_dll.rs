@@ -402,3 +402,12 @@ pub fn get_zt_string_array_from_memory(address: u32, end_address: u32) -> Vec<St
     }
     return strings;
 }
+
+pub fn read_string_list_from_memory(start_ptr: u32, end_ptr: u32) {
+    let mut current_ptr = start_ptr;
+    while current_ptr < end_ptr {
+        let string = get_string_from_memory(get_from_memory(current_ptr));
+        info!("String: {:#x} {}", current_ptr, string);
+        current_ptr += 4;
+    }
+}

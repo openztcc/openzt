@@ -33,6 +33,11 @@ fn add_expansion(expansion: Expansion) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn get_expansion(expansion_id: u32) -> Option<Expansion> {
+    let data_mutex = EXPANSION_ARRAY.lock().unwrap();
+    data_mutex.iter().find(|expansion| expansion.expansion_id == expansion_id).cloned()
+}
+
 fn save_mutex() {
     inner_save_mutex(EXPANSION_ARRAY.lock().unwrap());
 }
@@ -101,6 +106,10 @@ fn read_current_expansion() -> Expansion {
     expansions.into_iter().find(|expansion| expansion.expansion_id == current_expansion_id).unwrap()
 }
 
+fn save_current_expansion(expansion_id: u32) {
+    save_to_memory(EXPANSION_CURRENT, expansion_id);
+}
+
 fn save_expansion_list_to_memory(expansion_list: ExpansionList) {
     save_to_memory(EXPANSION_LIST_START, expansion_list);
 }
@@ -138,48 +147,27 @@ pub mod custom_expansion {
 
     use crate::debug_dll::{get_from_memory, get_string_from_memory, save_to_memory};
 
-    // use super::get_string_ptr;
+    use crate::string_registry::add_string_to_registry;
 
-    use super::{get_expansions, save_mutex, add_expansion, Expansion};
-
-    // #[hook(unsafe extern "thiscall" BFConfigFile_getKeys, offset=0x00009cf3)]
-    // pub fn bf_config_file_get_keys(this: u32, param_1: u32, param_2: u32) -> u32 {
-    //     let result = unsafe { BFConfigFile_getKeys.call(this, param_1, param_2) };
-    //     let string_array: u32 = get_from_memory(result);
-    //     let string_array_end: u32 = get_from_memory(result + 0x4);
-    //     let string_array_buffer_end: u32 = get_from_memory(result + 0x8);
-    //     let header: String = get_string_from_memory(param_2);
-    //     if header == "Member" && string_array != 0 {
-    //         info!("BFConfigFile::getKeys this: {:#x}, param_1: {:#x}, param_2: {}, result: {:#x} -> {:#x}", this, param_1, header, result, string_array);
-    //         save_to_memory(result + 0x4, string_array_end + 0x4);
-    //         save_to_memory(result + 0x8, string_array_buffer_end + 0x4);
-    //         save_to_memory(string_array_end, get_string_ptr("RSN".to_string()).unwrap());
-    //         // read_string_list_from_memory(string_array, get_from_memory(result + 0x4));
-    //     }
-    //     result
-    // }
+    use super::{get_expansions, save_mutex, add_expansion, Expansion, save_current_expansion};
 
     //uint __cdecl ZTUI::general::entityTypeIsDisplayed(int *param_1,char **param_2,char **param_3)
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
         let result = unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
-        info!("ZTUI::general::entityTypeIsDisplayed this: {:#x}, param_1: {}, param_2: {}, result: {:#x}", bf_entity, get_string_from_memory(get_from_memory(param_1)), get_string_from_memory(get_from_memory(param_2)), result);
+        // info!("ZTUI::general::entityTypeIsDisplayed this: {:#x}, param_1: {}, param_2: {}, result: {:#x}", bf_entity, get_string_from_memory(get_from_memory(param_1)), get_string_from_memory(get_from_memory(param_2)), result);
         result
-    }
-
-    pub fn read_string_list_from_memory(start_ptr: u32, end_ptr: u32) {
-        let mut current_ptr = start_ptr;
-        while current_ptr < end_ptr {
-            let string = get_string_from_memory(get_from_memory(current_ptr));
-            info!("String: {:#x} {}", current_ptr, string);
-            current_ptr += 4;
-        }
     }
 
     #[hook(unsafe extern "stdcall" ZTUI_expansionselect_setup, offset=0x001291fb)]
     pub fn ztui_expansionselect_setup() {
         info!("ZTUI::expansionselect::setup");
-        unsafe { ZTUI_expansionselect_setup.call() };
+        unsafe { ZTUI_expansionselect_setup.call() }; //TODO: Remove this call once all functionality has been replicated
+
+        // TODO: Get expansion resource files and parse them into Expansion structs, we can then remove the original call and read from ZT memory
+        // expansions should be sorted by expansion_id
+        // IDEA: Can we parse files asynchronously before this and just sort the expansions by id and add to memory here?
+
         get_expansions();
 
         let name = "TEST";
@@ -187,9 +175,15 @@ pub mod custom_expansion {
         // let name = CString::new("TEST").unwrap();
         let name_ptr = CString::new(name).unwrap().into_raw() as u32;
 
-        add_expansion(Expansion { expansion_id: 0x101, name_id: 5012, name_string_start_ptr: name_ptr, name_string_end_ptr: name_ptr + name.len() as u32 + 1, name_string_buffer_end_ptr: name_ptr + name.len() as u32 + 1});
+        // TODO: Add display name to string registry and get ID back
+        
+        let name_id = add_string_to_registry("TEST EXPANSION".to_string());
+
+        add_expansion(Expansion { expansion_id: 0x101, name_id: name_id, name_string_start_ptr: name_ptr, name_string_end_ptr: name_ptr + name.len() as u32 + 1, name_string_buffer_end_ptr: name_ptr + name.len() as u32 + 1});
 
         // save_mutex();
+
+        save_current_expansion(0x0);
     }
 }
 
