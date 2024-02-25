@@ -1,11 +1,16 @@
 use crate::debug_dll::{get_from_memory, get_string_from_memory, save_to_memory};
 use crate::add_to_command_register;
+use crate::resource_manager::{add_handler, Handler};
 
 use tracing::info;
 use retour_utils::hook_module;
 
 use std::fmt;
 use std::fmt::Display;
+use std::io::Read;
+
+use std::path::PathBuf;
+use zip::read::ZipFile;
 
 use std::sync::{Mutex, MutexGuard};
 use once_cell::sync::Lazy;
@@ -148,14 +153,23 @@ pub mod custom_expansion {
     use crate::debug_dll::{get_from_memory, get_string_from_memory, save_to_memory};
 
     use crate::string_registry::add_string_to_registry;
+    use crate::ztworldmgr::read_zt_entity_type_from_memory;
+
 
     use super::{get_expansions, save_mutex, add_expansion, Expansion, save_current_expansion};
 
     //uint __cdecl ZTUI::general::entityTypeIsDisplayed(int *param_1,char **param_2,char **param_3)
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
+        info!("ZTUI::general::entityTypeIsDisplayed {} {} {}", bf_entity, get_string_from_memory(get_from_memory(param_1)), get_string_from_memory(get_from_memory(param_2)));
+        info!("{}", read_zt_entity_type_from_memory(bf_entity));
         let result = unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
         // info!("ZTUI::general::entityTypeIsDisplayed this: {:#x}, param_1: {}, param_2: {}, result: {:#x}", bf_entity, get_string_from_memory(get_from_memory(param_1)), get_string_from_memory(get_from_memory(param_2)), result);
+        // info!("{}", read_zt_entity_from_memory(bf_entity));
+        // info!("{}", get_string_from_memory(get_from_memory::<u32>(bf_entity + 0x98)));
+        // zt_sub_type: get_string_from_memory(get_from_memory::<u32>(inner_class_ptr + 0xa4)),
+        // name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
+        // config_file_ptr: get_from_memory::<u32>(inner_class_ptr + 0x30),
         result
     }
 
@@ -185,11 +199,29 @@ pub mod custom_expansion {
 
         save_current_expansion(0x0);
     }
+
+    // #[hook(unsafe extern "thiscall" BFConfigFile_getKeys, offset=0x00009cf3)]
+    // pub fn bf_config_file_get_keys(this: u32, param_1: u32, param_2: u32) -> u32 {
+    //     info!("BFConfigFile::getKeys this: {:#x}, param_1: {:#x}, param_2: {:#x}", this, param_1, param_2);
+    //     unsafe { BFConfigFile_getKeys.call(this, param_1, param_2) }
+    //     // result
+    // }
+}
+
+fn parse_expansion(path: &PathBuf, file: &mut ZipFile) {
+    info!("EXPANSION FILE!!!!!!!!!!");
+                //     println!("Filename: {}", file.name());
+            //     // std::io::copy(&mut file, &mut std::io::stdout());
+    let mut string_buffer = String::with_capacity(file.size() as usize);
+    file.read_to_string(&mut string_buffer).unwrap();
+    info!("{}", string_buffer);
+
 }
 
 pub fn init() {
     add_to_command_register("list_expansion".to_string(), command_get_expansions);
     add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
+    add_handler(Handler::new(Some("xpac".to_string()), Some("cfg".to_string()), parse_expansion).unwrap());
     unsafe { custom_expansion::init_detours().unwrap() };
 }
 

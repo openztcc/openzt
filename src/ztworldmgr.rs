@@ -12,7 +12,7 @@ const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct zt_entity {
+pub struct ZTEntity {
     class: u32,
     secondary_class_ptr: u32,
     secondary_class: u32,
@@ -45,12 +45,13 @@ enum ZtEntityTypeClass {
 }
 
 #[derive(Debug)]
-struct ZtEntityType {
+pub struct ZtEntityType {
     ptr: u32,
     class_string: u32,
     class: ZtEntityTypeClass,
     zt_type: String,
     zt_sub_type: String,
+    bf_config_file_ptr: u32,
 }
 
 #[derive(Debug)]
@@ -70,7 +71,7 @@ pub fn init() {
 }
 
 
-pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> zt_entity {
+pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
     let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
     let secondary_class = get_from_memory(inner_class_ptr);
 
@@ -80,7 +81,7 @@ pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> zt_entity {
     let code: extern "thiscall" fn(u32) -> u32 = unsafe { std::mem::transmute(ptr) };
     let result = (code)(inner_class_ptr);
     
-    zt_entity{
+    ZTEntity{
         class: get_from_memory::<u32>(zt_entity_ptr + 0x0),
         // secondary_class: get_from_memory::<u32>(get_from_memory::<u32>(zt_entity_ptr + 0x128)),
         secondary_class: secondary_class,
@@ -93,12 +94,12 @@ pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> zt_entity {
     }
 }
 
-fn log_zt_entity(zt_entity: &zt_entity) {
+fn log_zt_entity(zt_entity: &ZTEntity) {
     info!("class: {:#x}", zt_entity.class);
     info!("secondary_class: {:#x}", zt_entity.secondary_class);
 }
 
-fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZtEntityType {
+pub fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZtEntityType {
     let class_string = get_from_memory::<u32>(zt_entity_type_ptr + 0x0);
     let class = ZtEntityTypeClass::from(class_string);
 
@@ -108,6 +109,7 @@ fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZtEntityType {
         class: class,
         zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
         zt_sub_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0xa4)),
+        bf_config_file_ptr: get_from_memory::<u32>(zt_entity_type_ptr + 0x80),
     }
 }
 
@@ -205,7 +207,7 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, &'stat
     Ok(summary)
 }
 
-impl fmt::Display for zt_entity {
+impl fmt::Display for ZTEntity {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Entity Type: {:#x},Secondary Class Ptr: {:#x}, Secondary Type: {:#x}, ZT Class: {}, ZT Type: {}, ZT Sub Type: {}, Name: {}", self.class, self.secondary_class_ptr, self.secondary_class, self.zt_class, self.zt_type, self.zt_sub_type, self.name)
     }
@@ -213,7 +215,7 @@ impl fmt::Display for zt_entity {
 
 impl fmt::Display for ZtEntityType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Class String: {:#x}, Class: {:?}, ZT Type: {}, ZT Sub Type: {}, ptr {:#x}", self.class_string, self.class, self.zt_type, self.zt_sub_type, self.ptr)
+        write!(f, "Class String: {:#x}, Class: {:?}, ZT Type: {}, ZT Sub Type: {}, ptr {:#x}, config_file_ptr {:#x}", self.class_string, self.class, self.zt_type, self.zt_sub_type, self.ptr, self.bf_config_file_ptr)
     }
 }
 
@@ -225,11 +227,11 @@ impl fmt::Display for zt_world_mgr {
     }
 }
 
-fn get_zt_world_mgr_entities(zt_world_mgr: &zt_world_mgr) -> Vec<zt_entity> {
+fn get_zt_world_mgr_entities(zt_world_mgr: &zt_world_mgr) -> Vec<ZTEntity> {
     let entity_array_start = zt_world_mgr.entity_array_start;
     let entity_array_end = zt_world_mgr.entity_array_end;
 
-    let mut entities: Vec<zt_entity> = Vec::new();
+    let mut entities: Vec<ZTEntity> = Vec::new();
     let mut i = entity_array_start;
     while i < entity_array_end {
         let zt_entity = read_zt_entity_from_memory(get_from_memory::<u32>(i));

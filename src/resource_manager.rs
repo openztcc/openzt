@@ -1,14 +1,22 @@
 use std::fmt;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+use once_cell::sync::Lazy;
 
 use walkdir::{DirEntry, WalkDir};
+
+use zip::read::ZipFile;
 
 use retour_utils::hook_module;
 use tracing::{error, info};
 
 use crate::console::add_to_command_register;
-use crate::debug_dll::{get_from_memory, get_string_from_memory};
+use crate::debug_dll::{get_base_path, get_from_memory, get_string_from_memory};
 
 const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
 
@@ -172,7 +180,7 @@ pub mod zoo_resource_mgr {
 
     use tracing::info;
 
-    use super::{BFResourceZip, Name};
+    use super::{load_resources, BFResourceZip, Name};
 
     use configparser::ini::Ini; //TODO: Replace with custom ini parser
 
@@ -334,21 +342,61 @@ pub mod zoo_resource_mgr {
         let return_value = unsafe { BFResourceMgr_constructor.call(this_ptr) };
         let ini_path = get_ini_path();
         let mut zoo_ini = Ini::new();                       //TODO: Load this once on startup; fix up load_ini to actually contain all the ini related functions
+        zoo_ini.set_comment_symbols(&['#']);
         zoo_ini.load(ini_path).unwrap();
         if let Some(paths) = zoo_ini.get("resource", "path") {
-            if !paths.split(';').any(|s| s.trim() == "./mods") {
+            info!("Paths: {}", paths);
+            let path_vec = paths.split(';').map(|s| s.to_owned()).collect::<Vec<String>>();
+            if !path_vec.clone().into_iter().any(|s| s.trim() == "./mods") {
                 info!("Adding mods directory to BFResourceMgr");
                 let add_path: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0052870b) };
                 if let Ok(mods_path) = CString::new("./mods") {
                     add_path(this_ptr, mods_path.as_ptr() as u32);
                 }
             }
+            load_resources(path_vec);
         }
         return_value
     }
 }
 
-// for entry in WalkDir::new("/Users/finnhartshorn/Projects/zootycoon/vanilla_install/Zoo Tycoon")
+
+#[derive(Clone)]
+pub struct Handler {
+    matcher_prefix: Option<String>,
+    matcher_suffix: Option<String>,
+    handler: HandlerFunction,
+}
+
+pub type HandlerFunction = fn(&PathBuf, &mut ZipFile) -> ();
+
+impl Handler {
+    pub fn new(matcher_prefix: Option<String>, matcher_suffix: Option<String>, handler: HandlerFunction) -> Result<Self, &'static str> {
+        if matcher_prefix.is_none() && matcher_suffix.is_none() {
+            return Err("Matcher prefix or filetype must be specified");
+        }
+        Ok(Self {
+            matcher_prefix,
+            matcher_suffix,
+            handler,
+        })
+    }
+
+    fn handle(&self, entry: &PathBuf, file: &mut ZipFile) {
+        let file_name = file.name();
+        if let Some(prefix) = &self.matcher_prefix {
+            if !file_name.starts_with(prefix) {
+                return;
+            }
+        }
+        if let Some(file_type) = &self.matcher_suffix {
+            if !file_name.ends_with(file_type) {
+                return;
+            }
+        }
+        (self.handler)(entry, file);
+    }
+}
 
 fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     let mut resources = Vec::new();
@@ -358,14 +406,53 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
         if entry
             .file_name()
             .to_str()
-            .map(|s| s.ends_with(".ztd"))
+            .map(|s| s.ends_with(".ztd") && !s.starts_with("zt"))
             .unwrap_or(false)
         {
-            println!("{}", &entry.path().display());
             resources.push(entry.path().to_path_buf());
         }
     }
     resources
 }
 
-// fn get_default_ztd_resources() -> Vec<PathBuf> {
+fn load_resources(mut paths: Vec<String>) {
+    // let base_path = get_base_path();
+    // paths.insert(0, base_path.clone().to_string_lossy().into_owned());
+    paths.iter().for_each(|path| {
+        info!("Loading resources from: {}", path);
+        let resources = get_ztd_resources(Path::new(path), false);
+        resources.iter().for_each(|resource| {
+            info!("Loading resource: {}", resource.display());
+            handle_ztd(resource);
+        });
+    });
+}
+
+fn handle_ztd(resource: &PathBuf) {
+    let mut buf_reader = BufReader::new(File::open(resource).unwrap());
+    let mut zip = zip::ZipArchive::new(&mut buf_reader).unwrap();
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i).unwrap();
+        handle(resource, &mut file);
+    }
+}
+
+static RESOURCE_HANDLER_ARRAY: Lazy<Mutex<Vec<Handler>>> = Lazy::new(|| {
+    Mutex::new(Vec::new())
+});
+
+pub fn add_handler(handler: Handler) {
+    let mut data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
+    data_mutex.push(handler);
+}
+
+fn get_handlers() -> Vec<Handler> {
+    RESOURCE_HANDLER_ARRAY.lock().unwrap().clone()
+}
+
+fn handle(dir_entry: &PathBuf, file: &mut ZipFile) {
+    let data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
+    for handler in data_mutex.iter() {
+        handler.handle(dir_entry, file);
+    }
+}

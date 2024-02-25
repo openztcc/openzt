@@ -16,6 +16,7 @@ retour-utils = "0.2.1"
 once_cell = "1.18.0"
 num_enum = "0.7.2"
 walkdir = "2.4.0"
+zip = "0.6.6"
 
 [lib]
 name = "openzt"
