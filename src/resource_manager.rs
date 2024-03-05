@@ -338,23 +338,22 @@ pub mod zoo_resource_mgr {
     }
     
     #[hook(unsafe extern "thiscall" BFResourceMgr_constructor, offset = 0x0012903f)]
-    fn zoo_bf_resource_mgr_constructor(this_ptr: u32) -> u32 { //TODO: Hook add_path call and add mods directory before any other path, use atomic to no add multiple times
+    fn zoo_bf_resource_mgr_constructor(this_ptr: u32) -> u32 { 
         let return_value = unsafe { BFResourceMgr_constructor.call(this_ptr) };
         let ini_path = get_ini_path();
-        let mut zoo_ini = Ini::new();                       //TODO: Load this once on startup; fix up load_ini to actually contain all the ini related functions
+        let mut zoo_ini = Ini::new();
         zoo_ini.set_comment_symbols(&['#']);
         zoo_ini.load(ini_path).unwrap();
         if let Some(paths) = zoo_ini.get("resource", "path") {
-            info!("Paths: {}", paths);
-            let path_vec = paths.split(';').map(|s| s.to_owned()).collect::<Vec<String>>();
-            if !path_vec.clone().into_iter().any(|s| s.trim() == "./mods") {
-                info!("Adding mods directory to BFResourceMgr");
-                let add_path: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0052870b) };
-                if let Ok(mods_path) = CString::new("./mods") {
-                    add_path(this_ptr, mods_path.as_ptr() as u32);
-                }
-            }
-            load_resources(path_vec);
+            // let path_vec = paths.split(';').map(|s| s.to_owned()).collect::<Vec<String>>();
+            // if !path_vec.clone().into_iter().any(|s| s.trim() == "./mods") {
+            //     info!("Adding mods directory to BFResourceMgr");
+            //     let add_path: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0052870b) };
+            //     if let Ok(mods_path) = CString::new("./mods") {
+            //         add_path(this_ptr, mods_path.as_ptr() as u32);
+            //     }
+            // }
+            load_resources(paths.split(';').map(|s| s.to_owned()).collect());
         }
         return_value
     }
@@ -406,7 +405,7 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
         if entry
             .file_name()
             .to_str()
-            .map(|s| s.ends_with(".ztd") && !s.starts_with("zt"))
+            .map(|s| s.ends_with(".ztd") && !s.starts_with("zt"))       // Exlcuding zts.ztd and ztatb*.ztd files until relevant
             .unwrap_or(false)
         {
             resources.push(entry.path().to_path_buf());

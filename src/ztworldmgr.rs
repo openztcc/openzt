@@ -2,6 +2,8 @@
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
 use crate::add_to_command_register;
 
+use getset::Getters;
+
 use tracing::info;
 use std::collections::HashMap;
 use std::fmt;
@@ -24,7 +26,7 @@ pub struct ZTEntity {
 
 #[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
 #[repr(u32)]
-enum ZtEntityTypeClass {
+pub enum ZtEntityTypeClass {
     Animal = 0x630268,
     Ambient = 0x62e1e8,
     Guest = 0x62e330,
@@ -44,7 +46,9 @@ enum ZtEntityTypeClass {
     Unknown = 0x0,
 }
 
-#[derive(Debug)]
+
+#[derive(Debug, Getters)]
+#[get = "pub"]
 pub struct ZtEntityType {
     ptr: u32,
     class_string: u32,

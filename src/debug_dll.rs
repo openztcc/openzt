@@ -93,6 +93,16 @@ pub fn log_exe_location_memory_value() {
     debug_logger(&format!("exe location from rust: {}", std::env::current_exe().unwrap().to_str().unwrap()));
 }
 
+pub fn get_string_from_memory_bounded(start: u32, end: u32, buffer_end: u32) -> String {
+    let mut string = String::new();
+    let mut char_address = start;
+    while { let byte = get_from_memory::<u8>(char_address); byte != 0 && char_address < end && char_address < buffer_end } {
+        string.push(get_from_memory::<u8>(char_address) as char);
+        char_address += 1;
+    }
+    return string;
+}
+
 pub fn get_string_from_memory(address: u32) -> String {
     debug!("decoding string at address: {:p}", address as *const ());
     let mut string = String::new();
