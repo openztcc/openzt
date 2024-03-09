@@ -1,4 +1,4 @@
-#![feature(abi_thiscall)]
+#![feature(abi_thiscall, let_chains)]
 #![allow(dead_code)]
 
 use configparser::ini::Ini;

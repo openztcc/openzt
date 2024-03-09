@@ -39,8 +39,8 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "bf_configparser"
-version = "1.0.0"
-source = "git+https://github.com/openztcc/bf-configparser#7b0e9984112b015bd880cc9353984a45b7689b8e"
+version = "1.1.0"
+source = "git+https://github.com/openztcc/bf-configparser#4bbd7ab681ed68f0b9c9cb6a144f43a01befe647"
 
 [[package]]
 name = "bitflags"

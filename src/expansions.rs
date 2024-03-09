@@ -2,6 +2,8 @@ use crate::debug_dll::{get_from_memory, get_string_from_memory, save_to_memory};
 use crate::add_to_command_register;
 use crate::resource_manager::{add_handler, Handler};
 use crate::string_registry::add_string_to_registry;
+use crate::ztui::{BuyTab, get_selected_sex, get_random_sex};
+use crate::ztworldmgr::{ZTEntity, ZTEntityTypeClass, ZTEntityType};
 
 use tracing::info;
 use retour_utils::hook_module;
@@ -10,6 +12,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::io::Read;
 use std::ffi::CString;
+use std::path::Path;
 
 use core::fmt::Error;
 
@@ -22,6 +25,8 @@ use anyhow::Context;
 use std::sync::{Mutex, MutexGuard};
 use once_cell::sync::Lazy;
 
+use std::collections::{HashSet, HashMap};
+
 use bf_configparser::ini::Ini;
 
 const EXPANSION_LIST_START: u32 = 0x00639030;
@@ -29,6 +34,36 @@ const EXPANSION_SIZE: u32 = 0x14;
 const EXPANSION_CURRENT: u32 = 0x00638d4c;
 
 const MAX_EXPANSION_SIZE: usize = 14;
+
+static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> = Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+fn add_member(entity_name: String, member: String) {
+    let mut data_mutex = MEMBER_SETS.lock().unwrap();
+    let mut set = data_mutex.entry(member).or_insert(HashSet::new());
+    set.insert(entity_name);
+}
+
+pub fn is_member(entity_name: &str, member: &str) -> bool {
+    let data_mutex = MEMBER_SETS.lock().unwrap();
+    match data_mutex.get(member) {
+        Some(set) => set.contains(entity_name),
+        None => false
+    }
+}
+
+fn command_get_members(args: Vec<&str>) -> Result<String, &'static str> {
+    let data_mutex = MEMBER_SETS.lock().unwrap();
+    let mut result = String::new();
+
+    for (set_name, members) in data_mutex.iter() {
+        let members_as_string: Vec<String> = members.iter().cloned().collect();
+        result.push_str(&format!("Set: {} -> Members: {}\n", set_name, members_as_string.join(", ")));
+    }
+
+    Ok(result)
+}
 
 // There are no acessors for Expansions, ZT accesses expansions by directly iterating over the array, adding to the array also saves ptrs to ZT's memory keeping things in sync
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| {
@@ -166,15 +201,12 @@ pub mod custom_expansion {
     use crate::debug_dll::{get_from_memory, get_string_from_memory, save_to_memory};
 
     use crate::string_registry::add_string_to_registry;
-    use crate::ztui::{get_current_buy_tab, get_current_tab, get_selected_sex, BuyTab};
-    use crate::ztworldmgr::{read_zt_entity_type_from_memory, ZtEntityTypeClass};
+    use crate::ztui::{get_current_buy_tab, get_selected_sex, BuyTab};
+    use crate::ztworldmgr::{read_zt_entity_type_from_memory, ZTEntityTypeClass}; 
 
 
     use super::{get_expansions, save_mutex, add_expansion, Expansion, save_current_expansion, read_current_expansion, add_expansion_with_string_id};
 
-    const RANDOM_SEX_STRING_PTR: u32 = 0x0063e420;
-
-    //uint __cdecl ZTUI::general::entityTypeIsDisplayed(int *param_1,char **param_2,char **param_3)
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
         // info!("ZTUI::general::entityTypeIsDisplayed {:#x} {:#x} {} {:#x} {}", bf_entity, param_1, get_string_from_memory(get_from_memory(param_1)), param_2, get_string_from_memory(get_from_memory(param_2)));
@@ -196,83 +228,16 @@ pub mod custom_expansion {
 
         let current_buy_tab = get_current_buy_tab();
         if get_current_buy_tab().is_none() {
+            info!("NO BUY TAB VISIBLE");
             return 0
         }
-        match current_buy_tab.unwrap() {
-            BuyTab::AnimalTab => {
-                if entity.class() != ZtEntityTypeClass::Animal {
-                    return 0
-                }
-                match get_selected_sex() {
-                    Some(sex) => {
-                        if sex as String != entity.zt_sub_type() {
-                            return 0
-                        }
-                    }
-                    None => {
-                        return 0
-                    }
-                }
-            },
-            BuyTab::ShelterTab => {   // Following three require parsing the [Member] section in config files
-                // Something like `get_members(entity).contains("shelter")`
-                // if entity.zt_type() == "shelter" { 
-                //     return 1
-                // }
-            },
-            BuyTab::ToysTab => {
-                // if entity.zt_type() == "toy" {
-                //     return 1
-                // }
-            },
-            BuyTab::ShowToysTab => {
-                // if entity.zt_type() == "show_toy" {
-                //     return 1
-                // }
-            },
-            BuyTab::BuildingTab => { // Likely needs parsing the [Member] section in config files
-                if entity.class() != ZtEntityTypeClass::Building {
-                    return 0
-                }
-            },
-            BuyTab::SceneryTab => {
-                if entity.class() != ZtEntityTypeClass::Scenery || entity.zt_type() != "other" {
-                    return 0
-                }
-            },
-            BuyTab::FenceTab => {
-                if !matches!(entity.class(), ZtEntityTypeClass::Fence | ZtEntityTypeClass::TankWall | ZtEntityTypeClass::TankFilter) {
-                    return 0
-                }
-                if entity.zt_type() == "g" {
-                    return 0
-                }
-            },
-            BuyTab::PathTab => {
-                if entity.class() != ZtEntityTypeClass::Path {
-                    return 0
-                }
-            },
-            BuyTab::FoliageTab => { // Likely needs parsing the [Member] section in config files
-                // if entity.zt_type() == "foliage" {
-                //     return 1
-                // }
-            },
-            BuyTab::RocksTab => { // Likely needs parsing the [Member] section in config files
-                // if entity.zt_type() == "rock" {
-                //     return 1
-                // }
-            },
-            BuyTab::StaffTab => {
-                if !matches!(entity.class(), ZtEntityTypeClass::Keeper | ZtEntityTypeClass::MaintenanceWorker | ZtEntityTypeClass::TourGuide) || (entity.zt_sub_type() != "" && entity.zt_sub_type() != get_string_from_memory(RANDOM_SEX_STRING_PTR)) {
-                    return 0
-                }
-            }
-            BuyTab::PaintTerrainTab | BuyTab::TerraformTab => {
-                return 0
-            },
-        }
 
+        let reimplemented_result = super::filter_entity_type(&current_buy_tab.unwrap(), &current_expansion, &entity);
+
+        if (result == 1) != reimplemented_result {
+            info!("#### > #### ZT {}, OpenZT {}, Entity {}", result, reimplemented_result, entity)
+        }
+        
         // if result == 1 {
         //     info!("Will show {} {} {} {}", get_string_from_memory(param_1), get_string_from_memory(param_2), entity.zt_type(), entity.zt_sub_type());
         // } else if current_expansion.expansion_id == 0x0 && result != 1 && entity.zt_sub_type() == "m" {
@@ -286,6 +251,7 @@ pub mod custom_expansion {
         // If animal and above is true, return 1 if selected_sex = entity_sex
 
         result
+        // if reimplemented_result {1} else {0}
         // 1
         // if entity.zt_sub_type() == "m" { 1 } else { 0 }
     }
@@ -319,16 +285,102 @@ pub mod custom_expansion {
     //     // result
     // }
 
-    #[hook(unsafe extern "thiscall" BFUIMgr_getElement, offset=0x0000157d)]
-    fn bf_ui_mgr_get_element(this: u32, param_1: u32) -> u32 {
-        let result = unsafe { BFUIMgr_getElement.call(this, param_1) };
-        if matches!(param_1, 2000 | 2001) {
-            info!("BFUIMgr::getElement this: {:#x}, param_1: {:#x}, result: {:#x}", this, param_1, result);
+    // #[hook(unsafe extern "thiscall" BFUIMgr_getElement, offset=0x0000157d)]
+    // fn bf_ui_mgr_get_element(this: u32, param_1: u32) -> u32 {
+    //     let result = unsafe { BFUIMgr_getElement.call(this, param_1) };
+    //     result
+    // }
+
+
+}
+
+fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &ZTEntityType) -> bool {
+    match buy_tab {
+        BuyTab::AnimalTab => {
+            if !entity.is_member("animals".to_string()) {
+                return false
+            }
+            match get_selected_sex() {
+                Some(sex) => {
+                    if &sex.to_string() != entity.zt_sub_type() {
+                        return false
+                    }
+                }
+                None => {
+                    return false
+                }
+            }
+        },
+        BuyTab::ShelterTab => {
+            if !entity.is_member("shelters".to_string()) {
+                return false
+            }
+        },
+        BuyTab::ToysTab => {
+            if !entity.is_member("toys".to_string()) {
+                return false
+            }
+        },
+        BuyTab::ShowToysTab => {
+            if !entity.is_member("showtoys".to_string()) {
+                return false
+            }
+        },
+        BuyTab::BuildingTab => {
+            if !entity.is_member("structures".to_string()) {
+                return false
+            }
+        },
+        BuyTab::SceneryTab => {
+            if !entity.is_member("scenery".to_string()) {
+                return false
+            }
+            // TOOD: Make member name a combination of name and class so name double-ups don't cause this issue
+            if entity.class() == &ZTEntityTypeClass::Scenery && entity.zt_type() == "other" && entity.zt_sub_type() == "fountain" {
+                return false
+            }
+        },
+        BuyTab::FenceTab => {
+            if !entity.is_member("fence".to_string()) {
+                return false
+            }
+            if entity.zt_sub_type() == "g" {
+                return false
+            }
+        },
+        BuyTab::PathTab => {
+            if !entity.is_member("paths".to_string()){
+                return false
+            }
+        },
+        BuyTab::FoliageTab => {
+            if !entity.is_member("foliage".to_string()){
+                return false
+            }
+        },
+        BuyTab::RocksTab => {
+            if !entity.is_member("rocks".to_string()){
+                return false
+            }
+        },
+        BuyTab::StaffTab => {
+            if !entity.is_member("staff".to_string()) {
+                return false
+            }
+            if (matches!(entity.zt_sub_type().as_str(), "m" | "f") && entity.zt_sub_type() != &get_random_sex().unwrap().to_string()) {
+                return false
+            }
         }
-        result
+        BuyTab::DeveloperTab => {
+            if !entity.is_member("developer".to_string()) {
+                return false
+            }
+        }
+        BuyTab::PaintTerrainTab | BuyTab::TerraformTab => {
+            return false
+        },
     }
-
-
+    return true
 }
 
 fn add_expansion_with_string_id(id: u32, name: String, string_id: u32, save_to_memory: bool) {
@@ -352,6 +404,58 @@ fn handle_expansion_config(path: &PathBuf, file: &mut ZipFile) {
         Err(e) => info!("Error parsing expansion config: {}", e)
     }
 }
+
+fn handle_member_parsing(path: &PathBuf, file: &mut ZipFile) {
+    // info!("MEMBER FILE!!!!!!!!!!");
+    match parse_member_config(file) {
+        Ok(_) => {},//info!("Member config parsed successfully"),
+        Err(e) => info!("Error parsing member config: {} {}", file.name(), e)
+    }
+}
+
+static FILE_NAME_OVERRIDES: Lazy<HashMap<String, String>> = Lazy::new(|| {
+    vec![
+        ("fences/tankwall.ai".to_string(), "fences/tankwal1.ai".to_string()), // Assumed spelling mistake
+        ("fences/hedge.ai".to_string(), "fences/not_hedge.ai".to_string()), // Duplicates, this one isn't loaded
+        ("scenery/other/fountain.ai".to_string(), "scenery/other/other_fountain.ai".to_string()), // Duplicates, this one isn't loaded
+    ].into_iter().collect()
+});
+
+fn parse_member_config(file: &mut ZipFile) -> anyhow::Result<()> {
+    let mut buffer = vec![0; file.size() as usize];
+    if let Err(error) = file.read(&mut buffer[..]) {
+        info!("Error reading member config {}: {}", file.name(), error);
+        return Ok(());
+    }
+    let string_buffer = String::from_utf8_lossy(&buffer[..]).to_string(); //TODO: Investigate parsing ANSI files
+
+    let mut member_cfg = Ini::new();
+    member_cfg.set_comment_symbols(&[';', '#', ':']);
+    member_cfg.read(string_buffer).map_err(anyhow::Error::msg)?;
+
+    let filepath = match FILE_NAME_OVERRIDES.contains_key(file.name()) {
+        true => FILE_NAME_OVERRIDES.get(file.name()).unwrap().to_string(),
+        false => file.name().to_ascii_lowercase(),
+    };
+
+    let filename = Path::new(&filepath).file_stem().unwrap().to_str().unwrap().to_string();
+    let extension = Path::new(&filepath).extension().unwrap().to_str().unwrap().to_string();
+
+    if let Some(keys) = member_cfg.get_keys("member") {
+        for key in keys {
+            add_member(filename.clone(), key);
+        }
+    }
+    match extension.as_str() {
+        "uca" | "ucb" | "ucs" => {
+            add_member(filename, "cc".to_string());
+        },
+        _ => {}
+    }
+
+    Ok(())
+}
+
 
 fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     let mut string_buffer = String::with_capacity(file.size() as usize);
@@ -379,7 +483,12 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
 pub fn init() {
     add_to_command_register("list_expansion".to_string(), command_get_expansions);
     add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
+    add_to_command_register("get_members".to_string(), command_get_members);
     add_handler(Handler::new(Some("xpac".to_string()), Some("cfg".to_string()), handle_expansion_config).unwrap());
+    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing).unwrap());
+    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing).unwrap());
+    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing).unwrap());
+    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing).unwrap());
     unsafe { custom_expansion::init_detours().unwrap() };
 }
 

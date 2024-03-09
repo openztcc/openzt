@@ -415,13 +415,9 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
 }
 
 fn load_resources(mut paths: Vec<String>) {
-    // let base_path = get_base_path();
-    // paths.insert(0, base_path.clone().to_string_lossy().into_owned());
     paths.iter().for_each(|path| {
-        info!("Loading resources from: {}", path);
         let resources = get_ztd_resources(Path::new(path), false);
         resources.iter().for_each(|resource| {
-            info!("Loading resource: {}", resource.display());
             handle_ztd(resource);
         });
     });
