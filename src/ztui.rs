@@ -36,7 +36,7 @@ pub enum UIElementId {
     DeveloperScrollingRegion = 5003,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BuyTab {
     AnimalTab,
     ShelterTab,

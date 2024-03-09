@@ -1,4 +1,4 @@
-use crate::debug_dll::{get_from_memory, get_string_from_memory, save_to_memory};
+use crate::debug_dll::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory};
 use crate::add_to_command_register;
 use crate::resource_manager::{add_handler, Handler};
 use crate::string_registry::add_string_to_registry;
@@ -133,6 +133,12 @@ pub struct Expansion {
     name_string_buffer_end_ptr: u32,
 }
 
+impl Expansion {
+    fn name_string(&self) -> String {
+        get_string_from_memory_bounded(self.name_string_start_ptr, self.name_string_end_ptr, self.name_string_buffer_end_ptr)
+    }
+}
+
 fn read_expansion_list_from_memory() -> ExpansionList {
     get_from_memory(EXPANSION_LIST_START)
 }
@@ -205,7 +211,7 @@ pub mod custom_expansion {
     use crate::ztworldmgr::{read_zt_entity_type_from_memory, ZTEntityTypeClass}; 
 
 
-    use super::{get_expansions, save_mutex, add_expansion, Expansion, save_current_expansion, read_current_expansion, add_expansion_with_string_id};
+    use super::{get_expansions, save_mutex, add_expansion, Expansion, save_current_expansion, read_current_expansion, add_expansion_with_string_id, add_expansion_with_string_value};
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
@@ -250,8 +256,8 @@ pub mod custom_expansion {
 
         // If animal and above is true, return 1 if selected_sex = entity_sex
 
-        result
-        // if reimplemented_result {1} else {0}
+        // result
+        if reimplemented_result {1} else {0}
         // 1
         // if entity.zt_sub_type() == "m" { 1 } else { 0 }
     }
@@ -261,19 +267,10 @@ pub mod custom_expansion {
         info!("ZTUI::expansionselect::setup");
         unsafe { ZTUI_expansionselect_setup.call() }; //TODO: Remove this call once all functionality has been replicated
 
-        // TODO: Get expansion resource files and parse them into Expansion structs, we can then remove the original call and read from ZT memory
-        // expansions should be sorted by expansion_id
-        // IDEA: Can we parse files asynchronously before this and just sort the expansions by id and add to memory here?
-
-        // get_expansions();
-        // Expansion { expansion_id: 0x0 name_id: 0x5974 name_string: all }
-
         add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
 
-        let name_all = "all";
-        let name_ptr_all = CString::new(name_all).unwrap().into_raw() as u32;
-        let name_ptr_all_end = name_ptr_all + name_all.len() as u32 + 1;
-        add_expansion(Expansion { expansion_id: 0x0, name_id: 0x5974, name_string_start_ptr: name_ptr_all, name_string_end_ptr: name_ptr_all_end, name_string_buffer_end_ptr: name_ptr_all_end }, false);
+        // add_expansion_with_string_value(0x4000, "cc".to_string(), "Custom Content".to_string(), true);
+        add_expansion_with_string_value(0x4000, "cc".to_string(), "Custom Content".to_string(), false);
 
         save_current_expansion(0x0);
     }
@@ -380,6 +377,20 @@ fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &
             return false
         },
     }
+
+    if buy_tab != &BuyTab::PathTab {
+        if current_expansion.expansion_id == 0x1 {
+            for expansion in get_expansions() {
+                if expansion.expansion_id > 0x1 && entity.is_member(expansion.name_string()) && !entity.is_member("zoo".to_string()) {
+                    return false
+                }
+            }
+        }
+        if current_expansion.expansion_id > 0x1 && !entity.is_member(current_expansion.name_string()) {
+                return false
+        }
+    }
+
     return true
 }
 
@@ -468,7 +479,7 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     // TODO: bf-configparser should return a custom error so we can use ? rather than map_err
     let mut id: u32= expansion_cfg.get_parse("expansion", "id").map_err(anyhow::Error::msg)?.context("No id found in expansion config")?;
     id += 1;
-    let name = expansion_cfg.get("expansion", "name").context("No name found in expansion config")?;
+    let name = expansion_cfg.get("expansion", "name").context("No name found in expansion config")?.to_ascii_lowercase();
     let name_ptr = CString::new(name.clone()).unwrap().into_raw() as u32;
     let listid: u32 = expansion_cfg.get_parse("expansion", "listid").map_err(anyhow::Error::msg)?.context("No listid found in expansion config")?;
 
