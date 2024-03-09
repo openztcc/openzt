@@ -53,6 +53,11 @@ pub fn is_member(entity_name: &str, member: &str) -> bool {
     }
 }
 
+pub fn get_members(member: &str) -> Option<HashSet<String>> {
+    let data_mutex = MEMBER_SETS.lock().unwrap();
+    data_mutex.get(member).cloned()
+}
+
 fn command_get_members(args: Vec<&str>) -> Result<String, &'static str> {
     let data_mutex = MEMBER_SETS.lock().unwrap();
     let mut result = String::new();
@@ -211,7 +216,7 @@ pub mod custom_expansion {
     use crate::ztworldmgr::{read_zt_entity_type_from_memory, ZTEntityTypeClass}; 
 
 
-    use super::{get_expansions, save_mutex, add_expansion, Expansion, save_current_expansion, read_current_expansion, add_expansion_with_string_id, add_expansion_with_string_value};
+    use super::{get_expansions, save_mutex, add_expansion, Expansion, save_current_expansion, read_current_expansion, add_expansion_with_string_id, add_expansion_with_string_value, get_members};
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
@@ -269,8 +274,9 @@ pub mod custom_expansion {
 
         add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
 
-        // add_expansion_with_string_value(0x4000, "cc".to_string(), "Custom Content".to_string(), true);
-        add_expansion_with_string_value(0x4000, "cc".to_string(), "Custom Content".to_string(), false);
+        if let Some(member_hash) = get_members("cc") && member_hash.len() > 0 {
+            add_expansion_with_string_value(0x4000, "cc".to_string(), "Custom Content".to_string(), true);
+        }
 
         save_current_expansion(0x0);
     }
@@ -457,11 +463,9 @@ fn parse_member_config(file: &mut ZipFile) -> anyhow::Result<()> {
             add_member(filename.clone(), key);
         }
     }
-    match extension.as_str() {
-        "uca" | "ucb" | "ucs" => {
-            add_member(filename, "cc".to_string());
-        },
-        _ => {}
+
+    if matches!(extension.as_str(), "uca" | "ucb" | "ucs") && filename != "b101b026" {
+        add_member(filename, "cc".to_string());
     }
 
     Ok(())
