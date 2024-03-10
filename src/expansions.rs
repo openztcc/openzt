@@ -70,10 +70,9 @@ fn command_get_members(args: Vec<&str>) -> Result<String, &'static str> {
     Ok(result)
 }
 
-// There are no acessors for Expansions, ZT accesses expansions by directly iterating over the array, adding to the array also saves ptrs to ZT's memory keeping things in sync
+// There are no accessors for Expansions, ZT accesses expansions by directly iterating over the array, adding to the array also saves ptrs to ZT's memory keeping things in sync
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| {
     Mutex::new(Vec::new())
-    // Mutex::new(read_expansions_from_memory())
 });
 
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> Result<(), &'static str> {
@@ -112,11 +111,6 @@ fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
 }
 
 fn get_expansions() -> Vec<Expansion> {
-    // let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
-    // let array_ptr = data_mutex.as_mut_ptr();
-    // let array_end_ptr = unsafe { array_ptr.offset(data_mutex.len() as isize) };
-    // let array_buffer_end_ptr = unsafe { array_ptr.offset(data_mutex.capacity() as isize) };
-    // info!("Saving expansions to {:#x} to {:#x} cap {:#x} ({} {})", array_ptr as u32, array_end_ptr as u32, array_buffer_end_ptr as u32, data_mutex.len(), data_mutex.capacity());
     EXPANSION_ARRAY.lock().unwrap().clone()
 }
 
@@ -220,18 +214,7 @@ pub mod custom_expansion {
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
-        // info!("ZTUI::general::entityTypeIsDisplayed {:#x} {:#x} {} {:#x} {}", bf_entity, param_1, get_string_from_memory(get_from_memory(param_1)), param_2, get_string_from_memory(get_from_memory(param_2)));
-        // info!("{}", read_zt_entity_type_from_memory(bf_entity));
         let result = unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
-        // info!("ZTUI::general::entityTypeIsDisplayed this: {:#x}, param_1: {}, param_2: {}, result: {:#x}", bf_entity, get_string_from_memory(get_from_memory(param_1)), get_string_from_memory(get_from_memory(param_2)), result);
-        // info!("{}", read_zt_entity_from_memory(bf_entity));
-        // info!("{}", get_string_from_memory(get_from_memory::<u32>(bf_entity + 0x98)));
-        // zt_sub_type: get_string_from_memory(get_from_memory::<u32>(inner_class_ptr + 0xa4)),
-        // name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
-        // config_file_ptr: get_from_memory::<u32>(inner_class_ptr + 0x30),
-
-        // TODO: Extract to function, pass in entity, current_expansion and current_buytab, don't even call if not in buy tab
-        // Compare answer to ZT's answer and log if different
 
         let current_expansion = read_current_expansion();
 
@@ -245,26 +228,7 @@ pub mod custom_expansion {
 
         let reimplemented_result = super::filter_entity_type(&current_buy_tab.unwrap(), &current_expansion, &entity);
 
-        if (result == 1) != reimplemented_result {
-            info!("#### > #### ZT {}, OpenZT {}, Entity {}", result, reimplemented_result, entity)
-        }
-        
-        // if result == 1 {
-        //     info!("Will show {} {} {} {}", get_string_from_memory(param_1), get_string_from_memory(param_2), entity.zt_type(), entity.zt_sub_type());
-        // } else if current_expansion.expansion_id == 0x0 && result != 1 && entity.zt_sub_type() == "m" {
-        //     info!("All selected but not return 1??????? for {} {} {} {}", get_string_from_memory(param_1), get_string_from_memory(param_2), entity.zt_type(), entity.zt_sub_type());
-        // }
-
-        // If all selected return 1
-        // if selected in [member]
-        // If zoo selected; return 1 if no expansions in member
-
-        // If animal and above is true, return 1 if selected_sex = entity_sex
-
-        // result
         if reimplemented_result {1} else {0}
-        // 1
-        // if entity.zt_sub_type() == "m" { 1 } else { 0 }
     }
 
     #[hook(unsafe extern "stdcall" ZTUI_expansionselect_setup, offset=0x001291fb)]
@@ -280,21 +244,6 @@ pub mod custom_expansion {
 
         save_current_expansion(0x0);
     }
-
-    // #[hook(unsafe extern "thiscall" BFConfigFile_getKeys, offset=0x00009cf3)]
-    // pub fn bf_config_file_get_keys(this: u32, param_1: u32, param_2: u32) -> u32 {
-    //     info!("BFConfigFile::getKeys this: {:#x}, param_1: {:#x}, param_2: {:#x}", this, param_1, param_2);
-    //     unsafe { BFConfigFile_getKeys.call(this, param_1, param_2) }
-    //     // result
-    // }
-
-    // #[hook(unsafe extern "thiscall" BFUIMgr_getElement, offset=0x0000157d)]
-    // fn bf_ui_mgr_get_element(this: u32, param_1: u32) -> u32 {
-    //     let result = unsafe { BFUIMgr_getElement.call(this, param_1) };
-    //     result
-    // }
-
-
 }
 
 fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &ZTEntityType) -> bool {
@@ -338,7 +287,7 @@ fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &
             if !entity.is_member("scenery".to_string()) {
                 return false
             }
-            // TOOD: Make member name a combination of name and class so name double-ups don't cause this issue
+            // TODO: Make member name a combination of name and class so name double-ups don't cause this issue
             if entity.class() == &ZTEntityTypeClass::Scenery && entity.zt_type() == "other" && entity.zt_sub_type() == "fountain" {
                 return false
             }
@@ -415,15 +364,15 @@ fn add_expansion_with_string_value(id: u32, name: String, string_value: String, 
 
 
 fn handle_expansion_config(path: &PathBuf, file: &mut ZipFile) {
-    info!("EXPANSION FILE!!!!!!!!!!");
-    match parse_expansion_config(file) {
-        Ok(_) => info!("Expansion config parsed successfully"),
-        Err(e) => info!("Error parsing expansion config: {}", e)
+    if Err(e) = parse_expansion_config(file) {
+        info!("Error parsing expansion config: {} {}", file.name(), e)
     }
 }
 
 fn handle_member_parsing(path: &PathBuf, file: &mut ZipFile) {
-    // info!("MEMBER FILE!!!!!!!!!!");
+    if Err(e) = parse_member_config(file) {
+        info!("Error parsing member config: {} {}", file.name(), e)
+    }
     match parse_member_config(file) {
         Ok(_) => {},//info!("Member config parsed successfully"),
         Err(e) => info!("Error parsing member config: {} {}", file.name(), e)
@@ -434,6 +383,7 @@ static FILE_NAME_OVERRIDES: Lazy<HashMap<String, String>> = Lazy::new(|| {
     vec![
         ("fences/tankwall.ai".to_string(), "fences/tankwal1.ai".to_string()), // Assumed spelling mistake
         ("fences/hedge.ai".to_string(), "fences/not_hedge.ai".to_string()), // Duplicates, this one isn't loaded
+        // TODO: Below might not be needed?
         ("scenery/other/fountain.ai".to_string(), "scenery/other/other_fountain.ai".to_string()), // Duplicates, this one isn't loaded
     ].into_iter().collect()
 });
@@ -489,8 +439,6 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
 
     info!("Adding expansion: {}", name);
     add_expansion(Expansion { expansion_id: id, name_id: listid, name_string_start_ptr: name_ptr, name_string_end_ptr: name_ptr + name.len() as u32 + 1, name_string_buffer_end_ptr: name_ptr + name.len() as u32 + 1}, false);
-    // let expansion = Expansion { expansion_id: id, name_id: listid, name_string_start_ptr: name_ptr, name_string_end_ptr: name_ptr + name.len() as u32 + 1, name_string_buffer_end_ptr: name_ptr + name.len() as u32 + 1};
-    // info!("Adding expansion: {}", expansion);
 
     Ok(())
 }
