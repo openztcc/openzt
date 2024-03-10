@@ -17,10 +17,6 @@ Handles walking through the directories listed in `zoo.ini` and extracting all f
 
 ## Patterns
 
-
-### TODO: brief detour overview
-
-
 ### structs
 
 All structs need to be prefixed with `#[repr(C)]`, this prevents Rust from optimizing them.
@@ -36,6 +32,7 @@ pub struct Expansion {
 ```
 
 You can then use the generic functions `get_from_memory` and `save_to_memory` to read/write the structs to/from Zoo Tycoon.
+`#[derive(Debug)]` is also useful as it allows you to print out the struct without defining a custom formatter.
 
 ### modules
 Features are split up into modules, to add a module first create a file `my_module.rs`, add the line `mod my_module` to `lib.rs`. The module can now be used by other modules. To initiate any detours or other structures a init function should be created and called behind a feature flag in `lib.rs` as below 
@@ -47,7 +44,33 @@ if cfg!(feature = "bugfix") {
 }
 ```
 
+### detours
+You can create a detour like this, offset is from the start of the function (you will likely need to subtract 0x400000 from a functions address). `cdecl` can be replaced with `thiscall` or `stdcall`.
 
-### TODO: Lazy static, why we need and how to do
+```rust
+pub mod custom_expansion {
+
+    #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
+    pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
+        unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };  // This calls the original function
+    }
+}
+
+pub fn init() {
+    unsafe { custom_expansion::init_detours().unwrap() };
+}
+```
+
+
+### Lazy static
+Currently development is ongoing in multiple independent modules, this means we don't have a central struct, instead we have global variables like below
+
+```rust
+static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| {
+    Mutex::new(Vec::new())
+});
+```
+The mutex is likely overkill given Zoo Tycoon is single threaded, but makes them threadsafe for future proofing.
+They can be accessed using something like `let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();` 
 
 
