@@ -55,7 +55,6 @@ pub enum BuyTab {
 }
 
 //TODO: Add support for the buy young hack
-//TODO: Add .string method or to_string methodw -> similar to ZTEntityClass enum
 pub enum Sex {
     Male,
     Female,
@@ -189,56 +188,6 @@ pub fn get_random_sex() -> Option<Sex> {
         _ => None
     }
 }
-
-// pub fn get_current_tab() -> Option<UIElement> {
-//     let tab_id = get_current_tab_id()?;
-//     Some(get_element(tab_id))
-
-// }
-
-// fn get_current_tab_id() -> Option<UIElementId> {
-//     if get_element(UIElementId::AnimalTab).state.is_selected() {
-//         return Some(UIElementId::AnimalTab);
-//     }
-//     if get_element(UIElementId::ShelterTab).state.is_selected() {
-//         return Some(UIElementId::ShelterTab);
-//     }
-//     if get_element(UIElementId::ToysTab).state.is_selected() {
-//         return Some(UIElementId::ToysTab);
-//     }
-//     if get_element(UIElementId::ShowToysTab).state.is_selected() {
-//         return Some(UIElementId::ShowToysTab);
-//     }
-//     if get_element(UIElementId::BuildingTab).state.is_selected() {
-//         return Some(UIElementId::BuildingTab);
-//     }
-//     if get_element(UIElementId::SceneryTab).state.is_selected() {
-//         return Some(UIElementId::SceneryTab);
-//     }
-//     if get_element(UIElementId::FenceTab).state.is_selected() {
-//         return Some(UIElementId::FenceTab);
-//     }
-//     if get_element(UIElementId::PathTab).state.is_selected() {
-//         return Some(UIElementId::PathTab);
-//     }
-//     if get_element(UIElementId::FoliageTab).state.is_selected() {
-//         return Some(UIElementId::FoliageTab);
-//     }
-//     if get_element(UIElementId::RocksTab).state.is_selected() {
-//         return Some(UIElementId::RocksTab);
-//     }
-//     if get_element(UIElementId::PaintTerrainTab).state.is_selected() {
-//         return Some(UIElementId::PaintTerrainTab);
-//     }
-//     if get_element(UIElementId::TerraformTab).state.is_selected() {
-//         return Some(UIElementId::TerraformTab);
-//     }
-//     if !get_element(UIElementId::StaffScrollingRegion).state.is_hidden() {
-//         return Some(UIElementId::StaffScrollingRegion);
-//     }
-//     None    
-// }
-
 
 #[derive(Debug)]
 #[repr(C)]

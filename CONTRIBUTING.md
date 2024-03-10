@@ -24,10 +24,16 @@ All structs need to be prefixed with `#[repr(C)]`, this prevents Rust from optim
 ```rust
 #[derive(Debug)]
 #[repr(C)]
-pub struct Expansion {
-    expansion_id: u32,
-    name_id: u32,
-    name_string: ZTString,
+pub struct UIElement {
+    vftable: u32,
+    unknown_u32_1: u32,
+    unknown_u32_2: u32,
+    unknown_string_1: ZTString,
+    string_content: ZTString,
+    element_name: ZTString,
+    // 25 unknown u32s
+    padding: [u8; 76],
+    state: UIState,
 }
 ```
 
@@ -45,7 +51,7 @@ if cfg!(feature = "bugfix") {
 ```
 
 ### detours
-You can create a detour like this, offset is from the start of the function (you will likely need to subtract 0x400000 from a functions address). `cdecl` can be replaced with `thiscall` or `stdcall`.
+You can create a detour like this, offset is from the start of the function (you will likely need to subtract 0x400000 from a functions address, this is only the case for detours, any other memory access should be done using the full address). `cdecl` can be replaced with `thiscall` or `stdcall`.
 
 ```rust
 pub mod custom_expansion {
@@ -73,4 +79,10 @@ static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| {
 The mutex is likely overkill given Zoo Tycoon is single threaded, but makes them threadsafe for future proofing.
 They can be accessed using something like `let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();` 
 
+### Calling Zoo Tycoon functions
+Occasionally you'll need to call a ZT function rather than just hooking calls coming from ZT. Note here that we use the full address and not an offset.
 
+```rust
+let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
+let element = get_element_fn(BFUIMGR_PTR, 0x2001);
+```
