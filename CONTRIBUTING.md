@@ -15,6 +15,13 @@ Handles sending and receiving data to/from [openzt-console](https://github.com/o
 ### resource_mgr.rs
 Handles walking through the directories listed in `zoo.ini` and extracting all files. You can register handler functions based on file prefixes and suffixes via `add_handler(handler: Handler)` and `Handler::new(matcher_prefix: Option<String>, matcher_suffix: Option<String>, handler: HandlerFunction)` where the HandlerFunction `pub type HandlerFunction = fn(&PathBuf, &mut ZipFile) -> ();`
 
+### string_registry.rs
+Lets you add strings that will be read by Zoo Tycoon's BFApp::loadString, currently does not let you override existing strings
+```rust
+pub fn add_string_to_registry(string_val: String) -> u32 { ... }
+pub fn get_string_from_registry(string_id: u32) -> Result<String, &'static str> { ... }
+```
+
 ## Patterns
 
 ### structs
