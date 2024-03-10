@@ -1,10 +1,8 @@
-# openzt
+# OpenZT
 
-Very basic DLL for injection into [Zoo Tycoon (2001)](https://en.wikipedia.org/wiki/Zoo_Tycoon_(2001_video_game)). Details on what classes and functions are currently patched are below. Further reverse engineering of the class structure is required to progress (WIP).
+A DLL for injection into [Zoo Tycoon (2001)](https://en.wikipedia.org/wiki/Zoo_Tycoon_(2001_video_game)). Details on what classes and functions are currently patched are below.
 
-## Classes and functions
-
-This will be a rundown of classes as they discovered and reimplemented.
+## Overview
 
 ### Legend
 ✅ = Reimplemented
@@ -17,3 +15,10 @@ This class appears to function as a mapping to constructors, potentially allowin
 ### Load INI ✅/⏳
 
 Loads settings from the **[debug]** section of **zoo.ini** and saves them into static memory addresses. Patching other ini section loading causes crashes as it was done before any OO patterns were uncovered.
+
+### ZTUI::expansionselect::setup ✅/⏳
+Loads existing expansions and supports adding new expansions via code, only outstanding feature is updating the UI dropdown to fit any new expansions.
+
+## Contributing
+
+OpenZT welcomes contribution from everyone. See [CONTRIBUTING.md](CONTRIBUTING.md) for help getting started.
