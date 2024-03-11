@@ -58,7 +58,7 @@ if cfg!(feature = "bugfix") {
 ```
 
 ### detours
-You can create a detour like this, offset is from the start of the function (you will likely need to subtract 0x400000 from a functions address, this is only the case for detours, any other memory access should be done using the full address). `cdecl` can be replaced with `thiscall` or `stdcall`.
+You can create a detour as follows, offset is from the start of the function (you will likely need to subtract 0x400000 from a functions address, this is only the case for detours, any other memory access should be done using the full address). `cdecl` can be replaced with `thiscall` or `stdcall`.
 
 ```rust
 pub mod custom_expansion {
@@ -92,4 +92,31 @@ Occasionally you'll need to call a ZT function rather than just hooking calls co
 ```rust
 let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
 let element = get_element_fn(BFUIMGR_PTR, 0x2001);
+```
+
+### Feature flags
+
+Feature flags can be added under the `[features]` heading in `Cargo.toml`
+
+```toml
+[features]
+default = ["bf_registry", "console", "ini", "ztui", "bugfix", "experimental"]
+release = ["bf_registry", "ini", "ztui", "bugfix"]
+console = []
+ini = []
+bf_registry = []
+zoo_logging = []
+ztui = []
+bugfix = []
+experimental = []
+```
+
+Features that are also listed after `default` are included by default when building. Those listed under `release` are included in release builds. To start with put your code behind the `experimental` feature flag.
+
+To put code behind a feature flag use the `cfg!` macro
+```rust
+if cfg!(feature = "console") {
+    info!("Feature 'console' enabled");
+    zoo_console::init();
+}
 ```
