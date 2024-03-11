@@ -364,18 +364,14 @@ fn add_expansion_with_string_value(id: u32, name: String, string_value: String, 
 
 
 fn handle_expansion_config(path: &PathBuf, file: &mut ZipFile) {
-    if Err(e) = parse_expansion_config(file) {
+    if let Err(e) = parse_expansion_config(file) {
         info!("Error parsing expansion config: {} {}", file.name(), e)
     }
 }
 
 fn handle_member_parsing(path: &PathBuf, file: &mut ZipFile) {
-    if Err(e) = parse_member_config(file) {
+    if let Err(e) = parse_member_config(file) {
         info!("Error parsing member config: {} {}", file.name(), e)
-    }
-    match parse_member_config(file) {
-        Ok(_) => {},//info!("Member config parsed successfully"),
-        Err(e) => info!("Error parsing member config: {} {}", file.name(), e)
     }
 }
 
