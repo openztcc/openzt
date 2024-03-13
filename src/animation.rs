@@ -1,5 +1,7 @@
 use std::mem;
 
+use crate::parsing::read_le_primitive;
+
 #[repr(C)]
 pub struct Animation {
     header: Option<Header>,
@@ -43,24 +45,21 @@ pub struct DrawInstruction {
 }
 
 // TODO: Write test based on mod data
-// TODO: Write helper for from_le_bytes that advances the index
 impl Animation {
     pub fn parse(data : &[u8]) -> Animation {
             let mut index = 0;
             let mut header = None;
-            let maybe_header = u32::from_le_bytes(data[0..4].try_into().unwrap());
+            let maybe_header = read_le_primitive(data, &mut index);
             let animation_speed = match maybe_header {
                 0x5A544146 => {
                     header = Some(Header {
                         ZTAF_string: maybe_header,
-                        empty_byte: u32::from_le_bytes(data[4..8].try_into().unwrap()),
-                        extra_frame: u8::from_le_bytes(data[8..9].try_into().unwrap()) == 1,
+                        empty_byte: read_le_primitive(data, &mut index),
+                        extra_frame: read_le_primitive(data, &mut index),
                     });
-                    index = 13;
-                    u32::from_le_bytes(data[9..13].try_into().unwrap())
+                    read_le_primitive(data, &mut index)
                 },
                 _ =>  {
-                    index = 4;
                     maybe_header
                 }
             };

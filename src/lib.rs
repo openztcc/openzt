@@ -33,6 +33,8 @@ mod string_registry;
 
 mod common;
 
+mod parsing;
+
 mod animation;
 
 #[cfg(target_os = "windows")]
