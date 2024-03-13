@@ -48,3 +48,9 @@ where
     *index += mem::size_of::<T>();
     T::from_le_bytes(value_bytes.try_into().unwrap())
 }
+
+pub fn read_string(bytes: &[u8], index: &mut usize, length: usize) -> String {
+    let string_bytes = &bytes[*index..*index + length - 1];
+    *index += length;
+    String::from_utf8(string_bytes.to_vec()).unwrap()
+}

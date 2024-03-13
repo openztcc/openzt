@@ -1,6 +1,6 @@
 use std::mem;
 
-use crate::parsing::read_le_primitive;
+use crate::parsing::{read_le_primitive, read_string};
 
 #[repr(C)]
 pub struct Animation {
@@ -13,6 +13,7 @@ pub struct Animation {
     //Random extra bytes?
 }
 
+#[derive(Clone)]
 #[repr(C)]
 pub struct Header {
     ZTAF_string: u32,
@@ -33,7 +34,7 @@ pub struct Frame {
 
 #[repr(C)]
 pub struct Line {
-    num_draw_instructions: u32,
+    num_draw_instructions: u8,
     draw_instructions: Vec<DrawInstruction>,
 }
 
@@ -47,55 +48,74 @@ pub struct DrawInstruction {
 // TODO: Write test based on mod data
 impl Animation {
     pub fn parse(data : &[u8]) -> Animation {
-            let mut index = 0;
-            let mut header = None;
-            let maybe_header = read_le_primitive(data, &mut index);
-            let animation_speed = match maybe_header {
-                0x5A544146 => {
-                    header = Some(Header {
-                        ZTAF_string: maybe_header,
-                        empty_byte: read_le_primitive(data, &mut index),
-                        extra_frame: read_le_primitive(data, &mut index),
+        let mut index = 0;
+        let mut header = None;
+        let maybe_header = read_le_primitive(data, &mut index);
+        let animation_speed = match maybe_header {
+            0x5A544146 => {
+                header = Some(Header {
+                    ZTAF_string: maybe_header,
+                    empty_byte: read_le_primitive(data, &mut index),
+                    extra_frame: read_le_primitive(data, &mut index),
+                });
+                read_le_primitive(data, &mut index)
+            },
+            _ =>  {
+                maybe_header
+            }
+        };
+
+        let pallette_filename_length = read_le_primitive(data, &mut index);
+        let pallette_filename = read_string(data, &mut index, pallette_filename_length as usize);
+        let num_frames = read_le_primitive(data, &mut index);
+        let mut frames = Vec::new();
+        for i in 0..num_frames + {if header.clone().is_some_and(|h| h.extra_frame) {1} else {0}} {
+            let num_bytes = read_le_primitive(data, &mut index);
+            let pixel_height = read_le_primitive(data, &mut index);
+            let pixel_width = read_le_primitive(data, &mut index);
+            let vertical_offset_y = read_le_primitive(data, &mut index);
+            let horizontal_offset_x = read_le_primitive(data, &mut index);
+            let mystery_u16 = read_le_primitive(data, &mut index);
+            let mut lines = Vec::new();
+            for j in 0..pixel_height {
+                let num_draw_instructions = read_le_primitive(data, &mut index);
+                let mut draw_instructions = Vec::new();
+                for k in 0..num_draw_instructions {
+                    let offset = read_le_primitive(data, &mut index);
+                    let num_colors = read_le_primitive(data, &mut index);
+                    let mut colors = Vec::new();
+                    for l in 0..num_colors {
+                        colors.push(read_le_primitive(data, &mut index));
+                    }
+                    draw_instructions.push(DrawInstruction {
+                        offset,
+                        num_colors,
+                        colors,
                     });
-                    read_le_primitive(data, &mut index)
-                },
-                _ =>  {
-                    maybe_header
                 }
-            };
-            // if maybe_header == 0x5A544146 {
-            //     header = Some(Header {
-            //         ZTAF_string: maybe_header,
-            //         empty_byte: u32::from_le_bytes(data[4..8].try_into().unwrap()),
-            //         extra_frame: u8::from_le_bytes(data[8..9].try_into().unwrap()) == 1,
-            //     });
-            //     let animation_speed = u32::from_le_bytes(data[9..13].try_into().unwrap());
-            //     index = 13;
-            // } else {
-            //     let animation_speed = maybe_header;
-            //     index = 4;
-            // }
-        
-        // let mut cursor = Cursor::new(data);
-        // let header = Header::parse(&mut cursor);
-        // let animation_speed = cursor.read_u32::<LittleEndian>().unwrap();
-        // let pallette_filename_length = cursor.read_u32::<LittleEndian>().unwrap();
-        // let pallette_filename = cursor.read_string(pallette_filename_length).unwrap();
-        // let num_frames = cursor.read_u32::<LittleEndian>().unwrap();
-        // let mut frames = Vec::new();
-        // for _ in 0..num_frames {
-        //     frames.push(Frame::parse(&mut cursor));
-        // }
+                lines.push(Line {
+                    num_draw_instructions,
+                    draw_instructions,
+                });
+            }
+            frames.push(Frame {
+                num_bytes,
+                pixel_height,
+                pixel_width,
+                vertical_offset_y,
+                horizontal_offset_x,
+                mystery_u16,
+                lines,
+            });
+        } 
+
         Animation {
             header: header,
             animation_speed: animation_speed,
-            pallette_filename_length: 5,
-            pallette_filename: "Test".to_string(),
-            num_frames: 0,
-            frames: Vec::new(),
-            // pallette_filename,
-            // num_frames,
-            // frames,
+            pallette_filename_length,
+            pallette_filename,
+            num_frames,
+            frames,
         }
     }
 }
@@ -117,11 +137,19 @@ mod parsing_tests {
     fn test_parse_simple_anim_no_header() {
         let animation = Animation::parse(include_bytes!("../resources/test/N-noheader"));
         assert!(animation.header.is_none());
+        assert_eq!(animation.pallette_filename, "ui/sharedui/listbk/ltb.pal".to_string());
+        assert_eq!(animation.num_frames, 1);
+        assert_eq!(animation.frames.len(), 1);
+
     }
 
     #[test]
     fn test_parse_simple_anim_with_header() {
         let animation = Animation::parse(include_bytes!("../resources/test/n"));
         assert!(animation.header.is_some());
+        assert_eq!(animation.header.unwrap().extra_frame, false);
+        assert_eq!(animation.pallette_filename, "ANIMALS/01BFCC32/ICMEIOLA/ICMEIOLA.PAL".to_string());
+        assert_eq!(animation.num_frames, 1);
+        assert_eq!(animation.frames.len(), 1);
     }
 }
