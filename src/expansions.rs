@@ -222,7 +222,6 @@ pub mod custom_expansion {
 
         let current_buy_tab = get_current_buy_tab();
         if get_current_buy_tab().is_none() {
-            info!("NO BUY TAB VISIBLE");
             return 0
         }
 
@@ -244,6 +243,35 @@ pub mod custom_expansion {
 
         save_current_expansion(0x0);
     }
+
+    #[hook(unsafe extern "thiscall" UIImage_load, offset=0x000d3509)]
+    pub fn ui_image_load(this: u32, bfconfigfile: u32, header: u32) -> u32 {
+
+        let result = unsafe { UIImage_load.call(this, bfconfigfile, header) };
+
+        info!("UIImage_load(0x4d3509) {:#x} {:#x} {} -> {:#x}", this, bfconfigfile, get_string_from_memory(header), result);
+
+        result
+    }
+
+    #[hook(unsafe extern "thiscall" BFAnimCache_findAnim, offset=0x00001fdd)]
+    pub fn bf_anim_cache_find_anim(this: u32, anim_name: u32, param_bool: u8) -> u32 {
+        let result = unsafe { BFAnimCache_findAnim.call(this, anim_name, param_bool) };
+
+        info!("BFAnimCache_findAnim(0x41fdd) {:#x} {} {:#x} -> {:#x}", this, get_string_from_memory(anim_name), param_bool, result);
+
+        result
+    }
+
+    // #[hook(unsafe extern "thiscall" UIControl_setAnimation, offset=0x000b1aa0)]
+    // pub fn ui_control_set_animation(this: u32, anim_name: u32, param_bool: u8) {
+    //     unsafe { UIControl_setAnimation.call(this, anim_name, param_bool) };
+
+    //     info!("UIControl_setAnimation(0x4b1aa0) {:#x} {} {:#x}", this, get_string_from_memory(anim_name), param_bool);
+    // }
+
+    
+
 }
 
 fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &ZTEntityType) -> bool {

@@ -131,22 +131,10 @@ pub fn init() {
 
 pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
     let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
-    // let secondary_class = get_from_memory(inner_class_ptr);
-    // info!("zt_entity_ptr: {:#x}", zt_entity_ptr);
-    // let ptr = get_from_memory::<u32>(secondary_class + 0x14) as *const ();
-    // let code: extern "thiscall" fn(u32) -> u32 = unsafe { std::mem::transmute(ptr) };
-    // let result = (code)(inner_class_ptr);
     
     ZTEntity{
         class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr + 0x0)),
-        // secondary_class: get_from_memory::<u32>(get_from_memory::<u32>(zt_entity_ptr + 0x128)),
-        // secondary_class: secondary_class,
-        // secondary_class_ptr: inner_class_ptr,
         type_class: read_zt_entity_type_from_memory(get_from_memory::<u32>(inner_class_ptr)),
-        // zt_class: "not implemented".to_string(),
-        // zt_class: get_string_from_memory(get_from_memory::<u32>(result)),
-        // zt_type: get_string_from_memory(get_from_memory::<u32>(inner_class_ptr + 0x98)),
-        // zt_sub_type: get_string_from_memory(get_from_memory::<u32>(inner_class_ptr + 0xa4)),
         name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
     }
 }
