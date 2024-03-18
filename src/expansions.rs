@@ -254,14 +254,14 @@ pub mod custom_expansion {
         result
     }
 
-    #[hook(unsafe extern "thiscall" BFAnimCache_findAnim, offset=0x00001fdd)]
-    pub fn bf_anim_cache_find_anim(this: u32, anim_name: u32, param_bool: u8) -> u32 {
-        let result = unsafe { BFAnimCache_findAnim.call(this, anim_name, param_bool) };
+    // #[hook(unsafe extern "thiscall" BFAnimCache_findAnim, offset=0x00001fdd)]
+    // pub fn bf_anim_cache_find_anim(this: u32, anim_name: u32, param_bool: u8) -> u32 {
+    //     let result = unsafe { BFAnimCache_findAnim.call(this, anim_name, param_bool) };
 
-        info!("BFAnimCache_findAnim(0x41fdd) {:#x} {} {:#x} -> {:#x}", this, get_string_from_memory(anim_name), param_bool, result);
+    //     info!("BFAnimCache_findAnim(0x41fdd) {:#x} {} {:#x} -> {:#x}", this, get_string_from_memory(anim_name), param_bool, result);
 
-        result
-    }
+    //     result
+    // }
 
     // #[hook(unsafe extern "thiscall" UIControl_setAnimation, offset=0x000b1aa0)]
     // pub fn ui_control_set_animation(this: u32, anim_name: u32, param_bool: u8) {
@@ -465,6 +465,10 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     add_expansion(Expansion { expansion_id: id, name_id: listid, name_string_start_ptr: name_ptr, name_string_end_ptr: name_ptr + name.len() as u32 + 1, name_string_buffer_end_ptr: name_ptr + name.len() as u32 + 1}, false);
 
     Ok(())
+}
+
+fn handle_expansion_dropdown(file: &mut ZipFile) {
+    
 }
 
 pub fn init() {

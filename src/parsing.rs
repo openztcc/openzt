@@ -24,7 +24,6 @@ pub trait EndianRead<TArray> {
 macro_rules! impl_EndianRead_for_ints (( $($int:ident),* ) => {
     $(
         impl EndianRead<[u8; <$int as TypeSize>::SIZE]> for $int {
-            // type Array = &[u8; std::mem::size_of::<Self>()];
             fn from_le_bytes(bytes: [u8; <$int as TypeSize>::SIZE]) -> Self { Self::from_le_bytes(bytes) }
             fn from_be_bytes(bytes: [u8; <$int as TypeSize>::SIZE]) -> Self { Self::from_be_bytes(bytes) }
         }

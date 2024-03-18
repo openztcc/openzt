@@ -54,9 +54,41 @@ struct BFResourceZip {
     contents_tree: u32, //? contents end?
 }
 
+#[derive(Debug)]
+#[repr(C)]
 struct BFResourceDirContents {
     dir: BFResourceDir,
     zips: Vec<BFResourceZip>,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct BFResource {
+    bf_resource_ptr_ptr: u32,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct BFResourcePtr {
+    num_refs: u32,
+    bf_zip_name_ptr: u32,
+    bf_resource_name_ptr: u32,
+    data_ptr: u32,
+    content_size: u32,
+    // crc32_maybe: u32, //May not be part of struct?
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct GXLLEAnim {
+    padding: [u8; 5],
+    bfresource_maybe: u32,
+}
+
+impl fmt::Display for BFResourcePtr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BFResourcePtr {{ num_refs: {:#x}, bf_zip_name: {}, bf_resource_name: {}, unknown_u32_3: {:#x}, content_size: {:#x} }}", self.num_refs, get_string_from_memory(self.bf_zip_name_ptr), get_string_from_memory(self.bf_resource_name_ptr), self.data_ptr, self.content_size)
+    }
 }
 
 trait Name {
@@ -180,43 +212,153 @@ pub mod zoo_resource_mgr {
 
     use tracing::info;
 
-    use super::{load_resources, BFResourceZip, Name};
+    use super::{load_resources, BFResourceZip, Name, BFResourcePtr};
 
     use configparser::ini::Ini; //TODO: Replace with custom ini parser
 
     use crate::debug_dll::{get_from_memory, get_ini_path, get_string_from_memory};
 
-    #[hook(unsafe extern "thiscall" BFResourceMgr_find, offset = 0x000b9a40)]
-    fn zoo_bf_resource_mgr_find(
-        this_ptr: u32,
-        buffer_ptr: u32,
-        file_name: u32,
-        file_extension: u32,
-    ) -> u32 {
-        // info!(
-        //     "BFResourceMgr::find({:X}, {:X}, {}, {})",
-        //     this_ptr,
-        //     buffer_ptr,
-        //     get_string_from_memory(file_name),
-        //     get_string_from_memory(file_extension)
-        // );
-        let return_value =
-            unsafe { BFResourceMgr_find.call(this_ptr, buffer_ptr, file_name, file_extension) };
-        // info!(
-        //     "BFResourceMgr::find({:X}, {:X}, {}, {}) -> {:X} -> {:X}",
-        //     this_ptr,
-        //     buffer_ptr,
-        //     get_string_from_memory(file_name),
-        //     get_string_from_memory(file_extension),
-        //     return_value,
-        //     get_from_memory::<u32>(return_value)
-        // );
-        // info!(
-        //     "BFConfigFile {}",
-        //     get_string_from_memory(get_from_memory::<u32>(return_value) + 0x10)
-        // );
+    // #[hook(unsafe extern "thiscall" BFResourceMgr_find, offset = 0x000b9a40)]
+    // fn zoo_bf_resource_mgr_find(
+    //     this_ptr: u32,
+    //     buffer_ptr: u32,
+    //     file_name: u32,
+    //     file_extension: u32,
+    // ) -> u32 {
+    //     info!(
+    //         "BFResourceMgr::find({:X}, {:X}, {}, {})",
+    //         this_ptr,
+    //         buffer_ptr,
+    //         get_string_from_memory(file_name),
+    //         get_string_from_memory(file_extension)
+    //     );
+    //     let return_value =
+    //         unsafe { BFResourceMgr_find.call(this_ptr, buffer_ptr, file_name, file_extension) };
+    //     info!(
+    //         "BFResourceMgr::find({:X}, {:X}, {}, {}) -> {:X} -> {:X}",
+    //         this_ptr,
+    //         buffer_ptr,
+    //         get_string_from_memory(file_name),
+    //         get_string_from_memory(file_extension),
+    //         return_value,
+    //         get_from_memory::<u32>(return_value)
+    //     );
+    //     info!(
+    //         "BFConfigFile {}",
+    //         // get_string_from_memory(get_from_memory::<u32>(return_value) + 0x10)
+    //         get_from_memory::<u32>(return_value) + 0x10
+    //     );
+    //     return_value
+    // }
+
+    // #[hook(unsafe extern "thiscall" BFResourceMgr_find2, offset = 0x000bf92b)]
+    // fn zoo_bf_resource_mgr_find2(
+    //     this_ptr: u32,
+    //     buffer_ptr: u32,
+    //     file_name: u32,
+    // ) -> u32 {
+    //     info!(
+    //         "BFResourceMgr::find2({:X}, {:X}, {})",
+    //         this_ptr,
+    //         buffer_ptr,
+    //         get_string_from_memory(file_name),
+    //     );
+    //     let return_value =
+    //         unsafe { BFResourceMgr_find2.call(this_ptr, buffer_ptr, file_name) };
+    //     info!(
+    //         "BFResourceMgr::find2({:X}, {:X}, {}) -> {:X} -> {:X}",
+    //         this_ptr,
+    //         buffer_ptr,
+    //         get_string_from_memory(file_name),
+    //         return_value,
+    //         get_from_memory::<u32>(return_value)
+    //     );
+    //     info!(
+    //         "BFConfigFile {}",
+    //         // get_string_from_memory(get_from_memory::<u32>(return_value) + 0x10)
+    //         get_from_memory::<u32>(return_value) + 0x10
+    //     );
+    //     return_value
+    // }
+
+
+    #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
+    fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) {
+        let file_name_string = get_string_from_memory(file_name);
+        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+            info!("BFResource::attempt({:#x}, {})", this_ptr, file_name_string);
+        }
+        unsafe { BFResource_attempt.call(this_ptr, file_name) };
+        // info!("BFResource::attempt({:X}, {})", this_ptr, get_string_from_memory(file_name));
+    }
+
+    #[hook(unsafe extern "thiscall" BFResourceMgr_load, offset = 0x00003817)]
+    fn zoo_bf_resource_mgr_load(this_ptr: u32, file_name: u32) -> u32 {
+        let file_name_string = get_string_from_memory(file_name);
+        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+            info!("BFResourceMgr::load({:#x}, {})", this_ptr, file_name_string);
+        }
+        let return_value = unsafe { BFResourceMgr_load.call(this_ptr, file_name) };
+        // info!("BFResourceMgr::load({:X}, {}) -> {:X}", this_ptr, get_string_from_memory(file_name), return_value);
+
+        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+            info!("BFResourceMgr::load() -> {:#x}", return_value);
+            info!("BFResourcePtr {}", get_from_memory::<BFResourcePtr>(return_value));
+        }
+
         return_value
     }
+
+
+    #[hook(unsafe extern "thiscall" BFResource_setHandle, offset = 0x000038af)]
+    fn zoo_bf_resource_set_handle(this_ptr: u32, handle: u32) {
+        if handle != 0 {
+            let bf_resource_ptr = get_from_memory::<BFResourcePtr>(handle);
+            let file_name = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
+
+            if !file_name.ends_with(".scn") && !file_name.ends_with(".cfg")&& !file_name.ends_with(".lyt") && !file_name.ends_with(".ani") && !file_name.ends_with(".tga") && !file_name.ends_with(".ai") && !file_name.ends_with(".wav") {
+                info!("BFResource::setHandle({:X}, {:X})", this_ptr, handle);
+                info!("this -> {:#x}", get_from_memory::<u32>(this_ptr));
+            }
+        }
+        
+        unsafe { BFResource_setHandle.call(this_ptr, handle) };
+        if handle != 0 {
+            let bf_resource_ptr = get_from_memory::<BFResourcePtr>(handle);
+            let file_name = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
+            if !file_name.ends_with(".scn") && !file_name.ends_with(".cfg")&& !file_name.ends_with(".lyt") && !file_name.ends_with(".ani") && !file_name.ends_with(".tga") && !file_name.ends_with(".ai") && !file_name.ends_with(".wav") {
+                info!("this -> {:#x}", get_from_memory::<u32>(this_ptr));
+                info!("BFResourcePtr {}", bf_resource_ptr);
+            }
+        }
+        
+    }
+
+    // 00411e21 uint __thiscall GXLLEAnim::attempt(void *this,char *param_1)
+    #[hook(unsafe extern "thiscall" GXLLEAnim_attempt, offset = 0x00011e21)]
+    fn zoo_gxlle_anim_attempt(this_ptr: u32, file_name: u32) -> u32 {
+        let file_name_string = get_string_from_memory(file_name);
+        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+        info!("GXLLEAnim::attempt({:X}, {})", this_ptr, file_name_string);
+        info!("BFResource? {:#x}", get_from_memory::<u32>(this_ptr + 0x5));
+        }
+        let return_value = unsafe { GXLLEAnim_attempt.call(this_ptr, file_name) };
+
+        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+        info!("GXLLEAnim::attempt({:X}, {}) -> {:X}", this_ptr, file_name_string, return_value);
+        }
+        return_value
+    }
+    
+
+    // #[hook(unsafe extern "thiscall" BFResourceMgr_findall, offset = 0x000bf92b)]
+    // fn zoo_bf_resource_mgr_findall(this_ptr: u32, buffer_ptr: u32, file_extension: u32) -> u32 {
+    //     info!("BFResourceMgr::findall({:X}, {:X}, {})", this_ptr, buffer_ptr, get_string_from_memory(file_extension));
+    //     let return_value = unsafe { BFResourceMgr_findall.call(this_ptr, buffer_ptr, file_extension) };
+    //     info!("BFResourceMgr::findall({:X}, {:X}, {}) -> {:X} -> {:X}", this_ptr, buffer_ptr, get_string_from_memory(file_extension), return_value, get_from_memory::<u32>(return_value));
+    //     info!("{:X}", get_from_memory::<u32>(buffer_ptr));
+    //     return_value
+    // }
 
     #[hook(unsafe extern "thiscall" ZTAdvTerrainMgr_loadTextures, offset = 0x001224b9)]
     fn zoo_zt_adv_terrain_mgr_load_textures(this_ptr: u32) -> u32 {
@@ -357,8 +499,19 @@ pub mod zoo_resource_mgr {
         }
         return_value
     }
+
+    // // 0x403802 void __cdecl BFResourceHashKey(byte *param_1,uint param_2)
+    // #[hook(unsafe extern "cdecl" BFResourceHashKey, offset = 0x0003802)]
+    // fn zoo_bf_resource_hash_key(param_1: u32, param_2: u32) -> u32 {
+    //     let result = unsafe { BFResourceHashKey.call(param_1, param_2) };
+    //     info!("BFResourceHashKey({}, {:#x}) -> {:#x}", get_string_from_memory(param_1), param_2, result);
+    //     result
+    // }
+
+
 }
 
+// fn calc_crc32()
 
 #[derive(Clone)]
 pub struct Handler {
@@ -399,6 +552,9 @@ impl Handler {
 
 fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     let mut resources = Vec::new();
+    if !dir.is_dir() {
+        return resources;
+    }
     let walker = WalkDir::new(dir).follow_links(true).max_depth(if recursive { 0 } else { 1 });
     for entry in walker {
         let entry = entry.unwrap();
