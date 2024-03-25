@@ -405,7 +405,7 @@ impl BFEntityType for EntityType {
 
 }
 
-pub fn command_print_configuration(_args: Vec<&str>) -> Result<String, &'static str> {
+pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
     
     let entity_type_address = get_selected_entity_type();
     let entity_type_ptr = get_from_memory::<u32>(entity_type_address);
@@ -413,42 +413,164 @@ pub fn command_print_configuration(_args: Vec<&str>) -> Result<String, &'static 
         return Err("No entity selected");
     }
     let entity_type = EntityType::new(entity_type_address);
-    info!("Printing configuration for entity type at address {:#x}", entity_type_ptr);
-  
-    Ok(format!("\n\n[Details]\nEntityType: {:#x}\nType Name: {}\nCodename: {}\n\n[Printed configuration]\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n",
-        entity_type.this,
-        entity_type.get_type_name(),
-        entity_type.get_codename(),
-        entity_type.get_ncolors(),
-        entity_type.get_icon_zoom() as u32,
-        entity_type.get_expansion_id() as u32,
-        entity_type.get_movable() as u32,
-        entity_type.get_walkable() as u32,
-        entity_type.get_walkable_by_tall() as u32,
-        entity_type.get_rubbleable() as u32,
-        entity_type.get_use_numbers_in_name() as u32,
-        entity_type.get_uses_real_shadows() as u32,
-        entity_type.get_has_shadow_images() as u32,
-        entity_type.get_force_shadow_black() as u32,
-        entity_type.get_draws_late() as u32,
-        entity_type.get_height(),
-        entity_type.get_depth(),
-        entity_type.get_has_underwater_section() as u32,
-        entity_type.get_is_transient() as u32,
-        entity_type.get_uses_placement_cube() as u32,
-        entity_type.get_show() as u32,
-        entity_type.get_hit_threshold(),
-        entity_type.get_avoid_edges() as u32,
-        entity_type.get_footprintx(),
-        entity_type.get_footprinty(),
-        entity_type.get_footprintz(),
-        entity_type.get_placement_footprintx(),
-        entity_type.get_placement_footprinty(),
-        entity_type.get_placement_footprintz(),
-        entity_type.get_available_at_startup() as u32
-     ))
+    if _args.len() == 0 {
+        return Ok(format!("Entity type at address {:#x}", entity_type_ptr));
+    }
+    if _args[0] == "-v" {
+
+        info!("Printing configuration for entity type at address {:#x}", entity_type_ptr);
+    
+        Ok(format!("\n\n[Details]\nEntityType: {:#x}\nType Name: {}\nCodename: {}\n\n[Printed configuration]\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n",
+            entity_type.this,
+            entity_type.get_type_name(),
+            entity_type.get_codename(),
+            entity_type.get_ncolors(),
+            entity_type.get_icon_zoom() as u32,
+            entity_type.get_expansion_id() as u32,
+            entity_type.get_movable() as u32,
+            entity_type.get_walkable() as u32,
+            entity_type.get_walkable_by_tall() as u32,
+            entity_type.get_rubbleable() as u32,
+            entity_type.get_use_numbers_in_name() as u32,
+            entity_type.get_uses_real_shadows() as u32,
+            entity_type.get_has_shadow_images() as u32,
+            entity_type.get_force_shadow_black() as u32,
+            entity_type.get_draws_late() as u32,
+            entity_type.get_height(),
+            entity_type.get_depth(),
+            entity_type.get_has_underwater_section() as u32,
+            entity_type.get_is_transient() as u32,
+            entity_type.get_uses_placement_cube() as u32,
+            entity_type.get_show() as u32,
+            entity_type.get_hit_threshold(),
+            entity_type.get_avoid_edges() as u32,
+            entity_type.get_footprintx(),
+            entity_type.get_footprinty(),
+            entity_type.get_footprintz(),
+            entity_type.get_placement_footprintx(),
+            entity_type.get_placement_footprinty(),
+            entity_type.get_placement_footprintz(),
+            entity_type.get_available_at_startup() as u32
+        ))
+    }
+    else if _args.len() == 2 {
+        if _args[0] == "-ncolors" {
+            entity_type.set_ncolors(_args[1].parse::<u32>().unwrap());
+            return Ok(format!("ncolors set to {}", _args[1]));
+        }
+        else if _args[0] == "-cIconZoom" {
+            entity_type.set_icon_zoom(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cIconZoom set to {}", _args[1]));
+        }
+        else if _args[0] == "-cExpansionID" {
+            entity_type.set_expansion_id(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cExpansionID set to {}", _args[1]));
+        }
+        else if _args[0] == "-cMovable" {
+            entity_type.set_movable(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cMovable set to {}", _args[1]));
+        }
+        else if _args[0] == "-cWalkable" {
+            entity_type.set_walkable(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cWalkable set to {}", _args[1]));
+        }
+        else if _args[0] == "-cWalkableByTall" {
+            entity_type.set_walkable_by_tall(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cWalkableByTall set to {}", _args[1]));
+        }
+        else if _args[0] == "-cRubbleable" {
+            entity_type.set_rubbleable(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cRubbleable set to {}", _args[1]));
+        }
+        else if _args[0] == "-cUseNumbersInName" {
+            entity_type.set_use_numbers_in_name(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cUseNumbersInName set to {}", _args[1]));
+        }
+        else if _args[0] == "-cUsesRealShadows" {
+            entity_type.set_uses_real_shadows(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cUsesRealShadows set to {}", _args[1]));
+        }
+        else if _args[0] == "-cHasShadowImages" {
+            entity_type.set_has_shadow_images(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cHasShadowImages set to {}", _args[1]));
+        }
+        else if _args[0] == "-cForceShadowBlack" {
+            entity_type.set_force_shadow_black(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cForceShadowBlack set to {}", _args[1]));
+        }
+        else if _args[0] == "-cDrawsLate" {
+            entity_type.set_draws_late(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cDrawsLate set to {}", _args[1]));
+        }
+        else if _args[0] == "-cHeight" {
+            entity_type.set_height(_args[1].parse::<u32>().unwrap());
+            return Ok(format!("cHeight set to {}", _args[1]));
+        }
+        else if _args[0] == "-cDepth" {
+            entity_type.set_depth(_args[1].parse::<u32>().unwrap());
+            return Ok(format!("cDepth set to {}", _args[1]));
+        }
+        else if _args[0] == "-cHasUnderwaterSection" {
+            entity_type.set_has_underwater_section(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cHasUnderwaterSection set to {}", _args[1]));
+        }
+        else if _args[0] == "-cIsTransient" {
+            entity_type.set_is_transient(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cIsTransient set to {}", _args[1]));
+        }
+        else if _args[0] == "-cUsesPlacementCube" {
+            entity_type.set_uses_placement_cube(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cUsesPlacementCube set to {}", _args[1]));
+        }
+        else if _args[0] == "-cShow" {
+            entity_type.set_show(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cShow set to {}", _args[1]));
+        }
+        else if _args[0] == "-cHitThreshold" {
+            entity_type.set_hit_threshold(_args[1].parse::<u32>().unwrap());
+            return Ok(format!("cHitThreshold set to {}", _args[1]));
+        }
+        else if _args[0] == "-cAvoidEdges" {
+            entity_type.set_avoid_edges(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cAvoidEdges set to {}", _args[1]));
+        }
+        else if _args[0] == "-cFootprintX" {
+            entity_type.set_footprintx(_args[1].parse::<u32>().unwrap());
+            return Ok(format!("cFootprintX set to {}", _args[1]));
+        }
+        else if _args[0] == "-cFootprintY" {
+            entity_type.set_footprinty(_args[1].parse::<u32>().unwrap());
+            return Ok(format!("cFootprintY set to {}", _args[1]));
+        }
+        else if _args[0] == "-cFootprintZ" {
+            entity_type.set_footprintz(_args[1].parse::<u32>().unwrap());
+            return Ok(format!("cFootprintZ set to {}", _args[1]));
+        }
+        else if _args[0] == "-cPlacementFootprintX" {
+            entity_type.set_placement_footprintx(_args[1].parse::<u32>().unwrap());
+            return Ok(format!("cPlacementFootprintX set to {}", _args[1]));
+        }
+        else if _args[0] == "-cPlacementFootprintY" {
+            entity_type.set_placement_footprinty(_args[1].parse::<u32>().unwrap());
+            return Ok(format!("cPlacementFootprintY set to {}", _args[1]));
+        }
+        else if _args[0] == "-cPlacementFootprintZ" {
+            entity_type.set_placement_footprintz(_args[1].parse::<i32>().unwrap());
+            return Ok(format!("cPlacementFootprintZ set to {}", _args[1]));
+        }
+        else if _args[0] == "-cAvailableAtStartup" {
+            entity_type.set_available_at_startup(_args[1].parse::<bool>().unwrap());
+            return Ok(format!("cAvailableAtStartup set to {}", _args[1]));
+        }
+        else {
+            return Ok("Invalid argument".to_string());
+        }
+    }
+    else {
+        Ok("Invalid argument".to_string())
+    }
 }
 
 pub fn init() {
-    add_to_command_register("print_selected_configuration".to_string(), command_print_configuration);
+    add_to_command_register("selected_type".to_string(), command_selected_type);
 }
