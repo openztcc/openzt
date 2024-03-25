@@ -35,22 +35,20 @@ struct BFEntityType {
     hit_threshold: u32, // 0x070
     avoid_edges: bool, // 0x074
     pad10: [u8; 0x0B4 - 0x075], // -- padding: 47 bytes
-    footprintx: u32, // 0x0B4
-    footprinty: u32, // 0x0B8
-    footprintz: u32, // 0x0BC
-    pad11: [u8; 0x0C0 - 0x0BC], // -- padding: 4 bytes
-    placement_footprintx: u32, // 0x0C0
-    placement_footprinty: u32, // 0x0C4
+    footprintx: i32, // 0x0B4
+    footprinty: i32, // 0x0B8
+    footprintz: i32, // 0x0BC
+    placement_footprintx: i32, // 0x0C0
+    placement_footprinty: i32, // 0x0C4
     placement_footprintz: i32, // 0x0C8
-    pad12: [u8; 0x0CC - 0x0C8], // -- padding: 4 bytes
     available_at_startup: bool // 0x0CC
 }
 
 impl BFEntityType {
-    // returns the instance of the ZTGameMgr struct
+    // returns the instance of the BFEntityType struct
     fn new(address: u32) -> Option<&'static mut BFEntityType> {
         unsafe {
-            // get the pointer to the ZTGameMgr instance    
+            // get the pointer to the BFEntityType instance    
             let ptr = get_from_memory::<*mut BFEntityType>(address);
     
             // is pointer not null
@@ -64,35 +62,51 @@ impl BFEntityType {
         }
     }
 
+    // returns the codename of the entity type
     fn get_codename(&self) -> String {
         let obj_ptr = self as *const BFEntityType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x098))
     }
 
+    // returns the type name of the entity type
     fn get_type_name(&self) -> String {
         let obj_ptr = self as *const BFEntityType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x0A4))
     }
 }
+
+// returns the selected entity type
+// usage: selected_type [-v] returns printed configuration of the selected entity type and other details
+// usage: selected_type [-<config> <value>] sets the configuration of the selected entity type
 pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
     
-    let entity_type_address = get_selected_entity_type();
+    let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
+    let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
     if entity_type_address == 0 {
         return Err("No entity selected");
     }
-    let entity_type = BFEntityType::new(entity_type_address).unwrap();
+    let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+
+    // if no selected entity type, return error
     if _args.len() == 0 {
-        return Ok(format!("Entity type at address {:#x}", entity_type_address));
+        return Ok(format!("No entity type selected."));
     }
+
+    // if -v flag is used, print the entity type configuration and other details
     if _args[0] == "-v" {
 
-        info!("Printing configuration for entity type at address {:#x}", entity_type_address);
+        info!("Printing configuration for entity type at address {:#x}", entity_type_print);
+
+        // NOTE: ncolors is part of a separate structure in memory withn BFEntityType, so we need to grab the pointer to it first
+        // this is temporary until the struct can be fully implemented
+        let ncolors_ptr = get_from_memory::<u32>(entity_type_print + 0x038);
+        let ncolors = get_from_memory::<u32>(ncolors_ptr);
     
         Ok(format!("\n\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n[Configuration]\n\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n\n",
-        entity_type_address,
+        entity_type_print,
         entity_type.get_type_name(),
         entity_type.get_codename(),
-        entity_type.ncolors,
+        ncolors,
         entity_type.icon_zoom as u32,
         entity_type.expansion_id as u32,
         entity_type.movable as u32,
@@ -122,11 +136,7 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
         ))
     }
     else if _args.len() == 2 {
-        if _args[0] == "-ncolors" { // Note: this is a double pointer, so not recommended to use yet
-            entity_type.ncolors = _args[1].parse::<u32>().unwrap();
-            return Ok(format!("ncolors set to {}", _args[1]));
-        }
-        else if _args[0] == "-cIconZoom" {
+        if _args[0] == "-cIconZoom" {
             entity_type.icon_zoom = _args[1].parse::<bool>().unwrap();
             return Ok(format!("cIconZoom set to {}", _args[1]));
         }
@@ -203,30 +213,30 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
             return Ok(format!("cAvoidEdges set to {}", _args[1]));
         }
         else if _args[0] == "-cFootprintX" {
-            entity_type.footprintx = _args[1].parse::<u32>().unwrap();
+            entity_type.footprintx = _args[1].parse::<i32>().unwrap();
             return Ok(format!("cFootprintX set to {}", _args[1]));
         }
         else if _args[0] == "-cFootprintY" {
-            entity_type.footprinty = _args[1].parse::<u32>().unwrap();
+            entity_type.footprinty = _args[1].parse::<i32>().unwrap();
             return Ok(format!("cFootprintY set to {}", _args[1]));
         }
         else if _args[0] == "-cFootprintZ" {
-            entity_type.footprintz = _args[1].parse::<u32>().unwrap();
+            entity_type.footprintz = _args[1].parse::<i32>().unwrap();
             return Ok(format!("cFootprintZ set to {}", _args[1]));
         }
         else if _args[0] == "-cPlacementFootprintX" {
-            entity_type.placement_footprintx = _args[1].parse::<u32>().unwrap();
+            entity_type.placement_footprintx = _args[1].parse::<i32>().unwrap();
             return Ok(format!("cPlacementFootprintX set to {}", _args[1]));
         }
         else if _args[0] == "-cPlacementFootprintY" {
-            entity_type.placement_footprinty = _args[1].parse::<u32>().unwrap();
+            entity_type.placement_footprinty = _args[1].parse::<i32>().unwrap();
             return Ok(format!("cPlacementFootprintY set to {}", _args[1]));
         }
         else if _args[0] == "-cPlacementFootprintZ" {
             entity_type.placement_footprintz = _args[1].parse::<i32>().unwrap();
             return Ok(format!("cPlacementFootprintZ set to {}", _args[1]));
         }
-        else if _args[0] == "-cAvailableAtStartup" {
+        else if _args[0] == "-availableAtStartup" {
             entity_type.available_at_startup = _args[1].parse::<bool>().unwrap();
             return Ok(format!("cAvailableAtStartup set to {}", _args[1]));
         }
