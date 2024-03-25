@@ -34,11 +34,7 @@ struct BFEntityType {
     show: bool, // 0x06F
     hit_threshold: u32, // 0x070
     avoid_edges: bool, // 0x074
-    pad8: [u8; 0x098 - 0x075], // -- padding: 27 bytes
-    codename: String, // 0x098
-    pad9: [u8; 0x0A4 - 0x09C], // -- padding: 8 bytes
-    type_name: String, // 0x0A4
-    pad10: [u8; 0x0B0 - 0x0A8], // -- padding: 8 bytes
+    pad10: [u8; 0x0B4 - 0x075], // -- padding: 47 bytes
     footprintx: u32, // 0x0B4
     footprinty: u32, // 0x0B8
     footprintz: u32, // 0x0BC
@@ -52,18 +48,39 @@ struct BFEntityType {
 
 impl BFEntityType {
     // returns the instance of the ZTGameMgr struct
-    unsafe fn new(ptr: *mut BFEntityType) -> &'static mut BFEntityType {
-        &mut *ptr
+    fn new(address: u32) -> Option<&'static mut BFEntityType> {
+        unsafe {
+            // get the pointer to the ZTGameMgr instance    
+            let ptr = get_from_memory::<*mut BFEntityType>(address);
+    
+            // is pointer not null
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } 
+            else {
+                // pointer is null
+                None
+            }
+        }
+    }
+
+    fn get_codename(&self) -> String {
+        let obj_ptr = self as *const BFEntityType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x098))
+    }
+
+    fn get_type_name(&self) -> String {
+        let obj_ptr = self as *const BFEntityType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x0A4))
     }
 }
 pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
     
     let entity_type_address = get_selected_entity_type();
-    let entity_type_ptr = get_from_memory::<*mut BFEntityType>(entity_type_address);
-    if entity_type_ptr == std::ptr::null_mut() {
+    if entity_type_address == 0 {
         return Err("No entity selected");
     }
-    let entity_type = unsafe {BFEntityType::new(entity_type_ptr)};
+    let entity_type = BFEntityType::new(entity_type_address).unwrap();
     if _args.len() == 0 {
         return Ok(format!("Entity type at address {:#x}", entity_type_address));
     }
@@ -71,38 +88,38 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
 
         info!("Printing configuration for entity type at address {:#x}", entity_type_address);
     
-        Ok(format!("\n\n[Details]\nEntityType: {:#x}\nType Name: {}\nCodename: {}\n\n[Printed configuration]\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n",
+        Ok(format!("\n\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n[Configuration]\n\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n\n",
         entity_type_address,
-            entity_type.type_name,
-            entity_type.codename,
-            entity_type.ncolors,
-            entity_type.icon_zoom as u32,
-            entity_type.expansion_id as u32,
-            entity_type.movable as u32,
-            entity_type.walkable as u32,
-            entity_type.walkable_by_tall as u32,
-            entity_type.rubbleable as u32,
-            entity_type.use_numbers_in_name as u32,
-            entity_type.uses_real_shadows as u32,
-            entity_type.has_shadow_images as u32,
-            entity_type.force_shadow_black as u32,
-            entity_type.draws_late as u32,
-            entity_type.height,
-            entity_type.depth,
-            entity_type.has_underwater_section as u32,
-            entity_type.is_transient as u32,
-            entity_type.uses_placement_cube as u32,
-            entity_type.show as u32,
-            entity_type.hit_threshold,
-            entity_type.avoid_edges as u32,
-            entity_type.footprintx,
-            entity_type.footprinty,
-            entity_type.footprintz,
-            entity_type.placement_footprintx,
-            entity_type.placement_footprinty,
-            entity_type.placement_footprintz,
-            entity_type.available_at_startup as u32
-            ))
+        entity_type.get_type_name(),
+        entity_type.get_codename(),
+        entity_type.ncolors,
+        entity_type.icon_zoom as u32,
+        entity_type.expansion_id as u32,
+        entity_type.movable as u32,
+        entity_type.walkable as u32,
+        entity_type.walkable_by_tall as u32,
+        entity_type.rubbleable as u32,
+        entity_type.use_numbers_in_name as u32,
+        entity_type.uses_real_shadows as u32,
+        entity_type.has_shadow_images as u32,
+        entity_type.force_shadow_black as u32,
+        entity_type.draws_late as u32,
+        entity_type.height,
+        entity_type.depth,
+        entity_type.has_underwater_section as u32,
+        entity_type.is_transient as u32,
+        entity_type.uses_placement_cube as u32,
+        entity_type.show as u32,
+        entity_type.hit_threshold,
+        entity_type.avoid_edges as u32,
+        entity_type.footprintx,
+        entity_type.footprinty,
+        entity_type.footprintz,
+        entity_type.placement_footprintx,
+        entity_type.placement_footprinty,
+        entity_type.placement_footprintz,
+        entity_type.available_at_startup as u32       
+        ))
     }
     else if _args.len() == 2 {
         if _args[0] == "-ncolors" { // Note: this is a double pointer, so not recommended to use yet
