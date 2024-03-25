@@ -100,7 +100,7 @@ impl BFEntityType for EntityType {
     fn set_icon_zoom(&self, icon_zoom: bool) {
         unsafe {
             let icon_zoom_ptr: *mut bool = (self.this + 0x050) as *mut bool;
-            *icon_zoom_ptr = icon_zoom;
+            *(icon_zoom_ptr as *mut bool) = icon_zoom;
         }
     }
 
@@ -122,7 +122,7 @@ impl BFEntityType for EntityType {
     fn set_movable(&self, movable: bool) {
         unsafe {
             let movable_ptr: *mut bool = (self.this + 0x055) as *mut bool;
-            *movable_ptr = movable;
+            *(movable_ptr as *mut bool) = movable;
         }
     }
 
@@ -454,7 +454,7 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
         ))
     }
     else if _args.len() == 2 {
-        if _args[0] == "-ncolors" {
+        if _args[0] == "-ncolors" { // Note: this is a double pointer, so not recommended to use yet
             entity_type.set_ncolors(_args[1].parse::<u32>().unwrap());
             return Ok(format!("ncolors set to {}", _args[1]));
         }
