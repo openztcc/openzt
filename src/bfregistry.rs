@@ -23,13 +23,11 @@ pub fn list_registry() -> Result<String, &'static str> {
 }
 
 pub fn add_to_registry(key: &String, value: u32) {
-    println!("Adding {} to registry", key);
     let mut data_mutex = BF_REGISTRY.lock().unwrap();
     data_mutex.insert(key.to_string(), value);
 }
 
 pub fn get_from_registry(key: String) -> Option<u32> {
-    println!("Getting {} from registry", key);
     let data_mutex = BF_REGISTRY.lock().unwrap();
     
     data_mutex.get(&key).cloned()

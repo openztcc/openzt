@@ -7,7 +7,7 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
+use once_cell::sync::Lazy; //TODO: Use std::sync::LazyCell when it becomes stable
 use tracing::info;
 
 use retour_utils::hook_module;
