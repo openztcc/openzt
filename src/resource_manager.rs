@@ -1,9 +1,14 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs::File;
+use std::ffi::CString;
+use std::hash::Hash;
+use std::io;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
+use std::ptr;
 use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
@@ -19,6 +24,241 @@ use crate::console::add_to_command_register;
 use crate::debug_dll::{get_base_path, get_from_memory, get_string_from_memory};
 
 const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
+
+#[derive(Debug, Clone)]
+enum ZTFile {
+    Text(CString, ZTFileType, u32),
+    Graphics(Vec<u8>, ZTFileType, u32),
+}
+
+#[derive(Debug, Clone)]
+enum ZTFileType {
+    Ai,
+    Ani,
+    Cfg,
+    Lyt,
+    Scn,
+    Uca,
+    Ucs,
+    Ucb,
+    Animation,
+    Palette,
+    TGA
+}
+
+impl ZTFile {
+    pub fn new(file: &mut ZipFile) -> io::Result<ZTFile> {
+        let file_extension = Path::new(file.name()).extension().unwrap_or_default().to_str().unwrap_or_default();
+        let file_size = file.size() as u32;
+        match file_extension {
+            "ai" => Ok(ZTFile::Text(CString::from_zip_file(file)?, ZTFileType::Ai, file_size)),
+            "cfg" => Ok(ZTFile::Text(CString::from_zip_file(file)?, ZTFileType::Cfg, file_size)),
+            "lyt" => Ok(ZTFile::Text(CString::from_zip_file(file)?, ZTFileType::Lyt, file_size)),
+            "scn" => Ok(ZTFile::Text(CString::from_zip_file(file)?, ZTFileType::Scn, file_size)),
+            "uca" => Ok(ZTFile::Text(CString::from_zip_file(file)?, ZTFileType::Uca, file_size)),
+            "ucs" => Ok(ZTFile::Text(CString::from_zip_file(file)?, ZTFileType::Ucs, file_size)),
+            "ucb" => Ok(ZTFile::Text(CString::from_zip_file(file)?, ZTFileType::Ucb, file_size)),
+            "ani" => Ok(ZTFile::Text(CString::from_zip_file(file)?, ZTFileType::Ani, file_size)),
+            "tga" => Ok(ZTFile::Graphics(Vec::<u8>::from_zip_file(file)?, ZTFileType::TGA, file_size)),
+            "pal" => Ok(ZTFile::Graphics(Vec::<u8>::from_zip_file(file)?, ZTFileType::Palette, file_size)),
+            _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "Unsupported file type")),
+        }
+    }
+
+    pub fn new_text(file_name: String, file_size: u32, data: CString) -> Result<ZTFile, &'static str> {
+        let file_extension = Path::new(&file_name).extension().unwrap_or_default().to_str().unwrap_or_default();
+        match file_extension {
+            "ai" => Ok(ZTFile::Text(data, ZTFileType::Ai, file_size)),
+            "cfg" => Ok(ZTFile::Text(data, ZTFileType::Cfg, file_size)),
+            "lyt" => Ok(ZTFile::Text(data, ZTFileType::Lyt, file_size)),
+            "scn" => Ok(ZTFile::Text(data, ZTFileType::Scn, file_size)),
+            "uca" => Ok(ZTFile::Text(data, ZTFileType::Uca, file_size)),
+            "ucs" => Ok(ZTFile::Text(data, ZTFileType::Ucs, file_size)),
+            "ucb" => Ok(ZTFile::Text(data, ZTFileType::Ucb, file_size)),
+            "ani" => Ok(ZTFile::Text(data, ZTFileType::Ani, file_size)),
+            _ => Err("Invalid file type"),
+        }
+        
+    }
+
+    pub fn new_graphics(file_name: String, file_size: u32, data: Vec<u8>) -> ZTFile {
+        let file_extension = Path::new(&file_name).extension().unwrap_or_default().to_str().unwrap_or_default();
+        match file_extension {
+            "tga" => ZTFile::Graphics(data, ZTFileType::TGA, file_size),
+            "pal" => ZTFile::Graphics(data, ZTFileType::Palette, file_size),
+            _ => ZTFile::Graphics(data, ZTFileType::Animation, file_size),
+        }
+    }
+}
+
+pub trait FromZipFile<T> {
+    fn from_zip_file(file: &mut ZipFile) -> io::Result<T>;
+}
+
+impl FromZipFile<String> for String {
+    fn from_zip_file(file: &mut ZipFile) -> io::Result<String> {
+        let mut buffer = vec![0; file.size() as usize];
+        file.read(&mut buffer[..])?;
+        Ok(String::from_utf8_lossy(&buffer[..]).to_string())
+    }
+}
+
+impl FromZipFile<Vec<u8>> for Vec<u8> {
+    fn from_zip_file(file: &mut ZipFile) -> io::Result<Self> {
+        let mut buffer = vec![0; file.size() as usize];
+        file.read(&mut buffer[..])?;
+        Ok(buffer)
+    }
+}
+
+impl FromZipFile<CString> for CString {
+    fn from_zip_file(file: &mut ZipFile) -> io::Result<Self> {
+        let mut buffer = vec![0; file.size() as usize];
+        file.read(&mut buffer[..])?;
+        Ok(CString::new(String::from_utf8_lossy(&buffer[..]).to_string())?)
+    }
+
+}
+
+fn add_file_to_maps(entry: &PathBuf, file: &mut ZipFile) {
+    if check_file(file.name()) {
+        info!("File already exists in map: {} zip: {}", file.name(), entry.display());
+        return;
+    }
+    let file_extension = Path::new(file.name()).extension().unwrap_or_default().to_str().unwrap_or_default();
+    if matches!(file_extension, "ai" | "ani" | "cfg" | "lyt" | "scn" | "uca" | "ucs" | "ucb") {
+        add_txt_file_to_map(entry, file);
+    } else if matches!(file_extension, "tga" | "pal"| "") {
+        // add_anim_file_to_map(entry, file);
+    } 
+}
+
+fn add_txt_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
+    let mut buffer = vec![0; file.size() as usize];
+    file.read(&mut buffer[..]).unwrap();
+    let mut intermediate_string = String::from_utf8_lossy(&buffer[..]).to_string();
+    // let file_contents = CString::new(String::from_utf8_lossy(&buffer[..]).to_string()).unwrap();
+
+    match file.name() {
+        // "ui/xpac.lyt" => {
+        //     file_contents.replace("animation=ui/sharedui/listbk/listbk", "TODO: Animation path for new expansion back");
+        // }
+        "ui/buya.lyt" => {
+            intermediate_string = intermediate_string.replace("helpid = 6207", "helpid = 6205");
+        }
+        // _ => return,
+        _ => {},
+    };
+
+    let file_size = intermediate_string.len();
+    let file_contents = CString::new(intermediate_string).unwrap();
+
+    let file_name = file.name().to_string();
+
+    add_ztfile(entry, file_name.clone(), ZTFile::new_text(file_name, file_size as u32, file_contents).unwrap());
+
+    // let bf_resource_ptr = BFResourcePtr {
+    //     num_refs: 100, // We set this very high to prevent the game from unloading the resource
+    //     bf_zip_name_ptr: 0,
+    //     bf_resource_name_ptr: CString::new(entry.clone().into_os_string().into_string().unwrap()).unwrap().into_raw() as u32,
+    //     data_ptr: file_contents.into_raw() as u32,
+    //     content_size: length as u32,
+    // };
+
+    // info!("{:?}" , bf_resource_ptr);
+
+}
+
+// TODO: Maybe remove this?
+// static FILE_MAP: Lazy<Mutex<HashMap<String, ZTFile>>> = Lazy::new(|| {
+//     Mutex::new(HashMap::new())
+// });
+
+// static RESOURCE_PTR_MAP: Lazy<Mutex<HashMap<String, Box<BFResourcePtr>>>> = Lazy::new(|| {
+//     Mutex::new(HashMap::new())
+// });
+
+static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+static RESOURCE_PTR_PTR_SET: Lazy<Mutex<HashSet<u32>>> = Lazy::new(|| {
+    Mutex::new(HashSet::new())
+});
+
+// static FILE_DATA_MAP: Lazy<Mutex<HashMap<String, Vec<u8>>>> = Lazy::new(|| {
+//     Mutex::new(HashMap::new())
+// });
+
+// pub fn add_file(path: String, file: ZipFile) {
+    
+// }
+
+pub fn add_ptr_ptr(ptr_ptr: u32) {
+    RESOURCE_PTR_PTR_SET.lock().unwrap().insert(ptr_ptr);
+}
+
+pub fn check_ptr_ptr(ptr_ptr: u32) -> bool {
+    RESOURCE_PTR_PTR_SET.lock().unwrap().contains(&ptr_ptr)
+}
+
+pub fn check_file(file_name: &str) -> bool {
+    RESOURCE_STRING_TO_PTR_MAP.lock().unwrap().contains_key(file_name)
+}
+
+pub fn get_file_ptr(file_name: &str) -> u32 {
+    // if !check_file(file_name) {
+    //     return 0;
+    // }
+    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+    let bf_resource_ptr = match binding.get(file_name) {
+        Some(ptr) => ptr.clone(),
+        None => return 0,
+    };
+    // let bf_resource_ptr = binding.get(file_name).unwrap();
+    let already_present = check_ptr_ptr(bf_resource_ptr);
+    info!("Getting file ptr: {} -> {:#x} ({})", file_name, bf_resource_ptr, already_present);
+    bf_resource_ptr
+}
+
+pub fn add_ztfile(path: &PathBuf, file_name: String, ztfile: ZTFile) {
+    let mut ztd_path = path.clone().into_os_string().into_string().unwrap();
+    ztd_path = ztd_path.replace("./", "zip::./").replace("\\", "/");
+    match ztfile {
+        ZTFile::Text(data, _, length) => {
+            let ptr = data.into_raw() as u32;
+            let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
+                num_refs: 100, // We set this very high to prevent the game from unloading the resource
+                bf_zip_name_ptr: CString::new(ztd_path).unwrap().into_raw() as u32,
+                bf_resource_name_ptr: CString::new(file_name.clone()).unwrap().into_raw() as u32,
+                data_ptr: ptr,
+                content_size: length,
+            }));
+
+            // info!("{}", resource_ptr);
+
+            RESOURCE_STRING_TO_PTR_MAP.lock().unwrap().insert(file_name.clone(), resource_ptr as u32);
+
+
+            // FILE_MAP.lock().unwrap().insert(file_name.clone(), ztfile);
+            // RESOURCE_PTR_MAP.lock().unwrap().insert(file_name, resource_ptr);
+        }
+        ZTFile::Graphics(data, _, length) => {
+            // FILE_MAP.lock().unwrap().insert(file_name, ZTFile::Graphics(data, ZTFileType::TGA));
+        }
+    }
+    // let data = match ztfile {
+    //     ZTFile::Text(data, _) => data.to_bytes().to_vec(),
+    //     ZTFile::Graphics(data, _) => data,
+    // };
+    // }
+    // FILE_MAP.lock().unwrap().insert(file_name, ztfile);
+}
+
+// pub fn get_file(file_name: &str) -> Option<ZTFile> {
+//     FILE_MAP.lock().unwrap().get(file_name).cloned()
+// }
+
 
 #[derive(Debug)]
 #[repr(C)]
@@ -75,7 +315,6 @@ struct BFResourcePtr {
     bf_resource_name_ptr: u32,
     data_ptr: u32,
     content_size: u32,
-    // crc32_maybe: u32, //May not be part of struct?
 }
 
 #[derive(Debug)]
@@ -87,7 +326,7 @@ struct GXLLEAnim {
 
 impl fmt::Display for BFResourcePtr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BFResourcePtr {{ num_refs: {:#x}, bf_zip_name: {}, bf_resource_name: {}, unknown_u32_3: {:#x}, content_size: {:#x} }}", self.num_refs, get_string_from_memory(self.bf_zip_name_ptr), get_string_from_memory(self.bf_resource_name_ptr), self.data_ptr, self.content_size)
+        write!(f, "BFResourcePtr {{ num_refs: {:#x}, bf_zip_name: {}, bf_resource_name: {}, data_ptr: {:#x}, content_size: {:#x} }}", self.num_refs, get_string_from_memory(self.bf_zip_name_ptr), get_string_from_memory(self.bf_resource_name_ptr), self.data_ptr, self.content_size)
     }
 }
 
@@ -203,6 +442,7 @@ pub fn init() {
     add_to_command_register("list_resources".to_owned(), command_list_resources);
     add_to_command_register("get_bfresourcemgr".to_owned(), command_get_bf_resource_mgr);
     unsafe { zoo_resource_mgr::init_detours().unwrap() };
+    add_handler(Handler::new(None, None, add_file_to_maps).unwrap());
     //TODO: Load resources from ZTD files
 }
 
@@ -212,11 +452,11 @@ pub mod zoo_resource_mgr {
 
     use tracing::info;
 
-    use super::{load_resources, BFResourceZip, Name, BFResourcePtr};
+    use super::{load_resources, BFResourceZip, Name, BFResourcePtr, check_file, get_file_ptr};
 
     use configparser::ini::Ini; //TODO: Replace with custom ini parser
 
-    use crate::debug_dll::{get_from_memory, get_ini_path, get_string_from_memory};
+    use crate::debug_dll::{get_from_memory, get_ini_path, get_string_from_memory, save_to_memory};
 
     // #[hook(unsafe extern "thiscall" BFResourceMgr_find, offset = 0x000b9a40)]
     // fn zoo_bf_resource_mgr_find(
@@ -285,70 +525,80 @@ pub mod zoo_resource_mgr {
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
     fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) {
         let file_name_string = get_string_from_memory(file_name);
-        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
-            info!("BFResource::attempt({:#x}, {})", this_ptr, file_name_string);
+        if check_file(&file_name_string) {
+
+            // let ptr = ptr::addr_of!(RESOURCE_PTR_MAP.lock().unwrap().get(&file_name_string).unwrap());
+
+            let ptr = get_file_ptr(&file_name_string);
+
+            info!("Loading: {} -> {:#x}", file_name_string, ptr);
+
+            save_to_memory(this_ptr, ptr);
+            return
         }
+        // if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+            // info!("BFResource::attempt({:#x} -> {:#x}, {})", this_ptr, get_from_memory::<u32>(this_ptr), file_name_string);
+        // }
         unsafe { BFResource_attempt.call(this_ptr, file_name) };
-        // info!("BFResource::attempt({:X}, {})", this_ptr, get_string_from_memory(file_name));
+        // info!("BFResource::attempt({:#x} -> {:#x}, {})", this_ptr, get_from_memory::<u32>(this_ptr), get_string_from_memory(file_name));
     }
 
-    #[hook(unsafe extern "thiscall" BFResourceMgr_load, offset = 0x00003817)]
-    fn zoo_bf_resource_mgr_load(this_ptr: u32, file_name: u32) -> u32 {
-        let file_name_string = get_string_from_memory(file_name);
-        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
-            info!("BFResourceMgr::load({:#x}, {})", this_ptr, file_name_string);
-        }
-        let return_value = unsafe { BFResourceMgr_load.call(this_ptr, file_name) };
-        // info!("BFResourceMgr::load({:X}, {}) -> {:X}", this_ptr, get_string_from_memory(file_name), return_value);
+    // #[hook(unsafe extern "thiscall" BFResourceMgr_load, offset = 0x00003817)]
+    // fn zoo_bf_resource_mgr_load(this_ptr: u32, file_name: u32) -> u32 {
+    //     let file_name_string = get_string_from_memory(file_name);
+    //     if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+    //         info!("BFResourceMgr::load({:#x}, {})", this_ptr, file_name_string);
+    //     }
+    //     let return_value = unsafe { BFResourceMgr_load.call(this_ptr, file_name) };
+    //     // info!("BFResourceMgr::load({:X}, {}) -> {:X}", this_ptr, get_string_from_memory(file_name), return_value);
 
-        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
-            info!("BFResourceMgr::load() -> {:#x}", return_value);
-            info!("BFResourcePtr {}", get_from_memory::<BFResourcePtr>(return_value));
-        }
+    //     if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+    //         info!("BFResourceMgr::load() -> {:#x}", return_value);
+    //         info!("BFResourcePtr {}", get_from_memory::<BFResourcePtr>(return_value));
+    //     }
 
-        return_value
-    }
+    //     return_value
+    // }
 
 
-    #[hook(unsafe extern "thiscall" BFResource_setHandle, offset = 0x000038af)]
-    fn zoo_bf_resource_set_handle(this_ptr: u32, handle: u32) {
-        if handle != 0 {
-            let bf_resource_ptr = get_from_memory::<BFResourcePtr>(handle);
-            let file_name = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
+    // #[hook(unsafe extern "thiscall" BFResource_setHandle, offset = 0x000038af)]
+    // fn zoo_bf_resource_set_handle(this_ptr: u32, handle: u32) {
+    //     if handle != 0 {
+    //         let bf_resource_ptr = get_from_memory::<BFResourcePtr>(handle);
+    //         let file_name = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
 
-            if !file_name.ends_with(".scn") && !file_name.ends_with(".cfg")&& !file_name.ends_with(".lyt") && !file_name.ends_with(".ani") && !file_name.ends_with(".tga") && !file_name.ends_with(".ai") && !file_name.ends_with(".wav") {
-                info!("BFResource::setHandle({:X}, {:X})", this_ptr, handle);
-                info!("this -> {:#x}", get_from_memory::<u32>(this_ptr));
-            }
-        }
+    //         // if !file_name.ends_with(".scn") && !file_name.ends_with(".cfg")&& !file_name.ends_with(".lyt") && !file_name.ends_with(".ani") && !file_name.ends_with(".tga") && !file_name.ends_with(".ai") && !file_name.ends_with(".wav") {
+    //             info!("BFResource::setHandle({:X}, {:X})", this_ptr, handle);
+    //             // info!("this -> {:#x}", get_from_memory::<u32>(this_ptr));
+    //         // }
+    //     }
         
-        unsafe { BFResource_setHandle.call(this_ptr, handle) };
-        if handle != 0 {
-            let bf_resource_ptr = get_from_memory::<BFResourcePtr>(handle);
-            let file_name = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
-            if !file_name.ends_with(".scn") && !file_name.ends_with(".cfg")&& !file_name.ends_with(".lyt") && !file_name.ends_with(".ani") && !file_name.ends_with(".tga") && !file_name.ends_with(".ai") && !file_name.ends_with(".wav") {
-                info!("this -> {:#x}", get_from_memory::<u32>(this_ptr));
-                info!("BFResourcePtr {}", bf_resource_ptr);
-            }
-        }
-        
-    }
+    //     unsafe { BFResource_setHandle.call(this_ptr, handle) };
+    //     // if handle != 0 {
+    //     //     let bf_resource_ptr = get_from_memory::<BFResourcePtr>(handle);
+    //     //     let file_name = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
+    //     //     // if !file_name.ends_with(".scn") && !file_name.ends_with(".cfg")&& !file_name.ends_with(".lyt") && !file_name.ends_with(".ani") && !file_name.ends_with(".tga") && !file_name.ends_with(".ai") && !file_name.ends_with(".wav") {
+    //     //     if file_name.ends_with("ui/buya.lyt") {
+    //     //         info!("this -> {:#x}", get_from_memory::<u32>(this_ptr));
+    //     //         info!("BFResourcePtr {}", bf_resource_ptr);
+    //     //     }
+    //     // }
+    // }
 
-    // 00411e21 uint __thiscall GXLLEAnim::attempt(void *this,char *param_1)
-    #[hook(unsafe extern "thiscall" GXLLEAnim_attempt, offset = 0x00011e21)]
-    fn zoo_gxlle_anim_attempt(this_ptr: u32, file_name: u32) -> u32 {
-        let file_name_string = get_string_from_memory(file_name);
-        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
-        info!("GXLLEAnim::attempt({:X}, {})", this_ptr, file_name_string);
-        info!("BFResource? {:#x}", get_from_memory::<u32>(this_ptr + 0x5));
-        }
-        let return_value = unsafe { GXLLEAnim_attempt.call(this_ptr, file_name) };
+    // #[hook(unsafe extern "thiscall" GXLLEAnim_attempt, offset = 0x00011e21)]
+    // fn zoo_gxlle_anim_attempt(this_ptr: u32, file_name: u32) -> u32 {
+    //     let file_name_string = get_string_from_memory(file_name);
+    //     if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+    //     info!("GXLLEAnim::attempt({:X}, {})", this_ptr, file_name_string);
+    //     info!("BFResource? {:#x}", get_from_memory::<u32>(this_ptr + 0x5));
+    //     }
+    //     let return_value = unsafe { GXLLEAnim_attempt.call(this_ptr, file_name) };
 
-        if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
-        info!("GXLLEAnim::attempt({:X}, {}) -> {:X}", this_ptr, file_name_string, return_value);
-        }
-        return_value
-    }
+    //     if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
+    //     info!("GXLLEAnim::attempt({:X}, {}) -> {:X}", this_ptr, file_name_string, return_value);
+    //     }
+    //     return_value
+    // }
     
 
     // #[hook(unsafe extern "thiscall" BFResourceMgr_findall, offset = 0x000bf92b)]
@@ -524,9 +774,9 @@ pub type HandlerFunction = fn(&PathBuf, &mut ZipFile) -> ();
 
 impl Handler {
     pub fn new(matcher_prefix: Option<String>, matcher_suffix: Option<String>, handler: HandlerFunction) -> Result<Self, &'static str> {
-        if matcher_prefix.is_none() && matcher_suffix.is_none() {
-            return Err("Matcher prefix or filetype must be specified");
-        }
+        // if matcher_prefix.is_none() && matcher_suffix.is_none() {
+        //     return Err("Matcher prefix or filetype must be specified");
+        // }
         Ok(Self {
             matcher_prefix,
             matcher_suffix,
@@ -583,8 +833,12 @@ fn handle_ztd(resource: &PathBuf) {
     let mut buf_reader = BufReader::new(File::open(resource).unwrap());
     let mut zip = zip::ZipArchive::new(&mut buf_reader).unwrap();
     for i in 0..zip.len() {
-        let mut file = zip.by_index(i).unwrap();
-        handle(resource, &mut file);
+        let data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
+        for handler in data_mutex.iter() {
+            // ZipFile doesn't provide a .seek() method to set the cursor to the start of the file, so we create new ZipFile for each handler
+            let mut file = zip.by_index(i).unwrap();
+            handler.handle(resource, &mut file);
+        }
     }
 }
 
@@ -599,11 +853,4 @@ pub fn add_handler(handler: Handler) {
 
 fn get_handlers() -> Vec<Handler> {
     RESOURCE_HANDLER_ARRAY.lock().unwrap().clone()
-}
-
-fn handle(dir_entry: &PathBuf, file: &mut ZipFile) {
-    let data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
-    for handler in data_mutex.iter() {
-        handler.handle(dir_entry, file);
-    }
 }

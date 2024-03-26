@@ -244,15 +244,15 @@ pub mod custom_expansion {
         save_current_expansion(0x0);
     }
 
-    #[hook(unsafe extern "thiscall" UIImage_load, offset=0x000d3509)]
-    pub fn ui_image_load(this: u32, bfconfigfile: u32, header: u32) -> u32 {
+    // #[hook(unsafe extern "thiscall" UIImage_load, offset=0x000d3509)]
+    // pub fn ui_image_load(this: u32, bfconfigfile: u32, header: u32) -> u32 {
 
-        let result = unsafe { UIImage_load.call(this, bfconfigfile, header) };
+    //     let result = unsafe { UIImage_load.call(this, bfconfigfile, header) };
 
-        info!("UIImage_load(0x4d3509) {:#x} {:#x} {} -> {:#x}", this, bfconfigfile, get_string_from_memory(header), result);
+    //     info!("UIImage_load(0x4d3509) {:#x} {:#x} {} -> {:#x}", this, bfconfigfile, get_string_from_memory(header), result);
 
-        result
-    }
+    //     result
+    // }
 
     // #[hook(unsafe extern "thiscall" BFAnimCache_findAnim, offset=0x00001fdd)]
     // pub fn bf_anim_cache_find_anim(this: u32, anim_name: u32, param_bool: u8) -> u32 {
@@ -378,6 +378,7 @@ fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &
 }
 
 fn add_expansion_with_string_id(id: u32, name: String, string_id: u32, save_to_memory: bool) {
+    // TODO: get len first to avoid needing to clone?
     let name_ptr = CString::new(name.clone()).unwrap().into_raw() as u32;
     let name_ptr_end = name_ptr + name.len() as u32 + 1;
     add_expansion(Expansion { expansion_id: id, name_id: string_id, name_string_start_ptr: name_ptr, name_string_end_ptr: name_ptr_end, name_string_buffer_end_ptr: name_ptr_end }, save_to_memory);
@@ -393,13 +394,13 @@ fn add_expansion_with_string_value(id: u32, name: String, string_value: String, 
 
 fn handle_expansion_config(path: &PathBuf, file: &mut ZipFile) {
     if let Err(e) = parse_expansion_config(file) {
-        info!("Error parsing expansion config: {} {}", file.name(), e)
+        info!("Error parsing expansion config: {} {} {}", path.display(), file.name(), e)
     }
 }
 
 fn handle_member_parsing(path: &PathBuf, file: &mut ZipFile) {
     if let Err(e) = parse_member_config(file) {
-        info!("Error parsing member config: {} {}", file.name(), e)
+        info!("Error parsing member config: {} {} {}", path.display(), file.name(), e)
     }
 }
 
