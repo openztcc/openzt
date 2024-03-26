@@ -1,5 +1,5 @@
 use crate::debug_dll::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory};
-use crate::add_to_command_register;
+use crate::{add_to_command_register, resource_manager};
 use crate::resource_manager::{add_handler, Handler};
 use crate::string_registry::add_string_to_registry;
 use crate::ztui::{BuyTab, get_selected_sex, get_random_sex};
@@ -18,6 +18,7 @@ use core::fmt::Error;
 
 
 use std::path::PathBuf;
+use std::str::FromStr;
 use zip::read::ZipFile;
 
 use anyhow::Context;
@@ -468,8 +469,8 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_expansion_dropdown(file: &mut ZipFile) {
-    
+fn handle_expansion_dropdown(_: &PathBuf, file: &mut ZipFile) {
+    resource_manager::add_anim_file_to_map(&PathBuf::from_str("openzt/openzt/expansion_dropdown/listbk").unwrap(), file)
 }
 
 pub fn init() {
@@ -481,6 +482,7 @@ pub fn init() {
     add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing).unwrap());
     add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing).unwrap());
     add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing).unwrap());
+    add_handler(Handler::new(Some("ui/sharedui/listbk/listbk".to_string()), None, handle_expansion_dropdown).unwrap());
     unsafe { custom_expansion::init_detours().unwrap() };
 }
 
