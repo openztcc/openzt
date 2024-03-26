@@ -2,6 +2,8 @@ use crate::add_to_command_register;
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
 use crate::ztui::get_selected_entity_type;
 
+// ------------ BFEntityType, Implementation, and Related Functions ------------ //
+
 use tracing::info;
 
 #[derive(Debug)]
@@ -252,4 +254,155 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
 
 pub fn init() {
     add_to_command_register("selected_type".to_string(), command_selected_type);
+    add_to_command_register("selected_scenery".to_string(), command_selected_scenery);
+}
+
+
+// ------------ ZTSceneryType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug)]
+#[repr(C)]
+struct ZTSceneryType {
+    bfentitytype: BFEntityType, // 0x000
+    pad1: [u8; 0xFC - 0x0CD], // -- padding: 35 bytes
+    purchase_cost: f32, // 0x100
+    name_id: u32, // 0x104
+    help_id: u32, // 0x108
+    habitat: u32, // 0x10C
+    location: u32, // 0x110
+    era: u32, // 0x114
+    max_food_units: u32, // 0x118
+    deletable: bool, // 0x119
+    pad2: [u8; 0x11C - 0x11A], // -- padding: 2 bytes
+    stink: bool, // 0x11C
+    pad3: [u8; 0x120 - 0x11D], // -- padding: 3 bytes
+    esthetic_weight: u32, // 0x120
+    pad4: [u8; 0x128 - 0x124], // -- padding: 4 bytes
+    selectable: bool, // 0x128
+    pad5: [u8; 0x12A - 0x129], // -- padding: 1 byte
+    foliage: bool, // 0x12A
+    pad6: [u8; 0x12D - 0x12B], // -- padding: 2 bytes
+    auto_rotate: bool, // 0x12D
+    land: bool, // 0x12E
+    swims: bool, // 0x12F
+    underwater: bool, // 0x130
+    surface: bool, // 0x131
+    submerge: bool, // 0x132
+    only_swims: bool, // 0x133
+    needs_confirm: bool, // 0x134
+    gawk_only_from_front: bool, // 0x135
+    dead_on_land: bool, // 0x136
+    dead_on_flat_water: bool, // 0x137
+    dead_underwater: bool, // 0x138
+    uses_tree_rubble: bool, // 0x139
+    forces_scenery_rubble: bool, // 0x13A
+    blocks_los: bool, // 0x13B
+}
+
+impl ZTSceneryType {
+    fn new (address: u32) -> Option<&'static mut ZTSceneryType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTSceneryType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            }
+            else {
+                None
+            }
+        }
+    }
+
+    fn get_info_image_name(&self) -> String {
+        let obj_ptr = self as *const ZTSceneryType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x14C))
+    }
+} 
+
+fn command_selected_scenery(_args: Vec<&str>) -> Result<String, &'static str> {
+    let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
+    let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
+    if entity_type_address == 0 {
+        return Err("No entity selected");
+    }
+    let entity_type = ZTSceneryType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+
+    // if no selected entity type, return error
+    if _args.len() == 0 {
+        return Ok(format!("No entity type selected."));
+    }
+
+    // if -v flag is used, print the entity type configuration and other details
+    if _args[0] == "-v" {
+
+        info!("Printing configuration for entity type at address {:#x}", entity_type_print);
+
+        // NOTE: ncolors is part of a separate structure in memory withn BFEntityType, so we need to grab the pointer to it first
+        // this is temporary until the struct can be fully implemented
+        let ncolors_ptr = get_from_memory::<u32>(entity_type_print + 0x038);
+        let ncolors = get_from_memory::<u32>(ncolors_ptr);
+    
+        Ok(format!("\n\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n[Configuration]\n\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\ncPurchaseCost: {:.2}\ncNameID: {}\ncHelpID: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncMaxFoodUnits: {}\ncDeletable: {}\ncStink: {}\ncEstheticWeight: {}\ncSelectable: {}\ncFoliage: {}\ncAutoRotate: {}\ncLand: {}\ncSwims: {}\ncUnderwater: {}\ncSurface: {}\ncSubmerge: {}\ncOnlySwims: {}\ncNeedsConfirm: {}\ncGawkOnlyFromFront: {}\ncDeadOnLand: {}\ncDeadOnFlatWater: {}\ncDeadUnderwater: {}\ncUsesTreeRubble: {}\ncForcesSceneryRubble: {}\ncBlocksLOS: {}\n\n",
+        entity_type_print,
+        entity_type.bfentitytype.get_type_name(),
+        entity_type.bfentitytype.get_codename(),
+        ncolors,
+        entity_type.bfentitytype.icon_zoom as u32,
+        entity_type.bfentitytype.expansion_id as u32,
+        entity_type.bfentitytype.movable as u32,
+        entity_type.bfentitytype.walkable as u32,
+        entity_type.bfentitytype.walkable_by_tall as u32,
+        entity_type.bfentitytype.rubbleable as u32,
+        entity_type.bfentitytype.use_numbers_in_name as u32,
+        entity_type.bfentitytype.uses_real_shadows as u32,
+        entity_type.bfentitytype.has_shadow_images as u32,
+        entity_type.bfentitytype.force_shadow_black as u32,
+        entity_type.bfentitytype.draws_late as u32,
+        entity_type.bfentitytype.height,
+        entity_type.bfentitytype.depth,
+        entity_type.bfentitytype.has_underwater_section as u32,
+        entity_type.bfentitytype.is_transient as u32,
+        entity_type.bfentitytype.uses_placement_cube as u32,
+        entity_type.bfentitytype.show as u32,
+        entity_type.bfentitytype.hit_threshold,
+        entity_type.bfentitytype.avoid_edges as u32,
+        entity_type.bfentitytype.footprintx,
+        entity_type.bfentitytype.footprinty,
+        entity_type.bfentitytype.footprintz,
+        entity_type.bfentitytype.placement_footprintx,
+        entity_type.bfentitytype.placement_footprinty,
+        entity_type.bfentitytype.placement_footprintz,
+        entity_type.bfentitytype.available_at_startup as u32,  
+        entity_type.purchase_cost,
+        entity_type.name_id,
+        entity_type.help_id,
+        entity_type.habitat,
+        entity_type.location,
+        entity_type.era,
+        entity_type.max_food_units,
+        entity_type.deletable as u32,
+        entity_type.stink as u32,
+        entity_type.esthetic_weight,
+        entity_type.selectable as u32,
+        entity_type.foliage as u32,
+        entity_type.auto_rotate as u32,
+        entity_type.land as u32,
+        entity_type.swims as u32,
+        entity_type.underwater as u32,
+        entity_type.surface as u32,
+        entity_type.submerge as u32,
+        entity_type.only_swims as u32,
+        entity_type.needs_confirm as u32,
+        entity_type.gawk_only_from_front as u32,
+        entity_type.dead_on_land as u32,
+        entity_type.dead_on_flat_water as u32,
+        entity_type.dead_underwater as u32,
+        entity_type.uses_tree_rubble as u32,
+        entity_type.forces_scenery_rubble as u32,
+        entity_type.blocks_los as u32,
+
+        ))
+    }
+    else {
+        Ok("Invalid argument".to_string())
+    }
 }
