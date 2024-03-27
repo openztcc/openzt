@@ -37,6 +37,10 @@ mod parsing;
 
 mod animation;
 
+mod bfentitytype;
+
+mod ztgamemgr;
+
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
@@ -208,6 +212,8 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 resource_manager::init();
                 expansions::init();
                 string_registry::init();
+                bfentitytype::init();
+                ztgamemgr::init();
             }
 
         }
