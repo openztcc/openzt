@@ -7,6 +7,6 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 
-"../openzt-loader/target/i686-pc-windows-msvc/release/openzt-loader.exe" --dll-path="target/i686-pc-windows-msvc/debug/openzt.dll" --listen --resume
+"../openzt-loader/target/i686-pc-windows-msvc/release/openzt-loader.exe" --dll-path="target/i686-pc-windows-msvc/release/openzt.dll" --listen
 
 pause

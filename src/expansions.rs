@@ -470,7 +470,7 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
 }
 
 fn handle_expansion_dropdown(_: &PathBuf, file: &mut ZipFile) {
-    resource_manager::add_anim_file_to_map(&PathBuf::from_str("openzt/openzt/expansion_dropdown/listbk").unwrap(), file)
+    resource_manager::add_raw_bytes_file_to_map(&PathBuf::from_str("openzt/openzt/expansion_dropdown/listbk").unwrap(), file)
 }
 
 pub fn init() {

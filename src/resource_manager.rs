@@ -41,9 +41,14 @@ enum ZTFileType {
     Uca,
     Ucs,
     Ucb,
+    Ini,
+    Txt,
     Animation,
     Palette,
-    TGA
+    TGA,
+    Wav,
+    Lle,
+    Bmp,
 }
 
 impl ZTFile {
@@ -59,16 +64,20 @@ impl ZTFile {
             "ucs" => Ok(ZTFile::Text(data, ZTFileType::Ucs, file_size)),
             "ucb" => Ok(ZTFile::Text(data, ZTFileType::Ucb, file_size)),
             "ani" => Ok(ZTFile::Text(data, ZTFileType::Ani, file_size)),
+            "ini" => Ok(ZTFile::Text(data, ZTFileType::Ini, file_size)),
+            "txt" => Ok(ZTFile::Text(data, ZTFileType::Txt, file_size)),
             _ => Err("Invalid file type"),
         }
-        
     }
 
-    pub fn new_graphics(file_name: String, file_size: u32, data: Box<[u8]>) -> ZTFile {
+    pub fn new_raw_bytes(file_name: String, file_size: u32, data: Box<[u8]>) -> ZTFile {
         let file_extension = Path::new(&file_name).extension().unwrap_or_default().to_str().unwrap_or_default();
         match file_extension {
             "tga" => ZTFile::Graphics(data, ZTFileType::TGA, file_size),
             "pal" => ZTFile::Graphics(data, ZTFileType::Palette, file_size),
+            "wav" => ZTFile::Graphics(data, ZTFileType::Wav, file_size),
+            "lle" => ZTFile::Graphics(data, ZTFileType::Lle, file_size),
+            "bmp" => ZTFile::Graphics(data, ZTFileType::Bmp, file_size),
             _ => ZTFile::Graphics(data, ZTFileType::Animation, file_size),
         }
     }
@@ -104,15 +113,16 @@ impl FromZipFile<CString> for CString {
 }
 
 fn add_file_to_maps(entry: &PathBuf, file: &mut ZipFile) {
-    if check_file(file.name()) {
+    let lowercase_file_name = file.name().to_lowercase();
+    if check_file(&lowercase_file_name) {
         // File already exists, skip loading
         return;
     }
-    let file_extension = Path::new(file.name()).extension().unwrap_or_default().to_str().unwrap_or_default();
-    if matches!(file_extension, "ai" | "ani" | "cfg" | "lyt" | "scn" | "uca" | "ucs" | "ucb") {
+    let file_extension = Path::new(&lowercase_file_name).extension().unwrap_or_default().to_str().unwrap_or_default();
+    if matches!(file_extension, "ai" | "ani" | "cfg" | "lyt" | "scn" | "uca" | "ucs" | "ucb") { // | "ini" | "txt") {
         add_txt_file_to_map(entry, file);
-    } else if matches!(file_extension, "tga" | "pal"| "") {
-        add_anim_file_to_map(entry, file);
+    } else if matches!(file_extension, "tga" | "pal" | "wav" | "lle" | "bmp" | "") {
+        add_raw_bytes_file_to_map(entry, file);
     } 
 }
 
@@ -138,14 +148,13 @@ pub fn add_txt_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
     let file_size = intermediate_string.len();
     let file_contents = CString::new(intermediate_string).unwrap();
 
-    let file_name = file.name().to_string();
+    let file_name = file.name().to_string().to_lowercase();
 
     add_ztfile(entry, file_name.clone(), ZTFile::new_text(file_name, file_size as u32, file_contents).unwrap());
 
 }
 
-pub fn add_anim_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
-    
+pub fn add_raw_bytes_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
     match file.read_exact(&mut buffer) {
         Ok(bytes_read) => bytes_read,
@@ -155,9 +164,9 @@ pub fn add_anim_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
         }
     };
 
-    let file_name = file.name().to_string();
+    let file_name = file.name().to_string().to_lowercase();
     let file_size = file.size() as u32;
-    add_ztfile(entry, file_name.clone(), ZTFile::new_graphics(file_name, file_size, buffer));
+    add_ztfile(entry, file_name.clone(), ZTFile::new_raw_bytes(file_name, file_size, buffer));
 }
 
 static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| {
@@ -177,42 +186,34 @@ pub fn check_ptr_ptr(ptr_ptr: u32) -> bool {
 }
 
 pub fn check_file(file_name: &str) -> bool {
-    RESOURCE_STRING_TO_PTR_MAP.lock().unwrap().contains_key(file_name)
+    RESOURCE_STRING_TO_PTR_MAP.lock().unwrap().contains_key(&file_name.to_lowercase())
 }
 
 pub fn get_file_ptr(file_name: &str) -> u32 {
-    // if !check_file(file_name) {
-    //     return 0;
-    // }
     let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
     let bf_resource_ptr = match binding.get(file_name) {
         Some(ptr) => ptr.clone(),
         None => return 0,
     };
-    // let bf_resource_ptr = binding.get(file_name).unwrap();
-    // let already_present = check_ptr_ptr(bf_resource_ptr);
-    // info!("Getting file ptr: {} -> {:#x} ({})", file_name, bf_resource_ptr, already_present);
     bf_resource_ptr
 }
 
 fn add_ztfile(path: &PathBuf, file_name: String, ztfile: ZTFile) {
     let mut ztd_path = path.clone().into_os_string().into_string().unwrap();
     ztd_path = ztd_path.replace("./", "zip::./").replace("\\", "/");
+    let lowercase_filename = file_name.to_lowercase();
     match ztfile {
         ZTFile::Text(data, _, length) => {
             let ptr = data.into_raw() as u32;
             let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
                 num_refs: 100, // We set this very high to prevent the game from unloading the resource
                 bf_zip_name_ptr: CString::new(ztd_path).unwrap().into_raw() as u32,
-                bf_resource_name_ptr: CString::new(file_name.clone()).unwrap().into_raw() as u32,
+                bf_resource_name_ptr: CString::new(lowercase_filename.clone()).unwrap().into_raw() as u32,
                 data_ptr: ptr,
                 content_size: length,
             }));
 
             RESOURCE_STRING_TO_PTR_MAP.lock().unwrap().insert(file_name.clone(), resource_ptr as u32);
-
-            // FILE_MAP.lock().unwrap().insert(file_name.clone(), ztfile);
-            // RESOURCE_PTR_MAP.lock().unwrap().insert(file_name, resource_ptr);
         }
         ZTFile::Graphics(data, _, length) => {
             let ptr = data.as_ptr() as u32;
@@ -220,27 +221,15 @@ fn add_ztfile(path: &PathBuf, file_name: String, ztfile: ZTFile) {
             let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
                 num_refs: 100, // We set this very high to prevent the game from unloading the resource
                 bf_zip_name_ptr: CString::new(ztd_path).unwrap().into_raw() as u32,
-                bf_resource_name_ptr: CString::new(file_name.clone()).unwrap().into_raw() as u32,
+                bf_resource_name_ptr: CString::new(lowercase_filename.clone()).unwrap().into_raw() as u32,
                 data_ptr: ptr,
                 content_size: length,
             }));
 
-            RESOURCE_STRING_TO_PTR_MAP.lock().unwrap().insert(file_name.clone(), resource_ptr as u32);
+            RESOURCE_STRING_TO_PTR_MAP.lock().unwrap().insert(lowercase_filename.clone(), resource_ptr as u32);
         }
     }
-
-    // let data = match ztfile {
-    //     ZTFile::Text(data, _) => data.to_bytes().to_vec(),
-    //     ZTFile::Graphics(data, _) => data,
-    // };
-    // }
-    // FILE_MAP.lock().unwrap().insert(file_name, ztfile);
 }
-
-// pub fn get_file(file_name: &str) -> Option<ZTFile> {
-//     FILE_MAP.lock().unwrap().get(file_name).cloned()
-// }
-
 
 #[derive(Debug)]
 #[repr(C)]
@@ -505,30 +494,34 @@ pub mod zoo_resource_mgr {
 
 
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
-    fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) {
+    fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> u8 {
         if bf_resource_inner(this_ptr, file_name) {
-            return;
+            return 1;
         }
-        // if !file_name_string.ends_with(".scn") && !file_name_string.ends_with(".cfg") && !file_name_string.ends_with(".lyt") && !file_name_string.ends_with(".ani") && !file_name_string.ends_with(".tga") && !file_name_string.ends_with(".ai") && !file_name_string.ends_with(".wav") {
-            // info!("BFResource::attempt({:#x} -> {:#x}, {})", this_ptr, get_from_memory::<u32>(this_ptr), file_name_string);
-        // }
-        unsafe { BFResource_attempt.call(this_ptr, file_name) };
-        // info!("BFResource::attempt({:#x} -> {:#x}, {})", this_ptr, get_from_memory::<u32>(this_ptr), get_string_from_memory(file_name));
+        let return_value = unsafe { BFResource_attempt.call(this_ptr, file_name) };
+
+        info!("Cache miss: {} -> {}", get_string_from_memory(file_name), return_value);
+
+        return_value
     }
 
     //47f4
     #[hook(unsafe extern "thiscall" BFResource_prepare, offset = 0x000047f4)]
-    fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32) {
+    fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32)  -> u8 {
         if bf_resource_inner(this_ptr, file_name) {
-            return;
+            return 1;
         }
 
-        unsafe { BFResource_prepare.call(this_ptr, file_name) };
+        let return_value = unsafe { BFResource_prepare.call(this_ptr, file_name) };
+
+        info!("Cache miss: {} -> {}", get_string_from_memory(file_name), return_value);
+
+        return_value
 
     }
 
     fn bf_resource_inner(this_ptr: u32, file_name: u32) -> bool {
-        let file_name_string = get_string_from_memory(file_name);
+        let file_name_string = get_string_from_memory(file_name).to_lowercase();
         if check_file(&file_name_string) {
 
             // let ptr = ptr::addr_of!(RESOURCE_PTR_MAP.lock().unwrap().get(&file_name_string).unwrap());
@@ -846,7 +839,7 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
         if entry
             .file_name()
             .to_str()
-            .map(|s| s.ends_with(".ztd") && !s.starts_with("zt"))       // Exlcuding zts.ztd and ztatb*.ztd files until relevant
+            .map(|s| s.to_lowercase().ends_with(".ztd") && !s.starts_with("ztat"))       // Exlcuding ztatb*.ztd files until relevant
             .unwrap_or(false)
         {
             resources.push(entry.path().to_path_buf());
