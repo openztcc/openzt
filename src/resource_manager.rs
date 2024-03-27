@@ -126,7 +126,7 @@ fn add_file_to_maps(entry: &PathBuf, file: &mut ZipFile) {
     } 
 }
 
-pub fn add_txt_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
+pub fn add_txt_file_to_map_with_path_override(entry: &PathBuf, file: &mut ZipFile, path: String) {
     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
     match file.read_exact(&mut buffer) {
         Ok(bytes_read) => bytes_read,
@@ -148,13 +148,16 @@ pub fn add_txt_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
     let file_size = intermediate_string.len();
     let file_contents = CString::new(intermediate_string).unwrap();
 
-    let file_name = file.name().to_string().to_lowercase();
-
-    add_ztfile(entry, file_name.clone(), ZTFile::new_text(file_name, file_size as u32, file_contents).unwrap());
-
+    add_ztfile(entry, path.clone(), ZTFile::new_text(path, file_size as u32, file_contents).unwrap());
 }
 
-pub fn add_raw_bytes_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
+pub fn add_txt_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
+    let file_name = file.name().to_string().to_lowercase();
+
+    add_txt_file_to_map_with_path_override(entry, file, file_name)
+}
+
+pub fn add_raw_bytes_to_map_with_path_override(entry: &PathBuf, file: &mut ZipFile, path: String) {
     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
     match file.read_exact(&mut buffer) {
         Ok(bytes_read) => bytes_read,
@@ -164,9 +167,13 @@ pub fn add_raw_bytes_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
         }
     };
 
-    let file_name = file.name().to_string().to_lowercase();
     let file_size = file.size() as u32;
-    add_ztfile(entry, file_name.clone(), ZTFile::new_raw_bytes(file_name, file_size, buffer));
+    add_ztfile(entry, path.clone(), ZTFile::new_raw_bytes(path, file_size, buffer));
+}
+
+pub fn add_raw_bytes_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
+    let file_name = file.name().to_string().to_lowercase();
+    add_raw_bytes_to_map_with_path_override(entry, file, file_name)
 }
 
 static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| {
@@ -865,6 +872,9 @@ fn handle_ztd(resource: &PathBuf) {
         for handler in data_mutex.iter() {
             // ZipFile doesn't provide a .seek() method to set the cursor to the start of the file, so we create new ZipFile for each handler
             let mut file = zip.by_index(i).unwrap();
+            if file.is_dir() {
+                continue;
+            }
             handler.handle(resource, &mut file);
         }
     }

@@ -5,7 +5,7 @@ use crate::string_registry::add_string_to_registry;
 use crate::ztui::{BuyTab, get_selected_sex, get_random_sex};
 use crate::ztworldmgr::{ZTEntity, ZTEntityTypeClass, ZTEntityType};
 
-use tracing::info;
+use tracing::{info, error};
 use retour_utils::hook_module;
 
 use std::fmt;
@@ -392,7 +392,6 @@ fn add_expansion_with_string_value(id: u32, name: String, string_value: String, 
     add_expansion(Expansion { expansion_id: 0x3fff, name_id: name_id, name_string_start_ptr: name_ptr, name_string_end_ptr: name_ptr + name.len() as u32 + 1, name_string_buffer_end_ptr: name_ptr + name.len() as u32 + 1}, save_to_memory);
 }
 
-
 fn handle_expansion_config(path: &PathBuf, file: &mut ZipFile) {
     if let Err(e) = parse_expansion_config(file) {
         info!("Error parsing expansion config: {} {} {}", path.display(), file.name(), e)
@@ -447,7 +446,6 @@ fn parse_member_config(file: &mut ZipFile) -> anyhow::Result<()> {
     Ok(())
 }
 
-
 fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     let mut string_buffer = String::with_capacity(file.size() as usize);
     file.read_to_string(&mut string_buffer)?;
@@ -469,8 +467,22 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_expansion_dropdown(_: &PathBuf, file: &mut ZipFile) {
-    resource_manager::add_raw_bytes_file_to_map(&PathBuf::from_str("openzt/openzt/expansion_dropdown/listbk").unwrap(), file)
+fn handle_expansion_dropdown(entry: &PathBuf, file: &mut ZipFile) {
+    let file_name = file.enclosed_name().unwrap().file_name().unwrap();
+    let file_path = Path::new("openzt/openzt/expansion_dropdown/").join(file_name);
+    let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
+        error!("Error converting file path to string");
+        return
+    };
+    match Path::new(&file_path_string).extension().unwrap_or_default().to_str().unwrap_or_default() {
+        "ani" => {
+            resource_manager::add_txt_file_to_map_with_path_override(entry, file, file_path_string);
+        },
+        "pal" | "" => {
+            resource_manager::add_raw_bytes_to_map_with_path_override(entry, file, file_path_string);
+        },
+        _ => return
+    }
 }
 
 pub fn init() {
@@ -482,7 +494,7 @@ pub fn init() {
     add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing).unwrap());
     add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing).unwrap());
     add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing).unwrap());
-    add_handler(Handler::new(Some("ui/sharedui/listbk/listbk".to_string()), None, handle_expansion_dropdown).unwrap());
+    add_handler(Handler::new(Some("ui/sharedui/listbk/".to_string()), None, handle_expansion_dropdown).unwrap());
     unsafe { custom_expansion::init_detours().unwrap() };
 }
 
