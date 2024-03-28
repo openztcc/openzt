@@ -1,6 +1,6 @@
 use std::fmt::format;
 
-use crate::add_to_command_register;
+use crate::{add_to_command_register, bfentitytype};
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
 use crate::ztui::get_selected_entity_type;
 
@@ -79,6 +79,7 @@ impl BFEntityType {
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x0A4))
     }
 
+    // allows setting the configuration of the entity type
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
         let config = config.to_lowercase();
         let value = value.to_lowercase();
@@ -195,6 +196,49 @@ impl BFEntityType {
             Err("Invalid configuration option")
         }
     }
+
+    // prints the configuration of the entity type
+    fn print_config(&self) -> String {
+        // NOTE: ncolors is part of a separate structure in memory withn BFEntityType, so we need to grab the pointer to it first
+        // this is temporary until the struct can be fully implemented
+        let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
+        let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
+        let ncolors_ptr = get_from_memory::<u32>(entity_type_print + 0x038);
+        let ncolors = get_from_memory::<u32>(ncolors_ptr);
+
+        format!("\n\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n[Configuration]\n\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n\n",
+        self as *const BFEntityType as u32,
+        self.get_type_name(),
+        self.get_codename(),
+        ncolors,
+        self.icon_zoom as u32,
+        self.expansion_id as u32,
+        self.movable as u32,
+        self.walkable as u32,
+        self.walkable_by_tall as u32,
+        self.rubbleable as u32,
+        self.use_numbers_in_name as u32,
+        self.uses_real_shadows as u32,
+        self.has_shadow_images as u32,
+        self.force_shadow_black as u32,
+        self.draws_late as u32,
+        self.height,
+        self.depth,
+        self.has_underwater_section as u32,
+        self.is_transient as u32,
+        self.uses_placement_cube as u32,
+        self.show as u32,
+        self.hit_threshold,
+        self.avoid_edges as u32,
+        self.footprintx,
+        self.footprinty,
+        self.footprintz,
+        self.placement_footprintx,
+        self.placement_footprinty,
+        self.placement_footprintz,
+        self.available_at_startup as u32,
+        )
+    }
 }
 
 // returns the selected entity type
@@ -218,44 +262,9 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
     if _args[0] == "-v" {
 
         info!("Printing configuration for entity type at address {:#x}", entity_type_print);
-
-        // NOTE: ncolors is part of a separate structure in memory withn BFEntityType, so we need to grab the pointer to it first
-        // this is temporary until the struct can be fully implemented
-        let ncolors_ptr = get_from_memory::<u32>(entity_type_print + 0x038);
-        let ncolors = get_from_memory::<u32>(ncolors_ptr);
-    
-        Ok(format!("\n\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n[Configuration]\n\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n\n",
-        entity_type_print,
-        entity_type.get_type_name(),
-        entity_type.get_codename(),
-        ncolors,
-        entity_type.icon_zoom as u32,
-        entity_type.expansion_id as u32,
-        entity_type.movable as u32,
-        entity_type.walkable as u32,
-        entity_type.walkable_by_tall as u32,
-        entity_type.rubbleable as u32,
-        entity_type.use_numbers_in_name as u32,
-        entity_type.uses_real_shadows as u32,
-        entity_type.has_shadow_images as u32,
-        entity_type.force_shadow_black as u32,
-        entity_type.draws_late as u32,
-        entity_type.height,
-        entity_type.depth,
-        entity_type.has_underwater_section as u32,
-        entity_type.is_transient as u32,
-        entity_type.uses_placement_cube as u32,
-        entity_type.show as u32,
-        entity_type.hit_threshold,
-        entity_type.avoid_edges as u32,
-        entity_type.footprintx,
-        entity_type.footprinty,
-        entity_type.footprintz,
-        entity_type.placement_footprintx,
-        entity_type.placement_footprinty,
-        entity_type.placement_footprintz,
-        entity_type.available_at_startup as u32       
-        ))
+        
+        // print the entity type configuration
+        Ok(entity_type.print_config())
     }
     else if _args.len() == 2 {
         entity_type.set_config(_args[0], _args[1]);
@@ -444,6 +453,38 @@ impl ZTSceneryType {
             Err("Invalid configuration option")
         }
     }
+
+    fn print_config(&self) -> String {
+        format!("Purchase Cost: {:.2}\nName ID: {}\nHelp ID: {}\nHabitat: {}\nLocation: {}\nEra: {}\nMax Food Units: {}\nStink: {}\nEsthetic Weight: {}\nSelectable: {}\nDeletable: {}\nFoliage: {}\nAuto Rotate: {}\nLand: {}\nSwims: {}\nUnderwater: {}\nSurface: {}\nSubmerge: {}\nOnly Swims: {}\nNeeds Confirm: {}\nGawk Only From Front: {}\nDead On Land: {}\nDead On Flat Water: {}\nDead Underwater: {}\nUses Tree Rubble: {}\nForces Scenery Rubble: {}\nBlocks LOS: {}\n",
+        self.purchase_cost,
+        self.name_id,
+        self.help_id,
+        self.habitat,
+        self.location,
+        self.era,
+        self.max_food_units,
+        self.stink as u32,
+        self.esthetic_weight,
+        self.selectable as u32,
+        self.deletable as u32,
+        self.foliage as u32,
+        self.auto_rotate as u32,
+        self.land as u32,
+        self.swims as u32,
+        self.underwater as u32,
+        self.surface as u32,
+        self.submerge as u32,
+        self.only_swims as u32,
+        self.needs_confirm as u32,
+        self.gawk_only_from_front as u32,
+        self.dead_on_land as u32,
+        self.dead_on_flat_water as u32,
+        self.dead_underwater as u32,
+        self.uses_tree_rubble as u32,
+        self.forces_scenery_rubble as u32,
+        self.blocks_los as u32,
+        )
+    }
 } 
 
 fn command_selected_scenery(_args: Vec<&str>) -> Result<String, &'static str> {
@@ -464,71 +505,7 @@ fn command_selected_scenery(_args: Vec<&str>) -> Result<String, &'static str> {
 
         info!("Printing configuration for entity type at address {:#x}", entity_type_print);
 
-        // NOTE: ncolors is part of a separate structure in memory withn BFEntityType, so we need to grab the pointer to it first
-        // this is temporary until the struct can be fully implemented
-        let ncolors_ptr = get_from_memory::<u32>(entity_type_print + 0x038);
-        let ncolors = get_from_memory::<u32>(ncolors_ptr);
-    
-        Ok(format!("\n\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n[Configuration]\n\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\ncPurchaseCost: {:.2}\ncNameID: {}\ncHelpID: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncMaxFoodUnits: {}\ncDeletable: {}\ncStink: {}\ncEstheticWeight: {}\ncSelectable: {}\ncFoliage: {}\ncAutoRotate: {}\ncLand: {}\ncSwims: {}\ncUnderwater: {}\ncSurface: {}\ncSubmerge: {}\ncOnlySwims: {}\ncNeedsConfirm: {}\ncGawkOnlyFromFront: {}\ncDeadOnLand: {}\ncDeadOnFlatWater: {}\ncDeadUnderwater: {}\ncUsesTreeRubble: {}\ncForcesSceneryRubble: {}\ncBlocksLOS: {}\n\n",
-        entity_type_print,
-        scenery_type.bfentitytype.get_type_name(),
-        scenery_type.bfentitytype.get_codename(),
-        ncolors,
-        scenery_type.bfentitytype.icon_zoom as u32,
-        scenery_type.bfentitytype.expansion_id as u32,
-        scenery_type.bfentitytype.movable as u32,
-        scenery_type.bfentitytype.walkable as u32,
-        scenery_type.bfentitytype.walkable_by_tall as u32,
-        scenery_type.bfentitytype.rubbleable as u32,
-        scenery_type.bfentitytype.use_numbers_in_name as u32,
-        scenery_type.bfentitytype.uses_real_shadows as u32,
-        scenery_type.bfentitytype.has_shadow_images as u32,
-        scenery_type.bfentitytype.force_shadow_black as u32,
-        scenery_type.bfentitytype.draws_late as u32,
-        scenery_type.bfentitytype.height,
-        scenery_type.bfentitytype.depth,
-        scenery_type.bfentitytype.has_underwater_section as u32,
-        scenery_type.bfentitytype.is_transient as u32,
-        scenery_type.bfentitytype.uses_placement_cube as u32,
-        scenery_type.bfentitytype.show as u32,
-        scenery_type.bfentitytype.hit_threshold,
-        scenery_type.bfentitytype.avoid_edges as u32,
-        scenery_type.bfentitytype.footprintx,
-        scenery_type.bfentitytype.footprinty,
-        scenery_type.bfentitytype.footprintz,
-        scenery_type.bfentitytype.placement_footprintx,
-        scenery_type.bfentitytype.placement_footprinty,
-        scenery_type.bfentitytype.placement_footprintz,
-        scenery_type.bfentitytype.available_at_startup as u32,  
-        scenery_type.purchase_cost,
-        scenery_type.name_id,
-        scenery_type.help_id,
-        scenery_type.habitat,
-        scenery_type.location,
-        scenery_type.era,
-        scenery_type.max_food_units,
-        scenery_type.deletable as u32,
-        scenery_type.stink as u32,
-        scenery_type.esthetic_weight,
-        scenery_type.selectable as u32,
-        scenery_type.foliage as u32,
-        scenery_type.auto_rotate as u32,
-        scenery_type.land as u32,
-        scenery_type.swims as u32,
-        scenery_type.underwater as u32,
-        scenery_type.surface as u32,
-        scenery_type.submerge as u32,
-        scenery_type.only_swims as u32,
-        scenery_type.needs_confirm as u32,
-        scenery_type.gawk_only_from_front as u32,
-        scenery_type.dead_on_land as u32,
-        scenery_type.dead_on_flat_water as u32,
-        scenery_type.dead_underwater as u32,
-        scenery_type.uses_tree_rubble as u32,
-        scenery_type.forces_scenery_rubble as u32,
-        scenery_type.blocks_los as u32,
-
-        ))
+        Ok(scenery_type.bfentitytype.print_config() + &scenery_type.print_config())
     }
     else if _args.len() == 2 {
         let result_entity_type = scenery_type.bfentitytype.set_config(_args[0], _args[1]);
