@@ -25,6 +25,7 @@ zip = "0.6.6"
 bf_configparser = { git = "https://github.com/openztcc/bf-configparser", version = "1.1.0" }
 anyhow = "1.0.80"
 getset = "0.1.2"
+maplit = "1.0.2"
 
 [lib]
 name = "openzt"
