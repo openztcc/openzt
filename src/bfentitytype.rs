@@ -81,14 +81,7 @@ impl BFEntityType {
 
     // allows setting the configuration of the entity type
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        let config = config.to_lowercase();
-        let value = value.to_lowercase();
-
-        if config == "ncolors" {
-            self.ncolors = value.parse::<u32>().unwrap();
-            Ok(format!("Set ncolors to {}", self.ncolors))
-        }
-        else if config == "cIconZoom" {
+        if config == "cIconZoom" {
             self.icon_zoom = value.parse::<bool>().unwrap();
             Ok(format!("Set cIconZoom to {}", self.icon_zoom))
         }
@@ -206,7 +199,7 @@ impl BFEntityType {
         let ncolors_ptr = get_from_memory::<u32>(entity_type_print + 0x038);
         let ncolors = get_from_memory::<u32>(ncolors_ptr);
 
-        format!("\n\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n[Configuration]\n\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n\n",
+        format!("\n\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n[Configuration]\n\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n",
         self as *const BFEntityType as u32,
         self.get_type_name(),
         self.get_codename(),
@@ -255,7 +248,7 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
 
     // if no selected entity type, return error
     if _args.len() == 0 {
-        return Ok(format!("[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n", entity_type_print, entity_type.get_type_name(), entity_type.get_codename()));
+        return Ok(format!("\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n", entity_type_print, entity_type.get_type_name(), entity_type.get_codename()));
     }
 
     // if -v flag is used, print the entity type configuration and other details
@@ -338,116 +331,114 @@ impl ZTSceneryType {
     }
 
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        let config = config.to_lowercase();
-        let value = value.to_lowercase();
 
-        if config == "cPurchaseCost" {
+        if config == "-cPurchaseCost" {
             self.purchase_cost = value.parse::<f32>().unwrap();
-            Ok(format!("Set cPurchaseCost to {}", self.purchase_cost))
+            Ok(format!("Set Purchase Cost to {}", self.purchase_cost))
         }
-        else if config == "cNameID" {
+        else if config == "-cNameID" {
             self.name_id = value.parse::<u32>().unwrap();
-            Ok(format!("Set cNameID to {}", self.name_id))
+            Ok(format!("Set Name ID to {}", self.name_id))
         }
-        else if config == "cHelpID" {
+        else if config == "-cHelpID" {
             self.help_id = value.parse::<u32>().unwrap();
-            Ok(format!("Set cHelpID to {}", self.help_id))
+            Ok(format!("Set Help ID to {}", self.help_id))
         }
-        else if config == "cHabitat" {
+        else if config == "-cHabitat" {
             self.habitat = value.parse::<u32>().unwrap();
-            Ok(format!("Set cHabitat to {}", self.habitat))
+            Ok(format!("Set Habitat to {}", self.habitat))
         }
-        else if config == "cLocation" {
+        else if config == "-cLocation" {
             self.location = value.parse::<u32>().unwrap();
-            Ok(format!("Set cLocation to {}", self.location))
+            Ok(format!("Set Location to {}", self.location))
         }
-        else if config == "cEra" {
+        else if config == "-cEra" {
             self.era = value.parse::<u32>().unwrap();
-            Ok(format!("Set cEra to {}", self.era))
+            Ok(format!("Set Era to {}", self.era))
         }
-        else if config == "cMaxFoodUnits" {
+        else if config == "-cMaxFoodUnits" {
             self.max_food_units = value.parse::<u32>().unwrap();
-            Ok(format!("Set cMaxFoodUnits to {}", self.max_food_units))
+            Ok(format!("Set Max Food Units to {}", self.max_food_units))
         }
-        else if config == "cStink" {
+        else if config == "-cStink" {
             self.stink = value.parse::<bool>().unwrap();
-            Ok(format!("Set cStink to {}", self.stink))
+            Ok(format!("Set Stink to {}", self.stink))
         }
-        else if config == "cEstheticWeight" {
+        else if config == "-cEstheticWeight" {
             self.esthetic_weight = value.parse::<u32>().unwrap();
-            Ok(format!("Set cEstheticWeight to {}", self.esthetic_weight))
+            Ok(format!("Set Esthetic Weight to {}", self.esthetic_weight))
         }
-        else if config == "cSelectable" {
+        else if config == "-cSelectable" {
             self.selectable = value.parse::<bool>().unwrap();
-            Ok(format!("Set cSelectable to {}", self.selectable))
+            Ok(format!("Set Selectable to {}", self.selectable))
         }
-        else if config == "cDeletable" {
+        else if config == "-cDeletable" {
             self.deletable = value.parse::<bool>().unwrap();
-            Ok(format!("Set cDeletable to {}", self.deletable))
+            Ok(format!("Set Deletable to {}", self.deletable))
         }
-        else if config == "cFoliage" {
+        else if config == "-cFoliage" {
             self.foliage = value.parse::<bool>().unwrap();
-            Ok(format!("Set cFoliage to {}", self.foliage))
+            Ok(format!("Set Foliage to {}", self.foliage))
         }
-        else if config == "cAutoRotate" {
+        else if config == "-cAutoRotate" {
             self.auto_rotate = value.parse::<bool>().unwrap();
-            Ok(format!("Set cAutoRotate to {}", self.auto_rotate))
+            Ok(format!("Set Auto Rotate to {}", self.auto_rotate))
         }
-        else if config == "cLand" {
+        else if config == "-cLand" {
             self.land = value.parse::<bool>().unwrap();
-            Ok(format!("Set cLand to {}", self.land))
+            Ok(format!("Set Land to {}", self.land))
         }
-        else if config == "cSwims" {
+        else if config == "-cSwims" {
             self.swims = value.parse::<bool>().unwrap();
-            Ok(format!("Set cSwims to {}", self.swims))
+            Ok(format!("Set Swims to {}", self.swims))
         }
-        else if config == "cUnderwater" {
+        else if config == "-cUnderwater" {
             self.underwater = value.parse::<bool>().unwrap();
-            Ok(format!("Set cUnderwater to {}", self.underwater))
+            Ok(format!("Set Underwater to {}", self.underwater))
         }
-        else if config == "cSurface" {
+        else if config == "-cSurface" {
             self.surface = value.parse::<bool>().unwrap();
-            Ok(format!("Set cSurface to {}", self.surface))
+            Ok(format!("Set Surface to {}", self.surface))
         }
-        else if config == "cSubmerge" {
+        else if config == "-cSubmerge" {
             self.submerge = value.parse::<bool>().unwrap();
-            Ok(format!("Set cSubmerge to {}", self.submerge))
+            Ok(format!("Set Submerge to {}", self.submerge))
         }
-        else if config == "cOnlySwims" {
+        else if config == "-cOnlySwims" {
             self.only_swims = value.parse::<bool>().unwrap();
-            Ok(format!("Set cOnlySwims to {}", self.only_swims))
+            Ok(format!("Set Only Swims to {}", self.only_swims))
         }
-        else if config == "cNeedsConfirm" {
+        else if config == "-cNeedsConfirm" {
             self.needs_confirm = value.parse::<bool>().unwrap();
-            Ok(format!("Set cNeedsConfirm to {}", self.needs_confirm))
+            Ok(format!("Set Needs Confirm to {}", self.needs_confirm))
         }
-        else if config == "cGawkOnlyFromFront" {
+        else if config == "-cGawkOnlyFromFront" {
             self.gawk_only_from_front = value.parse::<bool>().unwrap();
-            Ok(format!("Set cGawkOnlyFromFront to {}", self.gawk_only_from_front))
+            Ok(format!("Set Gawk Only From Front to {}", self.gawk_only_from_front))
         }
-        else if config == "cDeadOnLand" {
+        else if config == "-cDeadOnLand" {
             self.dead_on_land = value.parse::<bool>().unwrap();
-            Ok(format!("Set cDeadOnLand to {}", self.dead_on_land))
+            Ok(format!("Set Dead On Land to {}", self.dead_on_land))
         }
-        else if config == "cDeadOnFlatWater" {
+        else if config == "-cDeadOnFlatWater" {
             self.dead_on_flat_water = value.parse::<bool>().unwrap();
-            Ok(format!("Set cDeadOnFlatWater to {}", self.dead_on_flat_water))
+            Ok(format!("Set Dead On Flat Water to {}", self.dead_on_flat_water))
         }
-        else if config == "cDeadUnderwater" {
+        else if config == "-cDeadUnderwater" {
             self.dead_underwater = value.parse::<bool>().unwrap();
-            Ok(format!("Set cDeadUnderwater to {}", self.dead_underwater))
+            Ok(format!("Set Dead Underwater to {}", self.dead_underwater))
         }
-        else if config == "cUsesTreeRubble" {
+        else if config == "-cUsesTreeRubble" {
             self.uses_tree_rubble = value.parse::<bool>().unwrap();
-            Ok(format!("Set cUsesTreeRubble to {}", self.uses_tree_rubble))
+            Ok(format!("Set Uses Tree Rubble to {}", self.uses_tree_rubble))
         }
-        else if config == "cForcesSceneryRubble" {
+        else if config == "-cForcesSceneryRubble" {
             self.forces_scenery_rubble = value.parse::<bool>().unwrap();
-            Ok(format!("Set cForcesSceneryRubble to {}", self.forces_scenery_rubble))
+            Ok(format!("Set Forces Scenery Rubble to {}", self.forces_scenery_rubble))
         }
-        else if config == "cBlocksLOS" {
+        else if config == "-cBlocksLOS" {
             self.blocks_los = value.parse::<bool>().unwrap();
-            Ok(format!("Set cBlocksLOS to {}", self.blocks_los))
+            Ok(format!("Set Blocks LOS to {}", self.blocks_los))
         }
         else {
             Err("Invalid configuration option")
@@ -455,7 +446,7 @@ impl ZTSceneryType {
     }
 
     fn print_config(&self) -> String {
-        format!("Purchase Cost: {:.2}\nName ID: {}\nHelp ID: {}\nHabitat: {}\nLocation: {}\nEra: {}\nMax Food Units: {}\nStink: {}\nEsthetic Weight: {}\nSelectable: {}\nDeletable: {}\nFoliage: {}\nAuto Rotate: {}\nLand: {}\nSwims: {}\nUnderwater: {}\nSurface: {}\nSubmerge: {}\nOnly Swims: {}\nNeeds Confirm: {}\nGawk Only From Front: {}\nDead On Land: {}\nDead On Flat Water: {}\nDead Underwater: {}\nUses Tree Rubble: {}\nForces Scenery Rubble: {}\nBlocks LOS: {}\n",
+        format!("cPurchaseCost: {}\ncNameID: {}\ncHelpID: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncMaxFoodUnits: {}\ncStink: {}\ncEstheticWeight: {}\ncSelectable: {}\ncDeletable: {}\ncFoliage: {}\ncAutoRotate: {}\ncLand: {}\ncSwims: {}\ncUnderwater: {}\ncSurface: {}\ncSubmerge: {}\ncOnlySwims: {}\ncNeedsConfirm: {}\ncGawkOnlyFromFront: {}\ncDeadOnLand: {}\ncDeadOnFlatWater: {}\ncDeadUnderwater: {}\ncUsesTreeRubble: {}\ncForcesSceneryRubble: {}\ncBlocksLOS: {}\n",
         self.purchase_cost,
         self.name_id,
         self.help_id,
@@ -497,7 +488,7 @@ fn command_selected_scenery(_args: Vec<&str>) -> Result<String, &'static str> {
 
     // if no selected entity type, return error
     if _args.len() == 0 {
-        return Ok(format!("[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n", entity_type_print, scenery_type.bfentitytype.get_type_name(), scenery_type.bfentitytype.get_codename()));
+        return Ok(format!("\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n", entity_type_print, scenery_type.bfentitytype.get_type_name(), scenery_type.bfentitytype.get_codename()));
     }
 
     // if -v flag is used, print the entity type configuration and other details
