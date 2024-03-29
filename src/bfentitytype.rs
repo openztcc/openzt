@@ -70,13 +70,13 @@ impl BFEntityType {
     // returns the codename of the entity type
     fn get_codename(&self) -> String {
         let obj_ptr = self as *const BFEntityType as u32;
-        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x098))
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x0A4))
     }
 
     // returns the type name of the entity type
     fn get_type_name(&self) -> String {
         let obj_ptr = self as *const BFEntityType as u32;
-        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x0A4))
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x098))
     }
 
     // allows setting the configuration of the entity type
