@@ -29,7 +29,7 @@ mod ztadvterrainmgr;
 
 mod expansions;
 
-mod bfentitytype;
+pub mod bfentitytype;
 
 mod ztgamemgr;
 
