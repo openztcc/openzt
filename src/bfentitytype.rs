@@ -531,12 +531,13 @@ struct ZTBuildingType {
     i_capacity: i32, // 0x16C
     toy_satisfaction: i32, // 0x170
     time_inside: i32, // 0x174
-    default_cost: i32, // 0x178
-    low_cost: i32, // 0x17C
-    med_cost: i32, // 0x180
-    high_cost: i32, // 0x184
-    price_factor: i32, // 0x188 
-    upkeep: i32, // 0x18C
+    default_cost: f32, // 0x178
+    low_cost: f32, // 0x17C
+    med_cost: f32, // 0x180
+    high_cost: f32, // 0x184
+    price_factor: f32, // 0x188 
+    upkeep: f32, // 0x18C
+    pad1: [u8; 0x194 - 0x190], // -- padding: 
     hide_user: bool, // 0x194
     set_letter_facing: bool, // 0x195
     draw_user: bool, // 0x196
@@ -547,6 +548,7 @@ struct ZTBuildingType {
     user_tracker: bool, // 0x19B
     idler: bool, // 0x19C
     exhibit_viewer: bool, // 0x19D
+    pad2: [u8; 0x1A0 - 0x19E], // -- padding: 2 bytes
     alternate_panel_title: u32, // 0x1A0
     direct_entrance: bool, // 0x1A4
     hide_building: bool, // 0x1A5
@@ -554,6 +556,7 @@ struct ZTBuildingType {
     user_teleports_inside: bool, // 0x1A7
     user_uses_exit: bool, // 0x1A8
     user_uses_entrance_as_emergency_exit: bool, // 0x1A9
+    pad3: [u8; 0x1B8 - 0x1AA], // -- padding: 9 bytes
     adult_change: i32, // 0x1B8
     child_change: i32, // 0x1BC
     hunger_change: i32, // 0x1C0
@@ -575,6 +578,7 @@ impl ZTBuildingType {
         }
     }
 
+    // sets the configuration of the building type in the console
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
         if config == "-cCapacity" {
             self.i_capacity = value.parse::<i32>().unwrap();
@@ -589,27 +593,27 @@ impl ZTBuildingType {
             Ok(format!("Set Time Inside to {}", self.time_inside))
         }
         else if config == "-cDefaultCost" {
-            self.default_cost = value.parse::<i32>().unwrap();
+            self.default_cost = value.parse::<f32>().unwrap();
             Ok(format!("Set Default Cost to {}", self.default_cost))
         }
         else if config == "-cLowCost" {
-            self.low_cost = value.parse::<i32>().unwrap();
+            self.low_cost = value.parse::<f32>().unwrap();
             Ok(format!("Set Low Cost to {}", self.low_cost))
         }
         else if config == "-cMedCost" {
-            self.med_cost = value.parse::<i32>().unwrap();
+            self.med_cost = value.parse::<f32>().unwrap();
             Ok(format!("Set Med Cost to {}", self.med_cost))
         }
         else if config == "-cHighCost" {
-            self.high_cost = value.parse::<i32>().unwrap();
+            self.high_cost = value.parse::<f32>().unwrap();
             Ok(format!("Set High Cost to {}", self.high_cost))
         }
         else if config == "-cPriceFactor" {
-            self.price_factor = value.parse::<i32>().unwrap();
+            self.price_factor = value.parse::<f32>().unwrap();
             Ok(format!("Set Price Factor to {}", self.price_factor))
         }
         else if config == "-cUpkeep" {
-            self.upkeep = value.parse::<i32>().unwrap();
+            self.upkeep = value.parse::<f32>().unwrap();
             Ok(format!("Set Upkeep to {}", self.upkeep))
         }
         else if config == "-cHideUser" {
@@ -710,8 +714,9 @@ impl ZTBuildingType {
 
     }
 
+    // prints the configuration of the entity type
     fn print_config(&self) -> String {
-        format!("cCapacity: {}\ncToySatisfaction: {}\ncTimeInside: {}\ncDefaultCost: {}\ncLowCost: {}\ncMedCost: {}\ncHighCost: {}\ncPriceFactor: {}\ncUpkeep: {}\ncHideUser: {}\ncSetLetterFacing: {}\ncDrawUser: {}\ncHideCostChange: {}\ncHideCommerceInfo: {}\ncHideRegularInfo: {}\ncHoldsOntoUser: {}\ncUserTracker: {}\ncIdler: {}\ncExhibitViewer: {}\ncAlternatePanelTitle: {}\ncDirectEntrance: {}\ncHideBuilding: {}\ncUserStaysOutside: {}\ncUserTeleportsInside: {}\ncUserUsesExit: {}\ncUserUsesEntranceAsEmergencyExit: {}\ncAdultChange: {}\ncChildChange: {}\ncHungerChange: {}\ncThirstChange: {}\ncBathroomChange: {}\ncEnergyChange: {}\n",
+        format!("cCapacity: {}\ncToySatisfaction: {}\ncTimeInside: {}\ncDefaultCost: {:.2}\ncLowCost: {:.2}\ncMedCost: {:.2}\ncHighCost: {:.2}\ncPriceFactor: {:.2}\ncUpkeep: {:.2}\ncHideUser: {}\ncSetLetterFacing: {}\ncDrawUser: {}\ncHideCostChange: {}\ncHideCommerceInfo: {}\ncHideRegularInfo: {}\ncHoldsOntoUser: {}\ncUserTracker: {}\ncIdler: {}\ncExhibitViewer: {}\ncAlternatePanelTitle: {}\ncDirectEntrance: {}\ncHideBuilding: {}\ncUserStaysOutside: {}\ncUserTeleportsInside: {}\ncUserUsesExit: {}\ncUserUsesEntranceAsEmergencyExit: {}\ncAdultChange: {}\ncChildChange: {}\ncHungerChange: {}\ncThirstChange: {}\ncBathroomChange: {}\ncEnergyChange: {}\n",
         self.i_capacity,
         self.toy_satisfaction,
         self.time_inside,
@@ -771,9 +776,12 @@ fn command_selected_building(_args: Vec<&str>) -> Result<String, &'static str> {
         Ok(building_type.ztscenerytype.bfentitytype.print_config() + &building_type.ztscenerytype.print_config() + &building_type.print_config())
     }
     else if _args.len() == 2 {
+        // test for arguments in the entity type, scenery type, and building type
         let result_entity_type = building_type.ztscenerytype.bfentitytype.set_config(_args[0], _args[1]);
         let result_scenery_type = building_type.ztscenerytype.set_config(_args[0], _args[1]);
         let result_building_type = building_type.set_config(_args[0], _args[1]);
+
+        // return the result of the first successful configuration change
         if result_entity_type.is_ok() {
             return result_entity_type;
         }
