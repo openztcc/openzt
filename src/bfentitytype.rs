@@ -260,8 +260,13 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
         Ok(entity_type.print_config())
     }
     else if _args.len() == 2 {
-        entity_type.set_config(_args[0], _args[1]);
-        Ok("\n[/End of configuration]".to_string())
+        let result = entity_type.set_config(_args[0], _args[1]);
+        if result.is_ok() {
+            return result;
+        }
+        else {
+            return Err("Invalid configuration option");
+        }
     }
     else {
         Ok("Invalid argument".to_string())
@@ -271,6 +276,7 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
 pub fn init() {
     add_to_command_register("selected_type".to_string(), command_selected_type);
     add_to_command_register("selected_scenery".to_string(), command_selected_scenery);
+    add_to_command_register("selected_building".to_string(), command_selected_building);
 }
 
 
@@ -310,6 +316,7 @@ struct ZTSceneryType {
     uses_tree_rubble: bool, // 0x139
     forces_scenery_rubble: bool, // 0x13A
     blocks_los: bool, // 0x13B
+    pad7: [u8; 0x16C - 0x13C], // -- padding: 51 bytes
 }
 
 impl ZTSceneryType {
@@ -506,6 +513,283 @@ fn command_selected_scenery(_args: Vec<&str>) -> Result<String, &'static str> {
         }
         else if result_scenery_type.is_ok() {
             return result_scenery_type;
+        }
+        else {
+            return Err("Invalid configuration option");
+        }
+    }
+    else {
+        Ok("Invalid argument".to_string())
+    }
+}
+
+// ------------ ZTBuildingType, Implementation, and Related Functions ------------ //
+#[derive(Debug)]
+#[repr(C)]
+struct ZTBuildingType {
+    ztscenerytype: ZTSceneryType, // 0x000
+    i_capacity: i32, // 0x16C
+    toy_satisfaction: i32, // 0x170
+    time_inside: i32, // 0x174
+    default_cost: f32, // 0x178
+    low_cost: f32, // 0x17C
+    med_cost: f32, // 0x180
+    high_cost: f32, // 0x184
+    price_factor: f32, // 0x188 
+    upkeep: f32, // 0x18C
+    pad1: [u8; 0x194 - 0x190], // -- padding: 
+    hide_user: bool, // 0x194
+    set_letter_facing: bool, // 0x195
+    draw_user: bool, // 0x196
+    hide_cost_change: bool, // 0x197
+    hide_commerce_info: bool, // 0x198
+    hide_regular_info: bool, // 0x199
+    holds_onto_user: bool, // 0x19A
+    user_tracker: bool, // 0x19B
+    idler: bool, // 0x19C
+    exhibit_viewer: bool, // 0x19D
+    pad2: [u8; 0x1A0 - 0x19E], // -- padding: 2 bytes
+    alternate_panel_title: u32, // 0x1A0
+    direct_entrance: bool, // 0x1A4
+    hide_building: bool, // 0x1A5
+    user_stays_outside: bool, // 0x1A6
+    user_teleports_inside: bool, // 0x1A7
+    user_uses_exit: bool, // 0x1A8
+    user_uses_entrance_as_emergency_exit: bool, // 0x1A9
+    pad3: [u8; 0x1B8 - 0x1AA], // -- padding: 9 bytes
+    adult_change: i32, // 0x1B8
+    child_change: i32, // 0x1BC
+    hunger_change: i32, // 0x1C0
+    thirst_change: i32, // 0x1C4
+    bathroom_change: i32, // 0x1C8
+    energy_change: i32, // 0x1CC
+}
+
+impl ZTBuildingType {
+    fn new (address: u32) -> Option<&'static mut ZTBuildingType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTBuildingType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            }
+            else {
+                None
+            }
+        }
+    }
+
+    // sets the configuration of the building type in the console
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cCapacity" {
+            self.i_capacity = value.parse::<i32>().unwrap();
+            Ok(format!("Set Capacity to {}", self.i_capacity))
+        }
+        else if config == "-cToySatisfaction" {
+            self.toy_satisfaction = value.parse::<i32>().unwrap();
+            Ok(format!("Set Toy Satisfaction to {}", self.toy_satisfaction))
+        }
+        else if config == "-cTimeInside" {
+            self.time_inside = value.parse::<i32>().unwrap();
+            Ok(format!("Set Time Inside to {}", self.time_inside))
+        }
+        else if config == "-cDefaultCost" {
+            self.default_cost = value.parse::<f32>().unwrap();
+            Ok(format!("Set Default Cost to {}", self.default_cost))
+        }
+        else if config == "-cLowCost" {
+            self.low_cost = value.parse::<f32>().unwrap();
+            Ok(format!("Set Low Cost to {}", self.low_cost))
+        }
+        else if config == "-cMedCost" {
+            self.med_cost = value.parse::<f32>().unwrap();
+            Ok(format!("Set Med Cost to {}", self.med_cost))
+        }
+        else if config == "-cHighCost" {
+            self.high_cost = value.parse::<f32>().unwrap();
+            Ok(format!("Set High Cost to {}", self.high_cost))
+        }
+        else if config == "-cPriceFactor" {
+            self.price_factor = value.parse::<f32>().unwrap();
+            Ok(format!("Set Price Factor to {}", self.price_factor))
+        }
+        else if config == "-cUpkeep" {
+            self.upkeep = value.parse::<f32>().unwrap();
+            Ok(format!("Set Upkeep to {}", self.upkeep))
+        }
+        else if config == "-cHideUser" {
+            self.hide_user = value.parse::<bool>().unwrap();
+            Ok(format!("Set Hide User to {}", self.hide_user))
+        }
+        else if config == "-cSetLetterFacing" {
+            self.set_letter_facing = value.parse::<bool>().unwrap();
+            Ok(format!("Set Set Letter Facing to {}", self.set_letter_facing))
+        }
+        else if config == "-cDrawUser" {
+            self.draw_user = value.parse::<bool>().unwrap();
+            Ok(format!("Set Draw User to {}", self.draw_user))
+        }
+        else if config == "-cHideCostChange" {
+            self.hide_cost_change = value.parse::<bool>().unwrap();
+            Ok(format!("Set Hide Cost Change to {}", self.hide_cost_change))
+        }
+        else if config == "-cHideCommerceInfo" {
+            self.hide_commerce_info = value.parse::<bool>().unwrap();
+            Ok(format!("Set Hide Commerce Info to {}", self.hide_commerce_info))
+        }
+        else if config == "-cHideRegularInfo" {
+            self.hide_regular_info = value.parse::<bool>().unwrap();
+            Ok(format!("Set Hide Regular Info to {}", self.hide_regular_info))
+        }
+        else if config == "-cHoldsOntoUser" {
+            self.holds_onto_user = value.parse::<bool>().unwrap();
+            Ok(format!("Set Holds Onto User to {}", self.holds_onto_user))
+        }
+        else if config == "-cUserTracker" {
+            self.user_tracker = value.parse::<bool>().unwrap();
+            Ok(format!("Set User Tracker to {}", self.user_tracker))
+        }
+        else if config == "-cIdler" {
+            self.idler = value.parse::<bool>().unwrap();
+            Ok(format!("Set Idler to {}", self.idler))
+        }
+        else if config == "-cExhibitViewer" {
+            self.exhibit_viewer = value.parse::<bool>().unwrap();
+            Ok(format!("Set Exhibit Viewer to {}", self.exhibit_viewer))
+        }
+        else if config == "-cAlternatePanelTitle" {
+            self.alternate_panel_title = value.parse::<u32>().unwrap();
+            Ok(format!("Set Alternate Panel Title to {}", self.alternate_panel_title))
+        }
+        else if config == "-cDirectEntrance" {
+            self.direct_entrance = value.parse::<bool>().unwrap();
+            Ok(format!("Set Direct Entrance to {}", self.direct_entrance))
+        }
+        else if config == "-cHideBuilding" {
+            self.hide_building = value.parse::<bool>().unwrap();
+            Ok(format!("Set Hide Building to {}", self.hide_building))
+        }
+        else if config == "-cUserStaysOutside" {
+            self.user_stays_outside = value.parse::<bool>().unwrap();
+            Ok(format!("Set User Stays Outside to {}", self.user_stays_outside))
+        }
+        else if config == "-cUserTeleportsInside" {
+            self.user_teleports_inside = value.parse::<bool>().unwrap();
+            Ok(format!("Set User Teleports Inside to {}", self.user_teleports_inside))
+        }
+        else if config == "-cUserUsesExit" {
+            self.user_uses_exit = value.parse::<bool>().unwrap();
+            Ok(format!("Set User Uses Exit to {}", self.user_uses_exit))
+        }
+        else if config == "-cUserUsesEntranceAsEmergencyExit" {
+            self.user_uses_entrance_as_emergency_exit = value.parse::<bool>().unwrap();
+            Ok(format!("Set User Uses Entrance As Emergency Exit to {}", self.user_uses_entrance_as_emergency_exit))
+        }
+        else if config == "-cAdultChange" {
+            self.adult_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Adult Change to {}", self.adult_change))
+        }
+        else if config == "-cChildChange" {
+            self.child_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Child Change to {}", self.child_change))
+        }
+        else if config == "-cHungerChange" {
+            self.hunger_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Hunger Change to {}", self.hunger_change))
+        }
+        else if config == "-cThirstChange" {
+            self.thirst_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Thirst Change to {}", self.thirst_change))
+        }
+        else if config == "-cBathroomChange" {
+            self.bathroom_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Bathroom Change to {}", self.bathroom_change))
+        }
+        else if config == "-cEnergyChange" {
+            self.energy_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Energy Change to {}", self.energy_change))
+        }
+        else {
+            Err("Invalid configuration option")
+        }
+
+    }
+
+    // prints the configuration of the entity type
+    fn print_config(&self) -> String {
+        format!("cCapacity: {}\ncToySatisfaction: {}\ncTimeInside: {}\ncDefaultCost: {:.2}\ncLowCost: {:.2}\ncMedCost: {:.2}\ncHighCost: {:.2}\ncPriceFactor: {:.2}\ncUpkeep: {:.2}\ncHideUser: {}\ncSetLetterFacing: {}\ncDrawUser: {}\ncHideCostChange: {}\ncHideCommerceInfo: {}\ncHideRegularInfo: {}\ncHoldsOntoUser: {}\ncUserTracker: {}\ncIdler: {}\ncExhibitViewer: {}\ncAlternatePanelTitle: {}\ncDirectEntrance: {}\ncHideBuilding: {}\ncUserStaysOutside: {}\ncUserTeleportsInside: {}\ncUserUsesExit: {}\ncUserUsesEntranceAsEmergencyExit: {}\ncAdultChange: {}\ncChildChange: {}\ncHungerChange: {}\ncThirstChange: {}\ncBathroomChange: {}\ncEnergyChange: {}\n",
+        self.i_capacity,
+        self.toy_satisfaction,
+        self.time_inside,
+        self.default_cost,
+        self.low_cost,
+        self.med_cost,
+        self.high_cost,
+        self.price_factor,
+        self.upkeep,
+        self.hide_user as u32,
+        self.set_letter_facing as u32,
+        self.draw_user as u32,
+        self.hide_cost_change as u32,
+        self.hide_commerce_info as u32,
+        self.hide_regular_info as u32,
+        self.holds_onto_user as u32,
+        self.user_tracker as u32,
+        self.idler as u32,
+        self.exhibit_viewer as u32,
+        self.alternate_panel_title,
+        self.direct_entrance as u32,
+        self.hide_building as u32,
+        self.user_stays_outside as u32,
+        self.user_teleports_inside as u32,
+        self.user_uses_exit as u32,
+        self.user_uses_entrance_as_emergency_exit as u32,
+        self.adult_change,
+        self.child_change,
+        self.hunger_change,
+        self.thirst_change,
+        self.bathroom_change,
+        self.energy_change,
+        )
+    }
+}
+
+fn command_selected_building(_args: Vec<&str>) -> Result<String, &'static str> {
+    let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
+    let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
+    if entity_type_address == 0 {
+        return Err("No entity selected");
+    }
+    let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+    let type_name = building_type.ztscenerytype.bfentitytype.get_type_name();
+    let codename = building_type.ztscenerytype.bfentitytype.get_codename();
+
+    // if no selected entity type, return error
+    if _args.len() == 0 {
+        return Ok(format!("\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n", entity_type_print, type_name, codename));
+    }
+
+    // if -v flag is used, print the entity type configuration and other details
+    if _args[0] == "-v" {
+
+        info!("Printing configuration for entity type at address {:#x}", entity_type_print);
+
+        Ok(building_type.ztscenerytype.bfentitytype.print_config() + &building_type.ztscenerytype.print_config() + &building_type.print_config())
+    }
+    else if _args.len() == 2 {
+        // test for arguments in the entity type, scenery type, and building type
+        let result_entity_type = building_type.ztscenerytype.bfentitytype.set_config(_args[0], _args[1]);
+        let result_scenery_type = building_type.ztscenerytype.set_config(_args[0], _args[1]);
+        let result_building_type = building_type.set_config(_args[0], _args[1]);
+
+        // return the result of the first successful configuration change
+        if result_entity_type.is_ok() {
+            return result_entity_type;
+        }
+        else if result_scenery_type.is_ok() {
+            return result_scenery_type;
+        }
+        else if result_building_type.is_ok() {
+            return result_building_type;
         }
         else {
             return Err("Invalid configuration option");
