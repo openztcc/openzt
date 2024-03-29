@@ -1,12 +1,12 @@
 
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
-use crate::add_to_command_register;
+use crate::{add_to_command_register, bfentitytype};
+use crate::bfentitytype::ZTSceneryType;
 
 use tracing::info;
 use std::collections::HashMap;
 use std::fmt;
 use num_enum::FromPrimitive;
-
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 
@@ -67,6 +67,7 @@ pub fn init() {
     add_to_command_register("list_types".to_owned(), command_get_zt_world_mgr_types);
     add_to_command_register("get_zt_world_mgr".to_owned(), command_get_zt_world_mgr);
     add_to_command_register("get_types_summary".to_owned(), command_zt_world_mgr_types_summary);
+    add_to_command_register("make_sel".to_owned(), command_make_sel);
 }
 
 
@@ -252,4 +253,51 @@ fn get_zt_world_mgr_types(zt_world_mgr: &zt_world_mgr) -> Vec<ZtEntityType> {
         i += 0x4;
     }
     return entity_types;
+}
+
+fn get_entity_type_by_id(id: u32) -> u32 {
+    let zt_world_mgr = read_zt_world_mgr_from_global();
+    let entity_type_array_start = zt_world_mgr.entity_type_array_start;
+    let entity_type_array_end = zt_world_mgr.entity_type_array_end;
+
+    let mut i = (entity_type_array_end - entity_type_array_start) / 0x4;
+
+    info!("Searching {} entity types for id {}", i, id);
+
+    i -= 1;
+
+    while i > 0 {
+        let entity_type_ptr = entity_type_array_start + i * 0x4;
+        info!("Checking entity type at {:#x}", entity_type_ptr);
+        let entity_type = ZTSceneryType::new(entity_type_ptr).unwrap();
+        info!("Entity type name id: {}", entity_type.name_id);
+        if entity_type.name_id == id {
+            info!("Found entity type {}", entity_type.bfentitytype.get_type_name());
+            return entity_type_ptr;
+        }
+        else {
+            info!("Entity type {} does not match", entity_type.bfentitytype.get_type_name());
+            i -= 1;
+        }
+    }
+    0
+}
+
+fn command_make_sel(_args: Vec<&str>) -> Result<String, &'static str> {
+    if _args.len() < 1 {
+        return Err("Usage: make_sel <id>");
+    }
+    else {
+        let id = _args[0].parse::<u32>().unwrap();
+        let entity_type_ptr = get_entity_type_by_id(id);
+        if entity_type_ptr == 0 {
+            return Err("Entity type not found");
+        }
+        let entity_type = ZTSceneryType::new(entity_type_ptr).unwrap();
+        if entity_type.selectable {
+            return Ok(format!("Entity type {} is already selectable", entity_type.bfentitytype.get_type_name()));
+        }
+        entity_type.selectable = true;
+        Ok(format!("Entity type {} is now selectable", entity_type.bfentitytype.get_type_name()))
+    }
 }
