@@ -10,48 +10,48 @@ use tracing::info;
 
 #[derive(Debug)]
 #[repr(C)]
-struct BFEntityType {
-    pad1: [u8; 0x038], // -- padding: 56 bytes
-    ncolors: u32, // 0x038
-    pad2: [u8; 0x050 - 0x03C], // -- padding: 20 bytes
-    icon_zoom: bool, // 0x050
-    pad3: [u8; 0x054 - 0x051], // -- padding: 3 bytes
-    expansion_id: bool, // 0x054
-    movable: bool, // 0x055
-    walkable: bool, // 0x056
-    walkable_by_tall: bool, // 0x057
-    pad4: [u8; 0x059 - 0x058], // -- padding: 1 byte
-    rubbleable: bool, // 0x059
-    pad5: [u8; 0x05B - 0x05A], // -- padding: 1 byte
-    use_numbers_in_name: bool, // 0x05B
-    uses_real_shadows: bool, // 0x05C
-    has_shadow_images: bool, // 0x05D
-    force_shadow_black: bool, // 0x05E
-    pad6: [u8; 0x060 - 0x05F], // -- padding: 1 byte
-    draws_late: bool, // 0x060
-    pad7: [u8; 0x064 - 0x061], // -- padding: 3 bytes
-    height: u32, // 0x064
-    depth: u32, // 0x068
-    has_underwater_section: bool, // 0x06C
-    is_transient: bool, // 0x06D
-    uses_placement_cube: bool, // 0x06E
-    show: bool, // 0x06F
-    hit_threshold: u32, // 0x070
-    avoid_edges: bool, // 0x074
-    pad10: [u8; 0x0B4 - 0x075], // -- padding: 47 bytes
-    footprintx: i32, // 0x0B4
-    footprinty: i32, // 0x0B8
-    footprintz: i32, // 0x0BC
-    placement_footprintx: i32, // 0x0C0
-    placement_footprinty: i32, // 0x0C4
-    placement_footprintz: i32, // 0x0C8
-    available_at_startup: bool, // 0x0CC
-    pad11: [u8; 0x100 - 0x0CD], // -- padding: 35 bytes
+pub struct BFEntityType {
+    pad1: [u8; 0x038],         // ----------------------- padding: 56 bytes
+    pub ncolors: u32, // 0x038
+    pad2: [u8; 0x050 - 0x03C], // ----------------------- padding: 20 bytes
+    pub icon_zoom: bool, // 0x050
+    pad3: [u8; 0x054 - 0x051], // ----------------------- padding: 3 bytes
+    pub expansion_id: bool, // 0x054
+    pub movable: bool, // 0x055
+    pub walkable: bool, // 0x056
+    pub walkable_by_tall: bool, // 0x057
+    pad4: [u8; 0x059 - 0x058], // ----------------------- padding: 1 byte
+    pub rubbleable: bool, // 0x059
+    pad5: [u8; 0x05B - 0x05A], // ----------------------- padding: 1 byte
+    pub use_numbers_in_name: bool, // 0x05B
+    pub uses_real_shadows: bool, // 0x05C
+    pub has_shadow_images: bool, // 0x05D
+    pub force_shadow_black: bool, // 0x05E
+    pad6: [u8; 0x060 - 0x05F], // ----------------------- padding: 1 byte
+    pub draws_late: bool, // 0x060
+    pad7: [u8; 0x064 - 0x061], // ----------------------- padding: 3 bytes
+    pub height: u32, // 0x064
+    pub depth: u32, // 0x068
+    pub has_underwater_section: bool, // 0x06C
+    pub is_transient: bool, // 0x06D
+    pub uses_placement_cube: bool, // 0x06E
+    pub show: bool, // 0x06F
+    pub hit_threshold: u32, // 0x070
+    pub avoid_edges: bool, // 0x074
+    pad10: [u8; 0x0B4 - 0x075], // ----------------------- padding: 47 bytes
+    pub footprintx: i32, // 0x0B4
+    pub footprinty: i32, // 0x0B8
+    pub footprintz: i32, // 0x0BC
+    pub placement_footprintx: i32, // 0x0C0
+    pub placement_footprinty: i32, // 0x0C4
+    pub placement_footprintz: i32, // 0x0C8
+    pub available_at_startup: bool, // 0x0CC
+    pad11: [u8; 0x100 - 0x0CD], // ----------------------- padding: 35 bytes
 }
 
 impl BFEntityType {
     // returns the instance of the BFEntityType struct
-    fn new(address: u32) -> Option<&'static mut BFEntityType> {
+    pub fn new(address: u32) -> Option<&'static mut BFEntityType> {
         unsafe {
             // get the pointer to the BFEntityType instance    
             let ptr = get_from_memory::<*mut BFEntityType>(address);
@@ -68,18 +68,18 @@ impl BFEntityType {
     }
 
     // returns the codename of the entity type
-    fn get_codename(&self) -> String {
+    pub fn get_codename(&self) -> String {
         let obj_ptr = self as *const BFEntityType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x0A4))
     }
 
     // returns the type name of the entity type
-    fn get_type_name(&self) -> String {
+    pub fn get_type_name(&self) -> String {
         let obj_ptr = self as *const BFEntityType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x098))
     }
 
-    fn get_info_image_name(&self) -> String {
+    pub fn get_info_image_name(&self) -> String {
         let obj_ptr = self as *const BFEntityType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x148))
     }
@@ -253,43 +253,43 @@ impl BFEntityType {
 
 #[derive(Debug)]
 #[repr(C)]
-struct ZTSceneryType {
-    bfentitytype: BFEntityType, // 0x000
-    purchase_cost: f32, // 0x100
-    name_id: u32, // 0x104
-    help_id: u32, // 0x108
-    habitat: u32, // 0x10C
-    location: u32, // 0x110
-    era: u32, // 0x114
-    max_food_units: u32, // 0x118
-    stink: bool, // 0x11C
-    pad3: [u8; 0x120 - 0x11D], // -- padding: 3 bytes
-    esthetic_weight: u32, // 0x120
-    pad4: [u8; 0x128 - 0x124], // -- padding: 4 bytes
-    selectable: bool, // 0x128
-    deletable: bool, // 0x129
-    foliage: bool, // 0x12A
-    pad6: [u8; 0x12D - 0x12B], // -- padding: 2 bytes
-    auto_rotate: bool, // 0x12D
-    land: bool, // 0x12E
-    swims: bool, // 0x12F
-    underwater: bool, // 0x130
-    surface: bool, // 0x131
-    submerge: bool, // 0x132
-    only_swims: bool, // 0x133
-    needs_confirm: bool, // 0x134
-    gawk_only_from_front: bool, // 0x135
-    dead_on_land: bool, // 0x136
-    dead_on_flat_water: bool, // 0x137
-    dead_underwater: bool, // 0x138
-    uses_tree_rubble: bool, // 0x139
-    forces_scenery_rubble: bool, // 0x13A
-    blocks_los: bool, // 0x13B
-    pad7: [u8; 0x16C - 0x13C], // -- padding: 51 bytes
+pub struct ZTSceneryType {
+    pub bfentitytype: BFEntityType, // bytes: 0x100 - 0x000 = 0x100 = 256 bytes
+    pub purchase_cost: f32, // 0x100
+    pub name_id: u32, // 0x104
+    pub help_id: u32, // 0x108
+    pub habitat: u32, // 0x10C
+    pub location: u32, // 0x110
+    pub era: u32, // 0x114
+    pub max_food_units: u32, // 0x118
+    pub stink: bool, // 0x11C
+    pad3: [u8; 0x120 - 0x11D], // ----------------------- padding: 3 bytes
+    pub esthetic_weight: u32, // 0x120
+    pad4: [u8; 0x128 - 0x124], // ----------------------- padding: 4 bytes
+    pub selectable: bool, // 0x128
+    pub deletable: bool, // 0x129
+    pub foliage: bool, // 0x12A
+    pad6: [u8; 0x12D - 0x12B], // ----------------------- padding: 2 bytes
+    pub auto_rotate: bool, // 0x12D
+    pub land: bool, // 0x12E
+    pub swims: bool, // 0x12F
+    pub underwater: bool, // 0x130
+    pub surface: bool, // 0x131
+    pub submerge: bool, // 0x132
+    pub only_swims: bool, // 0x133
+    pub needs_confirm: bool, // 0x134
+    pub gawk_only_from_front: bool, // 0x135
+    pub dead_on_land: bool, // 0x136
+    pub dead_on_flat_water: bool, // 0x137
+    pub dead_underwater: bool, // 0x138
+    pub uses_tree_rubble: bool, // 0x139
+    pub forces_scenery_rubble: bool, // 0x13A
+    pub blocks_los: bool, // 0x13B
+    pad7: [u8; 0x16C - 0x13C], // ----------------------- padding: 51 bytes
 }
 
 impl ZTSceneryType {
-    fn new (address: u32) -> Option<&'static mut ZTSceneryType> {
+    pub fn new (address: u32) -> Option<&'static mut ZTSceneryType> {
         unsafe {
             let ptr = get_from_memory::<*mut ZTSceneryType>(address);
             if !ptr.is_null() {
@@ -301,7 +301,7 @@ impl ZTSceneryType {
         }
     }
 
-    fn get_info_image_name(&self) -> String {
+    pub fn get_info_image_name(&self) -> String {
         let obj_ptr = self as *const ZTSceneryType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x14C))
     }
@@ -458,42 +458,42 @@ impl ZTSceneryType {
 #[derive(Debug)]
 #[repr(C)]
 struct ZTBuildingType {
-    ztscenerytype: ZTSceneryType, // 0x000
-    i_capacity: i32, // 0x16C
-    toy_satisfaction: i32, // 0x170
-    time_inside: i32, // 0x174
-    default_cost: f32, // 0x178
-    low_cost: f32, // 0x17C
-    med_cost: f32, // 0x180
-    high_cost: f32, // 0x184
-    price_factor: f32, // 0x188 
-    upkeep: f32, // 0x18C
-    pad1: [u8; 0x194 - 0x190], // -- padding: 
-    hide_user: bool, // 0x194
-    set_letter_facing: bool, // 0x195
-    draw_user: bool, // 0x196
-    hide_cost_change: bool, // 0x197
-    hide_commerce_info: bool, // 0x198
-    hide_regular_info: bool, // 0x199
-    holds_onto_user: bool, // 0x19A
-    user_tracker: bool, // 0x19B
-    idler: bool, // 0x19C
-    exhibit_viewer: bool, // 0x19D
-    pad2: [u8; 0x1A0 - 0x19E], // -- padding: 2 bytes
-    alternate_panel_title: u32, // 0x1A0
-    direct_entrance: bool, // 0x1A4
-    hide_building: bool, // 0x1A5
-    user_stays_outside: bool, // 0x1A6
-    user_teleports_inside: bool, // 0x1A7
-    user_uses_exit: bool, // 0x1A8
-    user_uses_entrance_as_emergency_exit: bool, // 0x1A9
-    pad3: [u8; 0x1B8 - 0x1AA], // -- padding: 9 bytes
-    adult_change: i32, // 0x1B8
-    child_change: i32, // 0x1BC
-    hunger_change: i32, // 0x1C0
-    thirst_change: i32, // 0x1C4
-    bathroom_change: i32, // 0x1C8
-    energy_change: i32, // 0x1CC
+    pub ztscenerytype: ZTSceneryType, // bytes: 0x16C - 0x000 = 0x16C = 364 bytes
+    pub i_capacity: i32, // 0x16C
+    pub toy_satisfaction: i32, // 0x170
+    pub time_inside: i32, // 0x174
+    pub default_cost: f32, // 0x178
+    pub low_cost: f32, // 0x17C
+    pub med_cost: f32, // 0x180
+    pub high_cost: f32, // 0x184
+    pub price_factor: f32, // 0x188 
+    pub upkeep: f32, // 0x18C
+    pad1: [u8; 0x194 - 0x190], // -------------------------- padding: 4 bytes
+    pub hide_user: bool, // 0x194
+    pub set_letter_facing: bool, // 0x195
+    pub draw_user: bool, // 0x196
+    pub hide_cost_change: bool, // 0x197
+    pub hide_commerce_info: bool, // 0x198
+    pub hide_regular_info: bool, // 0x199
+    pub holds_onto_user: bool, // 0x19A
+    pub user_tracker: bool, // 0x19B
+    pub idler: bool, // 0x19C
+    pub exhibit_viewer: bool, // 0x19D
+    pad2: [u8; 0x1A0 - 0x19E], // -------------------------- padding: 2 bytes
+    pub alternate_panel_title: u32, // 0x1A0
+    pub direct_entrance: bool, // 0x1A4
+    pub hide_building: bool, // 0x1A5
+    pub user_stays_outside: bool, // 0x1A6
+    pub user_teleports_inside: bool, // 0x1A7
+    pub user_uses_exit: bool, // 0x1A8
+    pub user_uses_entrance_as_emergency_exit: bool, // 0x1A9
+    pad3: [u8; 0x1B8 - 0x1AA], // -------------------------- padding: 9 bytes
+    pub adult_change: i32, // 0x1B8
+    pub child_change: i32, // 0x1BC
+    pub hunger_change: i32, // 0x1C0
+    pub thirst_change: i32, // 0x1C4
+    pub bathroom_change: i32, // 0x1C8
+    pub energy_change: i32, // 0x1CC
 }
 
 impl ZTBuildingType {
@@ -645,6 +645,7 @@ impl ZTBuildingType {
 
     }
 
+    // print [Configuration/Floats] section of the configuration
     fn print_config_floats(&self) -> String {
         format!("\n\n[Configuration/Floats]\n\ncDefaultCost: {:.2}\ncLowCost: {:.2}\ncMedCost: {:.2}\ncHighCost: {:.2}\ncPriceFactor: {:.2}\ncUpkeep: {:.2}\n",
         self.default_cost,
@@ -656,7 +657,7 @@ impl ZTBuildingType {
         )
     }
 
-    // prints the configuration of the entity type
+    // prints the [Configuration/Integers] section of the configuration
     fn print_config_integers(&self) -> String {
         format!("cCapacity: {}\ncToySatisfaction: {}\ncTimeInside: {}\ncHideUser: {}\ncSetLetterFacing: {}\ncDrawUser: {}\ncHideCostChange: {}\ncHideCommerceInfo: {}\ncHideRegularInfo: {}\ncHoldsOntoUser: {}\ncUserTracker: {}\ncIdler: {}\ncExhibitViewer: {}\ncAlternatePanelTitle: {}\ncDirectEntrance: {}\ncHideBuilding: {}\ncUserStaysOutside: {}\ncUserTeleportsInside: {}\ncUserUsesExit: {}\ncUserUsesEntranceAsEmergencyExit: {}\ncAdultChange: {}\ncChildChange: {}\ncHungerChange: {}\ncThirstChange: {}\ncBathroomChange: {}\ncEnergyChange: {}\n",
         self.i_capacity,
@@ -689,6 +690,8 @@ impl ZTBuildingType {
     }
 }
 
+// ------------ Custom Command Implementation ------------ //
+
 fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
     let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
@@ -705,17 +708,20 @@ fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
 
         info!("Printing configuration for entity type at address {:#x}", entity_type_print);
 
-        Ok(build_config())
+        // print the entity type configuration for the selected entity type
+        Ok(print_config_for_type())
     }
     else if _args.len() == 2 {
-        build_set_config(_args)
+        // parse the subargs for the entity type
+        parse_subargs_for_type(_args)
     }
     else {
         Ok("Invalid argument".to_string())
     }
 }
 
-fn build_config() -> String {
+// prints the configuration for the selected entity type
+fn print_config_for_type() -> String {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
     let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
     let mut config: String = String::new();
@@ -741,7 +747,8 @@ fn build_config() -> String {
     config
 }
 
-fn build_set_config(_args: Vec<&str>) -> Result<String, &'static str> {
+// parses the subargs for the entity type
+fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
 
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
     let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
@@ -768,6 +775,7 @@ fn build_set_config(_args: Vec<&str>) -> Result<String, &'static str> {
     
 }
 
+// initializes the custom command
 pub fn init() {
     add_to_command_register("sel_type".to_string(), command_sel_type);
 }
