@@ -79,6 +79,11 @@ impl BFEntityType {
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x098))
     }
 
+    fn get_info_image_name(&self) -> String {
+        let obj_ptr = self as *const BFEntityType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x148))
+    }
+
     // allows setting the configuration of the entity type
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
         if config == "cIconZoom" {
@@ -190,8 +195,8 @@ impl BFEntityType {
         }
     }
 
-    // prints the configuration of the entity type
-    fn print_config(&self) -> String {
+    // prints [colorrep] section of the configuration
+    fn print_colorrep(&self) -> String {
         // NOTE: ncolors is part of a separate structure in memory withn BFEntityType, so we need to grab the pointer to it first
         // this is temporary until the struct can be fully implemented
         let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
@@ -199,11 +204,12 @@ impl BFEntityType {
         let ncolors_ptr = get_from_memory::<u32>(entity_type_print + 0x038);
         let ncolors = get_from_memory::<u32>(ncolors_ptr);
 
-        format!("\n\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n[Configuration]\n\nncolors: {}\ncIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n",
-        self as *const BFEntityType as u32,
-        self.get_type_name(),
-        self.get_codename(),
-        ncolors,
+        format!("\n\n[colorrep]\nncolors: {}\n", ncolors)
+    }
+
+    //  prints the [Configuration/Integers] section of the configuration
+    fn print_config_integers(&self) -> String {
+        format!("cIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n",
         self.icon_zoom as u32,
         self.expansion_id as u32,
         self.movable as u32,
@@ -232,6 +238,15 @@ impl BFEntityType {
         self.available_at_startup as u32,
         )
     }
+
+    // prints misc details of the entity type
+    fn print_details(&self) -> String {
+        format!("\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n",
+        self as *const BFEntityType as u32,
+        self.get_type_name(),
+        self.get_codename(),
+        )
+    }
 }
 
 // returns the selected entity type
@@ -257,7 +272,10 @@ pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
         info!("Printing configuration for entity type at address {:#x}", entity_type_print);
         
         // print the entity type configuration
-        Ok(entity_type.print_config())
+        Ok(entity_type.print_details() + 
+        "[Configuration/Integers]\n\n" + 
+        &entity_type.print_config_integers() + 
+        &entity_type.print_colorrep() )
     }
     else if _args.len() == 2 {
         let result = entity_type.set_config(_args[0], _args[1]);
@@ -452,7 +470,7 @@ impl ZTSceneryType {
         }
     }
 
-    fn print_config(&self) -> String {
+    fn print_config_integers(&self) -> String {
         format!("cPurchaseCost: {}\ncNameID: {}\ncHelpID: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncMaxFoodUnits: {}\ncStink: {}\ncEstheticWeight: {}\ncSelectable: {}\ncDeletable: {}\ncFoliage: {}\ncAutoRotate: {}\ncLand: {}\ncSwims: {}\ncUnderwater: {}\ncSurface: {}\ncSubmerge: {}\ncOnlySwims: {}\ncNeedsConfirm: {}\ncGawkOnlyFromFront: {}\ncDeadOnLand: {}\ncDeadOnFlatWater: {}\ncDeadUnderwater: {}\ncUsesTreeRubble: {}\ncForcesSceneryRubble: {}\ncBlocksLOS: {}\n",
         self.purchase_cost,
         self.name_id,
@@ -503,7 +521,13 @@ fn command_selected_scenery(_args: Vec<&str>) -> Result<String, &'static str> {
 
         info!("Printing configuration for entity type at address {:#x}", entity_type_print);
 
-        Ok(scenery_type.bfentitytype.print_config() + &scenery_type.print_config())
+        Ok(scenery_type.bfentitytype.print_details() +
+        "\n\n[Configuration/Integers]\n" +
+        &scenery_type.bfentitytype.print_config_integers() +
+        &scenery_type.print_config_integers() +
+        "\n\n[Characteristics/Strings]\n" +
+        &scenery_type.get_info_image_name() +
+        &scenery_type.bfentitytype.print_colorrep() )
     }
     else if _args.len() == 2 {
         let result_entity_type = scenery_type.bfentitytype.set_config(_args[0], _args[1]);
@@ -714,18 +738,23 @@ impl ZTBuildingType {
 
     }
 
-    // prints the configuration of the entity type
-    fn print_config(&self) -> String {
-        format!("cCapacity: {}\ncToySatisfaction: {}\ncTimeInside: {}\ncDefaultCost: {:.2}\ncLowCost: {:.2}\ncMedCost: {:.2}\ncHighCost: {:.2}\ncPriceFactor: {:.2}\ncUpkeep: {:.2}\ncHideUser: {}\ncSetLetterFacing: {}\ncDrawUser: {}\ncHideCostChange: {}\ncHideCommerceInfo: {}\ncHideRegularInfo: {}\ncHoldsOntoUser: {}\ncUserTracker: {}\ncIdler: {}\ncExhibitViewer: {}\ncAlternatePanelTitle: {}\ncDirectEntrance: {}\ncHideBuilding: {}\ncUserStaysOutside: {}\ncUserTeleportsInside: {}\ncUserUsesExit: {}\ncUserUsesEntranceAsEmergencyExit: {}\ncAdultChange: {}\ncChildChange: {}\ncHungerChange: {}\ncThirstChange: {}\ncBathroomChange: {}\ncEnergyChange: {}\n",
-        self.i_capacity,
-        self.toy_satisfaction,
-        self.time_inside,
+    fn print_config_floats(&self) -> String {
+        format!("\n\n[Configuration/Floats]\n\ncDefaultCost: {:.2}\ncLowCost: {:.2}\ncMedCost: {:.2}\ncHighCost: {:.2}\ncPriceFactor: {:.2}\ncUpkeep: {:.2}\n",
         self.default_cost,
         self.low_cost,
         self.med_cost,
         self.high_cost,
         self.price_factor,
         self.upkeep,
+        )
+    }
+
+    // prints the configuration of the entity type
+    fn print_config_integers(&self) -> String {
+        format!("cCapacity: {}\ncToySatisfaction: {}\ncTimeInside: {}\ncHideUser: {}\ncSetLetterFacing: {}\ncDrawUser: {}\ncHideCostChange: {}\ncHideCommerceInfo: {}\ncHideRegularInfo: {}\ncHoldsOntoUser: {}\ncUserTracker: {}\ncIdler: {}\ncExhibitViewer: {}\ncAlternatePanelTitle: {}\ncDirectEntrance: {}\ncHideBuilding: {}\ncUserStaysOutside: {}\ncUserTeleportsInside: {}\ncUserUsesExit: {}\ncUserUsesEntranceAsEmergencyExit: {}\ncAdultChange: {}\ncChildChange: {}\ncHungerChange: {}\ncThirstChange: {}\ncBathroomChange: {}\ncEnergyChange: {}\n",
+        self.i_capacity,
+        self.toy_satisfaction,
+        self.time_inside,
         self.hide_user as u32,
         self.set_letter_facing as u32,
         self.draw_user as u32,
@@ -760,12 +789,10 @@ fn command_selected_building(_args: Vec<&str>) -> Result<String, &'static str> {
         return Err("No entity selected");
     }
     let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-    let type_name = building_type.ztscenerytype.bfentitytype.get_type_name();
-    let codename = building_type.ztscenerytype.bfentitytype.get_codename();
 
     // if no selected entity type, return error
     if _args.len() == 0 {
-        return Ok(format!("\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n", entity_type_print, type_name, codename));
+        return Ok(building_type.ztscenerytype.bfentitytype.print_details());
     }
 
     // if -v flag is used, print the entity type configuration and other details
@@ -773,7 +800,15 @@ fn command_selected_building(_args: Vec<&str>) -> Result<String, &'static str> {
 
         info!("Printing configuration for entity type at address {:#x}", entity_type_print);
 
-        Ok(building_type.ztscenerytype.bfentitytype.print_config() + &building_type.ztscenerytype.print_config() + &building_type.print_config())
+        Ok(building_type.ztscenerytype.bfentitytype.print_details() +
+        "\n[Configuration/Integers]\n" +
+        &building_type.ztscenerytype.bfentitytype.print_config_integers() +
+        &building_type.ztscenerytype.print_config_integers() +
+        &building_type.print_config_integers() +
+        &building_type.print_config_floats() +
+        "\n[Characteristics/Strings]\n" +
+        &building_type.ztscenerytype.get_info_image_name() +
+        &building_type.ztscenerytype.bfentitytype.print_colorrep() )
     }
     else if _args.len() == 2 {
         // test for arguments in the entity type, scenery type, and building type
