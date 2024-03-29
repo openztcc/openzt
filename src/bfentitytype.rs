@@ -690,6 +690,118 @@ impl ZTBuildingType {
     }
 }
 
+// ------------ ZTFenceType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct ZTFenceType {
+    pub ztscenerytype: ZTSceneryType, // bytes: 0x16C - 0x000 = 0x16C = 364 bytes
+    pub strength: i32, // 0x16C
+    pub life: i32, // 0x170
+    pub decayed_life: i32, // 0x174
+    pub decayed_delta: i32, // 0x178
+    pub break_sound_atten: i32, // 0x17C
+    pub open_sound_atten: i32, // 0x180
+    pub break_sound: u32, // 0x184
+    pub open_sound: u32, // 0x188
+    pad1: [u8; 0x190 - 0x18C], // -------------------------- padding: 4 bytes
+    pub see_through: bool, // 0x190
+    pub is_jumpable: bool, // 0x191
+    pub is_climbable: bool, // 0x192
+    pub indestructible: bool, // 0x193
+    pub is_electrified: bool, // 0x194
+    pub no_draw_water: bool, // 0x195
+}
+
+impl ZTFenceType {
+    pub fn new (address: u32) -> Option<&'static mut ZTFenceType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTFenceType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            }
+            else {
+                None
+            }
+        }
+    }
+
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cStrength" {
+            self.strength = value.parse::<i32>().unwrap();
+            Ok(format!("Set Strength to {}", self.strength))
+        }
+        else if config == "-cLife" {
+            self.life = value.parse::<i32>().unwrap();
+            Ok(format!("Set Life to {}", self.life))
+        }
+        else if config == "-cDecayedLife" {
+            self.decayed_life = value.parse::<i32>().unwrap();
+            Ok(format!("Set Decayed Life to {}", self.decayed_life))
+        }
+        else if config == "-cDecayedDelta" {
+            self.decayed_delta = value.parse::<i32>().unwrap();
+            Ok(format!("Set Decayed Delta to {}", self.decayed_delta))
+        }
+        else if config == "-cBreakSoundAtten" {
+            self.break_sound_atten = value.parse::<i32>().unwrap();
+            Ok(format!("Set Break Sound Atten to {}", self.break_sound_atten))
+        }
+        else if config == "-cOpenSoundAtten" {
+            self.open_sound_atten = value.parse::<i32>().unwrap();
+            Ok(format!("Set Open Sound Atten to {}", self.open_sound_atten))
+        }
+        else if config == "-cBreakSound" {
+            self.break_sound = value.parse::<u32>().unwrap();
+            Ok(format!("Set Break Sound to {}", self.break_sound))
+        }
+        else if config == "-cOpenSound" {
+            self.open_sound = value.parse::<u32>().unwrap();
+            Ok(format!("Set Open Sound to {}", self.open_sound))
+        }
+        else if config == "-cSeeThrough" {
+            self.see_through = value.parse::<bool>().unwrap();
+            Ok(format!("Set See Through to {}", self.see_through))
+        }
+        else if config == "-cIsJumpable" {
+            self.is_jumpable = value.parse::<bool>().unwrap();
+            Ok(format!("Set Is Jumpable to {}", self.is_jumpable))
+        }
+        else if config == "-cIsClimbable" {
+            self.is_climbable = value.parse::<bool>().unwrap();
+            Ok(format!("Set Is Climbable to {}", self.is_climbable))
+        }
+        else if config == "-cIndestructible" {
+            self.indestructible = value.parse::<bool>().unwrap();
+            Ok(format!("Set Indestructible to {}", self.indestructible))
+        }
+        else if config == "-cIsElectrified" {
+            self.is_electrified = value.parse::<bool>().unwrap();
+            Ok(format!("Set Is Electrified to {}", self.is_electrified))
+        }
+        else if config == "-cNoDrawWater" {
+            self.no_draw_water = value.parse::<bool>().unwrap();
+            Ok(format!("Set No Draw Water to {}", self.no_draw_water))
+        }
+        else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    fn print_config_integers(&self) -> String {
+        format!("cStrength: {}\ncLife: {}\ncDecayedLife: {}\ncDecayedDelta: {}\ncBreakSoundAtten: {}\ncOpenSoundAtten: {}\ncBreakSound: {}\ncOpenSound: {}\n",
+        self.strength,
+        self.life,
+        self.decayed_life,
+        self.decayed_delta,
+        self.break_sound_atten,
+        self.open_sound_atten,
+        self.break_sound,
+        self.open_sound,
+        )
+    } 
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
