@@ -1,6 +1,6 @@
 use std::fmt::format;
 
-use crate::{add_to_command_register, bfentitytype};
+use crate::add_to_command_register;
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
 use crate::ztui::get_selected_entity_type;
 
@@ -249,55 +249,6 @@ impl BFEntityType {
     }
 }
 
-// returns the selected entity type
-// usage: selected_type [-v] returns printed configuration of the selected entity type and other details
-// usage: selected_type [-<config> <value>] sets the configuration of the selected entity type
-pub fn command_selected_type(_args: Vec<&str>) -> Result<String, &'static str> {
-    
-    let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
-    let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
-    if entity_type_address == 0 {
-        return Err("No entity selected");
-    }
-    let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-
-    // if no selected entity type, return error
-    if _args.len() == 0 {
-        return Ok(format!("\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n", entity_type_print, entity_type.get_type_name(), entity_type.get_codename()));
-    }
-
-    // if -v flag is used, print the entity type configuration and other details
-    if _args[0] == "-v" {
-
-        info!("Printing configuration for entity type at address {:#x}", entity_type_print);
-        
-        // print the entity type configuration
-        Ok(entity_type.print_details() + 
-        "[Configuration/Integers]\n\n" + 
-        &entity_type.print_config_integers() + 
-        &entity_type.print_colorrep() )
-    }
-    else if _args.len() == 2 {
-        let result = entity_type.set_config(_args[0], _args[1]);
-        if result.is_ok() {
-            return result;
-        }
-        else {
-            return Err("Invalid configuration option");
-        }
-    }
-    else {
-        Ok("Invalid argument".to_string())
-    }
-}
-
-pub fn init() {
-    add_to_command_register("selected_type".to_string(), command_selected_type);
-    add_to_command_register("selected_scenery".to_string(), command_selected_scenery);
-    add_to_command_register("selected_building".to_string(), command_selected_building);
-}
-
-
 // ------------ ZTSceneryType, Implementation, and Related Functions ------------ //
 
 #[derive(Debug)]
@@ -502,50 +453,6 @@ impl ZTSceneryType {
         )
     }
 } 
-
-fn command_selected_scenery(_args: Vec<&str>) -> Result<String, &'static str> {
-    let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
-    let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
-    if entity_type_address == 0 {
-        return Err("No entity selected");
-    }
-    let scenery_type = ZTSceneryType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-
-    // if no selected entity type, return error
-    if _args.len() == 0 {
-        return Ok(format!("\n[Details]\n\nEntity Type Address: {:#x}\nType Name: {}\nCodename: {}\n\n", entity_type_print, scenery_type.bfentitytype.get_type_name(), scenery_type.bfentitytype.get_codename()));
-    }
-
-    // if -v flag is used, print the entity type configuration and other details
-    if _args[0] == "-v" {
-
-        info!("Printing configuration for entity type at address {:#x}", entity_type_print);
-
-        Ok(scenery_type.bfentitytype.print_details() +
-        "\n\n[Configuration/Integers]\n" +
-        &scenery_type.bfentitytype.print_config_integers() +
-        &scenery_type.print_config_integers() +
-        "\n\n[Characteristics/Strings]\n" +
-        &scenery_type.get_info_image_name() +
-        &scenery_type.bfentitytype.print_colorrep() )
-    }
-    else if _args.len() == 2 {
-        let result_entity_type = scenery_type.bfentitytype.set_config(_args[0], _args[1]);
-        let result_scenery_type = scenery_type.set_config(_args[0], _args[1]);
-        if result_entity_type.is_ok() {
-            return result_entity_type;
-        }
-        else if result_scenery_type.is_ok() {
-            return result_scenery_type;
-        }
-        else {
-            return Err("Invalid configuration option");
-        }
-    }
-    else {
-        Ok("Invalid argument".to_string())
-    }
-}
 
 // ------------ ZTBuildingType, Implementation, and Related Functions ------------ //
 #[derive(Debug)]
@@ -782,55 +689,85 @@ impl ZTBuildingType {
     }
 }
 
-fn command_selected_building(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
     let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
     if entity_type_address == 0 {
         return Err("No entity selected");
     }
-    let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
 
-    // if no selected entity type, return error
+    let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        // if -v flag is used, print the entity type configuration and other details
     if _args.len() == 0 {
-        return Ok(building_type.ztscenerytype.bfentitytype.print_details());
+        Ok(entity_type.print_details())
     }
-
-    // if -v flag is used, print the entity type configuration and other details
-    if _args[0] == "-v" {
+    else if _args[0] == "-v" {
 
         info!("Printing configuration for entity type at address {:#x}", entity_type_print);
 
-        Ok(building_type.ztscenerytype.bfentitytype.print_details() +
-        "\n[Configuration/Integers]\n" +
-        &building_type.ztscenerytype.bfentitytype.print_config_integers() +
-        &building_type.ztscenerytype.print_config_integers() +
-        &building_type.print_config_integers() +
-        &building_type.print_config_floats() +
-        "\n[Characteristics/Strings]\n" +
-        &building_type.ztscenerytype.get_info_image_name() +
-        &building_type.ztscenerytype.bfentitytype.print_colorrep() )
+        Ok(build_config())
     }
     else if _args.len() == 2 {
-        // test for arguments in the entity type, scenery type, and building type
-        let result_entity_type = building_type.ztscenerytype.bfentitytype.set_config(_args[0], _args[1]);
-        let result_scenery_type = building_type.ztscenerytype.set_config(_args[0], _args[1]);
-        let result_building_type = building_type.set_config(_args[0], _args[1]);
-
-        // return the result of the first successful configuration change
-        if result_entity_type.is_ok() {
-            return result_entity_type;
-        }
-        else if result_scenery_type.is_ok() {
-            return result_scenery_type;
-        }
-        else if result_building_type.is_ok() {
-            return result_building_type;
-        }
-        else {
-            return Err("Invalid configuration option");
-        }
+        build_set_config(_args)
     }
     else {
         Ok("Invalid argument".to_string())
     }
+}
+
+fn build_config() -> String {
+    let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
+    let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+    let mut config: String = String::new();
+
+    config.push_str(&entity_type.print_details());
+    config.push_str("\n[Configuration/Integers]\n");
+    config.push_str(&entity_type.print_config_integers());
+
+    if entity_type.get_type_name() == "building" {
+        let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&building_type.ztscenerytype.bfentitytype.print_config_integers());
+        config.push_str(&building_type.print_config_integers());
+        config.push_str(&building_type.print_config_floats());
+        config.push_str(&building_type.ztscenerytype.bfentitytype.print_colorrep());
+    }
+
+    // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
+    if entity_type.get_info_image_name() != "" {
+        config.push_str("\n[Characteristics/Strings]\n");
+        config.push_str(&entity_type.get_info_image_name());
+    }
+
+    config
+}
+
+fn build_set_config(_args: Vec<&str>) -> Result<String, &'static str> {
+
+    let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
+    let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+    let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+
+    // test for arguments in the entity type, scenery type, and building type
+    let result_entity_type = building_type.ztscenerytype.bfentitytype.set_config(_args[0], _args[1]);
+    let result_scenery_type = building_type.ztscenerytype.set_config(_args[0], _args[1]);
+    let result_building_type = building_type.set_config(_args[0], _args[1]);
+
+    // return the result of the first successful configuration change
+    if result_entity_type.is_ok() {
+        result_entity_type
+    }
+    else if result_scenery_type.is_ok() {
+        result_scenery_type
+    }
+    else if result_building_type.is_ok() {
+        result_building_type
+    }
+    else {
+        Err("Invalid configuration option")
+    }
+    
+}
+
+pub fn init() {
+    add_to_command_register("sel_type".to_string(), command_sel_type);
 }
