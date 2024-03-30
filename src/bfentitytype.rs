@@ -812,6 +812,45 @@ impl ZTFenceType {
     } 
 }
 
+// ------------ ZTFoodType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct ZTFoodType {
+    ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
+    keeper_food_type: u32, // 0x168
+}
+
+impl ZTFoodType {
+    pub fn new (address: u32) -> Option<&'static mut ZTFoodType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTFoodType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            }
+            else {
+                None
+            }
+        }
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cKeeperFoodType" {
+            self.keeper_food_type = value.parse::<u32>().unwrap();
+            Ok(format!("Set Keeper Food Type to {}", self.keeper_food_type))
+        }
+        else {
+            Err("Invalid configuration option")
+        }
+    }
+    
+    pub fn print_config_integers(&self) -> String {
+        format!("cKeeperFoodType: {}\n",
+        self.keeper_food_type,
+        )
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
@@ -861,7 +900,7 @@ fn print_config_for_type() -> String {
     if class_type == "Building"{
         info!("Entity type is a building. Printing building type configuration.");
         let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-        config.push_str(&building_type.ztscenerytype.bfentitytype.print_config_integers());
+        config.push_str(&building_type.ztscenerytype.print_config_integers());
         config.push_str(&building_type.print_config_integers());
         config.push_str(&building_type.print_config_floats());
         info!("Checking for cInfoImageName...");
@@ -876,7 +915,6 @@ fn print_config_for_type() -> String {
     else if class_type == "Scenery" {
         info!("Entity type is a scenery. Printing scenery type configuration.");
         let scenery_type = ZTSceneryType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-        config.push_str(&scenery_type.bfentitytype.print_config_integers());
         config.push_str(&scenery_type.print_config_integers());
 
         info!("Checking for cInfoImageName...");
@@ -891,7 +929,6 @@ fn print_config_for_type() -> String {
     else if class_type == "Fences" {
         info!("Entity type is a fence. Printing fence type configuration.");
         let fence_type = ZTFenceType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-        config.push_str(&fence_type.ztscenerytype.bfentitytype.print_config_integers());
         config.push_str(&fence_type.print_config_integers());
 
         info!("Checking for cInfoImageName...");
@@ -902,6 +939,21 @@ fn print_config_for_type() -> String {
             config.push_str(&entity_type.get_info_image_name());
         }
     
+    }
+    else if class_type == "Food" {
+        info!("Entity type is a food. Printing food type configuration.");
+        let food_type = ZTFoodType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&food_type.ztscenerytype.bfentitytype.print_config_integers());
+        config.push_str(&food_type.ztscenerytype.print_config_integers());
+        config.push_str(&food_type.print_config_integers());
+
+        info!("Checking for cInfoImageName...");
+        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
+        if entity_type.get_info_image_name() != "" {
+            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
+            config.push_str("\n[Characteristics/Strings]\n");
+            config.push_str(&entity_type.get_info_image_name());
+        }
     }
     else {
         info!("Entity type is not a known entity type. Printing base entity type configuration only.");
@@ -927,6 +979,7 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_scenery_type = building_type.ztscenerytype.set_config(_args[0], _args[1]);
     let result_building_type = building_type.set_config(_args[0], _args[1]);
     let result_fence_type = ZTFenceType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
+    let result_food_type = ZTFoodType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -940,6 +993,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     }
     else if result_fence_type.is_ok() {
         result_fence_type
+    }
+    else if result_food_type.is_ok() {
+        result_food_type
     }
     else {
         Err("Invalid configuration option")
