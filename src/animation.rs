@@ -1,7 +1,8 @@
 use std::mem;
 
-use crate::parsing::{read_le_primitive, read_string};
+use crate::parsing::{read_le_primitive, read_string, write_le_primitive, write_string};
 
+#[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Animation {
     header: Option<Header>,
@@ -13,14 +14,15 @@ pub struct Animation {
     //Random extra bytes?
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Header {
     ZTAF_string: u32,
-    empty_byte: u32,
+    empty_4_bytes: u32,
     extra_frame: bool,
 }
 
+#[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Frame {
     num_bytes: u32,
@@ -32,12 +34,14 @@ pub struct Frame {
     lines: Vec<Line>,
 }
 
+#[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Line {
     num_draw_instructions: u8,
     draw_instructions: Vec<DrawInstruction>,
 }
 
+#[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct DrawInstruction {
     offset: u8,
@@ -55,7 +59,7 @@ impl Animation {
             0x5A544146 => {
                 header = Some(Header {
                     ZTAF_string: maybe_header,
-                    empty_byte: read_le_primitive(data, &mut index),
+                    empty_4_bytes: read_le_primitive(data, &mut index),
                     extra_frame: read_le_primitive(data, &mut index),
                 });
                 read_le_primitive(data, &mut index)
@@ -118,6 +122,45 @@ impl Animation {
             frames,
         }
     }
+
+    pub fn write(self) -> (Vec<u8>, usize) {
+        let mut accumulator: usize = 0;
+        let mut bytes = Vec::new();
+        match self.header {
+            Some(header) => {
+                write_le_primitive(&mut bytes, header.ZTAF_string, &mut accumulator);
+                write_le_primitive(&mut bytes, header.empty_4_bytes, &mut accumulator);
+                write_le_primitive(&mut bytes, header.extra_frame, &mut accumulator);
+            },
+            None => ()
+        }
+        write_le_primitive(&mut bytes, self.animation_speed, &mut accumulator);
+        // write_le_primitive(&mut bytes, self.pallette_filename_length, &mut accumulator);
+        write_string(&mut bytes, &self.pallette_filename, &mut accumulator);
+        write_le_primitive(&mut bytes, self.num_frames, &mut accumulator);
+
+        for frame in self.frames {
+            write_le_primitive(&mut bytes, frame.num_bytes, &mut accumulator);
+            write_le_primitive(&mut bytes, frame.pixel_height, &mut accumulator);
+            write_le_primitive(&mut bytes, frame.pixel_width, &mut accumulator);
+            write_le_primitive(&mut bytes, frame.vertical_offset_y, &mut accumulator);
+            write_le_primitive(&mut bytes, frame.horizontal_offset_x, &mut accumulator);
+            write_le_primitive(&mut bytes, frame.mystery_u16, &mut accumulator);
+
+            for line in frame.lines {
+                write_le_primitive(&mut bytes, line.num_draw_instructions, &mut accumulator);
+                for draw_instruction in line.draw_instructions {
+                    write_le_primitive(&mut bytes, draw_instruction.offset, &mut accumulator);
+                    write_le_primitive(&mut bytes, draw_instruction.num_colors, &mut accumulator);
+                    for color in draw_instruction.colors {
+                        write_le_primitive(&mut bytes, color, &mut accumulator);
+                    }
+                }
+            }
+        }
+        bytes.shrink_to_fit();
+        (bytes, accumulator)
+    }
 }
 
 #[cfg(test)]
@@ -145,11 +188,20 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_simple_anim_with_header() {
-        let animation = Animation::parse(include_bytes!("../resources/test/n"));
+        let animation = Animation::parse(include_bytes!("../resources/test/N"));
         assert!(animation.header.is_some());
         assert_eq!(animation.header.unwrap().extra_frame, false);
         assert_eq!(animation.pallette_filename, "ANIMALS/01BFCC32/ICMEIOLA/ICMEIOLA.PAL".to_string());
         assert_eq!(animation.num_frames, 1);
         assert_eq!(animation.frames.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_and_write() {
+        let animation = Animation::parse(include_bytes!("../resources/test/N"));
+        let animation_to_write = animation.clone();
+        let (animation_bytes, length) = animation_to_write.write();
+        let animation_2 = Animation::parse(&animation_bytes[..]);
+        assert_eq!(animation, animation_2);
     }
 }
