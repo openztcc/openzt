@@ -286,7 +286,7 @@ pub struct ZTSceneryType {
     pub uses_tree_rubble: bool, // 0x139
     pub forces_scenery_rubble: bool, // 0x13A
     pub blocks_los: bool, // 0x13B
-    pad7: [u8; 0x16C - 0x13C], // ----------------------- padding: 51 bytes
+    pad7: [u8; 0x168 - 0x13C], // ----------------------- padding: 51 bytes
 }
 
 impl ZTSceneryType {
@@ -459,7 +459,8 @@ impl ZTSceneryType {
 #[derive(Debug)]
 #[repr(C)]
 struct ZTBuildingType {
-    pub ztscenerytype: ZTSceneryType, // bytes: 0x16C - 0x000 = 0x16C = 364 bytes
+    pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x16C = 364 bytes
+    pad0: [u8; 0x16C - 0x168], // -------------------------- padding: 4 bytes
     pub i_capacity: i32, // 0x16C
     pub toy_satisfaction: i32, // 0x170
     pub time_inside: i32, // 0x174
@@ -696,22 +697,22 @@ impl ZTBuildingType {
 #[derive(Debug)]
 #[repr(C)]
 pub struct ZTFenceType {
-    pub ztscenerytype: ZTSceneryType, // bytes: 0x16C - 0x000 = 0x16C = 364 bytes
-    pub strength: i32, // 0x16C
-    pub life: i32, // 0x170
-    pub decayed_life: i32, // 0x174
-    pub decayed_delta: i32, // 0x178
-    pub break_sound_atten: i32, // 0x17C
-    pub open_sound_atten: i32, // 0x180
-    pub break_sound: u32, // 0x184
-    pub open_sound: u32, // 0x188
-    pad1: [u8; 0x190 - 0x18C], // -------------------------- padding: 4 bytes
-    pub see_through: bool, // 0x190
-    pub is_jumpable: bool, // 0x191
-    pub is_climbable: bool, // 0x192
-    pub indestructible: bool, // 0x193
-    pub is_electrified: bool, // 0x194
-    pub no_draw_water: bool, // 0x195
+    pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
+    pub strength: i32, // 0x168
+    pub life: i32, // 0x16C
+    pub decayed_life: i32, // 0x170
+    pub decayed_delta: i32, // 0x174
+    pub break_sound_atten: i32, // 0x178
+    pub open_sound_atten: i32, // 0x17C
+    // break_sound: String, // 0x184
+    // open_sound: String, // 0x188
+    pad2: [u8; 0x194 - 0x180], // ----------------------- padding: 20 bytes
+    pub see_through: bool, // 0x194
+    pub is_jumpable: bool, // 0x195
+    pub is_climbable: bool, // 0x196
+    pub indestructible: bool, // 0x197
+    pub is_electrified: bool, // 0x198
+    pub no_draw_water: bool, // 0x199
 }
 
 impl ZTFenceType {
@@ -725,6 +726,16 @@ impl ZTFenceType {
                 None
             }
         }
+    }
+
+    fn get_break_sound(&self) -> String {
+        let obj_ptr = self as *const ZTFenceType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x184))
+    }
+
+    fn get_open_sound(&self) -> String {
+        let obj_ptr = self as *const ZTFenceType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x188))
     }
 
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
@@ -751,14 +762,6 @@ impl ZTFenceType {
         else if config == "-cOpenSoundAtten" {
             self.open_sound_atten = value.parse::<i32>().unwrap();
             Ok(format!("Set Open Sound Atten to {}", self.open_sound_atten))
-        }
-        else if config == "-cBreakSound" {
-            self.break_sound = value.parse::<u32>().unwrap();
-            Ok(format!("Set Break Sound to {}", self.break_sound))
-        }
-        else if config == "-cOpenSound" {
-            self.open_sound = value.parse::<u32>().unwrap();
-            Ok(format!("Set Open Sound to {}", self.open_sound))
         }
         else if config == "-cSeeThrough" {
             self.see_through = value.parse::<bool>().unwrap();
@@ -790,15 +793,21 @@ impl ZTFenceType {
     }
 
     fn print_config_integers(&self) -> String {
-        format!("cStrength: {}\ncLife: {}\ncDecayedLife: {}\ncDecayedDelta: {}\ncBreakSoundAtten: {}\ncOpenSoundAtten: {}\ncBreakSound: {}\ncOpenSound: {}\n",
+        format!("cStrength: {}\ncLife: {}\ncDecayedLife: {}\ncDecayedDelta: {}\ncBreakSoundAtten: {}\ncOpenSoundAtten: {}\ncSeeThrough: {}\ncIsJumpable: {}\ncIsClimbable: {}\ncIndestructible: {}\ncIsElectrified: {}\ncNoDrawWater: {}\n", // cBreakSound: {}\ncOpenSound: {}\n",
         self.strength,
         self.life,
         self.decayed_life,
         self.decayed_delta,
         self.break_sound_atten,
         self.open_sound_atten,
-        self.break_sound,
-        self.open_sound,
+        self.see_through as u32,
+        self.is_jumpable as u32,
+        self.is_climbable as u32,
+        self.indestructible as u32,
+        self.is_electrified as u32,
+        self.no_draw_water as u32,
+        // self.get_break_sound(),
+        // self.get_open_sound(), // TODO: fix this
         )
     } 
 }
@@ -917,6 +926,7 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_entity_type = building_type.ztscenerytype.bfentitytype.set_config(_args[0], _args[1]);
     let result_scenery_type = building_type.ztscenerytype.set_config(_args[0], _args[1]);
     let result_building_type = building_type.set_config(_args[0], _args[1]);
+    let result_fence_type = ZTFenceType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -927,6 +937,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     }
     else if result_building_type.is_ok() {
         result_building_type
+    }
+    else if result_fence_type.is_ok() {
+        result_fence_type
     }
     else {
         Err("Invalid configuration option")
