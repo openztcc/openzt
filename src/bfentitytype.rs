@@ -86,107 +86,107 @@ impl BFEntityType {
 
     // allows setting the configuration of the entity type
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "cIconZoom" {
+        if config == "-cIconZoom" {
             self.icon_zoom = value.parse::<bool>().unwrap();
             Ok(format!("Set cIconZoom to {}", self.icon_zoom))
         }
-        else if config == "cExpansionID" {
+        else if config == "-cExpansionID" {
             self.expansion_id = value.parse::<bool>().unwrap();
             Ok(format!("Set cExpansionID to {}", self.expansion_id))
         }
-        else if config == "cMovable" {
+        else if config == "-cMovable" {
             self.movable = value.parse::<bool>().unwrap();
             Ok(format!("Set cMovable to {}", self.movable))
         }
-        else if config == "cWalkable" {
+        else if config == "-cWalkable" {
             self.walkable = value.parse::<bool>().unwrap();
             Ok(format!("Set cWalkable to {}", self.walkable))
         }
-        else if config == "cWalkableByTall" {
+        else if config == "-cWalkableByTall" {
             self.walkable_by_tall = value.parse::<bool>().unwrap();
             Ok(format!("Set cWalkableByTall to {}", self.walkable_by_tall))
         }
-        else if config == "cRubbleable" {
+        else if config == "-cRubbleable" {
             self.rubbleable = value.parse::<bool>().unwrap();
             Ok(format!("Set cRubbleable to {}", self.rubbleable))
         }
-        else if config == "cUseNumbersInName" {
+        else if config == "-cUseNumbersInName" {
             self.use_numbers_in_name = value.parse::<bool>().unwrap();
             Ok(format!("Set cUseNumbersInName to {}", self.use_numbers_in_name))
         }
-        else if config == "cUsesRealShadows" {
+        else if config == "-cUsesRealShadows" {
             self.uses_real_shadows = value.parse::<bool>().unwrap();
             Ok(format!("Set cUsesRealShadows to {}", self.uses_real_shadows))
         }
-        else if config == "cHasShadowImages" {
+        else if config == "-cHasShadowImages" {
             self.has_shadow_images = value.parse::<bool>().unwrap();
             Ok(format!("Set cHasShadowImages to {}", self.has_shadow_images))
         }
-        else if config == "cForceShadowBlack" {
+        else if config == "-cForceShadowBlack" {
             self.force_shadow_black = value.parse::<bool>().unwrap();
             Ok(format!("Set cForceShadowBlack to {}", self.force_shadow_black))
         }
-        else if config == "cDrawsLate" {
+        else if config == "-cDrawsLate" {
             self.draws_late = value.parse::<bool>().unwrap();
             Ok(format!("Set cDrawsLate to {}", self.draws_late))
         }
-        else if config == "cHeight" {
+        else if config == "-cHeight" {
             self.height = value.parse::<u32>().unwrap();
             Ok(format!("Set cHeight to {}", self.height))
         }
-        else if config == "cDepth" {
+        else if config == "-cDepth" {
             self.depth = value.parse::<u32>().unwrap();
             Ok(format!("Set cDepth to {}", self.depth))
         }
-        else if config == "cHasUnderwaterSection" {
+        else if config == "-cHasUnderwaterSection" {
             self.has_underwater_section = value.parse::<bool>().unwrap();
             Ok(format!("Set cHasUnderwaterSection to {}", self.has_underwater_section))
         }
-        else if config == "cIsTransient" {
+        else if config == "-cIsTransient" {
             self.is_transient = value.parse::<bool>().unwrap();
             Ok(format!("Set cIsTransient to {}", self.is_transient))
         }
-        else if config == "cUsesPlacementCube" {
+        else if config == "-cUsesPlacementCube" {
             self.uses_placement_cube = value.parse::<bool>().unwrap();
             Ok(format!("Set cUsesPlacementCube to {}", self.uses_placement_cube))
         }
-        else if config == "cShow" {
+        else if config == "-cShow" {
             self.show = value.parse::<bool>().unwrap();
             Ok(format!("Set cShow to {}", self.show))
         }
-        else if config == "cHitThreshold" {
+        else if config == "-cHitThreshold" {
             self.hit_threshold = value.parse::<u32>().unwrap();
             Ok(format!("Set cHitThreshold to {}", self.hit_threshold))
         }
-        else if config == "cAvoidEdges" {
+        else if config == "-cAvoidEdges" {
             self.avoid_edges = value.parse::<bool>().unwrap();
             Ok(format!("Set cAvoidEdges to {}", self.avoid_edges))
         }
-        else if config == "cFootprintX" {
+        else if config == "-cFootprintX" {
             self.footprintx = value.parse::<i32>().unwrap();
             Ok(format!("Set cFootprintX to {}", self.footprintx))
         }
-        else if config == "cFootprintY" {
+        else if config == "-cFootprintY" {
             self.footprinty = value.parse::<i32>().unwrap();
             Ok(format!("Set cFootprintY to {}", self.footprinty))
         }
-        else if config == "cFootprintZ" {
+        else if config == "-cFootprintZ" {
             self.footprintz = value.parse::<i32>().unwrap();
             Ok(format!("Set cFootprintZ to {}", self.footprintz))
         }
-        else if config == "cPlacementFootprintX" {
+        else if config == "-cPlacementFootprintX" {
             self.placement_footprintx = value.parse::<i32>().unwrap();
             Ok(format!("Set cPlacementFootprintX to {}", self.placement_footprintx))
         }
-        else if config == "cPlacementFootprintY" {
+        else if config == "-cPlacementFootprintY" {
             self.placement_footprinty = value.parse::<i32>().unwrap();
             Ok(format!("Set cPlacementFootprintY to {}", self.placement_footprinty))
         }
-        else if config == "cPlacementFootprintZ" {
+        else if config == "-cPlacementFootprintZ" {
             self.placement_footprintz = value.parse::<i32>().unwrap();
             Ok(format!("Set cPlacementFootprintZ to {}", self.placement_footprintz))
         }
-        else if config == "cAvailableAtStartup" {
+        else if config == "-cAvailableAtStartup" {
             self.available_at_startup = value.parse::<bool>().unwrap();
             Ok(format!("Set cAvailableAtStartup to {}", self.available_at_startup))
         }
@@ -821,7 +821,7 @@ fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
         info!("Printing configuration for entity type at address {:#x}", entity_type_print);
 
         // print the entity type configuration for the selected entity type
-        Ok(print_config_for_type())
+        Ok(print_config_for_type(_args))
     }
     else if _args.len() == 2 {
         // parse the subargs for the entity type
@@ -833,29 +833,57 @@ fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
 }
 
 // prints the configuration for the selected entity type
-fn print_config_for_type() -> String {
+fn print_config_for_type(_args: Vec<&str>) -> String {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
     let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
     let mut config: String = String::new();
+
+    info!("Printing configuration for entity type at address {:#x}", entity_type_address);
 
     config.push_str(&entity_type.print_details());
     config.push_str("\n[Configuration/Integers]\n");
     config.push_str(&entity_type.print_config_integers());
 
-    if entity_type.get_type_name() == "building" {
-        let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-        config.push_str(&building_type.ztscenerytype.bfentitytype.print_config_integers());
-        config.push_str(&building_type.print_config_integers());
-        config.push_str(&building_type.print_config_floats());
-        config.push_str(&building_type.ztscenerytype.bfentitytype.print_colorrep());
+    if _args.len() < 2 {
+        info!("Printing base entity type configuration only.\nFor other entity type configurations: -b for building, -s for scenery, -f for fence.");
+    }
+    else {
+        if _args[1] == "-b" {
+            info!("Entity type is a building. Printing building type configuration.");
+            let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+            config.push_str(&building_type.ztscenerytype.bfentitytype.print_config_integers());
+            config.push_str(&building_type.print_config_integers());
+            config.push_str(&building_type.print_config_floats());
+        }
+        else if _args[1] == "-s" {
+            info!("Entity type is a scenery. Printing scenery type configuration.");
+            let scenery_type = ZTSceneryType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+            config.push_str(&scenery_type.bfentitytype.print_config_integers());
+            config.push_str(&scenery_type.print_config_integers());
+        }
+        else if _args[1] == "-f" {
+            info!("Entity type is a fence. Printing fence type configuration.");
+            let fence_type = ZTFenceType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+            config.push_str(&fence_type.ztscenerytype.bfentitytype.print_config_integers());
+            config.push_str(&fence_type.print_config_integers());
+        }
+        else {
+            info!("Entity type is not a known entity type. Printing base entity type configuration only.");
+        }
     }
 
+    // print [colorrep] section of the configuration - available in all entity types
+    // config.push_str(&entity_type.print_colorrep());
+    // info!("Colorrep printed successfully.");
+
+    info!("Checking for cInfoImageName...");
     // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
     if entity_type.get_info_image_name() != "" {
+        info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
         config.push_str("\n[Characteristics/Strings]\n");
         config.push_str(&entity_type.get_info_image_name());
     }
-
+    info!("Configuration printed successfully.");
     config
 }
 
