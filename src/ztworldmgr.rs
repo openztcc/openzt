@@ -301,3 +301,27 @@ fn command_make_sel(_args: Vec<&str>) -> Result<String, &'static str> {
         Ok(format!("Entity type {} is now selectable", entity_type.bfentitytype.get_type_name()))
     }
 }
+
+pub fn determine_entity_type(address: u32) -> String {
+    let entity_type_address = get_from_memory::<u32>(address + 0x0);
+    let vtable_ptr = get_from_memory::<u32>(entity_type_address);
+
+    match vtable_ptr {
+        0x630268 => "Animal",
+        0x62e1e8 => "Ambient",
+        0x62e330 => "Guest",
+        0x63034c => "Fences",
+        0x62e8ac => "TourGuide",
+        0x6307e4 => "Building",
+        0x6303f4 => "Scenery",
+        0x630544 => "Food",
+        0x630694 => "TankFilter",
+        0x63049c => "Path",
+        0x63073c => "Rubble",
+        0x6305ec => "TankWall",
+        0x62e7d8 => "Keeper",
+        0x62e704 => "MaintenanceWorker",
+        0x62e980 => "DRT",
+        _ => "Unknown",
+    }.to_string()
+}
