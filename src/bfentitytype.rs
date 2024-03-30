@@ -822,7 +822,7 @@ fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
         info!("Printing configuration for entity type at address {:#x}", entity_type_print);
 
         // print the entity type configuration for the selected entity type
-        Ok(print_config_for_type(_args))
+        Ok(print_config_for_type())
     }
     else if _args.len() == 2 {
         // parse the subargs for the entity type
@@ -834,45 +834,42 @@ fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
 }
 
 // prints the configuration for the selected entity type
-fn print_config_for_type(_args: Vec<&str>) -> String {
+fn print_config_for_type() -> String {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
     let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
     let mut config: String = String::new();
 
     info!("Printing configuration for entity type at address {:#x}", entity_type_address);
 
+    let class_type = determine_entity_type(get_from_memory::<u32>(entity_type_address));
+
     config.push_str(&entity_type.print_details());
-    config.push_str("\nType: ");
-    config.push_str(&determine_entity_type(get_from_memory::<u32>(entity_type_address)));
-    config.push_str("\n[Configuration/Integers]\n");
+    config.push_str("Class Type: ");
+    config.push_str(&class_type);
+    config.push_str("\n\n[Configuration/Integers]\n\n");
     config.push_str(&entity_type.print_config_integers());
 
-    if _args.len() < 2 {
-        info!("Printing base entity type configuration only.\nFor other entity type configurations: -b for building, -s for scenery, -f for fence.");
+    if class_type == "Building"{
+        info!("Entity type is a building. Printing building type configuration.");
+        let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&building_type.ztscenerytype.bfentitytype.print_config_integers());
+        config.push_str(&building_type.print_config_integers());
+        config.push_str(&building_type.print_config_floats());
+    }
+    else if class_type == "Scenery" {
+        info!("Entity type is a scenery. Printing scenery type configuration.");
+        let scenery_type = ZTSceneryType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&scenery_type.bfentitytype.print_config_integers());
+        config.push_str(&scenery_type.print_config_integers());
+    }
+    else if class_type == "Fence" {
+        info!("Entity type is a fence. Printing fence type configuration.");
+        let fence_type = ZTFenceType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&fence_type.ztscenerytype.bfentitytype.print_config_integers());
+        config.push_str(&fence_type.print_config_integers());
     }
     else {
-        if _args[1] == "-b" {
-            info!("Entity type is a building. Printing building type configuration.");
-            let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-            config.push_str(&building_type.ztscenerytype.bfentitytype.print_config_integers());
-            config.push_str(&building_type.print_config_integers());
-            config.push_str(&building_type.print_config_floats());
-        }
-        else if _args[1] == "-s" {
-            info!("Entity type is a scenery. Printing scenery type configuration.");
-            let scenery_type = ZTSceneryType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-            config.push_str(&scenery_type.bfentitytype.print_config_integers());
-            config.push_str(&scenery_type.print_config_integers());
-        }
-        else if _args[1] == "-f" {
-            info!("Entity type is a fence. Printing fence type configuration.");
-            let fence_type = ZTFenceType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-            config.push_str(&fence_type.ztscenerytype.bfentitytype.print_config_integers());
-            config.push_str(&fence_type.print_config_integers());
-        }
-        else {
-            info!("Entity type is not a known entity type. Printing base entity type configuration only.");
-        }
+        info!("Entity type is not a known entity type. Printing base entity type configuration only.");
     }
 
     // print [colorrep] section of the configuration - available in all entity types
