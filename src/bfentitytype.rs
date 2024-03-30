@@ -3,6 +3,7 @@ use std::fmt::format;
 use crate::add_to_command_register;
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
 use crate::ztui::get_selected_entity_type;
+use crate::ztworldmgr::determine_entity_type;
 
 // ------------ BFEntityType, Implementation, and Related Functions ------------ //
 
@@ -841,6 +842,8 @@ fn print_config_for_type(_args: Vec<&str>) -> String {
     info!("Printing configuration for entity type at address {:#x}", entity_type_address);
 
     config.push_str(&entity_type.print_details());
+    config.push_str("\nType: ");
+    config.push_str(&determine_entity_type(get_from_memory::<u32>(entity_type_address)));
     config.push_str("\n[Configuration/Integers]\n");
     config.push_str(&entity_type.print_config_integers());
 
