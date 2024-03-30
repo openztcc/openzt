@@ -841,7 +841,7 @@ fn print_config_for_type() -> String {
 
     info!("Printing configuration for entity type at address {:#x}", entity_type_address);
 
-    let class_type = determine_entity_type(get_from_memory::<u32>(entity_type_address));
+    let class_type = determine_entity_type(entity_type_address);
 
     config.push_str(&entity_type.print_details());
     config.push_str("Class Type: ");
@@ -855,18 +855,44 @@ fn print_config_for_type() -> String {
         config.push_str(&building_type.ztscenerytype.bfentitytype.print_config_integers());
         config.push_str(&building_type.print_config_integers());
         config.push_str(&building_type.print_config_floats());
+        info!("Checking for cInfoImageName...");
+        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
+        if entity_type.get_info_image_name() != "" {
+            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
+            config.push_str("\n[Characteristics/Strings]\n");
+            config.push_str(&entity_type.get_info_image_name());
+        }
+    
     }
     else if class_type == "Scenery" {
         info!("Entity type is a scenery. Printing scenery type configuration.");
         let scenery_type = ZTSceneryType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
         config.push_str(&scenery_type.bfentitytype.print_config_integers());
         config.push_str(&scenery_type.print_config_integers());
+
+        info!("Checking for cInfoImageName...");
+        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
+        if entity_type.get_info_image_name() != "" {
+            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
+            config.push_str("\n[Characteristics/Strings]\n");
+            config.push_str(&entity_type.get_info_image_name());
+        }
+    
     }
-    else if class_type == "Fence" {
+    else if class_type == "Fences" {
         info!("Entity type is a fence. Printing fence type configuration.");
         let fence_type = ZTFenceType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
         config.push_str(&fence_type.ztscenerytype.bfentitytype.print_config_integers());
         config.push_str(&fence_type.print_config_integers());
+
+        info!("Checking for cInfoImageName...");
+        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
+        if entity_type.get_info_image_name() != "" {
+            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
+            config.push_str("\n[Characteristics/Strings]\n");
+            config.push_str(&entity_type.get_info_image_name());
+        }
+    
     }
     else {
         info!("Entity type is not a known entity type. Printing base entity type configuration only.");
@@ -876,13 +902,6 @@ fn print_config_for_type() -> String {
     // config.push_str(&entity_type.print_colorrep());
     // info!("Colorrep printed successfully.");
 
-    info!("Checking for cInfoImageName...");
-    // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
-    if entity_type.get_info_image_name() != "" {
-        info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
-        config.push_str("\n[Characteristics/Strings]\n");
-        config.push_str(&entity_type.get_info_image_name());
-    }
     info!("Configuration printed successfully.");
     config
 }
