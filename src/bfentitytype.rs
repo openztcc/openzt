@@ -1029,6 +1029,46 @@ impl ZTTankFilterType {
     }
 }
 
+// ------------ ZTPathType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct ZTPathType {
+    ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
+    pub material: u32, // 0x168
+    // TODO: missing Shapes structure in paths. Could not find.
+}
+
+impl ZTPathType {
+    pub fn new (address: u32) -> Option<&'static mut ZTPathType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTPathType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            }
+            else {
+                None
+            }
+        }
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cMaterial" {
+            self.material = value.parse::<u32>().unwrap();
+            Ok(format!("Set Material to {}", self.material))
+        }
+        else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cMaterial: {}\n",
+        self.material,
+        )
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
@@ -1137,6 +1177,15 @@ fn print_config_for_type() -> String {
 
         print_info_image_name(entity_type, &mut config);
     }
+    else if class_type == "Path" {
+        info!("Entity type is a path. Printing path type configuration.");
+        let path_type = ZTPathType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&path_type.ztscenerytype.bfentitytype.print_config_integers());
+        config.push_str(&path_type.ztscenerytype.print_config_integers());
+        config.push_str(&path_type.print_config_integers());
+
+        print_info_image_name(entity_type, &mut config);
+    }
     else {
         info!("Entity type is not a known entity type. Printing base entity type configuration only.");
     }
@@ -1164,6 +1213,7 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_food_type = ZTFoodType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
     let result_tank_filter_type = ZTTankFilterType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
     let result_tank_wall_type = ZTTankWallType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
+    let result_path_type = ZTPathType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -1186,6 +1236,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     }
     else if result_tank_filter_type.is_ok() {
         result_tank_filter_type
+    }
+    else if result_path_type.is_ok() {
+        result_path_type
     }
     else {
         Err("Invalid configuration option")
