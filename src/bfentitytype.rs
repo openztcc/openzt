@@ -812,6 +812,73 @@ impl ZTFenceType {
     } 
 }
 
+// ------------ ZTTankWallType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct ZTTankWallType{
+    ztfencetype: ZTFenceType, // bytes: 0x19C - 0x168 = 0x34 = 52 bytes
+    // pub portal_open_sound: u32, // 0x19C
+    // pub portal_close_sound: u32, // 0x1A0
+    pub portal_open_sound_atten: i32, // 0x1A4
+    pub portal_close_sound_atten: i32, // 0x1A8
+}
+
+impl ZTTankWallType {
+    pub fn new (address: u32) -> Option<&'static mut ZTTankWallType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTTankWallType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            }
+            else {
+                None
+            }
+        }
+    }
+
+    fn get_portal_open_sound(&self) -> String {
+        let obj_ptr = self as *const ZTTankWallType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x1A4))
+    }
+
+    fn get_portal_close_sound(&self) -> String {
+        let obj_ptr = self as *const ZTTankWallType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x1B0))
+    }
+
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        // if config == "-cPortalOpenSound" {
+        //     self.portal_open_sound = value.parse::<u32>().unwrap();
+        //     Ok(format!("Set Portal Open Sound to {}", self.portal_open_sound))
+        // }
+        // else if config == "-cPortalCloseSound" {
+        //     self.portal_close_sound = value.parse::<u32>().unwrap();
+        //     Ok(format!("Set Portal Close Sound to {}", self.portal_close_sound))
+        // }
+        if config == "-cPortalOpenSoundAtten" {
+            self.portal_open_sound_atten = value.parse::<i32>().unwrap();
+            Ok(format!("Set Portal Open Sound Atten to {}", self.portal_open_sound_atten))
+        }
+        else if config == "-cPortalCloseSoundAtten" {
+            self.portal_close_sound_atten = value.parse::<i32>().unwrap();
+            Ok(format!("Set Portal Close Sound Atten to {}", self.portal_close_sound_atten))
+        }
+        else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    fn print_portal_sounds(&self) -> String {
+        format!("\n\n[PortalSounds]\ncPortalOpenSound: {}\ncPortalCloseSound: {}\ncPortalOpenSoundAtten: {}\ncPortalCloseSoundAtten: {}\n\n",
+        self.get_portal_open_sound(),
+        self.portal_open_sound_atten,
+        self.get_portal_close_sound(),
+        self.portal_close_sound_atten,
+        )
+    }
+}
+
 // ------------ ZTFoodType, Implementation, and Related Functions ------------ //
 
 #[derive(Debug)]
@@ -992,6 +1059,16 @@ fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
     }
 }
 
+fn print_info_image_name(entity_type: &BFEntityType, config: &mut String) {
+    info!("Checking for cInfoImageName...");
+    // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
+    if entity_type.get_info_image_name() != "" {
+        info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
+        config.push_str("\n[Characteristics/Strings]\n");
+        config.push_str(&entity_type.get_info_image_name());
+    }
+}
+
 // prints the configuration for the selected entity type
 fn print_config_for_type() -> String {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
@@ -1014,13 +1091,7 @@ fn print_config_for_type() -> String {
         config.push_str(&building_type.ztscenerytype.print_config_integers());
         config.push_str(&building_type.print_config_integers());
         config.push_str(&building_type.print_config_floats());
-        info!("Checking for cInfoImageName...");
-        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
-        if entity_type.get_info_image_name() != "" {
-            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
-            config.push_str("\n[Characteristics/Strings]\n");
-            config.push_str(&entity_type.get_info_image_name());
-        }
+        print_info_image_name(&entity_type, &mut config);
     
     }
     else if class_type == "Scenery" {
@@ -1028,13 +1099,7 @@ fn print_config_for_type() -> String {
         let scenery_type = ZTSceneryType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
         config.push_str(&scenery_type.print_config_integers());
 
-        info!("Checking for cInfoImageName...");
-        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
-        if entity_type.get_info_image_name() != "" {
-            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
-            config.push_str("\n[Characteristics/Strings]\n");
-            config.push_str(&entity_type.get_info_image_name());
-        }
+        print_info_image_name(entity_type, &mut config);
     
     }
     else if class_type == "Fences" {
@@ -1042,14 +1107,16 @@ fn print_config_for_type() -> String {
         let fence_type = ZTFenceType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
         config.push_str(&fence_type.print_config_integers());
 
-        info!("Checking for cInfoImageName...");
-        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
-        if entity_type.get_info_image_name() != "" {
-            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
-            config.push_str("\n[Characteristics/Strings]\n");
-            config.push_str(&entity_type.get_info_image_name());
-        }
-    
+        print_info_image_name(entity_type, &mut config);
+    }
+    else if class_type == "TankWall" {
+        let tank_wall_type = ZTTankWallType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&tank_wall_type.ztfencetype.ztscenerytype.bfentitytype.print_config_integers());
+        config.push_str(&tank_wall_type.ztfencetype.ztscenerytype.print_config_integers());
+        config.push_str(&tank_wall_type.ztfencetype.print_config_integers());
+        config.push_str(&tank_wall_type.print_portal_sounds());
+
+        print_info_image_name(entity_type, &mut config);
     }
     else if class_type == "Food" {
         info!("Entity type is a food. Printing food type configuration.");
@@ -1058,29 +1125,17 @@ fn print_config_for_type() -> String {
         config.push_str(&food_type.ztscenerytype.print_config_integers());
         config.push_str(&food_type.print_config_integers());
 
-        info!("Checking for cInfoImageName...");
-        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
-        if entity_type.get_info_image_name() != "" {
-            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
-            config.push_str("\n[Characteristics/Strings]\n");
-            config.push_str(&entity_type.get_info_image_name());
-        }
+        print_info_image_name(entity_type, &mut config);
     }
     else if class_type == "TankFilter" {
         info!("Entity type is a tank filter. Printing tank filter type configuration.");
         let tank_filter_type = ZTTankFilterType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-        config.push_str(&tank_filter_type.print_filter_sounds());
         config.push_str(&tank_filter_type.ztscenerytype.bfentitytype.print_config_integers());
         config.push_str(&tank_filter_type.ztscenerytype.print_config_integers());
         config.push_str(&tank_filter_type.print_config_integers());
+        config.push_str(&tank_filter_type.print_filter_sounds());
 
-        info!("Checking for cInfoImageName...");
-        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
-        if entity_type.get_info_image_name() != "" {
-            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
-            config.push_str("\n[Characteristics/Strings]\n");
-            config.push_str(&entity_type.get_info_image_name());
-        }
+        print_info_image_name(entity_type, &mut config);
     }
     else {
         info!("Entity type is not a known entity type. Printing base entity type configuration only.");
@@ -1108,6 +1163,7 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_fence_type = ZTFenceType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
     let result_food_type = ZTFoodType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
     let result_tank_filter_type = ZTTankFilterType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
+    let result_tank_wall_type = ZTTankWallType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -1121,6 +1177,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     }
     else if result_fence_type.is_ok() {
         result_fence_type
+    }
+    else if result_tank_wall_type.is_ok() {
+        result_tank_wall_type
     }
     else if result_food_type.is_ok() {
         result_food_type
