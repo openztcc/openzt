@@ -851,6 +851,117 @@ impl ZTFoodType {
     }
 }
 
+// ------------ ZTTankeFilterType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct ZTTankFilterType {
+    ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
+    starting_health: i32, // 0x168
+    decayed_health: i32, // 0x16C
+    decay_time: i32, // 0x170
+    filter_delay: i32, // 0x174
+    filter_upkeep: i32, // 0x178
+    filter_clean_amount: i32, // 0x17C
+    filter_decayed_clean_amount: i32, // 0x180
+    // healthy_sound: String, // 0x184
+    // decayed_sound: String, // 0x190
+    pad1: [u8; 0x19C - 0x184], // ----------------------- padding: 24 bytes
+    healthy_atten: i32, // 0x19C
+    decayed_atten: i32, // 0x1A0
+}
+
+impl ZTTankFilterType {
+    pub fn new (address: u32) -> Option<&'static mut ZTTankFilterType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTTankFilterType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            }
+            else {
+                None
+            }
+        }
+    }
+
+    fn get_healthy_sound(&self) -> String {
+        let obj_ptr = self as *const ZTTankFilterType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x184))
+    }
+
+    fn get_decayed_sound(&self) -> String {
+        let obj_ptr = self as *const ZTTankFilterType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x190))
+    }
+
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cStartingHealth" {
+            self.starting_health = value.parse::<i32>().unwrap();
+            Ok(format!("Set Starting Health to {}", self.starting_health))
+        }
+        else if config == "-cDecayedHealth" {
+            self.decayed_health = value.parse::<i32>().unwrap();
+            Ok(format!("Set Decayed Health to {}", self.decayed_health))
+        }
+        else if config == "-cDecayTime" {
+            self.decay_time = value.parse::<i32>().unwrap();
+            Ok(format!("Set Decay Time to {}", self.decay_time))
+        }
+        else if config == "-cFilterDelay" {
+            self.filter_delay = value.parse::<i32>().unwrap();
+            Ok(format!("Set Filter Delay to {}", self.filter_delay))
+        }
+        else if config == "-cFilterUpkeep" {
+            self.filter_upkeep = value.parse::<i32>().unwrap();
+            Ok(format!("Set Filter Upkeep to {}", self.filter_upkeep))
+        }
+        else if config == "-cFilterCleanAmount" {
+            self.filter_clean_amount = value.parse::<i32>().unwrap();
+            Ok(format!("Set Filter Clean Amount to {}", self.filter_clean_amount))
+        }
+        else if config == "-cFilterDecayedCleanAmount" {
+            self.filter_decayed_clean_amount = value.parse::<i32>().unwrap();
+            Ok(format!("Set Filter Decayed Clean Amount to {}", self.filter_decayed_clean_amount))
+        }
+        else if config == "-cHealthyAtten" {
+            self.healthy_atten = value.parse::<i32>().unwrap();
+            Ok(format!("Set Healthy Atten to {}", self.healthy_atten))
+        }
+        else if config == "-cDecayedAtten" {
+            self.decayed_atten = value.parse::<i32>().unwrap();
+            Ok(format!("Set Decayed Atten to {}", self.decayed_atten))
+        }
+        else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    fn print_config_integers(&self) -> String {
+        format!("cStartingHealth: {}\ncDecayedHealth: {}\ncDecayTime: {}\ncFilterDelay: {}\ncFilterUpkeep: {}\ncFilterCleanAmount: {}\ncFilterDecayedCleanAmount: {}\ncHealthyAtten: {}\ncDecayedAtten: {}\ncHealthySound: {}\ncDecayedSound: {}\n",
+        self.starting_health,
+        self.decayed_health,
+        self.decay_time,
+        self.filter_delay,
+        self.filter_upkeep,
+        self.filter_clean_amount,
+        self.filter_decayed_clean_amount,
+        self.healthy_atten,
+        self.decayed_atten,
+        self.get_healthy_sound(),
+        self.get_decayed_sound(), // TODO: fix this
+        )
+    }
+
+    fn print_filter_sounds(&self) -> String {
+        format!("\n\n[FilterSounds]\n\ncHealthySound: {}\ncHealthyAtten: {}\ncDecayedSound: {}\ncDecayedAtten: {}\n\n",
+        self.get_healthy_sound(),
+        self.healthy_atten,
+        self.get_decayed_sound(),
+        self.decayed_atten
+        )
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
@@ -955,6 +1066,22 @@ fn print_config_for_type() -> String {
             config.push_str(&entity_type.get_info_image_name());
         }
     }
+    else if class_type == "TankFilter" {
+        info!("Entity type is a tank filter. Printing tank filter type configuration.");
+        let tank_filter_type = ZTTankFilterType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&tank_filter_type.print_filter_sounds());
+        config.push_str(&tank_filter_type.ztscenerytype.bfentitytype.print_config_integers());
+        config.push_str(&tank_filter_type.ztscenerytype.print_config_integers());
+        config.push_str(&tank_filter_type.print_config_integers());
+
+        info!("Checking for cInfoImageName...");
+        // TODO: move cInfoImageName to a separate struct (probably ZTSceneryType). crashes when trying to access it from guests
+        if entity_type.get_info_image_name() != "" {
+            info!("Entity type has cInfoImageName: {}", entity_type.get_info_image_name());
+            config.push_str("\n[Characteristics/Strings]\n");
+            config.push_str(&entity_type.get_info_image_name());
+        }
+    }
     else {
         info!("Entity type is not a known entity type. Printing base entity type configuration only.");
     }
@@ -980,6 +1107,7 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_building_type = building_type.set_config(_args[0], _args[1]);
     let result_fence_type = ZTFenceType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
     let result_food_type = ZTFoodType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
+    let result_tank_filter_type = ZTTankFilterType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -996,6 +1124,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     }
     else if result_food_type.is_ok() {
         result_food_type
+    }
+    else if result_tank_filter_type.is_ok() {
+        result_tank_filter_type
     }
     else {
         Err("Invalid configuration option")
