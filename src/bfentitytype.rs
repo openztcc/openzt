@@ -817,7 +817,7 @@ impl ZTFenceType {
 #[derive(Debug)]
 #[repr(C)]
 pub struct ZTTankWallType{
-    ztfencetype: ZTFenceType, // bytes: 0x19C - 0x168 = 0x34 = 52 bytes
+    pub ztfencetype: ZTFenceType, // bytes: 0x19C - 0x168 = 0x34 = 52 bytes
     // pub portal_open_sound: u32, // 0x19C
     // pub portal_close_sound: u32, // 0x1A0
     pub portal_open_sound_atten: i32, // 0x1A4
@@ -884,8 +884,8 @@ impl ZTTankWallType {
 #[derive(Debug)]
 #[repr(C)]
 pub struct ZTFoodType {
-    ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
-    keeper_food_type: u32, // 0x168
+    pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
+    pub keeper_food_type: u32, // 0x168
 }
 
 impl ZTFoodType {
@@ -923,19 +923,19 @@ impl ZTFoodType {
 #[derive(Debug)]
 #[repr(C)]
 pub struct ZTTankFilterType {
-    ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
-    starting_health: i32, // 0x168
-    decayed_health: i32, // 0x16C
-    decay_time: i32, // 0x170
-    filter_delay: i32, // 0x174
-    filter_upkeep: i32, // 0x178
-    filter_clean_amount: i32, // 0x17C
-    filter_decayed_clean_amount: i32, // 0x180
+    pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
+    pub starting_health: i32, // 0x168
+    pub decayed_health: i32, // 0x16C
+    pub decay_time: i32, // 0x170
+    pub filter_delay: i32, // 0x174
+    pub filter_upkeep: i32, // 0x178
+    pub filter_clean_amount: i32, // 0x17C
+    pub filter_decayed_clean_amount: i32, // 0x180
     // healthy_sound: String, // 0x184
     // decayed_sound: String, // 0x190
     pad1: [u8; 0x19C - 0x184], // ----------------------- padding: 24 bytes
-    healthy_atten: i32, // 0x19C
-    decayed_atten: i32, // 0x1A0
+    pub healthy_atten: i32, // 0x19C
+    pub decayed_atten: i32, // 0x1A0
 }
 
 impl ZTTankFilterType {
@@ -1069,6 +1069,57 @@ impl ZTPathType {
     }
 }
 
+// ------------ ZTRubbleType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct ZTRubbleType {
+    ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
+    // explosion_sound: String, // 0x168
+    pad0: [u8; 0x16C - 0x168], // ----------------------- padding: 4 bytes
+    pub explosion_sound_atten: i32, // 0x16C
+}
+
+impl ZTRubbleType {
+    pub fn new (address: u32) -> Option<&'static mut ZTRubbleType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTRubbleType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            }
+            else {
+                None
+            }
+        }
+    }
+
+    fn get_explosion_sound(&self) -> String {
+        let obj_ptr = self as *const ZTRubbleType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x168))
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        // if config == "-cExplosionSound" {
+        //     self.explosion_sound = value.parse::<String>().unwrap();
+        //     Ok(format!("Set Explosion Sound to {}", self.explosion_sound))
+        // }
+        if config == "-cExplosionSoundAtten" {
+            self.explosion_sound_atten = value.parse::<i32>().unwrap();
+            Ok(format!("Set Explosion Sound Atten to {}", self.explosion_sound_atten))
+        }
+        else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cExplosionSound: {}\ncExplosionSoundAtten: {}\n",
+        self.get_explosion_sound(),
+        self.explosion_sound_atten,
+        )
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
@@ -1186,6 +1237,15 @@ fn print_config_for_type() -> String {
 
         print_info_image_name(entity_type, &mut config);
     }
+    else if class_type == "Rubble" {
+        info!("Entity type is a rubble. Printing rubble type configuration.");
+        let rubble_type = ZTRubbleType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&rubble_type.ztscenerytype.bfentitytype.print_config_integers());
+        config.push_str(&rubble_type.ztscenerytype.print_config_integers());
+        config.push_str(&rubble_type.print_config_integers());
+
+        print_info_image_name(entity_type, &mut config);
+    }
     else {
         info!("Entity type is not a known entity type. Printing base entity type configuration only.");
     }
@@ -1214,6 +1274,7 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_tank_filter_type = ZTTankFilterType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
     let result_tank_wall_type = ZTTankWallType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
     let result_path_type = ZTPathType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
+    let result_rubble_type = ZTRubbleType::new(entity_type_address).unwrap().set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -1239,6 +1300,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     }
     else if result_path_type.is_ok() {
         result_path_type
+    }
+    else if result_rubble_type.is_ok() {
+        result_rubble_type
     }
     else {
         Err("Invalid configuration option")
