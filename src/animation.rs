@@ -54,7 +54,9 @@ impl Line {
     pub fn calc_byte_size(&self) -> usize {
         let mut size = mem::size_of::<u8>();
         for draw_instruction in &self.draw_instructions {
-            size += mem::size_of::<u8>() + mem::size_of::<u8>() + (draw_instruction.colors.len() * mem::size_of::<u8>());
+            size += mem::size_of::<u8>()
+                + mem::size_of::<u8>()
+                + (draw_instruction.colors.len() * mem::size_of::<u8>());
         }
         size
     }
@@ -65,12 +67,12 @@ impl Line {
 pub struct DrawInstruction {
     pub offset: u8,
     pub num_colors: u8,
-    pub colors: Vec::<u8>,
+    pub colors: Vec<u8>,
 }
 
 // TODO: Write test based on mod data
 impl Animation {
-    pub fn parse(data : &[u8]) -> Animation {
+    pub fn parse(data: &[u8]) -> Animation {
         let mut index = 0;
         let mut header = None;
         let maybe_header = read_le_primitive(data, &mut index);
@@ -82,17 +84,21 @@ impl Animation {
                     extra_frame: read_le_primitive(data, &mut index),
                 });
                 read_le_primitive(data, &mut index)
-            },
-            _ =>  {
-                maybe_header
             }
+            _ => maybe_header,
         };
 
         let pallette_filename_length = read_le_primitive(data, &mut index);
         let pallette_filename = read_string(data, &mut index, pallette_filename_length as usize);
         let num_frames = read_le_primitive(data, &mut index);
         let mut frames = Vec::new();
-        for _ in 0..num_frames + {if header.clone().is_some_and(|h| h.extra_frame) {1} else {0}} {
+        for _ in 0..num_frames + {
+            if header.clone().is_some_and(|h| h.extra_frame) {
+                1
+            } else {
+                0
+            }
+        } {
             let num_bytes = read_le_primitive(data, &mut index);
             let pixel_height = read_le_primitive(data, &mut index);
             let pixel_width = read_le_primitive(data, &mut index);
@@ -130,7 +136,7 @@ impl Animation {
                 mystery_u16,
                 lines,
             });
-        } 
+        }
 
         Animation {
             header: header,
@@ -150,8 +156,8 @@ impl Animation {
                 write_le_primitive(&mut bytes, header.ztaf_string, &mut accumulator);
                 write_le_primitive(&mut bytes, header.empty_4_bytes, &mut accumulator);
                 write_le_primitive(&mut bytes, header.extra_frame, &mut accumulator);
-            },
-            None => ()
+            }
+            None => (),
         }
         write_le_primitive(&mut bytes, self.animation_speed, &mut accumulator);
         write_string(&mut bytes, &self.pallette_filename, &mut accumulator);
@@ -180,7 +186,12 @@ impl Animation {
         (bytes, accumulator)
     }
 
-    pub fn duplicate_pixel_rows(&mut self, frame: usize, start_index: usize, end_index: usize) -> Result<&mut Self, &'static str>{
+    pub fn duplicate_pixel_rows(
+        &mut self,
+        frame: usize,
+        start_index: usize,
+        end_index: usize,
+    ) -> Result<&mut Self, &'static str> {
         let mut additional_bytes: usize = 0;
         if start_index > end_index {
             return Err("Start index must be less than end index");
@@ -197,7 +208,9 @@ impl Animation {
             additional_bytes += line.calc_byte_size();
         }
 
-        self.frames[frame].lines.splice(end_index..end_index, new_lines);
+        self.frames[frame]
+            .lines
+            .splice(end_index..end_index, new_lines);
 
         self.frames[frame].num_bytes += additional_bytes as u32;
 
@@ -215,11 +228,9 @@ impl Animation {
 #[cfg(test)]
 mod parsing_tests {
 
-    use crate::animation;
+    use std::path::PathBuf;
 
     use super::Animation;
-
-    use std::path::PathBuf;
 
     fn get_test_dir() -> PathBuf {
         let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -231,10 +242,12 @@ mod parsing_tests {
     fn test_parse_simple_anim_no_header() {
         let animation = Animation::parse(include_bytes!("../resources/test/N-noheader"));
         assert!(animation.header.is_none());
-        assert_eq!(animation.pallette_filename, "ui/sharedui/listbk/ltb.pal".to_string());
+        assert_eq!(
+            animation.pallette_filename,
+            "ui/sharedui/listbk/ltb.pal".to_string()
+        );
         assert_eq!(animation.num_frames, 1);
         assert_eq!(animation.frames.len(), 1);
-
     }
 
     #[test]
@@ -242,7 +255,10 @@ mod parsing_tests {
         let animation = Animation::parse(include_bytes!("../resources/test/N"));
         assert!(animation.header.is_some());
         assert_eq!(animation.header.unwrap().extra_frame, false);
-        assert_eq!(animation.pallette_filename, "ANIMALS/01BFCC32/ICMEIOLA/ICMEIOLA.PAL".to_string());
+        assert_eq!(
+            animation.pallette_filename,
+            "ANIMALS/01BFCC32/ICMEIOLA/ICMEIOLA.PAL".to_string()
+        );
         assert_eq!(animation.num_frames, 1);
         assert_eq!(animation.frames.len(), 1);
     }
@@ -251,14 +267,18 @@ mod parsing_tests {
     fn test_parse_and_write() {
         let animation = Animation::parse(include_bytes!("../resources/test/N"));
         let animation_to_write = animation.clone();
-        let (animation_bytes, length) = animation_to_write.write();
+        let (animation_bytes, _) = animation_to_write.write();
         let animation_2 = Animation::parse(&animation_bytes[..]);
+        assert!(animation == animation_2);
     }
 
     #[test]
     fn test_calc_byte_size() {
         let animation = Animation::parse(include_bytes!("../resources/test/N"));
-        assert_eq!(animation.frames[0].num_bytes, animation.frames[0].calc_byte_size() as u32);
+        assert_eq!(
+            animation.frames[0].num_bytes,
+            animation.frames[0].calc_byte_size() as u32
+        );
     }
 
     #[test]
@@ -266,13 +286,25 @@ mod parsing_tests {
         let animation = Animation::parse(include_bytes!("../resources/test/N"));
         let mut animation_to_modify = animation.clone();
         animation_to_modify.duplicate_pixel_rows(0, 0, 1).unwrap();
-        assert_eq!(animation.frames[0].pixel_height + 1, animation_to_modify.frames[0].pixel_height);
+        assert_eq!(
+            animation.frames[0].pixel_height + 1,
+            animation_to_modify.frames[0].pixel_height
+        );
         animation_to_modify.set_pallette_filename(animation.pallette_filename.clone());
-        assert_eq!(animation.pallette_filename_length, animation_to_modify.pallette_filename_length);
-        let (animation_bytes, length) = animation_to_modify.write();
+        assert_eq!(
+            animation.pallette_filename_length,
+            animation_to_modify.pallette_filename_length
+        );
+        let (animation_bytes, _) = animation_to_modify.write();
         let animation_2 = Animation::parse(&animation_bytes[..]);
-        assert_eq!(animation.frames[0].pixel_height + 1, animation_2.frames[0].pixel_height);
+        assert_eq!(
+            animation.frames[0].pixel_height + 1,
+            animation_2.frames[0].pixel_height
+        );
         assert_eq!(animation.pallette_filename, animation_2.pallette_filename);
-        assert_eq!(animation.pallette_filename_length, animation_2.pallette_filename_length);
+        assert_eq!(
+            animation.pallette_filename_length,
+            animation_2.pallette_filename_length
+        );
     }
 }

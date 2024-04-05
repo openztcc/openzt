@@ -1,31 +1,20 @@
 use std::sync::Mutex;
-use std::sync::atomic::Ordering;
-use std::sync::atomic::AtomicU32;
-use std::collections::HashMap;
 
 use once_cell::sync::Lazy;
-
 use retour_utils::hook_module;
-
 use tracing::info;
-
-use configparser::ini::Ini;
-
-use crate::add_to_command_register;
-
-use crate::debug_dll::get_base_path;
 
 const STRING_REGISTRY_ID_OFFSET: u32 = 100_000;
 
-
-static STRING_REGISTRY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| {
-    Mutex::new(Vec::new())
-});
+static STRING_REGISTRY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 pub fn add_string_to_registry(string_val: String) -> u32 {
     let mut data_mutex = STRING_REGISTRY.lock().unwrap();
     data_mutex.push(string_val);
-    info!("Added string to registry: {}", data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1);
+    info!(
+        "Added string to registry: {}",
+        data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1
+    );
     data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1
 }
 
@@ -33,11 +22,13 @@ pub fn get_string_from_registry(string_id: u32) -> Result<String, &'static str> 
     info!("Getting string from registry: {}", string_id);
     let string = {
         let data_mutex = STRING_REGISTRY.lock().unwrap();
-        data_mutex.get((string_id - STRING_REGISTRY_ID_OFFSET) as usize).cloned()
+        data_mutex
+            .get((string_id - STRING_REGISTRY_ID_OFFSET) as usize)
+            .cloned()
     };
     match string {
         Some(string) => Ok(string),
-        None => Err("String not found")
+        None => Err("String not found"),
     }
 }
 
@@ -45,16 +36,19 @@ pub fn get_string_from_registry(string_id: u32) -> Result<String, &'static str> 
 pub mod zoo_string {
     use tracing::info;
 
-    use crate::debug_dll::{get_string_from_memory, save_string_to_memory};
-    use crate::string_registry::get_string_from_registry;
-
     use super::STRING_REGISTRY_ID_OFFSET;
+    use crate::{debug_dll::save_string_to_memory, string_registry::get_string_from_registry};
 
     #[hook(unsafe extern "thiscall" BFApp_loadString, offset = 0x00004e0a)]
     fn bf_app_load_string(_this_ptr: u32, string_id: u32, string_buffer: u32) -> u32 {
         if string_id >= STRING_REGISTRY_ID_OFFSET {
             if let Ok(string) = get_string_from_registry(string_id) {
-                info!("BFApp::loadString string_id: {}, override: {} -> {}", string_id, string, string.len());
+                info!(
+                    "BFApp::loadString string_id: {}, override: {} -> {}",
+                    string_id,
+                    string,
+                    string.len()
+                );
                 save_string_to_memory(string_buffer, &string);
                 return string.len() as u32 + 1;
             }

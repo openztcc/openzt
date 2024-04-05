@@ -1,7 +1,8 @@
-use std::mem;
-use std::fmt;
-use std::convert::{TryFrom, TryInto};
-use std::ffi::CString;
+use std::{
+    convert::TryInto,
+    ffi::CString,
+    fmt, mem,
+};
 
 trait TypeSize {
     const SIZE: usize;
@@ -50,20 +51,28 @@ impl_EndianRead_for_ints!(u8, u16, u32, u64, i8, i16, i32, i64, f32, f64);
 impl_EndianWrite_for_ints!(u8, u16, u32, u64, i8, i16, i32, i64, f32, f64);
 
 impl EndianRead<[u8; 1]> for bool {
-    fn from_le_bytes(bytes: [u8; 1]) -> Self { bytes[0] != 0 }
-    fn from_be_bytes(bytes: [u8; 1]) -> Self { bytes[0] != 0 }
+    fn from_le_bytes(bytes: [u8; 1]) -> Self {
+        bytes[0] != 0
+    }
+    fn from_be_bytes(bytes: [u8; 1]) -> Self {
+        bytes[0] != 0
+    }
 }
 
 impl EndianWrite for bool {
-    fn to_le_bytes(self) -> Vec<u8> { vec![self as u8] }
-    fn to_be_bytes(self) -> Vec<u8> { vec![self as u8] }
+    fn to_le_bytes(self) -> Vec<u8> {
+        vec![self as u8]
+    }
+    fn to_be_bytes(self) -> Vec<u8> {
+        vec![self as u8]
+    }
 }
 
-pub fn read_le_primitive<'a, T, TArray> (bytes: &'a [u8], index: &mut usize) -> T
+pub fn read_le_primitive<'a, T, TArray>(bytes: &'a [u8], index: &mut usize) -> T
 where
-    T : EndianRead<TArray>,
-    TArray : TryFrom<&'a [u8]>,
-    <TArray as TryFrom<&'a [u8]>>::Error : fmt::Debug,
+    T: EndianRead<TArray>,
+    TArray: TryFrom<&'a [u8]>,
+    <TArray as TryFrom<&'a [u8]>>::Error: fmt::Debug,
 {
     let value_bytes = &bytes[*index..*index + mem::size_of::<T>()];
     *index += mem::size_of::<T>();
