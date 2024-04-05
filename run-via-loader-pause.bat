@@ -1,6 +1,8 @@
 @echo off
+
 echo Building openzt dll
 cargo +nightly build --lib --target=i686-pc-windows-msvc
+
 if %errorlevel% neq 0 (
     echo Failed
     pause

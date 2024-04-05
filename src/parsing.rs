@@ -3,8 +3,6 @@ use std::fmt;
 use std::convert::{TryFrom, TryInto};
 use std::ffi::CString;
 
-use zip::write;
-
 trait TypeSize {
     const SIZE: usize;
 }
@@ -71,26 +69,6 @@ where
     *index += mem::size_of::<T>();
     T::from_le_bytes(value_bytes.try_into().unwrap())
 }
-
-// pub fn write_le_primitive<T: EndiantWrite<[u8; T::SIZE]> + TypeSize>(value: &T) -> [u8; T::SIZE] {
-//     value.to_le_bytes()
-// }
-
-
-// pub fn write_le_primitive<'a, T, TArray> (value: T) -> TArray //Result<usize, &'static str>
-// where
-//     T : EndiantWrite<TArray>,
-//     TArray : TryInto<&'a [u8]>,
-//     <TArray as TryInto<&'a [u8]>>::Error : fmt::Debug,
-// {
-//     value.to_le_bytes()
-//     // let Ok(value_bytes) = value.to_le_bytes().try_into() else {
-//     //     return Err("Failed to convert value to bytes");
-//     // };
-//     // bytes[*index..*index + mem::size_of::<T>()].copy_from_slice(&value_bytes);
-//     // *index += mem::size_of::<T>();
-//     // Ok(*index)
-// }
 
 pub fn write_le_primitive<T: EndianWrite>(vec: &mut Vec<u8>, value: T, accumulator: &mut usize) {
     *accumulator += mem::size_of::<T>();

@@ -1,11 +1,11 @@
 use crate::debug_dll::{
-    get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory,
+    get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_string_to_memory, save_to_memory
 };
-use crate::resource_manager::{add_handler, Handler};
+use crate::resource_manager::{add_handler, add_raw_bytes_to_map_with_path_override, add_txt_file_to_map_with_path_override, modify_ztfile, modify_ztfile_as_animation, modify_ztfile_as_ini, BFResourcePtr, Handler};
 use crate::string_registry::add_string_to_registry;
 use crate::ztui::{get_random_sex, get_selected_sex, BuyTab};
 use crate::ztworldmgr::{ZTEntity, ZTEntityType, ZTEntityTypeClass};
-use crate::{add_to_command_register, resource_manager};
+use crate::{add_to_command_register, animation};
 
 use retour_utils::hook_module;
 use tracing::{error, info};
@@ -29,7 +29,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use std::collections::{HashMap, HashSet};
 
-use bf_configparser::ini::Ini;
+use bf_configparser::ini::{Ini, WriteOptions};
 
 use maplit::hashset;
 
@@ -145,12 +145,20 @@ const EXPANSION_CURRENT: u32 = 0x00638d4c;
 
 const MAX_EXPANSION_SIZE: usize = 14;
 
+//TODO: Should point to openzt/openzt/expansion_dropdown/
+const EXPANSION_ZT_RESOURCE_PREFIX: &str = "ui/sharedui/listbk/";
+const EXPANSION_OPENZT_RESOURCE_PREFIX: &str = "openzt/openzt/expansion_dropdown/";
+const EXPANSION_RESOURCE_ANI: &str = "listbk.ani";
+const EXPANSION_RESOURCE_LYT: &str = "ui/xpac.lyt";
+const EXPANSION_RESOURCE_PAL: &str = "listbk.pal";
+const EXPANSION_RESOURCE_ANIMATION: &str = "N";
+
 static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
     let mut data_mutex = MEMBER_SETS.lock().unwrap();
-    let mut set = data_mutex.entry(member).or_insert(HashSet::new());
+    let set = data_mutex.entry(member).or_insert(HashSet::new());
     set.insert(entity_name);
 }
 
@@ -220,6 +228,10 @@ fn get_expansion(expansion_id: u32) -> Option<Expansion> {
         .iter()
         .find(|expansion| expansion.expansion_id == expansion_id)
         .cloned()
+}
+
+fn expansion_number() -> usize {
+    EXPANSION_ARRAY.lock().unwrap().len()
 }
 
 fn save_mutex() {
@@ -362,7 +374,7 @@ pub mod custom_expansion {
     use super::{
         add_expansion, add_expansion_with_string_id, add_expansion_with_string_value,
         get_expansions, get_members, read_current_expansion, save_current_expansion, save_mutex,
-        Expansion, get_cc_expansion_name_all,
+        Expansion, get_cc_expansion_name_all, initialise_expansions,
     };
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
@@ -394,20 +406,28 @@ pub mod custom_expansion {
         info!("ZTUI::expansionselect::setup");
         unsafe { ZTUI_expansionselect_setup.call() }; //TODO: Remove this call once all functionality has been replicated
 
-        add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
+        initialise_expansions();
 
-        if let Some(member_hash) = get_members(&get_cc_expansion_name_all())
-            && member_hash.len() > 0
-        {
-            add_expansion_with_string_value(
-                0x4000,
-                get_cc_expansion_name_all(),
-                "Custom Content".to_string(),
-                true,
-            );
-        }
+        // add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
 
-        save_current_expansion(0x0);
+        // if let Some(member_hash) = get_members(&get_cc_expansion_name_all())
+        //     && member_hash.len() > 0
+        // {
+        //     add_expansion_with_string_value(
+        //         0x4000,
+        //         get_cc_expansion_name_all(),
+        //         "Custom Content".to_string(),
+        //         true,
+        //     );
+        // }
+
+        // save_mutex();
+        // save_current_expansion(0x0);
+
+        // let expansion_number = get_expansions().len();
+        // // if expansion_number > 4 {
+        //     resize_expansion_dropdown(expansion_number as u32);
+        // // }
     }
 
     // #[hook(unsafe extern "thiscall" UIImage_load, offset=0x000d3509)]
@@ -435,6 +455,74 @@ pub mod custom_expansion {
 
     //     info!("UIControl_setAnimation(0x4b1aa0) {:#x} {} {:#x}", this, get_string_from_memory(anim_name), param_bool);
     // }
+}
+
+fn initialise_expansions() {
+
+    add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
+    if let Some(member_hash) = get_members(&get_cc_expansion_name_all())
+    && member_hash.len() > 0 {
+
+        add_expansion_with_string_value(
+            0x4000,
+            get_cc_expansion_name_all(),
+            "Custom Content".to_string(),
+            true,
+        );
+
+        save_mutex();
+    }
+
+    let number_of_expansions = get_expansions().len();
+
+    if number_of_expansions > 4 {
+        resize_expansion_dropdown(number_of_expansions as u32);
+    }
+
+    save_current_expansion(0x0);
+}
+
+fn resize_expansion_dropdown(number_of_expansions: u32) {
+    let number_of_additional_expansions = number_of_expansions as i32 - 4;
+    info!("Resizing expansion dropdown to fit {} extra expansions", number_of_additional_expansions);
+    if let Err(err) = modify_ztfile_as_ini(EXPANSION_RESOURCE_LYT, |cfg| {
+        let old_y = cfg.get_parse::<i32>("list", "dy").unwrap().unwrap();
+        let new_y = old_y + (number_of_additional_expansions * 30);
+        cfg.set("list", "dy", Some(new_y.to_string()));
+        info!("Resized expansion dropdown to {}", new_y);
+    }) {
+        info!("Error resizing expansion dropdown 'ani' file: {}", err);
+    }
+
+    if let Err(err) = modify_ztfile_as_ini(&(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_ANI), |cfg| {
+        let old_y0 = cfg.get_parse::<i32>("animation", "y0").unwrap().unwrap();
+        let new_y0  = old_y0 - (number_of_additional_expansions * 10);
+        let old_y1 = cfg.get_parse::<i32>("animation", "y1").unwrap().unwrap();
+        let new_y1 = old_y1 + (number_of_additional_expansions * 10);
+        cfg.set("animation", "y0", Some(new_y0.to_string()));
+        cfg.set("animation", "y1", Some(new_y1.to_string()));
+        cfg.set("animation", "dir0", Some("openzt".to_string()));
+        cfg.set("animation", "dir1", Some("openzt".to_string()));
+        cfg.set("animation", "dir2", Some("expansion_dropdown".to_string()));
+        info!("Resized expansion dropdown to {} {}", new_y0, new_y1);
+    }) {
+        info!("Error resizing expansion dropdown 'ani' file: {}", err);
+    }
+    info!("Check");
+    match modify_ztfile_as_animation(&(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_ANIMATION), |animation| {
+        info!("Reading expansion dropdown animation {} {} {}", animation.num_frames, animation.frames[0].lines.len(), animation.frames[0].vertical_offset_y);
+        info!("Animation points to pal file: {}", animation.pallette_filename);
+        animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
+        for _ in 0..number_of_additional_expansions {
+            animation.duplicate_pixel_rows(0, 10,31).unwrap();
+        }
+        animation.set_pallette_filename(EXPANSION_OPENZT_RESOURCE_PREFIX .to_string() + EXPANSION_RESOURCE_PAL);
+        info!("Resized expansion dropdown animation to {} {}", animation.frames[0].lines.len(), animation.frames[0].vertical_offset_y);
+        info!("Animation pal file changed to: {}", animation.pallette_filename);
+    }) {
+        Ok(_) => info!("Resized expansion dropdown animation"),
+        Err(e) => info!("Error resizing expansion dropdown animation: {}", e),
+    }
 }
 
 fn filter_entity_type(
@@ -736,11 +824,12 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
 
 fn handle_expansion_dropdown(entry: &PathBuf, file: &mut ZipFile) {
     let file_name = file.enclosed_name().unwrap().file_name().unwrap();
-    let file_path = Path::new("openzt/openzt/expansion_dropdown/").join(file_name);
+    let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
     let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
         error!("Error converting file path to string");
         return;
     };
+    info!("Handling expansion dropdown: {}", file_path_string);
     match Path::new(&file_path_string)
         .extension()
         .unwrap_or_default()
@@ -748,14 +837,12 @@ fn handle_expansion_dropdown(entry: &PathBuf, file: &mut ZipFile) {
         .unwrap_or_default()
     {
         "ani" => {
-            resource_manager::add_txt_file_to_map_with_path_override(entry, file, file_path_string);
+            info!("Handling ani file");
+            add_txt_file_to_map_with_path_override(entry, file, file_path_string);
         }
         "pal" | "" => {
-            resource_manager::add_raw_bytes_to_map_with_path_override(
-                entry,
-                file,
-                file_path_string,
-            );
+            info!("Handling pal file");
+            add_raw_bytes_to_map_with_path_override(entry, file, file_path_string);
         }
         _ => return,
     }
@@ -782,7 +869,7 @@ pub fn init() {
     add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing).unwrap());
     add_handler(
         Handler::new(
-            Some("ui/sharedui/listbk/".to_string()),
+            Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()),
             None,
             handle_expansion_dropdown,
         )

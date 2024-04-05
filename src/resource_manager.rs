@@ -10,6 +10,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::ptr;
 use std::sync::Mutex;
+use core::slice;
+
+use bf_configparser::ini::{Ini, WriteOptions};
 
 use once_cell::sync::Lazy;
 
@@ -20,19 +23,20 @@ use zip::read::ZipFile;
 use retour_utils::hook_module;
 use tracing::{error, info};
 
+use crate::animation::Animation;
 use crate::console::add_to_command_register;
-use crate::debug_dll::{get_base_path, get_from_memory, get_string_from_memory};
+use crate::debug_dll::{get_base_path, get_from_memory, get_string_from_memory, save_to_memory};
 
 const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
 
 #[derive(Debug, Clone)]
-enum ZTFile {
+pub enum ZTFile {
     Text(CString, ZTFileType, u32),
     Graphics(Box<[u8]>, ZTFileType, u32),
 }
 
 #[derive(Debug, Clone)]
-enum ZTFileType {
+pub enum ZTFileType {
     Ai,
     Ani,
     Cfg,
@@ -49,6 +53,37 @@ enum ZTFileType {
     Wav,
     Lle,
     Bmp,
+}
+
+impl From<BFResourcePtr> for ZTFile {
+    fn from(bf_resource_ptr: BFResourcePtr) -> Self {
+        let filename = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
+        let file_extension = Path::new(&filename)
+            .extension()
+            .unwrap_or_default()
+            .to_str()
+            .unwrap_or_default();
+        let file_size = bf_resource_ptr.content_size;
+        let data = bf_resource_ptr.data_ptr;
+        match file_extension {
+            "ai" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ai, file_size),
+            "cfg" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Cfg, file_size),
+            "lyt" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Lyt, file_size),
+            "scn" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Scn, file_size),
+            "uca" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Uca, file_size),
+            "ucs" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ucs, file_size),
+            "ucb" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ucb, file_size),
+            "ani" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ani, file_size),
+            "ini" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ini, file_size),
+            "txt" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Txt, file_size), 
+            "tga" => ZTFile::Graphics(unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) }, ZTFileType::TGA, file_size),
+            "pal" => ZTFile::Graphics(unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) }, ZTFileType::Palette, file_size),
+            "wav" => ZTFile::Graphics(unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) }, ZTFileType::Wav, file_size),
+            "lle" => ZTFile::Graphics(unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) }, ZTFileType::Lle, file_size),
+            "bmp" => ZTFile::Graphics(unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) }, ZTFileType::Bmp, file_size),
+            _ => ZTFile::Graphics(unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) }, ZTFileType::Animation, file_size),
+        }
+    }
 }
 
 impl ZTFile {
@@ -141,7 +176,8 @@ fn add_file_to_maps(entry: &PathBuf, file: &mut ZipFile) {
     ) {
         // | "ini" | "txt") {
         add_txt_file_to_map(entry, file);
-    } else if matches!(file_extension, "tga" | "pal" | "wav" | "lle" | "bmp" | "") {
+    // } else if matches!(file_extension, "tga" | "pal" | "wav" | "lle" | "bmp" | "") {
+    } else if matches!(file_extension, "tga" | "pal" | "wav" | "lle" | "bmp" ) {
         add_raw_bytes_file_to_map(entry, file);
     }
 }
@@ -163,6 +199,7 @@ pub fn add_txt_file_to_map_with_path_override(entry: &PathBuf, file: &mut ZipFil
 
     let mut intermediate_string = String::from_utf8_lossy(&buffer).to_string();
 
+    // TODO: Patch with modifier
     match file.name() {
         "ui/xpac.lyt" => {
             intermediate_string = intermediate_string.replace(
@@ -192,7 +229,7 @@ pub fn add_txt_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
 pub fn add_raw_bytes_to_map_with_path_override(entry: &PathBuf, file: &mut ZipFile, path: String) {
     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
     match file.read_exact(&mut buffer) {
-        Ok(bytes_read) => bytes_read,
+        Ok(_) => {},
         Err(e) => {
             error!(
                 "Error reading file: {} {} -> {}",
@@ -239,7 +276,7 @@ pub fn check_file(file_name: &str) -> bool {
 
 pub fn get_file_ptr(file_name: &str) -> u32 {
     let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
-    let bf_resource_ptr = match binding.get(file_name) {
+    let bf_resource_ptr = match binding.get(&file_name.to_lowercase()) {
         Some(ptr) => ptr.clone(),
         None => return 0,
     };
@@ -286,6 +323,72 @@ fn add_ztfile(path: &PathBuf, file_name: String, ztfile: ZTFile) {
         }
     }
 }
+
+pub fn modify_ztfile<F>(file_name: &str, modifier: F) -> Result<(), &'static str> where 
+    F: Fn(&mut BFResourcePtr) {
+
+    // let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+    // let bf_resource_ptr_ptr = match binding.get(file_name) {
+    let bf_resource_ptr_ptr = get_file_ptr(file_name);
+    if bf_resource_ptr_ptr == 0 {
+            info!("File not found: {}", file_name);
+            return Err("File not found")
+    }
+    let mut bf_resource_ptr = get_from_memory::<BFResourcePtr>(bf_resource_ptr_ptr);
+
+    modifier(&mut bf_resource_ptr);
+
+    info!("Before save_to_memory {}", get_from_memory::<BFResourcePtr>(bf_resource_ptr_ptr));
+    save_to_memory::<BFResourcePtr>(bf_resource_ptr_ptr, bf_resource_ptr.clone());
+    info!("After save_to_memory {}", get_from_memory::<BFResourcePtr>(bf_resource_ptr_ptr));
+
+    Ok(())
+}
+
+
+pub fn modify_ztfile_as_ini<F>(file_name: &str, modifier: F) -> Result<(), &'static str> where 
+    F: Fn(&mut Ini) {
+
+    modify_ztfile(file_name, |file: &mut BFResourcePtr| {
+        let c_string = unsafe { CString::from_raw(file.data_ptr as *mut i8) };
+        let c_string_as_string = c_string.to_str().unwrap().to_string();
+        info!("{}", c_string_as_string);
+        let mut cfg = Ini::new_cs();
+        cfg.set_comment_symbols(&[';', '#', ':']);
+        cfg.read(c_string_as_string.clone());
+
+        modifier(&mut cfg);
+
+        let mut write_options = WriteOptions::default();
+        write_options.space_around_delimiters = true;
+        write_options.blank_lines_between_sections = 1;
+        let new_string = cfg.pretty_writes(&write_options);
+        info!("{}", new_string);
+        file.content_size = new_string.len() as u32;
+
+        let new_c_string = CString::new(new_string).unwrap();
+        file.data_ptr = new_c_string.into_raw() as u32;
+    })
+}
+
+pub fn modify_ztfile_as_animation<F>(file_name: &str, modifier: F) -> Result<(), &'static str> where 
+    F: Fn(&mut Animation) {
+
+    modify_ztfile(file_name, |file: &mut BFResourcePtr| {
+        info!("Modifying animation");
+        let data_vec: Box<[u8]> = unsafe { Box::from_raw(slice::from_raw_parts_mut(file.data_ptr as *mut _, file.content_size as usize)) };
+        let mut animation = Animation::parse(&data_vec);
+        modifier(&mut animation);
+        let (new_animation_bytes, length) = animation.write();
+        let boxed_slice = new_animation_bytes.into_boxed_slice();
+        let data_ptr = boxed_slice.as_ptr() as u32;
+        std::mem::forget(boxed_slice);
+        file.data_ptr = data_ptr;
+        file.content_size = length as u32;
+    })
+}
+
+
 
 #[derive(Debug)]
 #[repr(C)]
@@ -334,14 +437,14 @@ struct BFResource {
     bf_resource_ptr_ptr: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
-struct BFResourcePtr {
-    num_refs: u32,
-    bf_zip_name_ptr: u32,
-    bf_resource_name_ptr: u32,
-    data_ptr: u32,
-    content_size: u32,
+pub struct BFResourcePtr {
+    pub num_refs: u32,
+    pub bf_zip_name_ptr: u32,
+    pub bf_resource_name_ptr: u32,
+    pub data_ptr: u32,
+    pub content_size: u32,
 }
 
 #[derive(Debug)]
@@ -470,7 +573,6 @@ pub fn init() {
     add_to_command_register("get_bfresourcemgr".to_owned(), command_get_bf_resource_mgr);
     unsafe { zoo_resource_mgr::init_detours().unwrap() };
     add_handler(Handler::new(None, None, add_file_to_maps).unwrap());
-    //TODO: Load resources from ZTD files
 }
 
 #[hook_module("zoo.exe")]
@@ -557,11 +659,11 @@ pub mod zoo_resource_mgr {
         }
         let return_value = unsafe { BFResource_attempt.call(this_ptr, file_name) };
 
-        info!(
-            "Cache miss: {} -> {}",
-            get_string_from_memory(file_name),
-            return_value
-        );
+        // info!(
+        //     "Cache miss: {} -> {}",
+        //     get_string_from_memory(file_name),
+        //     return_value
+        // );
 
         return_value
     }
@@ -575,11 +677,11 @@ pub mod zoo_resource_mgr {
 
         let return_value = unsafe { BFResource_prepare.call(this_ptr, file_name) };
 
-        info!(
-            "Cache miss: {} -> {}",
-            get_string_from_memory(file_name),
-            return_value
-        );
+        // info!(
+        //     "Cache miss: {} -> {}",
+        //     get_string_from_memory(file_name),
+        //     return_value
+        // );
 
         return_value
     }
@@ -591,13 +693,14 @@ pub mod zoo_resource_mgr {
 
             let ptr = get_file_ptr(&file_name_string);
 
-            if file_name_string.starts_with("ui/sharedui/listbk/") {
+            if file_name_string.starts_with("ui/sharedui/listbk/")  || file_name_string.starts_with("openzt/openzt") {
                 info!(
                     "Loading: {} -> {:#x} ({:#x})",
                     file_name_string,
                     ptr,
                     get_from_memory::<u32>(ptr)
                 );
+                info!("BFResourcePtr {}", get_from_memory::<BFResourcePtr>(ptr));
             }
 
             // if !file_name_string.ends_with("cfg") {
@@ -822,6 +925,7 @@ pub mod zoo_resource_mgr {
 
     #[hook(unsafe extern "thiscall" BFResourceMgr_constructor, offset = 0x0012903f)]
     fn zoo_bf_resource_mgr_constructor(this_ptr: u32) -> u32 {
+        info!("BFResourceMgr::constructor({:X})", this_ptr);
         let return_value = unsafe { BFResourceMgr_constructor.call(this_ptr) };
         let ini_path = get_ini_path();
         let mut zoo_ini = Ini::new();
@@ -836,7 +940,9 @@ pub mod zoo_resource_mgr {
             //         add_path(this_ptr, mods_path.as_ptr() as u32);
             //     }
             // }
+            info!("Loading resources from: {}", paths);
             load_resources(paths.split(';').map(|s| s.to_owned()).collect());
+            info!("Resources loaded");
         }
         return_value
     }
@@ -867,9 +973,6 @@ impl Handler {
         matcher_suffix: Option<String>,
         handler: HandlerFunction,
     ) -> Result<Self, &'static str> {
-        // if matcher_prefix.is_none() && matcher_suffix.is_none() {
-        //     return Err("Matcher prefix or filetype must be specified");
-        // }
         Ok(Self {
             matcher_prefix,
             matcher_suffix,

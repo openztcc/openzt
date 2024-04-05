@@ -1,4 +1,5 @@
 @echo off
+
 echo Building openzt dll
 cargo +nightly build --lib --release --target=i686-pc-windows-msvc
 

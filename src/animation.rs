@@ -5,48 +5,67 @@ use crate::parsing::{read_le_primitive, read_string, write_le_primitive, write_s
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Animation {
-    header: Option<Header>,
-    animation_speed: u32, //May be limited to u16
-    pallette_filename_length: u32,
-    pallette_filename: String,
-    num_frames: u32,
-    frames: Vec<Frame>,
-    //Random extra bytes?
+    pub header: Option<Header>,
+    pub animation_speed: u32,
+    pub pallette_filename_length: u32,
+    pub pallette_filename: String,
+    pub num_frames: u32,
+    pub frames: Vec<Frame>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Header {
-    ZTAF_string: u32,
-    empty_4_bytes: u32,
-    extra_frame: bool,
+    pub ztaf_string: u32,
+    pub empty_4_bytes: u32,
+    pub extra_frame: bool,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Frame {
-    num_bytes: u32,
-    pixel_height: u16,
-    pixel_width: u16,
-    vertical_offset_y: u16,
-    horizontal_offset_x: u16,
-    mystery_u16: u16,
-    lines: Vec<Line>,
+    pub num_bytes: u32,
+    pub pixel_height: u16,
+    pub pixel_width: u16,
+    pub vertical_offset_y: u16,
+    pub horizontal_offset_x: u16,
+    pub mystery_u16: u16,
+    pub lines: Vec<Line>,
+}
+
+impl Frame {
+    pub fn calc_byte_size(&self) -> usize {
+        let mut size = mem::size_of::<u16>() * 5;
+        for line in &self.lines {
+            size += line.calc_byte_size()
+        }
+        size
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Line {
-    num_draw_instructions: u8,
-    draw_instructions: Vec<DrawInstruction>,
+    pub num_draw_instructions: u8,
+    pub draw_instructions: Vec<DrawInstruction>,
+}
+
+impl Line {
+    pub fn calc_byte_size(&self) -> usize {
+        let mut size = mem::size_of::<u8>();
+        for draw_instruction in &self.draw_instructions {
+            size += mem::size_of::<u8>() + mem::size_of::<u8>() + (draw_instruction.colors.len() * mem::size_of::<u8>());
+        }
+        size
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct DrawInstruction {
-    offset: u8,
-    num_colors: u8,
-    colors: Vec::<u8>,
+    pub offset: u8,
+    pub num_colors: u8,
+    pub colors: Vec::<u8>,
 }
 
 // TODO: Write test based on mod data
@@ -58,7 +77,7 @@ impl Animation {
         let animation_speed = match maybe_header {
             0x5A544146 => {
                 header = Some(Header {
-                    ZTAF_string: maybe_header,
+                    ztaf_string: maybe_header,
                     empty_4_bytes: read_le_primitive(data, &mut index),
                     extra_frame: read_le_primitive(data, &mut index),
                 });
@@ -73,7 +92,7 @@ impl Animation {
         let pallette_filename = read_string(data, &mut index, pallette_filename_length as usize);
         let num_frames = read_le_primitive(data, &mut index);
         let mut frames = Vec::new();
-        for i in 0..num_frames + {if header.clone().is_some_and(|h| h.extra_frame) {1} else {0}} {
+        for _ in 0..num_frames + {if header.clone().is_some_and(|h| h.extra_frame) {1} else {0}} {
             let num_bytes = read_le_primitive(data, &mut index);
             let pixel_height = read_le_primitive(data, &mut index);
             let pixel_width = read_le_primitive(data, &mut index);
@@ -81,14 +100,14 @@ impl Animation {
             let horizontal_offset_x = read_le_primitive(data, &mut index);
             let mystery_u16 = read_le_primitive(data, &mut index);
             let mut lines = Vec::new();
-            for j in 0..pixel_height {
+            for _ in 0..pixel_height {
                 let num_draw_instructions = read_le_primitive(data, &mut index);
                 let mut draw_instructions = Vec::new();
-                for k in 0..num_draw_instructions {
+                for _ in 0..num_draw_instructions {
                     let offset = read_le_primitive(data, &mut index);
                     let num_colors = read_le_primitive(data, &mut index);
                     let mut colors = Vec::new();
-                    for l in 0..num_colors {
+                    for _ in 0..num_colors {
                         colors.push(read_le_primitive(data, &mut index));
                     }
                     draw_instructions.push(DrawInstruction {
@@ -128,14 +147,13 @@ impl Animation {
         let mut bytes = Vec::new();
         match self.header {
             Some(header) => {
-                write_le_primitive(&mut bytes, header.ZTAF_string, &mut accumulator);
+                write_le_primitive(&mut bytes, header.ztaf_string, &mut accumulator);
                 write_le_primitive(&mut bytes, header.empty_4_bytes, &mut accumulator);
                 write_le_primitive(&mut bytes, header.extra_frame, &mut accumulator);
             },
             None => ()
         }
         write_le_primitive(&mut bytes, self.animation_speed, &mut accumulator);
-        // write_le_primitive(&mut bytes, self.pallette_filename_length, &mut accumulator);
         write_string(&mut bytes, &self.pallette_filename, &mut accumulator);
         write_le_primitive(&mut bytes, self.num_frames, &mut accumulator);
 
@@ -161,10 +179,43 @@ impl Animation {
         bytes.shrink_to_fit();
         (bytes, accumulator)
     }
+
+    pub fn duplicate_pixel_rows(&mut self, frame: usize, start_index: usize, end_index: usize) -> Result<&mut Self, &'static str>{
+        let mut additional_bytes: usize = 0;
+        if start_index > end_index {
+            return Err("Start index must be less than end index");
+        }
+        if self.frames.len() < frame {
+            return Err("Frame index out of bounds");
+        }
+        if self.frames[frame].lines.len() < end_index {
+            return Err("End index out of bounds");
+        }
+        let mut new_lines = Vec::new();
+        for line in self.frames[frame].lines[start_index..end_index].iter() {
+            new_lines.push(line.clone());
+            additional_bytes += line.calc_byte_size();
+        }
+
+        self.frames[frame].lines.splice(end_index..end_index, new_lines);
+
+        self.frames[frame].num_bytes += additional_bytes as u32;
+
+        self.frames[frame].pixel_height += (end_index - start_index) as u16;
+
+        Ok(self)
+    }
+
+    pub fn set_pallette_filename(&mut self, pallette_filename: String) {
+        self.pallette_filename = pallette_filename;
+        self.pallette_filename_length = self.pallette_filename.len() as u32 + 1;
+    }
 }
 
 #[cfg(test)]
 mod parsing_tests {
+
+    use crate::animation;
 
     use super::Animation;
 
@@ -202,6 +253,26 @@ mod parsing_tests {
         let animation_to_write = animation.clone();
         let (animation_bytes, length) = animation_to_write.write();
         let animation_2 = Animation::parse(&animation_bytes[..]);
-        assert_eq!(animation, animation_2);
+    }
+
+    #[test]
+    fn test_calc_byte_size() {
+        let animation = Animation::parse(include_bytes!("../resources/test/N"));
+        assert_eq!(animation.frames[0].num_bytes, animation.frames[0].calc_byte_size() as u32);
+    }
+
+    #[test]
+    fn test_parse_modify_and_write() {
+        let animation = Animation::parse(include_bytes!("../resources/test/N"));
+        let mut animation_to_modify = animation.clone();
+        animation_to_modify.duplicate_pixel_rows(0, 0, 1).unwrap();
+        assert_eq!(animation.frames[0].pixel_height + 1, animation_to_modify.frames[0].pixel_height);
+        animation_to_modify.set_pallette_filename(animation.pallette_filename.clone());
+        assert_eq!(animation.pallette_filename_length, animation_to_modify.pallette_filename_length);
+        let (animation_bytes, length) = animation_to_modify.write();
+        let animation_2 = Animation::parse(&animation_bytes[..]);
+        assert_eq!(animation.frames[0].pixel_height + 1, animation_2.frames[0].pixel_height);
+        assert_eq!(animation.pallette_filename, animation_2.pallette_filename);
+        assert_eq!(animation.pallette_filename_length, animation_2.pallette_filename_length);
     }
 }
