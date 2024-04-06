@@ -1,15 +1,14 @@
 
 use crate::debug_dll::{get_from_memory, get_string_from_memory};
-use crate::add_to_command_register;
+use crate::{add_to_command_register, bfentitytype};
 use crate::expansions::is_member;
+use crate::bfentitytype::ZTSceneryType;
 
 use getset::Getters;
-
 use tracing::info;
 use std::collections::HashMap;
 use std::fmt;
 use num_enum::FromPrimitive;
-
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 
@@ -126,6 +125,7 @@ pub fn init() {
     add_to_command_register("list_types".to_owned(), command_get_zt_world_mgr_types);
     add_to_command_register("get_zt_world_mgr".to_owned(), command_get_zt_world_mgr);
     add_to_command_register("get_types_summary".to_owned(), command_zt_world_mgr_types_summary);
+    add_to_command_register("make_sel".to_owned(), command_make_sel);
 }
 
 
@@ -282,4 +282,75 @@ fn get_zt_world_mgr_types(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntityType> {
         i += 0x4;
     }
     return entity_types;
+}
+
+fn get_entity_type_by_id(id: u32) -> u32 {
+    let zt_world_mgr = read_zt_world_mgr_from_global();
+    let entity_type_array_start = zt_world_mgr.entity_type_array_start;
+    let entity_type_array_end = zt_world_mgr.entity_type_array_end;
+
+    let mut i = (entity_type_array_end - entity_type_array_start) / 0x4;
+
+    info!("Searching {} entity types for id {}", i, id);
+
+    i -= 1;
+
+    while i > 0 {
+        let entity_type_ptr = entity_type_array_start + i * 0x4;
+        info!("Checking entity type at {:#x}", entity_type_ptr);
+        let entity_type = ZTSceneryType::new(entity_type_ptr).unwrap();
+        info!("Entity type name id: {}", entity_type.name_id);
+        if entity_type.name_id == id {
+            info!("Found entity type {}", entity_type.bfentitytype.get_type_name());
+            return entity_type_ptr;
+        }
+        else {
+            info!("Entity type {} does not match", entity_type.bfentitytype.get_type_name());
+            i -= 1;
+        }
+    }
+    0
+}
+
+fn command_make_sel(_args: Vec<&str>) -> Result<String, &'static str> {
+    if _args.len() < 1 {
+        return Err("Usage: make_sel <id>");
+    }
+    else {
+        let id = _args[0].parse::<u32>().unwrap();
+        let entity_type_ptr = get_entity_type_by_id(id);
+        if entity_type_ptr == 0 {
+            return Err("Entity type not found");
+        }
+        let entity_type = ZTSceneryType::new(entity_type_ptr).unwrap();
+        if entity_type.selectable {
+            return Ok(format!("Entity type {} is already selectable", entity_type.bfentitytype.get_type_name()));
+        }
+        entity_type.selectable = true;
+        Ok(format!("Entity type {} is now selectable", entity_type.bfentitytype.get_type_name()))
+    }
+}
+
+pub fn determine_entity_type(address: u32) -> String {
+    let entity_type_address = get_from_memory::<u32>(address + 0x0);
+    let vtable_ptr = get_from_memory::<u32>(entity_type_address);
+
+    match vtable_ptr {
+        0x630268 => "Animal",
+        0x62e1e8 => "Ambient",
+        0x62e330 => "Guest",
+        0x63034c => "Fences",
+        0x62e8ac => "TourGuide",
+        0x6307e4 => "Building",
+        0x6303f4 => "Scenery",
+        0x630544 => "Food",
+        0x630694 => "TankFilter",
+        0x63049c => "Path",
+        0x63073c => "Rubble",
+        0x6305ec => "TankWall",
+        0x62e7d8 => "Keeper",
+        0x62e704 => "MaintenanceWorker",
+        0x62e980 => "DRT",
+        _ => "Unknown",
+    }.to_string()
 }
