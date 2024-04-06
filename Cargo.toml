@@ -1,21 +1,31 @@
 [package]
 name = "openzt"
-version = "0.1.0"
+version = "0.1.0-alpha"
 edition = "2021"
 # default-target = "i686-pc-windows-msvc"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 3
+
 [dependencies]
-configparser = "3.0.0"
+configparser = "3.0.4" # TODO: remove this, all references should be replaced with bf_configparser
 winapi = {version = "0.3.9", features = ["winuser", "std", "memoryapi"]}
 tracing-subscriber = "0.3.16"
 tracing = "0.1.37"
-retour = "0.1.0"
-retour-utils = "0.1.2"
+retour = {version = "0.3.1", features = ["thiscall-abi"]}
+retour-utils = "0.2.1"
 once_cell = "1.18.0"
-num_enum = "0.6.1"
+num_enum = "0.7.2"
 walkdir = "2.4.0"
+zip = "0.6.6"
+bf_configparser = { git = "https://github.com/openztcc/bf-configparser", version = "1.1.1", features = ["indexmap"]}
+anyhow = "1.0.80"
+getset = "0.1.2"
+maplit = "1.0.2"
 
 [lib]
 name = "openzt"
