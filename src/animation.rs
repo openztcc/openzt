@@ -151,7 +151,6 @@ impl Animation {
     pub fn write(self) -> (Vec<u8>, usize) {
         let mut accumulator: usize = 0;
         let mut bytes = Vec::new();
-        // match self.header {
         if let Some(header) = self.header {
             write_le_primitive(&mut bytes, header.ztaf_string, &mut accumulator);
             write_le_primitive(&mut bytes, header.empty_4_bytes, &mut accumulator);
