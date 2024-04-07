@@ -35,5 +35,11 @@ impl ZTLogLevel {
 
 pub fn log_from_zt(source_file: &String, line_number: u32, level: u32, message: &String) {
     let level = ZTLogLevel::from_u32(level);
-    info!("{}({}) : {} : {}", source_file, line_number, level.as_str(), message);
+    info!(
+        "{}({}) : {} : {}",
+        source_file,
+        line_number,
+        level.as_str(),
+        message
+    );
 }

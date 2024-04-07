@@ -364,7 +364,10 @@ pub mod custom_expansion {
     use tracing::info;
 
     use super::{initialise_expansions, read_current_expansion};
-    use crate::{debug_dll::get_from_memory, ztui::get_current_buy_tab, ztworldmgr::read_zt_entity_type_from_memory};
+    use crate::{
+        debug_dll::get_from_memory, ztui::get_current_buy_tab,
+        ztworldmgr::read_zt_entity_type_from_memory,
+    };
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
@@ -381,8 +384,7 @@ pub mod custom_expansion {
         };
 
         let reimplemented_result =
-            match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity)
-            {
+            match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
                 true => 1,
                 false => 0,
             };
@@ -800,7 +802,8 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
             name_string_buffer_end_ptr: name_ptr + name.len() as u32 + 1,
         },
         false,
-    ).map_err(anyhow::Error::msg)?;
+    )
+    .map_err(anyhow::Error::msg)?;
 
     Ok(())
 }

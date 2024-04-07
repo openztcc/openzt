@@ -1,13 +1,10 @@
-use std::env;
-use std::path::Path;
+use std::{env, path::Path};
 
-mod load_ini;
-mod debug_dll;
 mod bfregistry;
-
+mod debug_dll;
+mod load_ini;
 
 fn main() {
-
     let zoo_directory = Path::new("../zt_files");
 
     env::set_current_dir(zoo_directory).unwrap();

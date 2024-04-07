@@ -1,7 +1,4 @@
-use std::{
-    ffi::CString,
-    fmt, mem,
-};
+use std::{ffi::CString, fmt, mem};
 
 trait TypeSize {
     const SIZE: usize;

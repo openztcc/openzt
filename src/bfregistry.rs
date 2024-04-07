@@ -1,13 +1,11 @@
-use std::collections::HashMap;
-use tracing::info;
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
+
 use once_cell::sync::Lazy;
+use tracing::info;
 
 use crate::debug_dll::get_from_memory;
 
-static BF_REGISTRY: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| {
-    Mutex::new(HashMap::new())
-});
+static BF_REGISTRY: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub fn command_list_registry(_args: Vec<&str>) -> Result<String, &'static str> {
     list_registry()
@@ -29,7 +27,7 @@ pub fn add_to_registry(key: &String, value: u32) {
 
 pub fn get_from_registry(key: String) -> Option<u32> {
     let data_mutex = BF_REGISTRY.lock().unwrap();
-    
+
     data_mutex.get(&key).cloned()
 }
 
@@ -44,7 +42,7 @@ pub fn read_bf_registry() {
     let end_address = get_from_memory::<u32>(end_ptr);
 
     info!("BFRegistry: {:#08x} -> {:#08x}", start_address, end_address);
-    
+
     let mut current_address = start_address;
     while current_address < end_address {
         if current_address == 0 || get_from_memory::<u32>(current_address) == 0 {

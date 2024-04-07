@@ -2,13 +2,12 @@ use std::fmt;
 
 use tracing::info;
 
-use crate::console::add_to_command_register;
-
-use crate::ztworldmgr::read_zt_entity_from_memory;
-
-use crate::debug_dll::{get_from_memory, get_string_from_memory_bounded};
-
-use crate::common::ZTString;
+use crate::{
+    common::ZTString,
+    console::add_to_command_register,
+    debug_dll::{get_from_memory, get_string_from_memory_bounded},
+    ztworldmgr::read_zt_entity_from_memory,
+};
 
 const BFUIMGR_PTR: u32 = 0x00638de0;
 
@@ -95,7 +94,10 @@ impl fmt::Display for Sex {
 const RANDOM_SEX_STRING_PTR: u32 = 0x0063e420;
 
 pub fn init() {
-    add_to_command_register("get_selected_entity".to_owned(), command_get_selected_entity);
+    add_to_command_register(
+        "get_selected_entity".to_owned(),
+        command_get_selected_entity,
+    );
     add_to_command_register("get_element".to_owned(), command_get_element);
 }
 
@@ -114,7 +116,8 @@ fn command_get_element(args: Vec<&str>) -> Result<String, &'static str> {
         return Err("Expected 1 argument");
     }
     let address = args[0].parse::<u32>().unwrap();
-    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
+    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 =
+        unsafe { std::mem::transmute(0x0040157d) };
     let ui_element_addr = get_element_fn(BFUIMGR_PTR, address);
     if ui_element_addr == 0 {
         return Err("No element found");
@@ -125,7 +128,8 @@ fn command_get_element(args: Vec<&str>) -> Result<String, &'static str> {
 }
 
 fn get_element(id: UIElementId) -> Option<UIElement> {
-    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
+    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 =
+        unsafe { std::mem::transmute(0x0040157d) };
     let ui_element_addr = get_element_fn(BFUIMGR_PTR, id as u32);
     if ui_element_addr == 0 {
         return None;
@@ -139,7 +143,9 @@ fn command_get_current_buy_tab(_args: Vec<&str>) -> Result<String, &'static str>
 }
 
 pub fn get_current_buy_tab() -> Option<BuyTab> {
-    if let Some(asr) = get_element(UIElementId::AnimalScrollingRegion) && !asr.state.is_hidden() {
+    if let Some(asr) = get_element(UIElementId::AnimalScrollingRegion)
+        && !asr.state.is_hidden()
+    {
         if get_element(UIElementId::AnimalTab)?.state.is_selected() {
             return Some(BuyTab::AnimalTab);
         }
@@ -153,7 +159,9 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
             return Some(BuyTab::ShowToysTab);
         }
     }
-    if let Some(osr) = get_element(UIElementId::BuyObjectScrollingRegion) && !osr.state.is_hidden() {
+    if let Some(osr) = get_element(UIElementId::BuyObjectScrollingRegion)
+        && !osr.state.is_hidden()
+    {
         if get_element(UIElementId::BuildingTab)?.state.is_selected() {
             return Some(BuyTab::BuildingTab);
         }
@@ -161,7 +169,9 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
             return Some(BuyTab::SceneryTab);
         }
     }
-    if let Some(hsr) = get_element(UIElementId::BuildHabitatScrollingRegion) && !hsr.state.is_hidden() {
+    if let Some(hsr) = get_element(UIElementId::BuildHabitatScrollingRegion)
+        && !hsr.state.is_hidden()
+    {
         if get_element(UIElementId::FenceTab)?.state.is_selected() {
             return Some(BuyTab::FenceTab);
         }
@@ -175,18 +185,27 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
             return Some(BuyTab::RocksTab);
         }
     }
-    if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion) && !tsr.state.is_hidden() {
-        if get_element(UIElementId::PaintTerrainTab)?.state.is_selected() {
+    if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion)
+        && !tsr.state.is_hidden()
+    {
+        if get_element(UIElementId::PaintTerrainTab)?
+            .state
+            .is_selected()
+        {
             return Some(BuyTab::PaintTerrainTab);
         }
         if get_element(UIElementId::TerraformTab)?.state.is_selected() {
             return Some(BuyTab::TerraformTab);
         }
     }
-    if let Some(ssr) = get_element(UIElementId::StaffScrollingRegion) && !ssr.state.is_hidden() {
+    if let Some(ssr) = get_element(UIElementId::StaffScrollingRegion)
+        && !ssr.state.is_hidden()
+    {
         return Some(BuyTab::StaffTab);
     }
-    if let Some(developer_tab) = get_element(UIElementId::DeveloperScrollingRegion) && !developer_tab.state.is_hidden() {
+    if let Some(developer_tab) = get_element(UIElementId::DeveloperScrollingRegion)
+        && !developer_tab.state.is_hidden()
+    {
         return Some(BuyTab::DeveloperTab);
     }
     None
@@ -204,10 +223,12 @@ pub fn get_selected_sex() -> Option<Sex> {
 
 pub fn get_random_sex() -> Option<Sex> {
     let string_address = get_from_memory::<u32>(RANDOM_SEX_STRING_PTR);
-    match get_string_from_memory_bounded(string_address, string_address + 4, string_address + 8).as_str() {
+    match get_string_from_memory_bounded(string_address, string_address + 4, string_address + 8)
+        .as_str()
+    {
         "m" => Some(Sex::Male),
         "f" => Some(Sex::Female),
-        _ => None
+        _ => None,
     }
 }
 
@@ -227,8 +248,6 @@ pub fn get_selected_entity_type() -> u32 {
     let entity_type_address = selected_entity + 0x128;
     entity_type_address
 }
-
-
 
 #[derive(Debug)]
 #[repr(C)]
@@ -254,7 +273,7 @@ impl fmt::Display for UIElement {
 #[derive(Debug)]
 #[repr(C)]
 pub struct UIState {
-    state: u16
+    state: u16,
 }
 
 impl UIState {
@@ -280,7 +299,14 @@ impl UIState {
 
 impl fmt::Display for UIState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "UIState {{ hidden: {}, disabled: {}, highlighted: {}, selected: {}, focused: {} }}",
-               self.is_hidden(), self.is_disabled(), self.is_highlighted(), self.is_selected(), self.is_focused())
+        write!(
+            f,
+            "UIState {{ hidden: {}, disabled: {}, highlighted: {}, selected: {}, focused: {} }}",
+            self.is_hidden(),
+            self.is_disabled(),
+            self.is_highlighted(),
+            self.is_selected(),
+            self.is_focused()
+        )
     }
 }
