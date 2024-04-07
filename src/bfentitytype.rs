@@ -1075,7 +1075,7 @@ impl ZTRubbleType {
 
 // ------------ Custom Command Implementation ------------ //
 
-fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_sel_type(args: Vec<&str>) -> Result<String, &'static str> {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
     let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
     if entity_type_address == 0 {
@@ -1084,9 +1084,9 @@ fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
 
     let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
                                                                        // if -v flag is used, print the entity type configuration and other details
-    if _args.len() == 0 {
+    if args.is_empty() {
         Ok(entity_type.print_details())
-    } else if _args[0] == "-v" {
+    } else if args[0] == "-v" {
         info!(
             "Printing configuration for entity type at address {:#x}",
             entity_type_print
@@ -1094,9 +1094,9 @@ fn command_sel_type(_args: Vec<&str>) -> Result<String, &'static str> {
 
         // print the entity type configuration for the selected entity type
         Ok(print_config_for_type())
-    } else if _args.len() == 2 {
+    } else if args.len() == 2 {
         // parse the subargs for the entity type
-        parse_subargs_for_type(_args)
+        parse_subargs_for_type(args)
     } else {
         Ok("Invalid argument".to_string())
     }
@@ -1140,7 +1140,7 @@ fn print_config_for_type() -> String {
         config.push_str(&building_type.ztscenerytype.print_config_integers());
         config.push_str(&building_type.print_config_integers());
         config.push_str(&building_type.print_config_floats());
-        print_info_image_name(&entity_type, &mut config);
+        print_info_image_name(entity_type, &mut config);
     } else if class_type == "Scenery" {
         info!("Entity type is a scenery. Printing scenery type configuration.");
         let scenery_type = ZTSceneryType::new(entity_type_address).unwrap(); // create a copied instance of the entity type

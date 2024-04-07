@@ -4,7 +4,7 @@
 
 use std::{net::TcpStream, sync::Mutex};
 
-use configparser::ini::Ini;
+use bf_configparser::ini::Ini;
 use retour_utils::hook_module;
 use tracing::{info, Level};
 
@@ -317,7 +317,7 @@ extern "cdecl" fn load_int_from_ini(
         "load_int_from_ini {} {} result: {}",
         section, header, result
     ));
-    return result;
+    result
 }
 
 #[no_mangle]
@@ -346,9 +346,8 @@ extern "cdecl" fn load_value_from_ini<'a>(
         "encoding string at address: {:p}",
         *result_address as *const ()
     ));
-    debug_dll::save_string_to_memory(*(&result_address as &u32), &result);
-    // ptr::write(result_address as *mut _, result);
-    return result_address;
+    debug_dll::save_string_to_memory(*result_address, &result);
+    result_address
 }
 
 fn get_ini_path() -> String {

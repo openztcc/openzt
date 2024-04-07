@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use configparser::ini::Ini;
+use bf_configparser::ini::Ini;
 
 #[derive(Debug)]
 pub struct DebugSettings {
@@ -13,7 +13,7 @@ pub struct DebugSettings {
 }
 
 pub fn load_debug_settings(ini_path: &Path) -> DebugSettings {
-    let mut debug_settings = DebugSettings {
+    let debug_settings = DebugSettings {
         log_cutoff: 9,
         send_log_file: 0,
         send_message_box: 0,
@@ -21,8 +21,7 @@ pub fn load_debug_settings(ini_path: &Path) -> DebugSettings {
         delta_log_0: 0,
         delta_log_1: 0,
     };
-    debug_settings = load_debug_settings_from_ini(debug_settings, ini_path);
-    return debug_settings;
+    load_debug_settings_from_ini(debug_settings, ini_path)
 }
 
 // pub unsafe fn zt_load_debug_settings() -> i32 {
@@ -84,17 +83,12 @@ fn load_debug_settings_from_ini(
         debug_settings.delta_log_1,
     );
 
-    return debug_settings;
+    debug_settings
 }
 
 pub fn load_int_with_default(ini_file: &Ini, section: &str, key: &str, default: i32) -> i32 {
-    let value = ini_file.getint(section, key);
-
-    match value {
-        Ok(inner_value) => match inner_value {
-            Some(parsed_value) => parsed_value as i32,
-            None => default,
-        },
+    match ini_file.get_parse(section, key) {
+        Ok(value) => value.unwrap_or(default),
         Err(_) => default,
     }
 }

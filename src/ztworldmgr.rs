@@ -26,7 +26,7 @@ pub enum ZTEntityClass {
     Keeper = 0x62e7d8,
     MaintenanceWorker = 0x62e704,
     TourGuide = 0x62e8ac,
-    DRT = 0x62e980,
+    Drt = 0x62e980,
     Ambient = 0x62e1e8,
     Rubble = 0x63073c,
     TankWall = 0x6305ec,
@@ -67,7 +67,7 @@ pub enum ZTEntityTypeClass {
     TankWall = 0x6305ec,
     Keeper = 0x62e7d8,
     MaintenanceWorker = 0x62e704,
-    DRT = 0x62e980,
+    Drt = 0x62e980,
     #[num_enum(default)]
     Unknown = 0x0,
 }
@@ -94,7 +94,7 @@ impl ZTEntityType {
             | ZTEntityTypeClass::TankWall
             | ZTEntityTypeClass::Keeper
             | ZTEntityTypeClass::MaintenanceWorker
-            | ZTEntityTypeClass::DRT => is_member(&self.zt_type, &member),
+            | ZTEntityTypeClass::Drt => is_member(&self.zt_type, &member),
             ZTEntityTypeClass::Building
             | ZTEntityTypeClass::Scenery
             | ZTEntityTypeClass::Food
@@ -134,20 +134,20 @@ pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
     let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
 
     ZTEntity {
-        class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr + 0x0)),
+        class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr)),
         type_class: read_zt_entity_type_from_memory(get_from_memory::<u32>(inner_class_ptr)),
         name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
     }
 }
 
 pub fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZTEntityType {
-    let class_string = get_from_memory::<u32>(zt_entity_type_ptr + 0x0);
+    let class_string = get_from_memory::<u32>(zt_entity_type_ptr);
     let class = ZTEntityTypeClass::from(class_string);
 
     ZTEntityType {
         ptr: zt_entity_type_ptr,
-        class_string: class_string,
-        class: class,
+        class_string,
+        class,
         zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
         zt_sub_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0xa4)),
         bf_config_file_ptr: get_from_memory::<u32>(zt_entity_type_ptr + 0x80),
@@ -176,7 +176,7 @@ fn command_get_zt_world_mgr_entities(_args: Vec<&str>) -> Result<String, &'stati
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let entities = get_zt_world_mgr_entities(&zt_world_mgr);
     info!("Found {} entities", entities.len());
-    if entities.len() == 0 {
+    if entities.is_empty() {
         return Ok("No entities found".to_string());
     }
     let mut string_array = Vec::new();
@@ -190,7 +190,7 @@ fn command_get_zt_world_mgr_types(_args: Vec<&str>) -> Result<String, &'static s
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let types = get_zt_world_mgr_types(&zt_world_mgr);
     info!("Found {} types", types.len());
-    if types.len() == 0 {
+    if types.is_empty() {
         return Ok("No types found".to_string());
     }
     let mut string_array = Vec::new();
@@ -210,7 +210,7 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, &'stat
     let types = get_zt_world_mgr_types(&zt_world_mgr);
     let mut summary = "\n".to_string();
     let mut subtype: HashMap<String, u32> = HashMap::new();
-    if types.len() == 0 {
+    if types.is_empty() {
         return Ok("No types found".to_string());
     }
     let mut current_class = types[0].class.clone();
@@ -279,7 +279,7 @@ fn get_zt_world_mgr_entities(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntity> {
         entities.push(zt_entity);
         i += 0x4;
     }
-    return entities;
+    entities
 }
 
 fn get_zt_world_mgr_types(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntityType> {
@@ -297,7 +297,7 @@ fn get_zt_world_mgr_types(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntityType> {
         entity_types.push(zt_entity_type);
         i += 0x4;
     }
-    return entity_types;
+    entity_types
 }
 
 fn get_entity_type_by_id(id: u32) -> u32 {
@@ -333,11 +333,11 @@ fn get_entity_type_by_id(id: u32) -> u32 {
     0
 }
 
-fn command_make_sel(_args: Vec<&str>) -> Result<String, &'static str> {
-    if _args.len() < 1 {
-        return Err("Usage: make_sel <id>");
+fn command_make_sel(args: Vec<&str>) -> Result<String, &'static str> {
+    if args.is_empty() {
+        Err("Usage: make_sel <id>")
     } else {
-        let id = _args[0].parse::<u32>().unwrap();
+        let id = args[0].parse::<u32>().unwrap();
         let entity_type_ptr = get_entity_type_by_id(id);
         if entity_type_ptr == 0 {
             return Err("Entity type not found");
@@ -358,7 +358,7 @@ fn command_make_sel(_args: Vec<&str>) -> Result<String, &'static str> {
 }
 
 pub fn determine_entity_type(address: u32) -> String {
-    let entity_type_address = get_from_memory::<u32>(address + 0x0);
+    let entity_type_address = get_from_memory::<u32>(address);
     let vtable_ptr = get_from_memory::<u32>(entity_type_address);
 
     match vtable_ptr {

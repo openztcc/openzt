@@ -76,7 +76,7 @@ pub fn debug_logger(message: &str) {
 }
 
 pub fn get_from_memory<T>(address: u32) -> T {
-    return unsafe { ptr::read(address as *const T) };
+    unsafe { ptr::read(address as *const T) }
 }
 
 pub fn save_to_memory<T>(address: u32, value: T) {
@@ -138,7 +138,7 @@ pub fn get_string_from_memory_bounded(start: u32, end: u32, buffer_end: u32) -> 
         string.push(get_from_memory::<u8>(char_address) as char);
         char_address += 1;
     }
-    return string;
+    string
 }
 
 pub fn get_string_from_memory(address: u32) -> String {
@@ -153,7 +153,7 @@ pub fn get_string_from_memory(address: u32) -> String {
         char_address += 1;
     }
     debug!("decoded: {}", string);
-    return string;
+    string
 }
 
 pub fn save_string_to_memory(address: u32, string: &str) {
@@ -339,7 +339,7 @@ fn handle_get_u32_setting(setting: &str) -> String {
 }
 
 pub fn command_show_settings(args: Vec<&str>) -> Result<String, &'static str> {
-    if args.len() != 0 {
+    if !args.is_empty() {
         return Err("Invalid number of arguments");
     }
     Ok(show_settings())
@@ -365,7 +365,7 @@ pub fn show_settings() -> String {
     format!("sendDebugger: {}\nsendLogFile: {}\nsendMessage: {}\ndeltaLog0: {}\ndeltaLog1: {}\nlogCutoff: {}\nShowBuildingAIInfo: {}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", send_debugger, send_log_file, send_message, delta_log_0, delta_log_1, log_cutoff,show_building_ai_info, show_goal, show_frame, show_selected, show_events, show_function_call, show_status_vars, show_position, show_name, show_ai_info)
 }
 
-pub fn parse_bool(string: &String) -> Result<bool, String> {
+pub fn parse_bool(string: &str) -> Result<bool, String> {
     match string.trim() {
         "true" | "1" => Ok(true),
         "false" | "0" => Ok(false),
@@ -377,7 +377,7 @@ fn handle_get_bool_zt_ai_mgr_setting(setting: &str) -> String {
     let address = get_from_memory::<u32>(ZTAIMGR_ADDRESS_PTR);
     let offset = setting_to_address(setting);
     let value: bool = get_from_memory::<bool>(address + offset);
-    return format!("{}: {}", setting, value);
+    format!("{}: {}", setting, value)
 }
 
 fn handle_set_bool_zt_ai_mgr_setting(setting: &str, value: String) -> String {
@@ -386,10 +386,10 @@ fn handle_set_bool_zt_ai_mgr_setting(setting: &str, value: String) -> String {
     match parse_bool(&value) {
         Ok(setting_value) => {
             save_to_memory::<bool>(address + offset, setting_value);
-            return format!("{} set to {}", setting, setting_value);
+            format!("{} set to {}", setting, setting_value)
         }
         Err(_) => {
-            return format!("invalid value: {}", value);
+            format!("invalid value: {}", value)
         }
     }
 }
@@ -397,13 +397,13 @@ fn handle_set_bool_zt_ai_mgr_setting(setting: &str, value: String) -> String {
 pub fn get_base_path() -> PathBuf {
     let mut exe_location = std::env::current_exe().unwrap();
     exe_location.pop();
-    return exe_location;
+    exe_location
 }
 
 pub fn get_ini_path() -> PathBuf {
     let mut exe_location = get_base_path();
     exe_location.push("zoo.ini");
-    return exe_location;
+    exe_location
 }
 
 pub fn patch_calls(addresses: Vec<u32>, new_address: u32) {
@@ -451,7 +451,7 @@ pub fn read_string_array_from_memory(address: u32, size: u32) -> Vec<String> {
         strings.push(string);
         string_address += 0x100;
     }
-    return strings;
+    strings
 }
 
 pub fn get_zt_string_array_from_memory(address: u32, end_address: u32) -> Vec<String> {
@@ -463,7 +463,7 @@ pub fn get_zt_string_array_from_memory(address: u32, end_address: u32) -> Vec<St
         strings.push(string);
         string_address += 0xc;
     }
-    return strings;
+    strings
 }
 
 pub fn read_string_list_from_memory(start_ptr: u32, end_ptr: u32) {

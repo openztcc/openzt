@@ -37,39 +37,39 @@ pub enum UIElementId {
 
 #[derive(Debug, PartialEq)]
 pub enum BuyTab {
-    AnimalTab,
-    ShelterTab,
-    ToysTab,
-    ShowToysTab,
-    BuildingTab,
-    SceneryTab,
-    FenceTab,
-    PathTab,
-    FoliageTab,
-    RocksTab,
-    PaintTerrainTab,
-    TerraformTab,
-    StaffTab,
-    DeveloperTab,
+    Animal,
+    Shelter,
+    Toys,
+    ShowToys,
+    Building,
+    Scenery,
+    Fence,
+    Path,
+    Foliage,
+    Rocks,
+    PaintTerrain,
+    Terraform,
+    Staff,
+    Developer,
 }
 
 impl fmt::Display for BuyTab {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let string = match self {
-            BuyTab::AnimalTab => "Animal Tab",
-            BuyTab::ShelterTab => "Shelter Tab",
-            BuyTab::ToysTab => "Toys Tab",
-            BuyTab::ShowToysTab => "Show Toys Tab",
-            BuyTab::BuildingTab => "Building Tab",
-            BuyTab::SceneryTab => "Scenery Tab",
-            BuyTab::FenceTab => "Fence Tab",
-            BuyTab::PathTab => "Path Tab",
-            BuyTab::FoliageTab => "Foliage Tab",
-            BuyTab::RocksTab => "Rocks Tab",
-            BuyTab::PaintTerrainTab => "Paint Terrain Tab",
-            BuyTab::TerraformTab => "Terraform Tab",
-            BuyTab::StaffTab => "Staff Tab",
-            BuyTab::DeveloperTab => "Developer Tab",
+            BuyTab::Animal => "Animal Tab",
+            BuyTab::Shelter => "Shelter Tab",
+            BuyTab::Toys => "Toys Tab",
+            BuyTab::ShowToys => "Show Toys Tab",
+            BuyTab::Building => "Building Tab",
+            BuyTab::Scenery => "Scenery Tab",
+            BuyTab::Fence => "Fence Tab",
+            BuyTab::Path => "Path Tab",
+            BuyTab::Foliage => "Foliage Tab",
+            BuyTab::Rocks => "Rocks Tab",
+            BuyTab::PaintTerrain => "Paint Terrain Tab",
+            BuyTab::Terraform => "Terraform Tab",
+            BuyTab::Staff => "Staff Tab",
+            BuyTab::Developer => "Developer Tab",
         };
         write!(f, "{}", string)
     }
@@ -147,42 +147,42 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
         && !asr.state.is_hidden()
     {
         if get_element(UIElementId::AnimalTab)?.state.is_selected() {
-            return Some(BuyTab::AnimalTab);
+            return Some(BuyTab::Animal);
         }
         if get_element(UIElementId::ShelterTab)?.state.is_selected() {
-            return Some(BuyTab::ShelterTab);
+            return Some(BuyTab::Shelter);
         }
         if get_element(UIElementId::ToysTab)?.state.is_selected() {
-            return Some(BuyTab::ToysTab);
+            return Some(BuyTab::Toys);
         }
         if get_element(UIElementId::ShowToysTab)?.state.is_selected() {
-            return Some(BuyTab::ShowToysTab);
+            return Some(BuyTab::ShowToys);
         }
     }
     if let Some(osr) = get_element(UIElementId::BuyObjectScrollingRegion)
         && !osr.state.is_hidden()
     {
         if get_element(UIElementId::BuildingTab)?.state.is_selected() {
-            return Some(BuyTab::BuildingTab);
+            return Some(BuyTab::Building);
         }
         if get_element(UIElementId::SceneryTab)?.state.is_selected() {
-            return Some(BuyTab::SceneryTab);
+            return Some(BuyTab::Scenery);
         }
     }
     if let Some(hsr) = get_element(UIElementId::BuildHabitatScrollingRegion)
         && !hsr.state.is_hidden()
     {
         if get_element(UIElementId::FenceTab)?.state.is_selected() {
-            return Some(BuyTab::FenceTab);
+            return Some(BuyTab::Fence);
         }
         if get_element(UIElementId::PathTab)?.state.is_selected() {
-            return Some(BuyTab::PathTab);
+            return Some(BuyTab::Path);
         }
         if get_element(UIElementId::FoliageTab)?.state.is_selected() {
-            return Some(BuyTab::FoliageTab);
+            return Some(BuyTab::Foliage);
         }
         if get_element(UIElementId::RocksTab)?.state.is_selected() {
-            return Some(BuyTab::RocksTab);
+            return Some(BuyTab::Rocks);
         }
     }
     if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion)
@@ -192,21 +192,21 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
             .state
             .is_selected()
         {
-            return Some(BuyTab::PaintTerrainTab);
+            return Some(BuyTab::PaintTerrain);
         }
         if get_element(UIElementId::TerraformTab)?.state.is_selected() {
-            return Some(BuyTab::TerraformTab);
+            return Some(BuyTab::Terraform);
         }
     }
     if let Some(ssr) = get_element(UIElementId::StaffScrollingRegion)
         && !ssr.state.is_hidden()
     {
-        return Some(BuyTab::StaffTab);
+        return Some(BuyTab::Staff);
     }
     if let Some(developer_tab) = get_element(UIElementId::DeveloperScrollingRegion)
         && !developer_tab.state.is_hidden()
     {
-        return Some(BuyTab::DeveloperTab);
+        return Some(BuyTab::Developer);
     }
     None
 }
@@ -245,8 +245,7 @@ pub fn get_selected_entity_type() -> u32 {
         return 0;
     }
 
-    let entity_type_address = selected_entity + 0x128;
-    entity_type_address
+    selected_entity + 0x128
 }
 
 #[derive(Debug)]
@@ -266,7 +265,7 @@ pub struct UIElement {
 impl fmt::Display for UIElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "UIElement {{ unknown_u32_1: {:#x}, unknown_u32_2: {:#x}, unknown_string_1: {}, string_content: {}, element_name: {}, state: {} }}",
-               self.unknown_u32_1, self.unknown_u32_2, self.unknown_string_1.to_string(), self.string_content.to_string(), self.element_name.to_string(), self.state)
+               self.unknown_u32_1, self.unknown_u32_2, self.unknown_string_1, self.string_content, self.element_name, self.state)
     }
 }
 

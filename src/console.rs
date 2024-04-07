@@ -59,7 +59,6 @@ fn call_command(command_name: String, args: Vec<&str>) -> Result<String, &'stati
 }
 
 pub fn call_next_command() {
-    //} -> Result<String, &'static str> {
     let command = get_from_command_queue();
     if command.is_none() {
         return;
@@ -119,17 +118,6 @@ pub fn command_list_commands(_args: Vec<&str>) -> Result<String, &'static str> {
     }
 }
 
-// fn call_command(command_name: String, args: Vec<&str>) -> Result<String, &'static str> {
-//     info!("Calling command {} with args {:?}", command_name, args);
-//     let data_mutex = COMMAND_REGISTRY.lock().unwrap();
-
-//     let command = data_mutex.get(&command_name).cloned();
-//     match command {
-//         Some(command) => command(args),
-//         None => Err("Command not found")
-//     }
-// }
-
 fn handle_client(mut stream: TcpStream) {
     let mut buffer = [0; 1024]; // Buffer to store received data
 
@@ -148,21 +136,14 @@ fn handle_client(mut stream: TcpStream) {
 
                 loop {
                     let result = get_next_result();
-                    if !result.is_none() {
+                    if result.is_some() {
                         let result = result.unwrap();
-                        // info!("Sending: {}", result);
                         if let Err(err) = stream.write_all(result.as_bytes()) {
                             info!("Error sending data: {}", err);
                         }
                         break;
                     }
                 }
-
-                // Send the received string back to the client
-                // if let Err(err) = stream.write_all(&buffer[0..size]) {
-                //     info!("Error sending data: {}", err);
-                //     break;
-                // }
             }
             Err(err) => {
                 info!("Error reading data: {}", err);

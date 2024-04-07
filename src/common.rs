@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::debug_dll::get_string_from_memory_bounded;
 
 #[derive(Debug)]
@@ -8,8 +10,12 @@ pub struct ZTString {
     buffer_end_ptr: u32,
 }
 
-impl ToString for ZTString {
-    fn to_string(&self) -> String {
-        get_string_from_memory_bounded(self.start_ptr, self.end_ptr, self.buffer_end_ptr)
+impl fmt::Display for ZTString {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            get_string_from_memory_bounded(self.start_ptr, self.end_ptr, self.buffer_end_ptr)
+        )
     }
 }

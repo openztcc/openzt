@@ -32,11 +32,11 @@ pub fn get_from_registry(key: String) -> Option<u32> {
 }
 
 pub fn read_bf_registry() {
-    let start_ptr: u32 = 0x63f590 as u32;
+    let start_ptr: u32 = 0x63f590;
     if get_from_memory::<u32>(start_ptr) == 0 {
         return;
     }
-    let end_ptr: u32 = 0x63f594 as u32;
+    let end_ptr: u32 = 0x63f594;
 
     let start_address = get_from_memory::<u32>(start_ptr);
     let end_address = get_from_memory::<u32>(end_ptr);
@@ -48,6 +48,6 @@ pub fn read_bf_registry() {
         if current_address == 0 || get_from_memory::<u32>(current_address) == 0 {
             break;
         }
-        current_address = current_address + 0x1c;
+        current_address += 0x1c;
     }
 }

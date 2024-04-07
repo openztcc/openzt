@@ -4,7 +4,7 @@ use std::{
     fmt,
     fmt::Display,
     io::Read,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Mutex, MutexGuard},
 };
 
@@ -143,7 +143,6 @@ const EXPANSION_CURRENT: u32 = 0x00638d4c;
 
 const MAX_EXPANSION_SIZE: usize = 14;
 
-//TODO: Should point to openzt/openzt/expansion_dropdown/
 const EXPANSION_ZT_RESOURCE_PREFIX: &str = "ui/sharedui/listbk/";
 const EXPANSION_OPENZT_RESOURCE_PREFIX: &str = "openzt/openzt/expansion_dropdown/";
 const EXPANSION_RESOURCE_ANI: &str = "listbk.ani";
@@ -172,10 +171,6 @@ pub fn get_members(member: &str) -> Option<HashSet<String>> {
     let data_mutex = MEMBER_SETS.lock().unwrap();
     data_mutex.get(member).cloned()
 }
-
-// pub fn get_cc_members() -> Option<HashSet<String>> {
-//     get_members(&(CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string() + CUSTOM_CONTENT_EXPANSION_STRING_ALL))
-// }
 
 fn get_cc_expansion_name_all() -> String {
     CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string() + CUSTOM_CONTENT_EXPANSION_STRING_ALL
@@ -241,7 +236,8 @@ fn save_mutex() {
 fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
     let array_ptr = mutex_guard.as_mut_ptr();
     let array_end_ptr = unsafe { array_ptr.offset(isize::try_from(mutex_guard.len()).unwrap()) };
-    let array_buffer_end_ptr = unsafe { array_ptr.offset(isize::try_from(mutex_guard.capacity()).unwrap()) };
+    let array_buffer_end_ptr =
+        unsafe { array_ptr.offset(isize::try_from(mutex_guard.capacity()).unwrap()) };
     info!(
         "Saving expansions to {:#x} to {:#x}; {:#x}",
         array_ptr as u32, array_end_ptr as u32, array_buffer_end_ptr as u32
@@ -407,7 +403,7 @@ pub mod custom_expansion {
 fn initialise_expansions() {
     add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
     if let Some(member_hash) = get_members(&get_cc_expansion_name_all())
-        && member_hash.is_empty()
+        && !member_hash.is_empty()
     {
         add_expansion_with_string_value(
             0x4000,
@@ -434,11 +430,16 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
         "Resizing expansion dropdown to fit {} extra expansions",
         number_of_additional_expansions
     );
+
     if let Err(err) = modify_ztfile_as_ini(EXPANSION_RESOURCE_LYT, |cfg| {
         let old_y = cfg.get_parse::<i32>("list", "dy").unwrap().unwrap();
         let new_y = old_y + (number_of_additional_expansions * 30);
         cfg.set("list", "dy", Some(new_y.to_string()));
-        info!("Resized expansion dropdown to {}", new_y);
+        cfg.set(
+            "background",
+            "animation",
+            Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "listbk"),
+        );
     }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
@@ -455,7 +456,6 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
             cfg.set("animation", "dir0", Some("openzt".to_string()));
             cfg.set("animation", "dir1", Some("openzt".to_string()));
             cfg.set("animation", "dir2", Some("expansion_dropdown".to_string()));
-            info!("Resized expansion dropdown to {} {}", new_y0, new_y1);
         },
     ) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
@@ -473,7 +473,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
             );
         },
     ) {
-        Ok(_) => info!("Resized expansion dropdown animation"),
+        Ok(_) => (),
         Err(e) => info!("Error resizing expansion dropdown animation: {}", e),
     }
 }
@@ -484,7 +484,7 @@ fn filter_entity_type(
     entity: &ZTEntityType,
 ) -> bool {
     match buy_tab {
-        BuyTab::AnimalTab => {
+        BuyTab::Animal => {
             if !entity.is_member("animals".to_string()) {
                 return false;
             }
@@ -497,27 +497,27 @@ fn filter_entity_type(
                 None => return false,
             }
         }
-        BuyTab::ShelterTab => {
+        BuyTab::Shelter => {
             if !entity.is_member("shelters".to_string()) {
                 return false;
             }
         }
-        BuyTab::ToysTab => {
+        BuyTab::Toys => {
             if !entity.is_member("toys".to_string()) {
                 return false;
             }
         }
-        BuyTab::ShowToysTab => {
+        BuyTab::ShowToys => {
             if !entity.is_member("showtoys".to_string()) {
                 return false;
             }
         }
-        BuyTab::BuildingTab => {
+        BuyTab::Building => {
             if !entity.is_member("structures".to_string()) {
                 return false;
             }
         }
-        BuyTab::SceneryTab => {
+        BuyTab::Scenery => {
             if !entity.is_member("scenery".to_string()) {
                 return false;
             }
@@ -529,7 +529,7 @@ fn filter_entity_type(
                 return false;
             }
         }
-        BuyTab::FenceTab => {
+        BuyTab::Fence => {
             if !entity.is_member("fence".to_string()) {
                 return false;
             }
@@ -537,22 +537,22 @@ fn filter_entity_type(
                 return false;
             }
         }
-        BuyTab::PathTab => {
+        BuyTab::Path => {
             if !entity.is_member("paths".to_string()) {
                 return false;
             }
         }
-        BuyTab::FoliageTab => {
+        BuyTab::Foliage => {
             if !entity.is_member("foliage".to_string()) {
                 return false;
             }
         }
-        BuyTab::RocksTab => {
+        BuyTab::Rocks => {
             if !entity.is_member("rocks".to_string()) {
                 return false;
             }
         }
-        BuyTab::StaffTab => {
+        BuyTab::Staff => {
             if !entity.is_member("staff".to_string()) {
                 return false;
             }
@@ -562,15 +562,15 @@ fn filter_entity_type(
                 return false;
             }
         }
-        BuyTab::DeveloperTab => {
+        BuyTab::Developer => {
             if !entity.is_member("developer".to_string()) {
                 return false;
             }
         }
-        BuyTab::PaintTerrainTab | BuyTab::TerraformTab => return false,
+        BuyTab::PaintTerrain | BuyTab::Terraform => return false,
     }
 
-    if buy_tab != &BuyTab::PathTab {
+    if buy_tab != &BuyTab::Path {
         if current_expansion.expansion_id == 0x1 {
             for expansion in get_expansions() {
                 if expansion.expansion_id > 0x1
@@ -634,7 +634,7 @@ fn add_expansion_with_string_value(
     }
 }
 
-fn handle_expansion_config(path: &PathBuf, file: &mut ZipFile) {
+fn handle_expansion_config(path: &Path, file: &mut ZipFile) {
     if let Err(e) = parse_expansion_config(file) {
         info!(
             "Error parsing expansion config: {} {} {}",
@@ -645,7 +645,7 @@ fn handle_expansion_config(path: &PathBuf, file: &mut ZipFile) {
     }
 }
 
-fn handle_member_parsing(path: &PathBuf, file: &mut ZipFile) {
+fn handle_member_parsing(path: &Path, file: &mut ZipFile) {
     if let Err(e) = parse_member_config(path, file) {
         error!(
             "Error parsing member config: {} {} {}",
@@ -676,7 +676,7 @@ static FILE_NAME_OVERRIDES: Lazy<HashMap<String, String>> = Lazy::new(|| {
     .collect()
 });
 
-fn parse_member_config(path: &PathBuf, file: &mut ZipFile) -> anyhow::Result<()> {
+fn parse_member_config(path: &Path, file: &mut ZipFile) -> anyhow::Result<()> {
     let mut buffer = vec![0; file.size() as usize];
     if let Err(error) = file.read(&mut buffer[..]) {
         info!("Error reading member config {}: {}", file.name(), error);
@@ -717,7 +717,7 @@ fn parse_member_config(path: &PathBuf, file: &mut ZipFile) -> anyhow::Result<()>
     Ok(())
 }
 
-fn is_cc(path: &PathBuf) -> bool {
+fn is_cc(path: &Path) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };
@@ -747,7 +747,6 @@ fn is_cc(path: &PathBuf) -> bool {
 fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     let mut string_buffer = String::with_capacity(file.size() as usize);
     file.read_to_string(&mut string_buffer)?;
-    info!("{}", string_buffer);
 
     let mut expansion_cfg = Ini::new();
     expansion_cfg
@@ -786,7 +785,7 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_expansion_dropdown(entry: &PathBuf, file: &mut ZipFile) {
+fn handle_expansion_dropdown(entry: &Path, file: &mut ZipFile) {
     let file_name = file.enclosed_name().unwrap().file_name().unwrap();
     let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
     let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {

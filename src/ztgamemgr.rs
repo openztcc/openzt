@@ -29,14 +29,14 @@ struct ZTGameMgr {
     pad9: [u8; 0x1160 - 0x56],     // 0x54
     zoo_admission_cost: f32,       // 0x1160
     pad10: [u8; 0x1194 - 0x1164],  // 0x1160
-    date: SYSTEMTIME,              // 0x1194
+    date: Systemtime,              // 0x1194
     pad11: [u8; 0x1400],           // 0x1194
 }
 
 // SYSTEMTIME struct from Windows API
 #[derive(Debug, Clone)]
 #[repr(C)]
-struct SYSTEMTIME {
+struct Systemtime {
     w_year: u16,
     w_month: u16,
     w_day_of_week: u16,
