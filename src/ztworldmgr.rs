@@ -1,14 +1,15 @@
-
-use crate::debug_dll::{get_from_memory, get_string_from_memory};
-use crate::{add_to_command_register, bfentitytype};
-use crate::expansions::is_member;
-use crate::bfentitytype::ZTSceneryType;
+use std::{collections::HashMap, fmt};
 
 use getset::Getters;
-use tracing::info;
-use std::collections::HashMap;
-use std::fmt;
 use num_enum::FromPrimitive;
+use tracing::info;
+
+use crate::{
+    add_to_command_register,
+    bfentitytype::ZTSceneryType,
+    debug_dll::{get_from_memory, get_string_from_memory},
+    expansions::is_member,
+};
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 
@@ -25,7 +26,7 @@ pub enum ZTEntityClass {
     Keeper = 0x62e7d8,
     MaintenanceWorker = 0x62e704,
     TourGuide = 0x62e8ac,
-    DRT = 0x62e980,
+    Drt = 0x62e980,
     Ambient = 0x62e1e8,
     Rubble = 0x63073c,
     TankWall = 0x6305ec,
@@ -66,11 +67,10 @@ pub enum ZTEntityTypeClass {
     TankWall = 0x6305ec,
     Keeper = 0x62e7d8,
     MaintenanceWorker = 0x62e704,
-    DRT = 0x62e980,
+    Drt = 0x62e980,
     #[num_enum(default)]
     Unknown = 0x0,
 }
-
 
 #[derive(Debug, Getters)]
 #[get = "pub"]
@@ -86,25 +86,21 @@ pub struct ZTEntityType {
 impl ZTEntityType {
     pub fn is_member(&self, member: String) -> bool {
         match self.class {
-            ZTEntityTypeClass::Animal |
-            ZTEntityTypeClass::Guest |
-            ZTEntityTypeClass::Fences |
-            ZTEntityTypeClass::TourGuide |
-            ZTEntityTypeClass::TankFilter |
-            ZTEntityTypeClass::TankWall |
-            ZTEntityTypeClass::Keeper |
-            ZTEntityTypeClass::MaintenanceWorker |
-            ZTEntityTypeClass::DRT => {
-                is_member(&self.zt_type, &member)
-            }
-            ZTEntityTypeClass::Building |
-            ZTEntityTypeClass::Scenery |
-            ZTEntityTypeClass::Food |
-            ZTEntityTypeClass::Path |
-            ZTEntityTypeClass::Rubble |
-            ZTEntityTypeClass::Ambient => {
-                is_member(&self.zt_sub_type, &member)
-            }
+            ZTEntityTypeClass::Animal
+            | ZTEntityTypeClass::Guest
+            | ZTEntityTypeClass::Fences
+            | ZTEntityTypeClass::TourGuide
+            | ZTEntityTypeClass::TankFilter
+            | ZTEntityTypeClass::TankWall
+            | ZTEntityTypeClass::Keeper
+            | ZTEntityTypeClass::MaintenanceWorker
+            | ZTEntityTypeClass::Drt => is_member(&self.zt_type, &member),
+            ZTEntityTypeClass::Building
+            | ZTEntityTypeClass::Scenery
+            | ZTEntityTypeClass::Food
+            | ZTEntityTypeClass::Path
+            | ZTEntityTypeClass::Rubble
+            | ZTEntityTypeClass::Ambient => is_member(&self.zt_sub_type, &member),
 
             ZTEntityTypeClass::Unknown => false,
         }
@@ -121,39 +117,42 @@ struct ZTWorldMgr {
 }
 
 pub fn init() {
-    add_to_command_register("list_entities".to_owned(), command_get_zt_world_mgr_entities);
+    add_to_command_register(
+        "list_entities".to_owned(),
+        command_get_zt_world_mgr_entities,
+    );
     add_to_command_register("list_types".to_owned(), command_get_zt_world_mgr_types);
     add_to_command_register("get_zt_world_mgr".to_owned(), command_get_zt_world_mgr);
-    add_to_command_register("get_types_summary".to_owned(), command_zt_world_mgr_types_summary);
+    add_to_command_register(
+        "get_types_summary".to_owned(),
+        command_zt_world_mgr_types_summary,
+    );
     add_to_command_register("make_sel".to_owned(), command_make_sel);
 }
 
-
 pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
     let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
-    
-    ZTEntity{
-        class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr + 0x0)),
+
+    ZTEntity {
+        class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr)),
         type_class: read_zt_entity_type_from_memory(get_from_memory::<u32>(inner_class_ptr)),
         name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
     }
 }
 
 pub fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZTEntityType {
-    let class_string = get_from_memory::<u32>(zt_entity_type_ptr + 0x0);
+    let class_string = get_from_memory::<u32>(zt_entity_type_ptr);
     let class = ZTEntityTypeClass::from(class_string);
 
-    ZTEntityType{
+    ZTEntityType {
         ptr: zt_entity_type_ptr,
-        class_string: class_string,
-        class: class,
+        class_string,
+        class,
         zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
         zt_sub_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0xa4)),
         bf_config_file_ptr: get_from_memory::<u32>(zt_entity_type_ptr + 0x80),
     }
 }
-
-
 
 fn read_zt_world_mgr_from_global() -> ZTWorldMgr {
     let zt_world_mgr_ptr = get_from_memory::<u32>(GLOBAL_ZTWORLDMGR_ADDRESS);
@@ -161,7 +160,7 @@ fn read_zt_world_mgr_from_global() -> ZTWorldMgr {
 }
 
 fn read_zt_world_mgr_from_memory(zt_world_mgr_ptr: u32) -> ZTWorldMgr {
-    ZTWorldMgr{
+    ZTWorldMgr {
         entity_array_start: get_from_memory::<u32>(zt_world_mgr_ptr + 0x80),
         entity_array_end: get_from_memory::<u32>(zt_world_mgr_ptr + 0x84),
         entity_type_array_start: get_from_memory::<u32>(zt_world_mgr_ptr + 0x98),
@@ -177,7 +176,7 @@ fn command_get_zt_world_mgr_entities(_args: Vec<&str>) -> Result<String, &'stati
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let entities = get_zt_world_mgr_entities(&zt_world_mgr);
     info!("Found {} entities", entities.len());
-    if entities.len() == 0 {
+    if entities.is_empty() {
         return Ok("No entities found".to_string());
     }
     let mut string_array = Vec::new();
@@ -191,7 +190,7 @@ fn command_get_zt_world_mgr_types(_args: Vec<&str>) -> Result<String, &'static s
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let types = get_zt_world_mgr_types(&zt_world_mgr);
     info!("Found {} types", types.len());
-    if types.len() == 0 {
+    if types.is_empty() {
         return Ok("No types found".to_string());
     }
     let mut string_array = Vec::new();
@@ -211,7 +210,7 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, &'stat
     let types = get_zt_world_mgr_types(&zt_world_mgr);
     let mut summary = "\n".to_string();
     let mut subtype: HashMap<String, u32> = HashMap::new();
-    if types.len() == 0 {
+    if types.is_empty() {
         return Ok("No types found".to_string());
     }
     let mut current_class = types[0].class.clone();
@@ -223,8 +222,18 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, &'stat
                 string_array.push(format!("\t{:?}: {}", class, count));
                 total += count;
             }
-            summary.push_str(&format!("{:?}: ({})\n{}\n", current_class, total, string_array.join("\n")));
-            info!("{:?}: ({})\n{}", current_class, total, string_array.join("\n"));
+            summary.push_str(&format!(
+                "{:?}: ({})\n{}\n",
+                current_class,
+                total,
+                string_array.join("\n")
+            ));
+            info!(
+                "{:?}: ({})\n{}",
+                current_class,
+                total,
+                string_array.join("\n")
+            );
             subtype = HashMap::new();
             current_class = zt_type.class.clone();
         }
@@ -237,7 +246,11 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, &'stat
 
 impl fmt::Display for ZTEntity {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Entity Type: {:?}, Name: {}, EntityType {}", self.class, self.name, self.type_class)
+        write!(
+            f,
+            "Entity Type: {:?}, Name: {}, EntityType {}",
+            self.class, self.name, self.type_class
+        )
     }
 }
 
@@ -266,7 +279,7 @@ fn get_zt_world_mgr_entities(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntity> {
         entities.push(zt_entity);
         i += 0x4;
     }
-    return entities;
+    entities
 }
 
 fn get_zt_world_mgr_types(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntityType> {
@@ -276,12 +289,15 @@ fn get_zt_world_mgr_types(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntityType> {
     let mut entity_types: Vec<ZTEntityType> = Vec::new();
     let mut i = entity_type_array_start;
     while i < entity_type_array_end {
-        info!("Reading entity at {:#x}; end {:#x}", i, entity_type_array_end);
+        info!(
+            "Reading entity at {:#x}; end {:#x}",
+            i, entity_type_array_end
+        );
         let zt_entity_type = read_zt_entity_type_from_memory(get_from_memory::<u32>(i));
         entity_types.push(zt_entity_type);
         i += 0x4;
     }
-    return entity_types;
+    entity_types
 }
 
 fn get_entity_type_by_id(id: u32) -> u32 {
@@ -301,38 +317,48 @@ fn get_entity_type_by_id(id: u32) -> u32 {
         let entity_type = ZTSceneryType::new(entity_type_ptr).unwrap();
         info!("Entity type name id: {}", entity_type.name_id);
         if entity_type.name_id == id {
-            info!("Found entity type {}", entity_type.bfentitytype.get_type_name());
+            info!(
+                "Found entity type {}",
+                entity_type.bfentitytype.get_type_name()
+            );
             return entity_type_ptr;
-        }
-        else {
-            info!("Entity type {} does not match", entity_type.bfentitytype.get_type_name());
+        } else {
+            info!(
+                "Entity type {} does not match",
+                entity_type.bfentitytype.get_type_name()
+            );
             i -= 1;
         }
     }
     0
 }
 
-fn command_make_sel(_args: Vec<&str>) -> Result<String, &'static str> {
-    if _args.len() < 1 {
-        return Err("Usage: make_sel <id>");
-    }
-    else {
-        let id = _args[0].parse::<u32>().unwrap();
+fn command_make_sel(args: Vec<&str>) -> Result<String, &'static str> {
+    if args.is_empty() {
+        Err("Usage: make_sel <id>")
+    } else {
+        let id = args[0].parse::<u32>().unwrap();
         let entity_type_ptr = get_entity_type_by_id(id);
         if entity_type_ptr == 0 {
             return Err("Entity type not found");
         }
         let entity_type = ZTSceneryType::new(entity_type_ptr).unwrap();
         if entity_type.selectable {
-            return Ok(format!("Entity type {} is already selectable", entity_type.bfentitytype.get_type_name()));
+            return Ok(format!(
+                "Entity type {} is already selectable",
+                entity_type.bfentitytype.get_type_name()
+            ));
         }
         entity_type.selectable = true;
-        Ok(format!("Entity type {} is now selectable", entity_type.bfentitytype.get_type_name()))
+        Ok(format!(
+            "Entity type {} is now selectable",
+            entity_type.bfentitytype.get_type_name()
+        ))
     }
 }
 
 pub fn determine_entity_type(address: u32) -> String {
-    let entity_type_address = get_from_memory::<u32>(address + 0x0);
+    let entity_type_address = get_from_memory::<u32>(address);
     let vtable_ptr = get_from_memory::<u32>(entity_type_address);
 
     match vtable_ptr {
@@ -352,5 +378,6 @@ pub fn determine_entity_type(address: u32) -> String {
         0x62e704 => "MaintenanceWorker",
         0x62e980 => "DRT",
         _ => "Unknown",
-    }.to_string()
+    }
+    .to_string()
 }

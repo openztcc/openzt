@@ -1,20 +1,20 @@
 extern crate winapi;
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    sync::Mutex,
+    thread,
+};
 
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::thread;
-
-use std::sync::Mutex;
 use once_cell::sync::Lazy; //TODO: Use std::sync::LazyCell when it becomes stable
-use tracing::info;
-
 use retour_utils::hook_module;
+use tracing::info;
 
 #[hook_module("zoo.exe")]
 pub mod zoo_console {
-    use super::{call_next_command, start_server, add_to_command_register, command_list_commands};
+    use super::{add_to_command_register, call_next_command, command_list_commands, start_server};
 
     #[hook(unsafe extern "thiscall" ZTApp_updateGame, offset = 0x0001a6d1)]
     fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
@@ -33,17 +33,12 @@ pub mod zoo_console {
 
 type CommandCallback = fn(args: Vec<&str>) -> Result<String, &'static str>;
 
-static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, CommandCallback>>> = Lazy::new(|| {
-    Mutex::new(HashMap::<String, CommandCallback>::new())
-});
+static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, CommandCallback>>> =
+    Lazy::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
 
-static COMMAND_RESULTS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| {
-    Mutex::new(Vec::<String>::new())
-});
+static COMMAND_RESULTS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<String>::new()));
 
-static COMMAND_QUEUE: Lazy<Mutex<Vec::<String>>> = Lazy::new(|| {
-    Mutex::new(Vec::<String>::new())
-});
+static COMMAND_QUEUE: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<String>::new()));
 
 pub fn add_to_command_register(command_name: String, command_callback: CommandCallback) {
     info!("Registring command {} to registry", command_name);
@@ -59,14 +54,14 @@ fn call_command(command_name: String, args: Vec<&str>) -> Result<String, &'stati
     };
     match command {
         Some(command) => command(args),
-        None => Err("Command not found")
+        None => Err("Command not found"),
     }
 }
 
-pub fn call_next_command() { //} -> Result<String, &'static str> {
+pub fn call_next_command() {
     let command = get_from_command_queue();
     if command.is_none() {
-         return
+        return;
     } else {
         info!("Calling next command {}", command.as_ref().unwrap());
     }
@@ -80,7 +75,7 @@ pub fn call_next_command() { //} -> Result<String, &'static str> {
         Ok(result) => {
             let mut data_mutex = COMMAND_RESULTS.lock().unwrap();
             data_mutex.push(result);
-        },
+        }
         Err(err) => {
             let result = err.to_string();
             let mut data_mutex = COMMAND_RESULTS.lock().unwrap();
@@ -115,24 +110,13 @@ pub fn command_list_commands(_args: Vec<&str>) -> Result<String, &'static str> {
                 result.push_str(&format!("{}\n", command_name));
             }
             Ok(result)
-        },
+        }
         Err(err) => {
             info!("Error getting command list: {}", err);
             Err("Error getting command list")
         }
     }
 }
-
-// fn call_command(command_name: String, args: Vec<&str>) -> Result<String, &'static str> {
-//     info!("Calling command {} with args {:?}", command_name, args);
-//     let data_mutex = COMMAND_REGISTRY.lock().unwrap();
-    
-//     let command = data_mutex.get(&command_name).cloned();
-//     match command {
-//         Some(command) => command(args),
-//         None => Err("Command not found")
-//     }
-// }
 
 fn handle_client(mut stream: TcpStream) {
     let mut buffer = [0; 1024]; // Buffer to store received data
@@ -152,21 +136,14 @@ fn handle_client(mut stream: TcpStream) {
 
                 loop {
                     let result = get_next_result();
-                    if !result.is_none() {
+                    if result.is_some() {
                         let result = result.unwrap();
-                        // info!("Sending: {}", result);
                         if let Err(err) = stream.write_all(result.as_bytes()) {
                             info!("Error sending data: {}", err);
                         }
                         break;
                     }
                 }
-
-                // Send the received string back to the client
-                // if let Err(err) = stream.write_all(&buffer[0..size]) {
-                //     info!("Error sending data: {}", err);
-                //     break;
-                // }
             }
             Err(err) => {
                 info!("Error reading data: {}", err);

@@ -2,13 +2,12 @@ use std::fmt;
 
 use tracing::info;
 
-use crate::console::add_to_command_register;
-
-use crate::ztworldmgr::read_zt_entity_from_memory;
-
-use crate::debug_dll::{get_from_memory, get_string_from_memory_bounded};
-
-use crate::common::ZTString;
+use crate::{
+    common::ZTString,
+    console::add_to_command_register,
+    debug_dll::{get_from_memory, get_string_from_memory_bounded},
+    ztworldmgr::read_zt_entity_from_memory,
+};
 
 const BFUIMGR_PTR: u32 = 0x00638de0;
 
@@ -38,20 +37,42 @@ pub enum UIElementId {
 
 #[derive(Debug, PartialEq)]
 pub enum BuyTab {
-    AnimalTab,
-    ShelterTab,
-    ToysTab,
-    ShowToysTab,
-    BuildingTab,
-    SceneryTab,
-    FenceTab,
-    PathTab,
-    FoliageTab,
-    RocksTab,
-    PaintTerrainTab,
-    TerraformTab,
-    StaffTab,
-    DeveloperTab,
+    Animal,
+    Shelter,
+    Toys,
+    ShowToys,
+    Building,
+    Scenery,
+    Fence,
+    Path,
+    Foliage,
+    Rocks,
+    PaintTerrain,
+    Terraform,
+    Staff,
+    Developer,
+}
+
+impl fmt::Display for BuyTab {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let string = match self {
+            BuyTab::Animal => "Animal Tab",
+            BuyTab::Shelter => "Shelter Tab",
+            BuyTab::Toys => "Toys Tab",
+            BuyTab::ShowToys => "Show Toys Tab",
+            BuyTab::Building => "Building Tab",
+            BuyTab::Scenery => "Scenery Tab",
+            BuyTab::Fence => "Fence Tab",
+            BuyTab::Path => "Path Tab",
+            BuyTab::Foliage => "Foliage Tab",
+            BuyTab::Rocks => "Rocks Tab",
+            BuyTab::PaintTerrain => "Paint Terrain Tab",
+            BuyTab::Terraform => "Terraform Tab",
+            BuyTab::Staff => "Staff Tab",
+            BuyTab::Developer => "Developer Tab",
+        };
+        write!(f, "{}", string)
+    }
 }
 
 //TODO: Add support for the buy young hack
@@ -73,7 +94,10 @@ impl fmt::Display for Sex {
 const RANDOM_SEX_STRING_PTR: u32 = 0x0063e420;
 
 pub fn init() {
-    add_to_command_register("get_selected_entity".to_owned(), command_get_selected_entity);
+    add_to_command_register(
+        "get_selected_entity".to_owned(),
+        command_get_selected_entity,
+    );
     add_to_command_register("get_element".to_owned(), command_get_element);
 }
 
@@ -92,7 +116,8 @@ fn command_get_element(args: Vec<&str>) -> Result<String, &'static str> {
         return Err("Expected 1 argument");
     }
     let address = args[0].parse::<u32>().unwrap();
-    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
+    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 =
+        unsafe { std::mem::transmute(0x0040157d) };
     let ui_element_addr = get_element_fn(BFUIMGR_PTR, address);
     if ui_element_addr == 0 {
         return Err("No element found");
@@ -103,7 +128,8 @@ fn command_get_element(args: Vec<&str>) -> Result<String, &'static str> {
 }
 
 fn get_element(id: UIElementId) -> Option<UIElement> {
-    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
+    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 =
+        unsafe { std::mem::transmute(0x0040157d) };
     let ui_element_addr = get_element_fn(BFUIMGR_PTR, id as u32);
     if ui_element_addr == 0 {
         return None;
@@ -117,55 +143,70 @@ fn command_get_current_buy_tab(_args: Vec<&str>) -> Result<String, &'static str>
 }
 
 pub fn get_current_buy_tab() -> Option<BuyTab> {
-    if let Some(asr) = get_element(UIElementId::AnimalScrollingRegion) && !asr.state.is_hidden() {
+    if let Some(asr) = get_element(UIElementId::AnimalScrollingRegion)
+        && !asr.state.is_hidden()
+    {
         if get_element(UIElementId::AnimalTab)?.state.is_selected() {
-            return Some(BuyTab::AnimalTab);
+            return Some(BuyTab::Animal);
         }
         if get_element(UIElementId::ShelterTab)?.state.is_selected() {
-            return Some(BuyTab::ShelterTab);
+            return Some(BuyTab::Shelter);
         }
         if get_element(UIElementId::ToysTab)?.state.is_selected() {
-            return Some(BuyTab::ToysTab);
+            return Some(BuyTab::Toys);
         }
         if get_element(UIElementId::ShowToysTab)?.state.is_selected() {
-            return Some(BuyTab::ShowToysTab);
+            return Some(BuyTab::ShowToys);
         }
     }
-    if let Some(osr) = get_element(UIElementId::BuyObjectScrollingRegion) && !osr.state.is_hidden() {
+    if let Some(osr) = get_element(UIElementId::BuyObjectScrollingRegion)
+        && !osr.state.is_hidden()
+    {
         if get_element(UIElementId::BuildingTab)?.state.is_selected() {
-            return Some(BuyTab::BuildingTab);
+            return Some(BuyTab::Building);
         }
         if get_element(UIElementId::SceneryTab)?.state.is_selected() {
-            return Some(BuyTab::SceneryTab);
+            return Some(BuyTab::Scenery);
         }
     }
-    if let Some(hsr) = get_element(UIElementId::BuildHabitatScrollingRegion) && !hsr.state.is_hidden() {
+    if let Some(hsr) = get_element(UIElementId::BuildHabitatScrollingRegion)
+        && !hsr.state.is_hidden()
+    {
         if get_element(UIElementId::FenceTab)?.state.is_selected() {
-            return Some(BuyTab::FenceTab);
+            return Some(BuyTab::Fence);
         }
         if get_element(UIElementId::PathTab)?.state.is_selected() {
-            return Some(BuyTab::PathTab);
+            return Some(BuyTab::Path);
         }
         if get_element(UIElementId::FoliageTab)?.state.is_selected() {
-            return Some(BuyTab::FoliageTab);
+            return Some(BuyTab::Foliage);
         }
         if get_element(UIElementId::RocksTab)?.state.is_selected() {
-            return Some(BuyTab::RocksTab);
+            return Some(BuyTab::Rocks);
         }
     }
-    if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion) && !tsr.state.is_hidden() {
-        if get_element(UIElementId::PaintTerrainTab)?.state.is_selected() {
-            return Some(BuyTab::PaintTerrainTab);
+    if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion)
+        && !tsr.state.is_hidden()
+    {
+        if get_element(UIElementId::PaintTerrainTab)?
+            .state
+            .is_selected()
+        {
+            return Some(BuyTab::PaintTerrain);
         }
         if get_element(UIElementId::TerraformTab)?.state.is_selected() {
-            return Some(BuyTab::TerraformTab);
+            return Some(BuyTab::Terraform);
         }
     }
-    if let Some(ssr) = get_element(UIElementId::StaffScrollingRegion) && !ssr.state.is_hidden() {
-        return Some(BuyTab::StaffTab);
+    if let Some(ssr) = get_element(UIElementId::StaffScrollingRegion)
+        && !ssr.state.is_hidden()
+    {
+        return Some(BuyTab::Staff);
     }
-    if let Some(developer_tab) = get_element(UIElementId::DeveloperScrollingRegion) && !developer_tab.state.is_hidden() {
-        return Some(BuyTab::DeveloperTab);
+    if let Some(developer_tab) = get_element(UIElementId::DeveloperScrollingRegion)
+        && !developer_tab.state.is_hidden()
+    {
+        return Some(BuyTab::Developer);
     }
     None
 }
@@ -182,10 +223,12 @@ pub fn get_selected_sex() -> Option<Sex> {
 
 pub fn get_random_sex() -> Option<Sex> {
     let string_address = get_from_memory::<u32>(RANDOM_SEX_STRING_PTR);
-    match get_string_from_memory_bounded(string_address, string_address + 4, string_address + 8).as_str() {
+    match get_string_from_memory_bounded(string_address, string_address + 4, string_address + 8)
+        .as_str()
+    {
         "m" => Some(Sex::Male),
         "f" => Some(Sex::Female),
-        _ => None
+        _ => None,
     }
 }
 
@@ -202,11 +245,8 @@ pub fn get_selected_entity_type() -> u32 {
         return 0;
     }
 
-    let entity_type_address = selected_entity + 0x128;
-    entity_type_address
+    selected_entity + 0x128
 }
-
-
 
 #[derive(Debug)]
 #[repr(C)]
@@ -225,14 +265,14 @@ pub struct UIElement {
 impl fmt::Display for UIElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "UIElement {{ unknown_u32_1: {:#x}, unknown_u32_2: {:#x}, unknown_string_1: {}, string_content: {}, element_name: {}, state: {} }}",
-               self.unknown_u32_1, self.unknown_u32_2, self.unknown_string_1.to_string(), self.string_content.to_string(), self.element_name.to_string(), self.state)
+               self.unknown_u32_1, self.unknown_u32_2, self.unknown_string_1, self.string_content, self.element_name, self.state)
     }
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct UIState {
-    state: u16
+    state: u16,
 }
 
 impl UIState {
@@ -258,7 +298,14 @@ impl UIState {
 
 impl fmt::Display for UIState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "UIState {{ hidden: {}, disabled: {}, highlighted: {}, selected: {}, focused: {} }}",
-               self.is_hidden(), self.is_disabled(), self.is_highlighted(), self.is_selected(), self.is_focused())
+        write!(
+            f,
+            "UIState {{ hidden: {}, disabled: {}, highlighted: {}, selected: {}, focused: {} }}",
+            self.is_hidden(),
+            self.is_disabled(),
+            self.is_highlighted(),
+            self.is_selected(),
+            self.is_focused()
+        )
     }
 }

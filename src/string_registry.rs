@@ -53,8 +53,7 @@ pub mod zoo_string {
                 return string.len() as u32 + 1;
             }
         }
-        let return_value = unsafe { BFApp_loadString.call(_this_ptr, string_id, string_buffer) };
-        return_value
+        unsafe { BFApp_loadString.call(_this_ptr, string_id, string_buffer) }
     }
 }
 

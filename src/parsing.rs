@@ -1,7 +1,4 @@
-use std::{
-    ffi::CString,
-    fmt, mem,
-};
+use std::{ffi::CString, fmt, mem};
 
 trait TypeSize {
     const SIZE: usize;
@@ -92,7 +89,7 @@ pub fn read_string(bytes: &[u8], index: &mut usize, length: usize) -> String {
 pub fn write_string(vec: &mut Vec<u8>, string: &str, accumulator: &mut usize) {
     let length = string.len() + 1;
     let c_string = CString::new(string).unwrap();
-    *accumulator += length as usize;
+    *accumulator += length;
     write_le_primitive(vec, (length) as u32, accumulator);
     vec.extend_from_slice(c_string.as_bytes_with_nul());
 }

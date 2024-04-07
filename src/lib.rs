@@ -1,15 +1,12 @@
-#![feature(abi_thiscall, let_chains)]
+// #![feature(abi_thiscall, let_chains)]
+#![feature(let_chains)]
 #![allow(dead_code)]
 
-use configparser::ini::Ini;
+use std::{net::TcpStream, sync::Mutex};
 
-use std::net::TcpStream;
-
-use std::sync::Mutex;
-
-use tracing::{info, Level};
-
+use bf_configparser::ini::Ini;
 use retour_utils::hook_module;
+use tracing::{info, Level};
 
 mod bfregistry;
 
@@ -42,11 +39,14 @@ mod bfentitytype;
 mod ztgamemgr;
 
 #[cfg(target_os = "windows")]
-use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
+use winapi::um::winnt::{
+    DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH,
+};
 
-use crate::console::{add_to_command_register, zoo_console};
-
-use crate::debug_dll::{command_show_settings, command_get_setting, command_set_setting};
+use crate::{
+    console::{add_to_command_register, zoo_console},
+    debug_dll::{command_get_setting, command_set_setting, command_show_settings},
+};
 
 #[cfg(not(target_os = "windows"))]
 mod linux {
@@ -59,10 +59,8 @@ mod linux {
 mod debug_dll;
 mod load_ini;
 
-
 #[no_mangle]
 pub fn dll_first_load() {
-
     let stream = TcpStream::connect("127.0.0.1:1492").unwrap();
 
     let subscriber = tracing_subscriber::fmt()
@@ -70,13 +68,11 @@ pub fn dll_first_load() {
         .with_max_level(Level::INFO)
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber).unwrap_or_else(|error| {
-        panic!("Failed to init tracing: {error}")
-    });
+    tracing::subscriber::set_global_default(subscriber)
+        .unwrap_or_else(|error| panic!("Failed to init tracing: {error}"));
 
     info!("openzt.dll Loaded");
 }
-
 
 #[hook_module("zoo.exe")]
 mod zoo_ini {
@@ -90,9 +86,10 @@ mod zoo_ini {
 
 #[hook_module("zoo.exe")]
 mod zoo_bf_registry {
-    use crate::debug_dll::{get_string_from_memory, get_from_memory};
-
-    use crate::bfregistry::{get_from_registry, add_to_registry};
+    use crate::{
+        bfregistry::{add_to_registry, get_from_registry},
+        debug_dll::{get_from_memory, get_string_from_memory},
+    };
 
     #[hook(unsafe extern "thiscall" BFRegistry_prtGetHook, offset = 0x000bdd22)]
     fn prt_get(_this_prt: u32, class_name: u32, _delimeter_maybe: u8) -> u32 {
@@ -107,7 +104,7 @@ mod zoo_bf_registry {
     }
 
     #[hook(unsafe extern "cdecl" BFRegistry_AddUIHook, offset = 0x001774bf)]
-    fn add_to_bfregistry_ui(param_1: u32, param_2: u32) -> u32  {
+    fn add_to_bfregistry_ui(param_1: u32, param_2: u32) -> u32 {
         let param_1_string = get_string_from_memory(get_from_memory::<u32>(param_1));
         add_to_registry(&param_1_string, param_2);
         0x638001
@@ -116,44 +113,60 @@ mod zoo_bf_registry {
 
 #[hook_module("zoo.exe")]
 mod bf_version_info {
-    use crate::debug_dll::{get_string_from_memory, get_from_memory, save_string_to_memory, save_to_memory};
-
-    use tracing::info;
+    use crate::debug_dll::{
+        get_from_memory, get_string_from_memory, save_string_to_memory, save_to_memory,
+    };
 
     #[hook(unsafe extern "cdecl" BFVersionInfo_GetVersionStringHook, offset = 0x000bdfd4)]
     fn bf_version_info_get_version_string_hook(param_1: u32, param_2: u32, param_3: u32) -> u32 {
-        let return_value = unsafe { BFVersionInfo_GetVersionStringHook.call(param_1, param_2, param_3) };
+        let return_value =
+            unsafe { BFVersionInfo_GetVersionStringHook.call(param_1, param_2, param_3) };
         let version_string = get_string_from_memory(get_from_memory::<u32>(param_2));
         let version_length = version_string.len();
         let full_openzt_version_string = format!(" OpenZT: {}", env!("CARGO_PKG_VERSION"));
-        save_string_to_memory(get_from_memory::<u32>(param_2) + version_length as u32, &full_openzt_version_string);
-        save_to_memory(param_3, (version_length + full_openzt_version_string.len() + 2) as u32);
+        save_string_to_memory(
+            get_from_memory::<u32>(param_2) + version_length as u32,
+            &full_openzt_version_string,
+        );
+        save_to_memory(
+            param_3,
+            (version_length + full_openzt_version_string.len() + 2) as u32,
+        );
         return_value
     }
 }
 
 #[hook_module("zoo.exe")]
 mod zoo_logging {
-    use crate::debug_dll::get_string_from_memory;
-    use crate::capture_ztlog::log_from_zt;
+    use crate::{capture_ztlog::log_from_zt, debug_dll::get_string_from_memory};
 
     #[hook(unsafe extern "cdecl" ZooLogging_LogHook, offset = 0x00001363)]
-    fn zoo_log_func(source_file: u32, param_2: u32, param_3: u32, _param_4: u8, _param_5: u32, _param_6: u32, log_message: u32) {
+    fn zoo_log_func(
+        source_file: u32,
+        param_2: u32,
+        param_3: u32,
+        _param_4: u8,
+        _param_5: u32,
+        _param_6: u32,
+        log_message: u32,
+    ) {
         let source_file_string = get_string_from_memory(source_file);
         let log_message_string = get_string_from_memory(log_message);
         log_from_zt(&source_file_string, param_2, param_3, &log_message_string);
     }
 }
 
-
 #[no_mangle]
 extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
             dll_first_load();
-            info!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved);
+            info!(
+                "DllMain: DLL_PROCESS_ATTACH: {}, {} {}",
+                module, reason, _reserved
+            );
 
-            unsafe { 
+            unsafe {
                 if cfg!(feature = "ini") {
                     info!("Feature 'ini' enabled");
                     zoo_ini::init_detours().unwrap();
@@ -170,7 +183,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 }
 
                 bf_version_info::init_detours().unwrap();
-                
+
                 if cfg!(feature = "zoo_logging") {
                     info!("Feature 'zoo_logging' enabled");
                     zoo_logging::init_detours().unwrap();
@@ -200,16 +213,24 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 bfentitytype::init();
                 ztgamemgr::init();
             }
-
         }
         DLL_PROCESS_DETACH => {
-            info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);
+            info!(
+                "DllMain: DLL_PROCESS_DETACH: {}, {} {}",
+                module, reason, _reserved
+            );
         }
         DLL_THREAD_ATTACH => {
-            info!("DllMain: DLL_THREAD_ATTACH: {}, {} {}", module, reason, _reserved);
+            info!(
+                "DllMain: DLL_THREAD_ATTACH: {}, {} {}",
+                module, reason, _reserved
+            );
         }
         DLL_THREAD_DETACH => {
-            info!("DllMain: DLL_THREAD_DETACH: {}, {} {}", module, reason, _reserved);
+            info!(
+                "DllMain: DLL_THREAD_DETACH: {}, {} {}",
+                module, reason, _reserved
+            );
         }
         _ => {
             info!("DllMain: Unknown: {}, {} {}", module, reason, _reserved);
@@ -217,7 +238,6 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
     }
     1
 }
-
 
 #[no_mangle]
 extern "C" fn dll_ini_debug_log() {
@@ -238,41 +258,79 @@ fn load_debug_settings_from_ini() {
 
 #[no_mangle]
 pub fn patch_load_debug_ini_call() {
-    debug_dll::debug_logger(&format!("load_debug_settings_from_ini {:p}", load_debug_settings_from_ini as *const ()));
-    debug_dll::debug_logger(&format!("load_debug_settings_from_ini (u32) {}", load_debug_settings_from_ini as u32));
+    debug_dll::debug_logger(&format!(
+        "load_debug_settings_from_ini {:p}",
+        load_debug_settings_from_ini as *const ()
+    ));
+    debug_dll::debug_logger(&format!(
+        "load_debug_settings_from_ini (u32) {}",
+        load_debug_settings_from_ini as u32
+    ));
     debug_dll::get_code_from_memory(debug_dll::DEBUG_INI_LOAD_CALL_ADDRESS, 0x10);
-    debug_dll::patch_call(debug_dll::DEBUG_INI_LOAD_CALL_ADDRESS, load_debug_settings_from_ini as u32);
+    debug_dll::patch_call(
+        debug_dll::DEBUG_INI_LOAD_CALL_ADDRESS,
+        load_debug_settings_from_ini as u32,
+    );
 }
 
 #[no_mangle]
 extern "C" fn patch_load_int_from_ini_call() {
-    debug_dll::debug_logger(&format!("load_int_from_ini {:p}", load_int_from_ini as *const ()));
-    debug_dll::patch_calls(debug_dll::LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET.to_vec(), load_int_from_ini as u32);
+    debug_dll::debug_logger(&format!(
+        "load_int_from_ini {:p}",
+        load_int_from_ini as *const ()
+    ));
+    debug_dll::patch_calls(
+        debug_dll::LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET.to_vec(),
+        load_int_from_ini as u32,
+    );
     debug_dll::patch_nops_series(debug_dll::LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET_NOP.to_vec());
 }
 
 #[no_mangle]
 extern "C" fn patch_load_value_from_ini_call() {
-    debug_dll::debug_logger(&format!("load_value_from_ini {:p}", load_value_from_ini as *const ()));
-    debug_dll::patch_calls(debug_dll::LOAD_VALUE_FROM_INI_ADDRESS_ARRAY.to_vec(), load_value_from_ini as u32);
+    debug_dll::debug_logger(&format!(
+        "load_value_from_ini {:p}",
+        load_value_from_ini as *const ()
+    ));
+    debug_dll::patch_calls(
+        debug_dll::LOAD_VALUE_FROM_INI_ADDRESS_ARRAY.to_vec(),
+        load_value_from_ini as u32,
+    );
 }
 
-
 #[no_mangle]
-extern "cdecl" fn load_int_from_ini(section_address: &u32, header_address: &u32, default: i32) -> u32 {
-    debug_dll::debug_logger(&format!("load_int_from_ini {:p} {:p} default: {}", *section_address as *const (), *header_address as *const (), default));
+extern "cdecl" fn load_int_from_ini(
+    section_address: &u32,
+    header_address: &u32,
+    default: i32,
+) -> u32 {
+    debug_dll::debug_logger(&format!(
+        "load_int_from_ini {:p} {:p} default: {}",
+        *section_address as *const (), *header_address as *const (), default
+    ));
     let section = debug_dll::get_string_from_memory(*section_address);
     let header = debug_dll::get_string_from_memory(*header_address);
     let mut zoo_ini = Ini::new();
     zoo_ini.load(get_ini_path()).unwrap();
     let result = load_ini::load_int_with_default(&zoo_ini, &section, &header, default) as u32;
-    debug_dll::debug_logger(&format!("load_int_from_ini {} {} result: {}", section, header, result));
-    return result;
+    debug_dll::debug_logger(&format!(
+        "load_int_from_ini {} {} result: {}",
+        section, header, result
+    ));
+    result
 }
 
 #[no_mangle]
-extern "cdecl" fn load_value_from_ini<'a>(result_address: &'a u32, section_address: &u32, header_address: &u32, default_address: &u32) -> &'a u32{
-    debug_dll::debug_logger(&format!("load_value_from_ini {:p} {:p} default: {:p}", *section_address as *const (), *header_address as *const (), *default_address as *const ()));
+extern "cdecl" fn load_value_from_ini<'a>(
+    result_address: &'a u32,
+    section_address: &u32,
+    header_address: &u32,
+    default_address: &u32,
+) -> &'a u32 {
+    debug_dll::debug_logger(&format!(
+        "load_value_from_ini {:p} {:p} default: {:p}",
+        *section_address as *const (), *header_address as *const (), *default_address as *const ()
+    ));
     let section = debug_dll::get_string_from_memory(*section_address);
     let header = debug_dll::get_string_from_memory(*header_address);
     let default = debug_dll::get_string_from_memory(*default_address);
@@ -280,11 +338,16 @@ extern "cdecl" fn load_value_from_ini<'a>(result_address: &'a u32, section_addre
     zoo_ini.load(get_ini_path()).unwrap();
     let result = load_ini::load_string_with_default(&zoo_ini, &section, &header, &default);
 
-    debug_dll::debug_logger(&format!("load_value_from_ini {} {} result: {}", section, header, result));
-    debug_dll::debug_logger(&format!("encoding string at address: {:p}", *result_address as *const ()));
-    debug_dll::save_string_to_memory(*(&result_address as &u32), &result);
-    // ptr::write(result_address as *mut _, result);
-    return result_address;
+    debug_dll::debug_logger(&format!(
+        "load_value_from_ini {} {} result: {}",
+        section, header, result
+    ));
+    debug_dll::debug_logger(&format!(
+        "encoding string at address: {:p}",
+        *result_address as *const ()
+    ));
+    debug_dll::save_string_to_memory(*result_address, &result);
+    result_address
 }
 
 fn get_ini_path() -> String {

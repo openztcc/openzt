@@ -1,14 +1,12 @@
-use std::path::PathBuf;
-use std::ptr;
+use std::{path::PathBuf, ptr};
 
-use tracing::{info, debug};
-
-use crate::load_ini::DebugSettings;
-
+use tracing::{debug, info};
 #[cfg(target_os = "windows")]
 use winapi::um::memoryapi::VirtualProtect;
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::PAGE_EXECUTE_READWRITE;
+
+use crate::load_ini::DebugSettings;
 
 const SEND_DEBUGGER_ADDRESS: u32 = 0x00643e44;
 const SEND_LOG_FILE_ADDRESS: u32 = 0x00643e48;
@@ -33,19 +31,43 @@ const SHOW_GOAL_OFFSET: u32 = 0x118;
 const AI_INFO_NTH_OFFSET: u32 = 0x110;
 
 pub const DEBUG_INI_LOAD_CALL_ADDRESS: u32 = 0x0057a218;
-pub const DEBUG_INI_LOAD_FUNCTION_ADDRESS: u32 = 0x00579f4c; 
-
+pub const DEBUG_INI_LOAD_FUNCTION_ADDRESS: u32 = 0x00579f4c;
 
 const DEBUG_INI_LOAD_FUNCTION_RETURN_ADDRESS: u32 = 0x0057a217;
 
 pub const EXE_LOCATION_ADDRESS: u32 = 0x0064BEDC;
 pub const EXE_LOCATION_ADDRESS_2: u32 = 0x0064BED8;
 pub const EXE_LOCATION_ADDRESS_3: u32 = 0x0064A800;
-pub const LOAD_INT_FROM_INI_ADDRESS_ARRAY: [u32; 146] = [0x0041b1cd, 0x00442dc1, 0x00453449, 0x0046154c, 0x00462825, 0x00463935, 0x004639e2, 0x0047eaa1, 0x0048b03d, 0x0048b1b9, 0x004bc271, 0x004bd23f, 0x004c2778, 0x004c2848, 0x004c2987, 0x004ca3ea, 0x004cabe6, 0x004cb55d, 0x004cb629, 0x004d6948, 0x004d8305, 0x004d83b2, 0x004ebc8e, 0x0050efc1, 0x0051319a, 0x0051324a, 0x0051841a, 0x005184fb, 0x00518621, 0x0051872a, 0x00518842, 0x00518942, 0x00518a65, 0x00518b4f, 0x00518c3f, 0x00518e08, 0x00518eab, 0x00518f4e, 0x00518ff1, 0x0051909a, 0x0051915b, 0x0051e375, 0x0051e489, 0x0051e52c, 0x0051e5cf, 0x0051e670, 0x0051e71e, 0x0051e7c7, 0x0051e870, 0x0051e914, 0x0051fb81, 0x0051fc28, 0x0051fccf, 0x0051fd76, 0x0051fe1d, 0x0051febf, 0x0051ff66, 0x00520012, 0x005200b4, 0x00520160, 0x0052020c, 0x00520b26, 0x00521ed5, 0x00525a42, 0x00525aeb, 0x00525bbf, 0x00525c68, 0x00525d31, 0x00525df1, 0x00526125, 0x005261c5, 0x00526269, 0x0052630d, 0x005263ae, 0x005264f5, 0x00526544, 0x005268a0, 0x00526949, 0x005269f2, 0x00526a9b, 0x00526b7e, 0x00526c31, 0x00526cd8, 0x00526d7b, 0x00526e2a, 0x00526ed9, 0x00526f88, 0x00527037, 0x005270e6, 0x00527195, 0x00527248, 0x005272f7, 0x005273a6, 0x00527455, 0x00527504, 0x005275a7, 0x00527627, 0x00527678, 0x00527d83, 0x00527eb0, 0x005281c1, 0x0052826b, 0x00528315, 0x005283bf, 0x00528590, 0x0052aea3, 0x0052af49, 0x0052afef, 0x0052b095, 0x0052b13b, 0x0052b1e1, 0x0052b284, 0x0052b327, 0x0052b3ca, 0x0052b46d, 0x0052b510, 0x0052b58a, 0x0052b5de, 0x0052bd95, 0x0052be3a, 0x0052bee1, 0x0052c0b4, 0x00533edb, 0x00533f90, 0x00534208, 0x00534406, 0x00536340, 0x005363ed, 0x00536666, 0x005367d2, 0x00579fda, 0x0057a044, 0x0057a0b5, 0x0057a123, 0x0057a18e, 0x0057a1f1, 0x00598daf, 0x005b1558, 0x005b15fd, 0x005b257e, 0x005c181c, 0x005c1ea7, 0x005d6efa, 0x005d7df9, 0x005e5eab, 0x00606980];
-pub const LOAD_INT_FROM_INI_ADDRESS_ARRAY_FAILED: [u32; 13] = [0x004bc32b, 0x004bc3d0, 0x004bc475, 0x004bc51a, 0x004bc5c4, 0x004bc667, 0x004bccce, 0x004bc854, 0x004bc7b0, 0x004bc707, 0x004bc8f8, 0x00533b1b, 0x005956e1];
+pub const LOAD_INT_FROM_INI_ADDRESS_ARRAY: [u32; 146] = [
+    0x0041b1cd, 0x00442dc1, 0x00453449, 0x0046154c, 0x00462825, 0x00463935, 0x004639e2, 0x0047eaa1,
+    0x0048b03d, 0x0048b1b9, 0x004bc271, 0x004bd23f, 0x004c2778, 0x004c2848, 0x004c2987, 0x004ca3ea,
+    0x004cabe6, 0x004cb55d, 0x004cb629, 0x004d6948, 0x004d8305, 0x004d83b2, 0x004ebc8e, 0x0050efc1,
+    0x0051319a, 0x0051324a, 0x0051841a, 0x005184fb, 0x00518621, 0x0051872a, 0x00518842, 0x00518942,
+    0x00518a65, 0x00518b4f, 0x00518c3f, 0x00518e08, 0x00518eab, 0x00518f4e, 0x00518ff1, 0x0051909a,
+    0x0051915b, 0x0051e375, 0x0051e489, 0x0051e52c, 0x0051e5cf, 0x0051e670, 0x0051e71e, 0x0051e7c7,
+    0x0051e870, 0x0051e914, 0x0051fb81, 0x0051fc28, 0x0051fccf, 0x0051fd76, 0x0051fe1d, 0x0051febf,
+    0x0051ff66, 0x00520012, 0x005200b4, 0x00520160, 0x0052020c, 0x00520b26, 0x00521ed5, 0x00525a42,
+    0x00525aeb, 0x00525bbf, 0x00525c68, 0x00525d31, 0x00525df1, 0x00526125, 0x005261c5, 0x00526269,
+    0x0052630d, 0x005263ae, 0x005264f5, 0x00526544, 0x005268a0, 0x00526949, 0x005269f2, 0x00526a9b,
+    0x00526b7e, 0x00526c31, 0x00526cd8, 0x00526d7b, 0x00526e2a, 0x00526ed9, 0x00526f88, 0x00527037,
+    0x005270e6, 0x00527195, 0x00527248, 0x005272f7, 0x005273a6, 0x00527455, 0x00527504, 0x005275a7,
+    0x00527627, 0x00527678, 0x00527d83, 0x00527eb0, 0x005281c1, 0x0052826b, 0x00528315, 0x005283bf,
+    0x00528590, 0x0052aea3, 0x0052af49, 0x0052afef, 0x0052b095, 0x0052b13b, 0x0052b1e1, 0x0052b284,
+    0x0052b327, 0x0052b3ca, 0x0052b46d, 0x0052b510, 0x0052b58a, 0x0052b5de, 0x0052bd95, 0x0052be3a,
+    0x0052bee1, 0x0052c0b4, 0x00533edb, 0x00533f90, 0x00534208, 0x00534406, 0x00536340, 0x005363ed,
+    0x00536666, 0x005367d2, 0x00579fda, 0x0057a044, 0x0057a0b5, 0x0057a123, 0x0057a18e, 0x0057a1f1,
+    0x00598daf, 0x005b1558, 0x005b15fd, 0x005b257e, 0x005c181c, 0x005c1ea7, 0x005d6efa, 0x005d7df9,
+    0x005e5eab, 0x00606980,
+];
+pub const LOAD_INT_FROM_INI_ADDRESS_ARRAY_FAILED: [u32; 13] = [
+    0x004bc32b, 0x004bc3d0, 0x004bc475, 0x004bc51a, 0x004bc5c4, 0x004bc667, 0x004bccce, 0x004bc854,
+    0x004bc7b0, 0x004bc707, 0x004bc8f8, 0x00533b1b, 0x005956e1,
+];
 
 pub const LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET: [u32; 2] = [0x004bc271, 0x004bc32b];
-pub const LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET_NOP: [u32; 8] = [0x004bc224, 0x004bc260, 0x004bc27f, 0x004bc288, 0x004bc2de, 0x004bc31a, 0x004bc33e, 0x004bc347];
+pub const LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET_NOP: [u32; 8] = [
+    0x004bc224, 0x004bc260, 0x004bc27f, 0x004bc288, 0x004bc2de, 0x004bc31a, 0x004bc33e, 0x004bc347,
+];
 
 pub const LOAD_VALUE_FROM_INI_ADDRESS_ARRAY: [u32; 1] = [0x005221a8];
 
@@ -54,20 +76,30 @@ pub fn debug_logger(message: &str) {
 }
 
 pub fn get_from_memory<T>(address: u32) -> T {
-    return unsafe { ptr::read(address as *const T)};
+    unsafe { ptr::read(address as *const T) }
 }
 
 pub fn save_to_memory<T>(address: u32, value: T) {
-    unsafe { ptr::write(address as *mut T, value)};
+    unsafe { ptr::write(address as *mut T, value) };
 }
 
 pub fn save_to_protected_memory<T>(address: u32, value: T) {
     unsafe {
         {
             let mut old_protect: u32 = 0;
-            VirtualProtect(address as *mut _, std::mem::size_of::<T>() as usize, PAGE_EXECUTE_READWRITE, &mut old_protect);
+            VirtualProtect(
+                address as *mut _,
+                std::mem::size_of::<T>() as usize,
+                PAGE_EXECUTE_READWRITE,
+                &mut old_protect,
+            );
             ptr::write(address as *mut _, value);
-            VirtualProtect(address as *mut _, std::mem::size_of::<T>() as usize, old_protect, &mut old_protect);
+            VirtualProtect(
+                address as *mut _,
+                std::mem::size_of::<T>() as usize,
+                old_protect,
+                &mut old_protect,
+            );
         }
     }
 }
@@ -90,33 +122,45 @@ pub fn log_debug_ini_memory_values() {
 pub fn log_exe_location_memory_value() {
     let exe_location: String = get_string_from_memory(EXE_LOCATION_ADDRESS);
     debug_logger(&format!("exe location from memory: {}", exe_location));
-    debug_logger(&format!("exe location from rust: {}", std::env::current_exe().unwrap().to_str().unwrap()));
+    debug_logger(&format!(
+        "exe location from rust: {}",
+        std::env::current_exe().unwrap().to_str().unwrap()
+    ));
 }
 
 pub fn get_string_from_memory_bounded(start: u32, end: u32, buffer_end: u32) -> String {
     let mut string = String::new();
     let mut char_address = start;
-    while { let byte = get_from_memory::<u8>(char_address); byte != 0 && char_address < end && char_address < buffer_end } {
+    while {
+        let byte = get_from_memory::<u8>(char_address);
+        byte != 0 && char_address < end && char_address < buffer_end
+    } {
         string.push(get_from_memory::<u8>(char_address) as char);
         char_address += 1;
     }
-    return string;
+    string
 }
 
 pub fn get_string_from_memory(address: u32) -> String {
     debug!("decoding string at address: {:p}", address as *const ());
     let mut string = String::new();
     let mut char_address = address;
-    while { let byte = get_from_memory::<u8>(char_address); byte != 0 } {
+    while {
+        let byte = get_from_memory::<u8>(char_address);
+        byte != 0
+    } {
         string.push(get_from_memory::<u8>(char_address) as char);
         char_address += 1;
     }
     debug!("decoded: {}", string);
-    return string;
+    string
 }
 
 pub fn save_string_to_memory(address: u32, string: &str) {
-    debug_logger(&format!("encoding string at address: {:p}", address as *const ()));
+    debug_logger(&format!(
+        "encoding string at address: {:p}",
+        address as *const ()
+    ));
     let mut char_address = address;
     for c in string.chars() {
         save_to_memory::<u8>(char_address, c as u8);
@@ -143,7 +187,10 @@ pub fn patch_call(address: u32, new_address: u32) {
     let opcode: u8 = get_from_memory::<u8>(address);
     let old_offset: u32 = get_from_memory::<u32>(address + 1);
     debug_logger(&format!("opcode: {:02x}", opcode));
-    debug_logger(&format!("current address: {:02x} current offset: {:02x} {}", address, old_offset, old_offset as i32));
+    debug_logger(&format!(
+        "current address: {:02x} current offset: {:02x} {}",
+        address, old_offset, old_offset as i32
+    ));
     debug_logger(&format!("new address: {:02x}", new_address));
     let address_offset: i32 = (new_address - address - 5) as i32;
     debug_logger(&format!("new address offset: {:02x} ", address_offset));
@@ -152,7 +199,12 @@ pub fn patch_call(address: u32, new_address: u32) {
         #[cfg(target_os = "windows")]
         {
             let mut old_protect: u32 = 0;
-            VirtualProtect(address as *mut _, 5, PAGE_EXECUTE_READWRITE, &mut old_protect);
+            VirtualProtect(
+                address as *mut _,
+                5,
+                PAGE_EXECUTE_READWRITE,
+                &mut old_protect,
+            );
             ptr::write((address + 1) as *mut _, address_offset);
             VirtualProtect(address as *mut _, 5, old_protect, &mut old_protect);
         }
@@ -179,16 +231,14 @@ pub fn command_set_setting(args: Vec<&str>) -> Result<String, &'static str> {
 
 fn set_setting(setting: String, value: String) -> String {
     match setting.as_str() {
-        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1" | "ShowBuildingAIInfo" => {
-            handle_bool_setting(setting.as_str(), value)
-        },
-        "logCutoff" => {
-            handle_u32_setting(setting.as_str(), value)
-        },
-        "ShowGoal" | "ShowFrame" | "ShowSelected" | "ShowEvents" | "ShowFunctionCall" | "ShowStatusVars" | "ShowPosition" | "ShowName" | "ShowAIInfo" => {
+        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1"
+        | "ShowBuildingAIInfo" => handle_bool_setting(setting.as_str(), value),
+        "logCutoff" => handle_u32_setting(setting.as_str(), value),
+        "ShowGoal" | "ShowFrame" | "ShowSelected" | "ShowEvents" | "ShowFunctionCall"
+        | "ShowStatusVars" | "ShowPosition" | "ShowName" | "ShowAIInfo" => {
             info!("handle_get_bool_zt_ai_mgr_setting");
             handle_set_bool_zt_ai_mgr_setting(setting.as_str(), value)
-        },
+        }
         _ => {
             format!("unknown setting: {}", setting)
         }
@@ -208,7 +258,7 @@ fn handle_bool_setting(setting: &str, value: String) -> String {
             };
             save_to_memory::<bool>(address, setting_value);
             format!("{} set to {}", setting, setting_value)
-        },
+        }
         Err(_) => {
             format!("invalid value: {}", value)
         }
@@ -224,7 +274,7 @@ fn handle_u32_setting(setting: &str, value: String) -> String {
             };
             save_to_memory::<u32>(address, setting_value);
             format!("{} set to {}", setting, setting_value)
-        },
+        }
         Err(_) => {
             format!("invalid value: {}", value)
         }
@@ -241,15 +291,13 @@ pub fn command_get_setting(args: Vec<&str>) -> Result<String, &'static str> {
 
 fn get_setting(setting: String) -> String {
     match setting.as_str() {
-        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1" | "ShowBuildingAIInfo" => {
-            handle_get_bool_setting(setting.as_str())
-        },
-        "logCutoff" => {
-            handle_get_u32_setting(setting.as_str())
-        },
-        "ShowGoal" | "ShowFrame" | "ShowSelected" | "ShowEvents" | "ShowFunctionCall" | "ShowStatusVars" | "ShowPosition" | "ShowName" | "ShowAIInfo" => {
+        "sendDebugger" | "sendLogFile" | "sendMessageBox" | "deltaLog0" | "deltaLog1"
+        | "ShowBuildingAIInfo" => handle_get_bool_setting(setting.as_str()),
+        "logCutoff" => handle_get_u32_setting(setting.as_str()),
+        "ShowGoal" | "ShowFrame" | "ShowSelected" | "ShowEvents" | "ShowFunctionCall"
+        | "ShowStatusVars" | "ShowPosition" | "ShowName" | "ShowAIInfo" => {
             handle_get_bool_zt_ai_mgr_setting(setting.as_str())
-        },
+        }
         _ => {
             format!("unknown setting: {}", setting)
         }
@@ -291,7 +339,7 @@ fn handle_get_u32_setting(setting: &str) -> String {
 }
 
 pub fn command_show_settings(args: Vec<&str>) -> Result<String, &'static str> {
-    if args.len() != 0 {
+    if !args.is_empty() {
         return Err("Invalid number of arguments");
     }
     Ok(show_settings())
@@ -317,7 +365,7 @@ pub fn show_settings() -> String {
     format!("sendDebugger: {}\nsendLogFile: {}\nsendMessage: {}\ndeltaLog0: {}\ndeltaLog1: {}\nlogCutoff: {}\nShowBuildingAIInfo: {}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", send_debugger, send_log_file, send_message, delta_log_0, delta_log_1, log_cutoff,show_building_ai_info, show_goal, show_frame, show_selected, show_events, show_function_call, show_status_vars, show_position, show_name, show_ai_info)
 }
 
-pub fn parse_bool(string: &String) -> Result<bool, String> {
+pub fn parse_bool(string: &str) -> Result<bool, String> {
     match string.trim() {
         "true" | "1" => Ok(true),
         "false" | "0" => Ok(false),
@@ -329,7 +377,7 @@ fn handle_get_bool_zt_ai_mgr_setting(setting: &str) -> String {
     let address = get_from_memory::<u32>(ZTAIMGR_ADDRESS_PTR);
     let offset = setting_to_address(setting);
     let value: bool = get_from_memory::<bool>(address + offset);
-    return format!("{}: {}", setting, value);
+    format!("{}: {}", setting, value)
 }
 
 fn handle_set_bool_zt_ai_mgr_setting(setting: &str, value: String) -> String {
@@ -338,10 +386,10 @@ fn handle_set_bool_zt_ai_mgr_setting(setting: &str, value: String) -> String {
     match parse_bool(&value) {
         Ok(setting_value) => {
             save_to_memory::<bool>(address + offset, setting_value);
-            return format!("{} set to {}", setting, setting_value);
-        },
+            format!("{} set to {}", setting, setting_value)
+        }
         Err(_) => {
-            return format!("invalid value: {}", value);
+            format!("invalid value: {}", value)
         }
     }
 }
@@ -349,13 +397,13 @@ fn handle_set_bool_zt_ai_mgr_setting(setting: &str, value: String) -> String {
 pub fn get_base_path() -> PathBuf {
     let mut exe_location = std::env::current_exe().unwrap();
     exe_location.pop();
-    return exe_location;
+    exe_location
 }
 
 pub fn get_ini_path() -> PathBuf {
     let mut exe_location = get_base_path();
     exe_location.push("zoo.ini");
-    return exe_location;
+    exe_location
 }
 
 pub fn patch_calls(addresses: Vec<u32>, new_address: u32) {
@@ -371,7 +419,12 @@ pub fn patch_nop(address: u32) {
         #[cfg(target_os = "windows")]
         {
             let mut old_protect: u32 = 0;
-            VirtualProtect(address as *mut _, 1, PAGE_EXECUTE_READWRITE, &mut old_protect);
+            VirtualProtect(
+                address as *mut _,
+                1,
+                PAGE_EXECUTE_READWRITE,
+                &mut old_protect,
+            );
             ptr::write(address as *mut _, 0x90u8);
             VirtualProtect(address as *mut _, 1, old_protect, &mut old_protect);
         }
@@ -398,7 +451,7 @@ pub fn read_string_array_from_memory(address: u32, size: u32) -> Vec<String> {
         strings.push(string);
         string_address += 0x100;
     }
-    return strings;
+    strings
 }
 
 pub fn get_zt_string_array_from_memory(address: u32, end_address: u32) -> Vec<String> {
@@ -410,7 +463,7 @@ pub fn get_zt_string_array_from_memory(address: u32, end_address: u32) -> Vec<St
         strings.push(string);
         string_address += 0xc;
     }
-    return strings;
+    strings
 }
 
 pub fn read_string_list_from_memory(start_ptr: u32, end_ptr: u32) {

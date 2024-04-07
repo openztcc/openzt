@@ -1,9 +1,4 @@
-
-use std::arch::global_asm;
-
-use tracing::info;
-
-use crate::debug_dll::{get_from_memory, save_to_protected_memory, patch_nop};
+use crate::debug_dll::{patch_nop, save_to_protected_memory};
 
 const ZOOWALL_MAP_EDGE_CRASH_ADDRESS: u32 = 0x050b260;
 
@@ -15,7 +10,6 @@ pub fn init() {
     fix_zoowall_map_edge_crash();
     fix_fence_one_tile_from_map_edge_crash()
 }
-
 
 fn fix_zoowall_map_edge_crash() {
     // We change a jump address to fix a bug trying access a null pointer
@@ -33,6 +27,8 @@ fn fix_fence_one_tile_from_map_edge_crash() {
 
 // Leaving this in incase future bugfixes require inline assembly
 
+// use std::arch::global_asm;
+//
 // pub mod fence_crash_asm {
 //     global_asm!(r#"
 //         .global fence_crash_trmp
@@ -40,7 +36,7 @@ fn fix_fence_one_tile_from_map_edge_crash() {
 //         call DWORD PTR ds:0x40fa92
 //         TEST EAX, EAX
 //         JZ 0x01
-//         JMP DWORD PTR 
+//         JMP DWORD PTR
 //         JMP DWORD PTR ds:<past original if>
 
 //         jmp back to original if

@@ -139,8 +139,8 @@ impl Animation {
         }
 
         Animation {
-            header: header,
-            animation_speed: animation_speed,
+            header,
+            animation_speed,
             pallette_filename_length,
             pallette_filename,
             num_frames,
@@ -151,13 +151,10 @@ impl Animation {
     pub fn write(self) -> (Vec<u8>, usize) {
         let mut accumulator: usize = 0;
         let mut bytes = Vec::new();
-        match self.header {
-            Some(header) => {
-                write_le_primitive(&mut bytes, header.ztaf_string, &mut accumulator);
-                write_le_primitive(&mut bytes, header.empty_4_bytes, &mut accumulator);
-                write_le_primitive(&mut bytes, header.extra_frame, &mut accumulator);
-            }
-            None => (),
+        if let Some(header) = self.header {
+            write_le_primitive(&mut bytes, header.ztaf_string, &mut accumulator);
+            write_le_primitive(&mut bytes, header.empty_4_bytes, &mut accumulator);
+            write_le_primitive(&mut bytes, header.extra_frame, &mut accumulator);
         }
         write_le_primitive(&mut bytes, self.animation_speed, &mut accumulator);
         write_string(&mut bytes, &self.pallette_filename, &mut accumulator);
@@ -254,7 +251,7 @@ mod parsing_tests {
     fn test_parse_simple_anim_with_header() {
         let animation = Animation::parse(include_bytes!("../resources/test/N"));
         assert!(animation.header.is_some());
-        assert_eq!(animation.header.unwrap().extra_frame, false);
+        assert!(!animation.header.unwrap().extra_frame);
         assert_eq!(
             animation.pallette_filename,
             "ANIMALS/01BFCC32/ICMEIOLA/ICMEIOLA.PAL".to_string()

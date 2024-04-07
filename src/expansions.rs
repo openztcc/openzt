@@ -4,7 +4,7 @@ use std::{
     fmt,
     fmt::Display,
     io::Read,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Mutex, MutexGuard},
 };
 
@@ -143,7 +143,6 @@ const EXPANSION_CURRENT: u32 = 0x00638d4c;
 
 const MAX_EXPANSION_SIZE: usize = 14;
 
-//TODO: Should point to openzt/openzt/expansion_dropdown/
 const EXPANSION_ZT_RESOURCE_PREFIX: &str = "ui/sharedui/listbk/";
 const EXPANSION_OPENZT_RESOURCE_PREFIX: &str = "openzt/openzt/expansion_dropdown/";
 const EXPANSION_RESOURCE_ANI: &str = "listbk.ani";
@@ -156,7 +155,7 @@ static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> =
 
 fn add_member(entity_name: String, member: String) {
     let mut data_mutex = MEMBER_SETS.lock().unwrap();
-    let set = data_mutex.entry(member).or_insert(HashSet::new());
+    let set = data_mutex.entry(member).or_default();
     set.insert(entity_name);
 }
 
@@ -172,10 +171,6 @@ pub fn get_members(member: &str) -> Option<HashSet<String>> {
     let data_mutex = MEMBER_SETS.lock().unwrap();
     data_mutex.get(member).cloned()
 }
-
-// pub fn get_cc_members() -> Option<HashSet<String>> {
-//     get_members(&(CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string() + CUSTOM_CONTENT_EXPANSION_STRING_ALL))
-// }
 
 fn get_cc_expansion_name_all() -> String {
     CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string() + CUSTOM_CONTENT_EXPANSION_STRING_ALL
@@ -240,8 +235,9 @@ fn save_mutex() {
 
 fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
     let array_ptr = mutex_guard.as_mut_ptr();
-    let array_end_ptr = unsafe { array_ptr.offset(mutex_guard.len() as isize) };
-    let array_buffer_end_ptr = unsafe { array_ptr.offset(mutex_guard.capacity() as isize) };
+    let array_end_ptr = unsafe { array_ptr.offset(isize::try_from(mutex_guard.len()).unwrap()) };
+    let array_buffer_end_ptr =
+        unsafe { array_ptr.offset(isize::try_from(mutex_guard.capacity()).unwrap()) };
     info!(
         "Saving expansions to {:#x} to {:#x}; {:#x}",
         array_ptr as u32, array_end_ptr as u32, array_buffer_end_ptr as u32
@@ -368,6 +364,7 @@ pub mod custom_expansion {
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
+        // TODO: Put this call and subsequent log behind OpenZT debug flag
         let result =
             unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
 
@@ -375,22 +372,20 @@ pub mod custom_expansion {
 
         let entity = read_zt_entity_type_from_memory(bf_entity);
 
-        let current_buy_tab = get_current_buy_tab();
-        if get_current_buy_tab().is_none() {
+        let Some(current_buy_tab) = get_current_buy_tab() else {
             return 0;
-        }
+        };
 
         let reimplemented_result =
-            match super::filter_entity_type(&current_buy_tab.unwrap(), &current_expansion, &entity)
-            {
+            match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
                 true => 1,
                 false => 0,
             };
 
         if result != reimplemented_result {
             info!(
-                "Filtering mismatch {:#x} {:#x} {:#x} -> {:#x} (reimplemented: {:#x})",
-                bf_entity, param_1, param_2, result, reimplemented_result
+                "Filtering mismatch {} {} ({:#x} vs {:#x})",
+                entity, current_buy_tab, result, reimplemented_result
             );
         }
 
@@ -408,7 +403,7 @@ pub mod custom_expansion {
 fn initialise_expansions() {
     add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
     if let Some(member_hash) = get_members(&get_cc_expansion_name_all())
-        && member_hash.len() > 0
+        && !member_hash.is_empty()
     {
         add_expansion_with_string_value(
             0x4000,
@@ -435,11 +430,16 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
         "Resizing expansion dropdown to fit {} extra expansions",
         number_of_additional_expansions
     );
+
     if let Err(err) = modify_ztfile_as_ini(EXPANSION_RESOURCE_LYT, |cfg| {
         let old_y = cfg.get_parse::<i32>("list", "dy").unwrap().unwrap();
         let new_y = old_y + (number_of_additional_expansions * 30);
         cfg.set("list", "dy", Some(new_y.to_string()));
-        info!("Resized expansion dropdown to {}", new_y);
+        cfg.set(
+            "background",
+            "animation",
+            Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "listbk"),
+        );
     }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
@@ -456,7 +456,6 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
             cfg.set("animation", "dir0", Some("openzt".to_string()));
             cfg.set("animation", "dir1", Some("openzt".to_string()));
             cfg.set("animation", "dir2", Some("expansion_dropdown".to_string()));
-            info!("Resized expansion dropdown to {} {}", new_y0, new_y1);
         },
     ) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
@@ -465,16 +464,6 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     match modify_ztfile_as_animation(
         &(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_ANIMATION),
         |animation| {
-            info!(
-                "Reading expansion dropdown animation {} {} {}",
-                animation.num_frames,
-                animation.frames[0].lines.len(),
-                animation.frames[0].vertical_offset_y
-            );
-            info!(
-                "Animation points to pal file: {}",
-                animation.pallette_filename
-            );
             animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
             for _ in 0..number_of_additional_expansions {
                 animation.duplicate_pixel_rows(0, 10, 31).unwrap();
@@ -482,18 +471,9 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
             animation.set_pallette_filename(
                 EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_PAL,
             );
-            info!(
-                "Resized expansion dropdown animation to {} {}",
-                animation.frames[0].lines.len(),
-                animation.frames[0].vertical_offset_y
-            );
-            info!(
-                "Animation pal file changed to: {}",
-                animation.pallette_filename
-            );
         },
     ) {
-        Ok(_) => info!("Resized expansion dropdown animation"),
+        Ok(_) => (),
         Err(e) => info!("Error resizing expansion dropdown animation: {}", e),
     }
 }
@@ -504,7 +484,7 @@ fn filter_entity_type(
     entity: &ZTEntityType,
 ) -> bool {
     match buy_tab {
-        BuyTab::AnimalTab => {
+        BuyTab::Animal => {
             if !entity.is_member("animals".to_string()) {
                 return false;
             }
@@ -517,27 +497,27 @@ fn filter_entity_type(
                 None => return false,
             }
         }
-        BuyTab::ShelterTab => {
+        BuyTab::Shelter => {
             if !entity.is_member("shelters".to_string()) {
                 return false;
             }
         }
-        BuyTab::ToysTab => {
+        BuyTab::Toys => {
             if !entity.is_member("toys".to_string()) {
                 return false;
             }
         }
-        BuyTab::ShowToysTab => {
+        BuyTab::ShowToys => {
             if !entity.is_member("showtoys".to_string()) {
                 return false;
             }
         }
-        BuyTab::BuildingTab => {
+        BuyTab::Building => {
             if !entity.is_member("structures".to_string()) {
                 return false;
             }
         }
-        BuyTab::SceneryTab => {
+        BuyTab::Scenery => {
             if !entity.is_member("scenery".to_string()) {
                 return false;
             }
@@ -549,7 +529,7 @@ fn filter_entity_type(
                 return false;
             }
         }
-        BuyTab::FenceTab => {
+        BuyTab::Fence => {
             if !entity.is_member("fence".to_string()) {
                 return false;
             }
@@ -557,22 +537,22 @@ fn filter_entity_type(
                 return false;
             }
         }
-        BuyTab::PathTab => {
+        BuyTab::Path => {
             if !entity.is_member("paths".to_string()) {
                 return false;
             }
         }
-        BuyTab::FoliageTab => {
+        BuyTab::Foliage => {
             if !entity.is_member("foliage".to_string()) {
                 return false;
             }
         }
-        BuyTab::RocksTab => {
+        BuyTab::Rocks => {
             if !entity.is_member("rocks".to_string()) {
                 return false;
             }
         }
-        BuyTab::StaffTab => {
+        BuyTab::Staff => {
             if !entity.is_member("staff".to_string()) {
                 return false;
             }
@@ -582,15 +562,15 @@ fn filter_entity_type(
                 return false;
             }
         }
-        BuyTab::DeveloperTab => {
+        BuyTab::Developer => {
             if !entity.is_member("developer".to_string()) {
                 return false;
             }
         }
-        BuyTab::PaintTerrainTab | BuyTab::TerraformTab => return false,
+        BuyTab::PaintTerrain | BuyTab::Terraform => return false,
     }
 
-    if buy_tab != &BuyTab::PathTab {
+    if buy_tab != &BuyTab::Path {
         if current_expansion.expansion_id == 0x1 {
             for expansion in get_expansions() {
                 if expansion.expansion_id > 0x1
@@ -608,7 +588,7 @@ fn filter_entity_type(
         }
     }
 
-    return true;
+    true
 }
 
 fn add_expansion_with_string_id(id: u32, name: String, string_id: u32, save_to_memory: bool) {
@@ -631,22 +611,22 @@ fn add_expansion_with_string_id(id: u32, name: String, string_id: u32, save_to_m
 }
 
 fn add_expansion_with_string_value(
-    id: u32,
+    expansion_id: u32,
     name: String,
     string_value: String,
     save_to_memory: bool,
 ) {
     let name_len = name.len();
-    let name_ptr = CString::new(name).unwrap().into_raw() as u32;
-    let name_ptr_end = name_ptr + name_len as u32 + 1;
+    let name_string_start_ptr = CString::new(name).unwrap().into_raw() as u32;
+    let name_string_end_ptr = name_string_start_ptr + name_len as u32 + 1;
     let name_id = add_string_to_registry(string_value);
     if let Err(err) = add_expansion(
         Expansion {
-            expansion_id: id,
-            name_id: name_id,
-            name_string_start_ptr: name_ptr,
-            name_string_end_ptr: name_ptr_end,
-            name_string_buffer_end_ptr: name_ptr_end,
+            expansion_id,
+            name_id,
+            name_string_start_ptr,
+            name_string_end_ptr,
+            name_string_buffer_end_ptr: name_string_end_ptr,
         },
         save_to_memory,
     ) {
@@ -654,7 +634,7 @@ fn add_expansion_with_string_value(
     }
 }
 
-fn handle_expansion_config(path: &PathBuf, file: &mut ZipFile) {
+fn handle_expansion_config(path: &Path, file: &mut ZipFile) {
     if let Err(e) = parse_expansion_config(file) {
         info!(
             "Error parsing expansion config: {} {} {}",
@@ -665,7 +645,7 @@ fn handle_expansion_config(path: &PathBuf, file: &mut ZipFile) {
     }
 }
 
-fn handle_member_parsing(path: &PathBuf, file: &mut ZipFile) {
+fn handle_member_parsing(path: &Path, file: &mut ZipFile) {
     if let Err(e) = parse_member_config(path, file) {
         error!(
             "Error parsing member config: {} {} {}",
@@ -696,7 +676,7 @@ static FILE_NAME_OVERRIDES: Lazy<HashMap<String, String>> = Lazy::new(|| {
     .collect()
 });
 
-fn parse_member_config(path: &PathBuf, file: &mut ZipFile) -> anyhow::Result<()> {
+fn parse_member_config(path: &Path, file: &mut ZipFile) -> anyhow::Result<()> {
     let mut buffer = vec![0; file.size() as usize];
     if let Err(error) = file.read(&mut buffer[..]) {
         info!("Error reading member config {}: {}", file.name(), error);
@@ -737,7 +717,7 @@ fn parse_member_config(path: &PathBuf, file: &mut ZipFile) -> anyhow::Result<()>
     Ok(())
 }
 
-fn is_cc(path: &PathBuf) -> bool {
+fn is_cc(path: &Path) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };
@@ -748,7 +728,7 @@ fn is_cc(path: &PathBuf) -> bool {
         .to_str()
         .unwrap_or_default()
     {
-        "zupdate" | "xpack1" | "zupdate1" | "xpack2" => return false,
+        "zupdate" | "xpack1" | "zupdate1" | "xpack2" => false,
         "dlupdate" | "dupdate" | "updates" | "" => {
             match path
                 .file_name()
@@ -756,18 +736,17 @@ fn is_cc(path: &PathBuf) -> bool {
                 .to_str()
                 .unwrap_or_default()
             {
-                "" => return false,
-                file_name => return !OFFICIAL_FILESET.contains(file_name),
+                "" => false,
+                file_name => !OFFICIAL_FILESET.contains(file_name),
             }
         }
-        _ => return true,
+        _ => true,
     }
 }
 
 fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     let mut string_buffer = String::with_capacity(file.size() as usize);
     file.read_to_string(&mut string_buffer)?;
-    info!("{}", string_buffer);
 
     let mut expansion_cfg = Ini::new();
     expansion_cfg
@@ -800,19 +779,19 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
             name_string_buffer_end_ptr: name_ptr + name.len() as u32 + 1,
         },
         false,
-    ).map_err(anyhow::Error::msg)?;
+    )
+    .map_err(anyhow::Error::msg)?;
 
     Ok(())
 }
 
-fn handle_expansion_dropdown(entry: &PathBuf, file: &mut ZipFile) {
+fn handle_expansion_dropdown(entry: &Path, file: &mut ZipFile) {
     let file_name = file.enclosed_name().unwrap().file_name().unwrap();
     let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
     let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
         error!("Error converting file path to string");
         return;
     };
-    info!("Handling expansion dropdown: {}", file_path_string);
     match Path::new(&file_path_string)
         .extension()
         .unwrap_or_default()
@@ -820,14 +799,12 @@ fn handle_expansion_dropdown(entry: &PathBuf, file: &mut ZipFile) {
         .unwrap_or_default()
     {
         "ani" => {
-            info!("Handling ani file");
             add_txt_file_to_map_with_path_override(entry, file, file_path_string);
         }
         "pal" | "" => {
-            info!("Handling pal file");
             add_raw_bytes_to_map_with_path_override(entry, file, file_path_string);
         }
-        _ => return,
+        _ => (),
     }
 }
 

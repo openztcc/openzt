@@ -1,9 +1,8 @@
 // ztgamemgr module has functions to interact with the live zoo stats such as cash, num animals, species, guests, etc.
 
-use crate::add_to_command_register;
-use crate::debug_dll::get_from_memory;
-
 use tracing::info;
+
+use crate::{add_to_command_register, debug_dll::get_from_memory};
 
 const GLOBAL_ZTGAMEMGR_ADDRESS: u32 = 0x00638048;
 
@@ -12,32 +11,32 @@ const GLOBAL_ZTGAMEMGR_ADDRESS: u32 = 0x00638048;
 #[repr(C)]
 struct ZTGameMgr {
     pad1: [u8; 0x0C],
-    cash: f32, // 0x0C
-    pad2: [u8; 0x30 - 0x10], // 0x0C
-    num_animals: u16, // 0x30
-    pad3: [u8; 0x38 - 0x32], // 0x30
-    num_species: u16, // 0x38
-    pad4: [u8; 0x3C - 0x3A], // 0x38
-    num_tired_guests: u16, // 0x3C
-    pad5: [u8; 0x40 - 0x3E], // 0x3C
-    num_hungry_guests: u16, // 0x40
-    pad6: [u8; 0x44 - 0x42], // 0x40
-    num_thirst_guests: u16, // 0x44
-    pad7: [u8; 0x48 - 0x46], // 0x44
+    cash: f32,                     // 0x0C
+    pad2: [u8; 0x30 - 0x10],       // 0x0C
+    num_animals: u16,              // 0x30
+    pad3: [u8; 0x38 - 0x32],       // 0x30
+    num_species: u16,              // 0x38
+    pad4: [u8; 0x3C - 0x3A],       // 0x38
+    num_tired_guests: u16,         // 0x3C
+    pad5: [u8; 0x40 - 0x3E],       // 0x3C
+    num_hungry_guests: u16,        // 0x40
+    pad6: [u8; 0x44 - 0x42],       // 0x40
+    num_thirst_guests: u16,        // 0x44
+    pad7: [u8; 0x48 - 0x46],       // 0x44
     num_guests_restroom_need: u16, // 0x48
-    pad8: [u8; 0x54 - 0x4A], // 0x48
-    num_guests: u16, // 0x54
-    pad9: [u8; 0x1160 - 0x56], // 0x54
-    zoo_admission_cost: f32, // 0x1160
-    pad10: [u8; 0x1194 - 0x1164], // 0x1160
-    date: SYSTEMTIME, // 0x1194
-    pad11: [u8; 0x1400], // 0x1194
+    pad8: [u8; 0x54 - 0x4A],       // 0x48
+    num_guests: u16,               // 0x54
+    pad9: [u8; 0x1160 - 0x56],     // 0x54
+    zoo_admission_cost: f32,       // 0x1160
+    pad10: [u8; 0x1194 - 0x1164],  // 0x1160
+    date: Systemtime,              // 0x1194
+    pad11: [u8; 0x1400],           // 0x1194
 }
 
 // SYSTEMTIME struct from Windows API
 #[derive(Debug, Clone)]
 #[repr(C)]
-struct SYSTEMTIME {
+struct Systemtime {
     w_year: u16,
     w_month: u16,
     w_day_of_week: u16,
@@ -60,14 +59,13 @@ impl ZTGameMgr {
     // returns the instance of the ZTGameMgr struct
     fn instance() -> Option<&'static mut ZTGameMgr> {
         unsafe {
-            // get the pointer to the ZTGameMgr instance    
+            // get the pointer to the ZTGameMgr instance
             let ptr = get_from_memory::<*mut ZTGameMgr>(GLOBAL_ZTGAMEMGR_ADDRESS);
-    
+
             // is pointer null
             if !ptr.is_null() {
                 Some(&mut *ptr)
-            } 
-            else {
+            } else {
                 // pointer is null
                 None
             }
@@ -82,7 +80,10 @@ pub fn command_get_date_str(_args: Vec<&str>) -> Result<String, &'static str> {
     let date = ztgamemgr.date.clone();
     info!("Date: {:#?}", date);
 
-    Ok(format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", date.w_year, date.w_month, date.w_day, date.w_hour, date.w_minute, date.w_second))
+    Ok(format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        date.w_year, date.w_month, date.w_day, date.w_hour, date.w_minute, date.w_second
+    ))
 }
 
 // adds cash to the player's account
@@ -114,5 +115,4 @@ pub fn init() {
     add_to_command_register("add_cash".to_string(), command_add_cash);
     add_to_command_register("enable_dev_mode".to_string(), command_enable_dev_mode);
     add_to_command_register("zoostats".to_string(), command_zoostats);
-}    
-
+}

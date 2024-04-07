@@ -12,7 +12,6 @@ opt-level = 1
 opt-level = 3
 
 [dependencies]
-configparser = "3.0.4" # TODO: remove this, all references should be replaced with bf_configparser
 winapi = {version = "0.3.9", features = ["winuser", "std", "memoryapi"]}
 tracing-subscriber = "0.3.16"
 tracing = "0.1.37"

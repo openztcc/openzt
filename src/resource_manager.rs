@@ -223,33 +223,33 @@ pub trait FromZipFile<T> {
     fn from_zip_file(file: &mut ZipFile) -> io::Result<T>;
 }
 
-impl FromZipFile<String> for String {
-    fn from_zip_file(file: &mut ZipFile) -> io::Result<String> {
-        let mut buffer = vec![0; file.size() as usize];
-        file.read(&mut buffer[..])?;
-        Ok(String::from_utf8_lossy(&buffer[..]).to_string())
-    }
-}
+// impl FromZipFile<String> for String {
+//     fn from_zip_file(file: &mut ZipFile) -> io::Result<String> {
+//         let mut buffer = vec![0; file.size() as usize];
+//         file.read(&mut buffer[..])?;
+//         Ok(String::from_utf8_lossy(&buffer[..]).to_string())
+//     }
+// }
 
-impl FromZipFile<Vec<u8>> for Vec<u8> {
-    fn from_zip_file(file: &mut ZipFile) -> io::Result<Self> {
-        let mut buffer = vec![0; file.size() as usize];
-        file.read(&mut buffer[..])?;
-        Ok(buffer)
-    }
-}
+// impl FromZipFile<Vec<u8>> for Vec<u8> {
+//     fn from_zip_file(file: &mut ZipFile) -> io::Result<Self> {
+//         let mut buffer = vec![0; file.size() as usize];
+//         file.read(&mut buffer[..])?;
+//         Ok(buffer)
+//     }
+// }
 
-impl FromZipFile<CString> for CString {
-    fn from_zip_file(file: &mut ZipFile) -> io::Result<Self> {
-        let mut buffer = vec![0; file.size() as usize];
-        file.read(&mut buffer[..])?;
-        Ok(CString::new(
-            String::from_utf8_lossy(&buffer[..]).to_string(),
-        )?)
-    }
-}
+// impl FromZipFile<CString> for CString {
+//     fn from_zip_file(file: &mut ZipFile) -> io::Result<Self> {
+//         let mut buffer = vec![0; file.size() as usize];
+//         file.read(&mut buffer[..])?;
+//         Ok(CString::new(
+//             String::from_utf8_lossy(&buffer[..]).to_string(),
+//         )?)
+//     }
+// }
 
-fn add_file_to_maps(entry: &PathBuf, file: &mut ZipFile) {
+fn add_file_to_maps(entry: &Path, file: &mut ZipFile) {
     let lowercase_file_name = file.name().to_lowercase();
     if check_file(&lowercase_file_name) {
         // File already exists, skip loading
@@ -273,7 +273,7 @@ fn add_file_to_maps(entry: &PathBuf, file: &mut ZipFile) {
     }
 }
 
-pub fn add_txt_file_to_map_with_path_override(entry: &PathBuf, file: &mut ZipFile, path: String) {
+pub fn add_txt_file_to_map_with_path_override(entry: &Path, file: &mut ZipFile, path: String) {
     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
     match file.read_exact(&mut buffer) {
         Ok(bytes_read) => bytes_read,
@@ -288,18 +288,7 @@ pub fn add_txt_file_to_map_with_path_override(entry: &PathBuf, file: &mut ZipFil
         }
     };
 
-    let mut intermediate_string = String::from_utf8_lossy(&buffer).to_string();
-
-    // TODO: Patch with modifier
-    match file.name() {
-        "ui/xpac.lyt" => {
-            intermediate_string = intermediate_string.replace(
-                "animation=ui/sharedui/listbk/listbk",
-                "animation=openzt/openzt/expansion_dropdown/listbk",
-            );
-        }
-        _ => {}
-    };
+    let intermediate_string = String::from_utf8_lossy(&buffer).to_string();
 
     let file_size = intermediate_string.len();
     let file_contents = CString::new(intermediate_string).unwrap();
@@ -311,13 +300,13 @@ pub fn add_txt_file_to_map_with_path_override(entry: &PathBuf, file: &mut ZipFil
     );
 }
 
-pub fn add_txt_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
+pub fn add_txt_file_to_map(entry: &Path, file: &mut ZipFile) {
     let file_name = file.name().to_string().to_lowercase();
 
     add_txt_file_to_map_with_path_override(entry, file, file_name)
 }
 
-pub fn add_raw_bytes_to_map_with_path_override(entry: &PathBuf, file: &mut ZipFile, path: String) {
+pub fn add_raw_bytes_to_map_with_path_override(entry: &Path, file: &mut ZipFile, path: String) {
     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
     match file.read_exact(&mut buffer) {
         Ok(_) => {}
@@ -340,7 +329,7 @@ pub fn add_raw_bytes_to_map_with_path_override(entry: &PathBuf, file: &mut ZipFi
     );
 }
 
-pub fn add_raw_bytes_file_to_map(entry: &PathBuf, file: &mut ZipFile) {
+pub fn add_raw_bytes_file_to_map(entry: &Path, file: &mut ZipFile) {
     let file_name = file.name().to_string().to_lowercase();
     add_raw_bytes_to_map_with_path_override(entry, file, file_name)
 }
@@ -365,18 +354,14 @@ pub fn check_file(file_name: &str) -> bool {
         .contains_key(&file_name.to_lowercase())
 }
 
-pub fn get_file_ptr(file_name: &str) -> u32 {
+pub fn get_file_ptr(file_name: &str) -> Option<u32> {
     let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
-    let bf_resource_ptr = match binding.get(&file_name.to_lowercase()) {
-        Some(ptr) => ptr.clone(),
-        None => return 0,
-    };
-    bf_resource_ptr
+    binding.get(&file_name.to_lowercase()).copied()
 }
 
-fn add_ztfile(path: &PathBuf, file_name: String, ztfile: ZTFile) {
-    let mut ztd_path = path.clone().into_os_string().into_string().unwrap();
-    ztd_path = ztd_path.replace("./", "zip::./").replace("\\", "/");
+fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
+    let mut ztd_path = path.to_str().unwrap().to_string();
+    ztd_path = ztd_path.replace("./", "zip::./").replace('\\', "/");
     let lowercase_filename = file_name.to_lowercase();
     match ztfile {
         ZTFile::Text(data, _, length) => {
@@ -419,24 +404,15 @@ pub fn modify_ztfile<F>(file_name: &str, modifier: F) -> Result<(), &'static str
 where
     F: Fn(&mut BFResourcePtr),
 {
-    let bf_resource_ptr_ptr = get_file_ptr(file_name);
-    if bf_resource_ptr_ptr == 0 {
+    let Some(bf_resource_ptr_ptr) = get_file_ptr(file_name) else {
         info!("File not found: {}", file_name);
         return Err("File not found");
-    }
+    };
     let mut bf_resource_ptr = get_from_memory::<BFResourcePtr>(bf_resource_ptr_ptr);
 
     modifier(&mut bf_resource_ptr);
 
-    info!(
-        "Before save_to_memory {}",
-        get_from_memory::<BFResourcePtr>(bf_resource_ptr_ptr)
-    );
     save_to_memory::<BFResourcePtr>(bf_resource_ptr_ptr, bf_resource_ptr.clone());
-    info!(
-        "After save_to_memory {}",
-        get_from_memory::<BFResourcePtr>(bf_resource_ptr_ptr)
-    );
 
     Ok(())
 }
@@ -448,7 +424,6 @@ where
     modify_ztfile(file_name, |file: &mut BFResourcePtr| {
         let c_string = unsafe { CString::from_raw(file.data_ptr as *mut i8) };
         let c_string_as_string = c_string.to_str().unwrap().to_string();
-        info!("{}", c_string_as_string);
         let mut cfg = Ini::new_cs();
         cfg.set_comment_symbols(&[';', '#', ':']);
         if let Err(err) = cfg.read(c_string_as_string.clone()) {
@@ -462,7 +437,6 @@ where
         write_options.space_around_delimiters = true;
         write_options.blank_lines_between_sections = 1;
         let new_string = cfg.pretty_writes(&write_options);
-        info!("{}", new_string);
         file.content_size = new_string.len() as u32;
 
         let new_c_string = CString::new(new_string).unwrap();
@@ -680,20 +654,18 @@ pub fn init() {
 
 #[hook_module("zoo.exe")]
 pub mod zoo_resource_mgr {
-    use configparser::ini::Ini; //TODO: Replace with custom ini parser
+    use bf_configparser::ini::Ini; //TODO: Replace with custom ini parser
     use tracing::info;
 
     use super::{check_file, get_file_ptr, load_resources, BFResourcePtr};
-    use crate::debug_dll::{get_from_memory, get_ini_path, get_string_from_memory, save_to_memory};
+    use crate::debug_dll::{get_ini_path, get_string_from_memory, save_to_memory};
 
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
     fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> u8 {
         if bf_resource_inner(this_ptr, file_name) {
             return 1;
         }
-        let return_value = unsafe { BFResource_attempt.call(this_ptr, file_name) };
-
-        return_value
+        unsafe { BFResource_attempt.call(this_ptr, file_name) }
     }
 
     //47f4
@@ -703,28 +675,14 @@ pub mod zoo_resource_mgr {
             return 1;
         }
 
-        let return_value = unsafe { BFResource_prepare.call(this_ptr, file_name) };
-
-        return_value
+        unsafe { BFResource_prepare.call(this_ptr, file_name) }
     }
 
     fn bf_resource_inner(this_ptr: u32, file_name: u32) -> bool {
         let file_name_string = get_string_from_memory(file_name).to_lowercase();
-        if check_file(&file_name_string) {
-            let ptr = get_file_ptr(&file_name_string);
-
-            if file_name_string.starts_with("ui/sharedui/listbk/")
-                || file_name_string.starts_with("openzt/openzt")
-            {
-                info!(
-                    "Loading: {} -> {:#x} ({:#x})",
-                    file_name_string,
-                    ptr,
-                    get_from_memory::<u32>(ptr)
-                );
-                info!("BFResourcePtr {}", get_from_memory::<BFResourcePtr>(ptr));
-            }
-
+        if check_file(&file_name_string)
+            && let Some(ptr) = get_file_ptr(&file_name_string)
+        {
             let mut bfrp = unsafe { Box::from_raw(ptr as *mut BFResourcePtr) };
 
             bfrp.num_refs = 100;
@@ -771,7 +729,7 @@ pub struct Handler {
     handler: HandlerFunction,
 }
 
-pub type HandlerFunction = fn(&PathBuf, &mut ZipFile) -> ();
+pub type HandlerFunction = fn(&Path, &mut ZipFile) -> ();
 
 impl Handler {
     pub fn new(
@@ -786,7 +744,7 @@ impl Handler {
         })
     }
 
-    fn handle(&self, entry: &PathBuf, file: &mut ZipFile) {
+    fn handle(&self, entry: &Path, file: &mut ZipFile) {
         let file_name = file.name();
         if let Some(prefix) = &self.matcher_prefix {
             if !file_name.starts_with(prefix) {
