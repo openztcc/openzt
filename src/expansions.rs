@@ -156,7 +156,7 @@ static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> =
 
 fn add_member(entity_name: String, member: String) {
     let mut data_mutex = MEMBER_SETS.lock().unwrap();
-    let set = data_mutex.entry(member).or_insert(HashSet::new());
+    let set = data_mutex.entry(member).or_default();
     set.insert(entity_name);
 }
 
@@ -240,8 +240,8 @@ fn save_mutex() {
 
 fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
     let array_ptr = mutex_guard.as_mut_ptr();
-    let array_end_ptr = unsafe { array_ptr.offset(mutex_guard.len() as isize) };
-    let array_buffer_end_ptr = unsafe { array_ptr.offset(mutex_guard.capacity() as isize) };
+    let array_end_ptr = unsafe { array_ptr.offset(isize::try_from(mutex_guard.len()).unwrap()) };
+    let array_buffer_end_ptr = unsafe { array_ptr.offset(isize::try_from(mutex_guard.capacity()).unwrap()) };
     info!(
         "Saving expansions to {:#x} to {:#x}; {:#x}",
         array_ptr as u32, array_end_ptr as u32, array_buffer_end_ptr as u32
@@ -407,7 +407,7 @@ pub mod custom_expansion {
 fn initialise_expansions() {
     add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
     if let Some(member_hash) = get_members(&get_cc_expansion_name_all())
-        && member_hash.len() > 0
+        && member_hash.is_empty()
     {
         add_expansion_with_string_value(
             0x4000,
@@ -464,31 +464,12 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     match modify_ztfile_as_animation(
         &(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_ANIMATION),
         |animation| {
-            info!(
-                "Reading expansion dropdown animation {} {} {}",
-                animation.num_frames,
-                animation.frames[0].lines.len(),
-                animation.frames[0].vertical_offset_y
-            );
-            info!(
-                "Animation points to pal file: {}",
-                animation.pallette_filename
-            );
             animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
             for _ in 0..number_of_additional_expansions {
                 animation.duplicate_pixel_rows(0, 10, 31).unwrap();
             }
             animation.set_pallette_filename(
                 EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_PAL,
-            );
-            info!(
-                "Resized expansion dropdown animation to {} {}",
-                animation.frames[0].lines.len(),
-                animation.frames[0].vertical_offset_y
-            );
-            info!(
-                "Animation pal file changed to: {}",
-                animation.pallette_filename
             );
         },
     ) {
@@ -607,7 +588,7 @@ fn filter_entity_type(
         }
     }
 
-    return true;
+    true
 }
 
 fn add_expansion_with_string_id(id: u32, name: String, string_id: u32, save_to_memory: bool) {
@@ -630,22 +611,22 @@ fn add_expansion_with_string_id(id: u32, name: String, string_id: u32, save_to_m
 }
 
 fn add_expansion_with_string_value(
-    id: u32,
+    expansion_id: u32,
     name: String,
     string_value: String,
     save_to_memory: bool,
 ) {
     let name_len = name.len();
-    let name_ptr = CString::new(name).unwrap().into_raw() as u32;
-    let name_ptr_end = name_ptr + name_len as u32 + 1;
+    let name_string_start_ptr = CString::new(name).unwrap().into_raw() as u32;
+    let name_string_end_ptr = name_string_start_ptr + name_len as u32 + 1;
     let name_id = add_string_to_registry(string_value);
     if let Err(err) = add_expansion(
         Expansion {
-            expansion_id: id,
-            name_id: name_id,
-            name_string_start_ptr: name_ptr,
-            name_string_end_ptr: name_ptr_end,
-            name_string_buffer_end_ptr: name_ptr_end,
+            expansion_id,
+            name_id,
+            name_string_start_ptr,
+            name_string_end_ptr,
+            name_string_buffer_end_ptr: name_string_end_ptr,
         },
         save_to_memory,
     ) {
@@ -747,7 +728,7 @@ fn is_cc(path: &PathBuf) -> bool {
         .to_str()
         .unwrap_or_default()
     {
-        "zupdate" | "xpack1" | "zupdate1" | "xpack2" => return false,
+        "zupdate" | "xpack1" | "zupdate1" | "xpack2" => false,
         "dlupdate" | "dupdate" | "updates" | "" => {
             match path
                 .file_name()
@@ -755,11 +736,11 @@ fn is_cc(path: &PathBuf) -> bool {
                 .to_str()
                 .unwrap_or_default()
             {
-                "" => return false,
-                file_name => return !OFFICIAL_FILESET.contains(file_name),
+                "" => false,
+                file_name => !OFFICIAL_FILESET.contains(file_name),
             }
         }
-        _ => return true,
+        _ => true,
     }
 }
 
@@ -812,7 +793,6 @@ fn handle_expansion_dropdown(entry: &PathBuf, file: &mut ZipFile) {
         error!("Error converting file path to string");
         return;
     };
-    info!("Handling expansion dropdown: {}", file_path_string);
     match Path::new(&file_path_string)
         .extension()
         .unwrap_or_default()
@@ -820,14 +800,12 @@ fn handle_expansion_dropdown(entry: &PathBuf, file: &mut ZipFile) {
         .unwrap_or_default()
     {
         "ani" => {
-            info!("Handling ani file");
             add_txt_file_to_map_with_path_override(entry, file, file_path_string);
         }
         "pal" | "" => {
-            info!("Handling pal file");
             add_raw_bytes_to_map_with_path_override(entry, file, file_path_string);
         }
-        _ => return,
+        _ => (),
     }
 }
 
