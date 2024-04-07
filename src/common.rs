@@ -1,5 +1,3 @@
-use std::string::ToString;
-
 use crate::debug_dll::get_string_from_memory_bounded;
 
 #[derive(Debug)]

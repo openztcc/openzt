@@ -1,8 +1,4 @@
-use std::arch::global_asm;
-
-use tracing::info;
-
-use crate::debug_dll::{get_from_memory, patch_nop, save_to_protected_memory};
+use crate::debug_dll::{patch_nop, save_to_protected_memory};
 
 const ZOOWALL_MAP_EDGE_CRASH_ADDRESS: u32 = 0x050b260;
 
@@ -31,6 +27,8 @@ fn fix_fence_one_tile_from_map_edge_crash() {
 
 // Leaving this in incase future bugfixes require inline assembly
 
+// use std::arch::global_asm;
+//
 // pub mod fence_crash_asm {
 //     global_asm!(r#"
 //         .global fence_crash_trmp

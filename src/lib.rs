@@ -113,8 +113,6 @@ mod zoo_bf_registry {
 
 #[hook_module("zoo.exe")]
 mod bf_version_info {
-    use tracing::info;
-
     use crate::debug_dll::{
         get_from_memory, get_string_from_memory, save_string_to_memory, save_to_memory,
     };

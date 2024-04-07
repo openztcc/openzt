@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 // ------------ BFEntityType, Implementation, and Related Functions ------------ //
 use tracing::info;
 
@@ -1234,7 +1232,6 @@ fn print_config_for_type() -> String {
 // parses the subargs for the entity type
 fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
-    let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
     let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
 
     // test for arguments in the entity type, scenery type, and building type
