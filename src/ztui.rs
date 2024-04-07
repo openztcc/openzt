@@ -54,6 +54,28 @@ pub enum BuyTab {
     DeveloperTab,
 }
 
+impl fmt::Display for BuyTab {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let string = match self {
+            BuyTab::AnimalTab => "Animal Tab",
+            BuyTab::ShelterTab => "Shelter Tab",
+            BuyTab::ToysTab => "Toys Tab",
+            BuyTab::ShowToysTab => "Show Toys Tab",
+            BuyTab::BuildingTab => "Building Tab",
+            BuyTab::SceneryTab => "Scenery Tab",
+            BuyTab::FenceTab => "Fence Tab",
+            BuyTab::PathTab => "Path Tab",
+            BuyTab::FoliageTab => "Foliage Tab",
+            BuyTab::RocksTab => "Rocks Tab",
+            BuyTab::PaintTerrainTab => "Paint Terrain Tab",
+            BuyTab::TerraformTab => "Terraform Tab",
+            BuyTab::StaffTab => "Staff Tab",
+            BuyTab::DeveloperTab => "Developer Tab",
+        };
+        write!(f, "{}", string)
+    }
+}
+
 //TODO: Add support for the buy young hack
 pub enum Sex {
     Male,

@@ -364,10 +364,11 @@ pub mod custom_expansion {
     use tracing::info;
 
     use super::{initialise_expansions, read_current_expansion};
-    use crate::{ztui::get_current_buy_tab, ztworldmgr::read_zt_entity_type_from_memory};
+    use crate::{debug_dll::get_from_memory, ztui::get_current_buy_tab, ztworldmgr::read_zt_entity_type_from_memory};
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
+        // TODO: Put this call and subsequent log behind OpenZT debug flag
         let result =
             unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
 
@@ -375,13 +376,12 @@ pub mod custom_expansion {
 
         let entity = read_zt_entity_type_from_memory(bf_entity);
 
-        let current_buy_tab = get_current_buy_tab();
-        if get_current_buy_tab().is_none() {
+        let Some(current_buy_tab) = get_current_buy_tab() else {
             return 0;
-        }
+        };
 
         let reimplemented_result =
-            match super::filter_entity_type(&current_buy_tab.unwrap(), &current_expansion, &entity)
+            match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity)
             {
                 true => 1,
                 false => 0,
@@ -389,8 +389,8 @@ pub mod custom_expansion {
 
         if result != reimplemented_result {
             info!(
-                "Filtering mismatch {:#x} {:#x} {:#x} -> {:#x} (reimplemented: {:#x})",
-                bf_entity, param_1, param_2, result, reimplemented_result
+                "Filtering mismatch {} {} ({:#x} vs {:#x})",
+                entity, current_buy_tab, result, reimplemented_result
             );
         }
 
