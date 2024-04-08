@@ -1,5 +1,9 @@
 // ------------ BFEntityType, Implementation, and Related Functions ------------ //
+use std::ops::Deref;
+
 use tracing::info;
+
+use getset::Getters;
 
 use crate::{
     add_to_command_register,
@@ -8,7 +12,7 @@ use crate::{
     ztworldmgr::determine_entity_type,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Getters, Setters)]
 #[repr(C)]
 pub struct BFEntityType {
     pad1: [u8; 0x038],                // ----------------------- padding: 56 bytes
@@ -255,7 +259,7 @@ impl BFEntityType {
 
 // ------------ ZTSceneryType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug)]
+#[derive(Debug, Getters, Setters)]
 #[repr(C)]
 pub struct ZTSceneryType {
     pub bfentitytype: BFEntityType, // bytes: 0x100 - 0x000 = 0x100 = 256 bytes
@@ -438,8 +442,15 @@ impl ZTSceneryType {
     }
 }
 
+impl Deref for ZTSceneryType {
+    type Target = BFEntityType;
+    fn deref(&self) -> &Self::Target {
+        &self.bfentitytype
+    }
+}
+
 // ------------ ZTBuildingType, Implementation, and Related Functions ------------ //
-#[derive(Debug)]
+#[derive(Debug, Getters, Setters)]
 #[repr(C)]
 struct ZTBuildingType {
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x16C = 364 bytes
@@ -662,9 +673,16 @@ impl ZTBuildingType {
     }
 }
 
+impl Deref for ZTBuildingType {
+    type Target = ZTSceneryType;
+    fn deref(&self) -> &Self::Target {
+        &self.ztscenerytype
+    }
+}
+
 // ------------ ZTFenceType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug)]
+#[derive(Debug, Getters, Setters)]
 #[repr(C)]
 pub struct ZTFenceType {
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
@@ -772,9 +790,16 @@ impl ZTFenceType {
     }
 }
 
+impl Deref for ZTFenceType {
+    type Target = ZTSceneryType;
+    fn deref(&self) -> &Self::Target {
+        &self.ztscenerytype
+    }
+}
+
 // ------------ ZTTankWallType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug)]
+#[derive(Debug, Getters, Setters)]
 #[repr(C)]
 pub struct ZTTankWallType {
     pub ztfencetype: ZTFenceType, // bytes: 0x19C - 0x168 = 0x34 = 52 bytes
@@ -842,9 +867,16 @@ impl ZTTankWallType {
     }
 }
 
+impl Deref for ZTTankWallType {
+    type Target = ZTFenceType;
+    fn deref(&self) -> &Self::Target {
+        &self.ztfencetype
+    }
+}
+
 // ------------ ZTFoodType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug)]
+#[derive(Debug, Getters, Setters)]
 #[repr(C)]
 pub struct ZTFoodType {
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
@@ -877,9 +909,16 @@ impl ZTFoodType {
     }
 }
 
+impl Deref for ZTFoodType {
+    type Target = ZTSceneryType;
+    fn deref(&self) -> &Self::Target {
+        &self.ztscenerytype
+    }
+}
+
 // ------------ ZTTankeFilterType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug)]
+#[derive(Debug, Getters, Setters)]
 #[repr(C)]
 pub struct ZTTankFilterType {
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
@@ -984,9 +1023,16 @@ impl ZTTankFilterType {
     }
 }
 
+impl Deref for ZTTankFilterType {
+    type Target = ZTSceneryType;
+    fn deref(&self) -> &Self::Target {
+        &self.ztscenerytype
+    }
+}
+
 // ------------ ZTPathType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug)]
+#[derive(Debug, Getters, Setters)]
 #[repr(C)]
 pub struct ZTPathType {
     ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
@@ -1020,9 +1066,16 @@ impl ZTPathType {
     }
 }
 
+impl Deref for ZTPathType {
+    type Target = ZTSceneryType;
+    fn deref(&self) -> &Self::Target {
+        &self.ztscenerytype
+    }
+}
+
 // ------------ ZTRubbleType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug)]
+#[derive(Debug, Getters, Setters)]
 #[repr(C)]
 pub struct ZTRubbleType {
     ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
@@ -1070,6 +1123,13 @@ impl ZTRubbleType {
             self.get_explosion_sound(),
             self.explosion_sound_atten,
         )
+    }
+}
+
+impl Deref for ZTRubbleType {
+    type Target = ZTSceneryType;
+    fn deref(&self) -> &Self::Target {
+        &self.ztscenerytype
     }
 }
 
