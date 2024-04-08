@@ -2,7 +2,7 @@
 use tracing::info;
 
 use crate::{
-    add_to_command_register,
+    console::{add_to_command_register, CommandError},
     debug_dll::{get_from_memory, get_string_from_memory},
     ztui::get_selected_entity_type,
     ztworldmgr::determine_entity_type,
@@ -84,117 +84,146 @@ impl BFEntityType {
     }
 
     // allows setting the configuration of the entity type
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cIconZoom" {
-            self.icon_zoom = value.parse::<bool>().unwrap();
-            Ok(format!("Set cIconZoom to {}", self.icon_zoom))
-        } else if config == "-cExpansionID" {
-            self.expansion_id = value.parse::<bool>().unwrap();
-            Ok(format!("Set cExpansionID to {}", self.expansion_id))
-        } else if config == "-cMovable" {
-            self.movable = value.parse::<bool>().unwrap();
-            Ok(format!("Set cMovable to {}", self.movable))
-        } else if config == "-cWalkable" {
-            self.walkable = value.parse::<bool>().unwrap();
-            Ok(format!("Set cWalkable to {}", self.walkable))
-        } else if config == "-cWalkableByTall" {
-            self.walkable_by_tall = value.parse::<bool>().unwrap();
-            Ok(format!("Set cWalkableByTall to {}", self.walkable_by_tall))
-        } else if config == "-cRubbleable" {
-            self.rubbleable = value.parse::<bool>().unwrap();
-            Ok(format!("Set cRubbleable to {}", self.rubbleable))
-        } else if config == "-cUseNumbersInName" {
-            self.use_numbers_in_name = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set cUseNumbersInName to {}",
-                self.use_numbers_in_name
-            ))
-        } else if config == "-cUsesRealShadows" {
-            self.uses_real_shadows = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set cUsesRealShadows to {}",
-                self.uses_real_shadows
-            ))
-        } else if config == "-cHasShadowImages" {
-            self.has_shadow_images = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set cHasShadowImages to {}",
-                self.has_shadow_images
-            ))
-        } else if config == "-cForceShadowBlack" {
-            self.force_shadow_black = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set cForceShadowBlack to {}",
-                self.force_shadow_black
-            ))
-        } else if config == "-cDrawsLate" {
-            self.draws_late = value.parse::<bool>().unwrap();
-            Ok(format!("Set cDrawsLate to {}", self.draws_late))
-        } else if config == "-cHeight" {
-            self.height = value.parse::<u32>().unwrap();
-            Ok(format!("Set cHeight to {}", self.height))
-        } else if config == "-cDepth" {
-            self.depth = value.parse::<u32>().unwrap();
-            Ok(format!("Set cDepth to {}", self.depth))
-        } else if config == "-cHasUnderwaterSection" {
-            self.has_underwater_section = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set cHasUnderwaterSection to {}",
-                self.has_underwater_section
-            ))
-        } else if config == "-cIsTransient" {
-            self.is_transient = value.parse::<bool>().unwrap();
-            Ok(format!("Set cIsTransient to {}", self.is_transient))
-        } else if config == "-cUsesPlacementCube" {
-            self.uses_placement_cube = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set cUsesPlacementCube to {}",
-                self.uses_placement_cube
-            ))
-        } else if config == "-cShow" {
-            self.show = value.parse::<bool>().unwrap();
-            Ok(format!("Set cShow to {}", self.show))
-        } else if config == "-cHitThreshold" {
-            self.hit_threshold = value.parse::<u32>().unwrap();
-            Ok(format!("Set cHitThreshold to {}", self.hit_threshold))
-        } else if config == "-cAvoidEdges" {
-            self.avoid_edges = value.parse::<bool>().unwrap();
-            Ok(format!("Set cAvoidEdges to {}", self.avoid_edges))
-        } else if config == "-cFootprintX" {
-            self.footprintx = value.parse::<i32>().unwrap();
-            Ok(format!("Set cFootprintX to {}", self.footprintx))
-        } else if config == "-cFootprintY" {
-            self.footprinty = value.parse::<i32>().unwrap();
-            Ok(format!("Set cFootprintY to {}", self.footprinty))
-        } else if config == "-cFootprintZ" {
-            self.footprintz = value.parse::<i32>().unwrap();
-            Ok(format!("Set cFootprintZ to {}", self.footprintz))
-        } else if config == "-cPlacementFootprintX" {
-            self.placement_footprintx = value.parse::<i32>().unwrap();
-            Ok(format!(
-                "Set cPlacementFootprintX to {}",
-                self.placement_footprintx
-            ))
-        } else if config == "-cPlacementFootprintY" {
-            self.placement_footprinty = value.parse::<i32>().unwrap();
-            Ok(format!(
-                "Set cPlacementFootprintY to {}",
-                self.placement_footprinty
-            ))
-        } else if config == "-cPlacementFootprintZ" {
-            self.placement_footprintz = value.parse::<i32>().unwrap();
-            Ok(format!(
-                "Set cPlacementFootprintZ to {}",
-                self.placement_footprintz
-            ))
-        } else if config == "-cAvailableAtStartup" {
-            self.available_at_startup = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set cAvailableAtStartup to {}",
-                self.available_at_startup
-            ))
-        } else {
-            Err("Invalid configuration option")
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        match config {
+            "-cIconZoom" => {
+                self.icon_zoom = value.parse::<bool>()?;
+                Ok(format!("Set cIconZoom to {}", self.icon_zoom))
+            }
+            "-cExpansionID" => {
+                self.expansion_id = value.parse::<bool>()?;
+                Ok(format!("Set cExpansionID to {}", self.expansion_id))
+            }
+            "-cMovable" => {
+                self.movable = value.parse::<bool>()?;
+                Ok(format!("Set cMovable to {}", self.movable))
+            }
+            "-cWalkable" => {
+                self.walkable = value.parse::<bool>()?;
+                Ok(format!("Set cWalkable to {}", self.walkable))
+            }
+            "-cWalkableByTall" => {
+                self.walkable_by_tall = value.parse::<bool>()?;
+                Ok(format!("Set cWalkableByTall to {}", self.walkable_by_tall))
+            }
+            "-cRubbleable" => {
+                self.rubbleable = value.parse::<bool>()?;
+                Ok(format!("Set cRubbleable to {}", self.rubbleable))
+            }
+            "-cUseNumbersInName" => {
+                self.use_numbers_in_name = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set cUseNumbersInName to {}",
+                    self.use_numbers_in_name
+                ))
+            }
+            "-cUsesRealShadows" => {
+                self.uses_real_shadows = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set cUsesRealShadows to {}",
+                    self.uses_real_shadows
+                ))
+            }
+            "-cHasShadowImages" => {
+                self.has_shadow_images = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set cHasShadowImages to {}",
+                    self.has_shadow_images
+                ))
+            }
+            "-cForceShadowBlack" => {
+                self.force_shadow_black = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set cForceShadowBlack to {}",
+                    self.force_shadow_black
+                ))
+            }
+            "-cDrawsLate" => {
+                self.draws_late = value.parse::<bool>()?;
+                Ok(format!("Set cDrawsLate to {}", self.draws_late))
+            }
+            "-cHeight" => {
+                self.height = value.parse::<u32>()?;
+                Ok(format!("Set cHeight to {}", self.height))
+            }
+            "-cDepth" => {
+                self.depth = value.parse::<u32>()?;
+                Ok(format!("Set cDepth to {}", self.depth))
+            }
+            "-cHasUnderwaterSection" => {
+                self.has_underwater_section = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set cHasUnderwaterSection to {}",
+                    self.has_underwater_section
+                ))
+            }
+            "-cIsTransient" => {
+                self.is_transient = value.parse::<bool>()?;
+                Ok(format!("Set cIsTransient to {}", self.is_transient))
+            }
+            "-cUsesPlacementCube" => {
+                self.uses_placement_cube = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set cUsesPlacementCube to {}",
+                    self.uses_placement_cube
+                ))
+            }
+            "-cShow" => {
+                self.show = value.parse::<bool>()?;
+                Ok(format!("Set cShow to {}", self.show))
+            }
+            "-cHitThreshold" => {
+                self.hit_threshold = value.parse::<u32>()?;
+                Ok(format!("Set cHitThreshold to {}", self.hit_threshold))
+            }
+            "-cAvoidEdges" => {
+                self.avoid_edges = value.parse::<bool>()?;
+                Ok(format!("Set cAvoidEdges to {}", self.avoid_edges))
+            }
+            "-cFootprintX" => {
+                self.footprintx = value.parse::<i32>()?;
+                Ok(format!("Set cFootprintX to {}", self.footprintx))
+            }
+            "-cFootprintY" => {
+                self.footprinty = value.parse::<i32>()?;
+                Ok(format!("Set cFootprintY to {}", self.footprinty))
+            }
+            "-cFootprintZ" => {
+                self.footprintz = value.parse::<i32>()?;
+                Ok(format!("Set cFootprintZ to {}", self.footprintz))
+            }
+            "-cPlacementFootprintX" => {
+                self.placement_footprintx = value.parse::<i32>()?;
+                Ok(format!(
+                    "Set cPlacementFootprintX to {}",
+                    self.placement_footprintx
+                ))
+            }
+            "-cPlacementFootprintY" => {
+                self.placement_footprinty = value.parse::<i32>()?;
+                Ok(format!(
+                    "Set cPlacementFootprintY to {}",
+                    self.placement_footprinty
+                ))
+            }
+            "-cPlacementFootprintZ" => {
+                self.placement_footprintz = value.parse::<i32>()?;
+                Ok(format!(
+                    "Set cPlacementFootprintZ to {}",
+                    self.placement_footprintz
+                ))
+            }
+            "-cAvailableAtStartup" => {
+                self.available_at_startup = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set cAvailableAtStartup to {}",
+                    self.available_at_startup
+                ))
+            }
+            _ => Err(CommandError::new(format!(
+                "Invalid configuration option: {}",
+                config
+            ))),
         }
     }
 
@@ -309,99 +338,129 @@ impl ZTSceneryType {
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x14C))
     }
 
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cPurchaseCost" {
-            self.purchase_cost = value.parse::<f32>().unwrap();
-            Ok(format!("Set Purchase Cost to {}", self.purchase_cost))
-        } else if config == "-cNameID" {
-            self.name_id = value.parse::<u32>().unwrap();
-            Ok(format!("Set Name ID to {}", self.name_id))
-        } else if config == "-cHelpID" {
-            self.help_id = value.parse::<u32>().unwrap();
-            Ok(format!("Set Help ID to {}", self.help_id))
-        } else if config == "-cHabitat" {
-            self.habitat = value.parse::<u32>().unwrap();
-            Ok(format!("Set Habitat to {}", self.habitat))
-        } else if config == "-cLocation" {
-            self.location = value.parse::<u32>().unwrap();
-            Ok(format!("Set Location to {}", self.location))
-        } else if config == "-cEra" {
-            self.era = value.parse::<u32>().unwrap();
-            Ok(format!("Set Era to {}", self.era))
-        } else if config == "-cMaxFoodUnits" {
-            self.max_food_units = value.parse::<u32>().unwrap();
-            Ok(format!("Set Max Food Units to {}", self.max_food_units))
-        } else if config == "-cStink" {
-            self.stink = value.parse::<bool>().unwrap();
-            Ok(format!("Set Stink to {}", self.stink))
-        } else if config == "-cEstheticWeight" {
-            self.esthetic_weight = value.parse::<u32>().unwrap();
-            Ok(format!("Set Esthetic Weight to {}", self.esthetic_weight))
-        } else if config == "-cSelectable" {
-            self.selectable = value.parse::<bool>().unwrap();
-            Ok(format!("Set Selectable to {}", self.selectable))
-        } else if config == "-cDeletable" {
-            self.deletable = value.parse::<bool>().unwrap();
-            Ok(format!("Set Deletable to {}", self.deletable))
-        } else if config == "-cFoliage" {
-            self.foliage = value.parse::<bool>().unwrap();
-            Ok(format!("Set Foliage to {}", self.foliage))
-        } else if config == "-cAutoRotate" {
-            self.auto_rotate = value.parse::<bool>().unwrap();
-            Ok(format!("Set Auto Rotate to {}", self.auto_rotate))
-        } else if config == "-cLand" {
-            self.land = value.parse::<bool>().unwrap();
-            Ok(format!("Set Land to {}", self.land))
-        } else if config == "-cSwims" {
-            self.swims = value.parse::<bool>().unwrap();
-            Ok(format!("Set Swims to {}", self.swims))
-        } else if config == "-cUnderwater" {
-            self.underwater = value.parse::<bool>().unwrap();
-            Ok(format!("Set Underwater to {}", self.underwater))
-        } else if config == "-cSurface" {
-            self.surface = value.parse::<bool>().unwrap();
-            Ok(format!("Set Surface to {}", self.surface))
-        } else if config == "-cSubmerge" {
-            self.submerge = value.parse::<bool>().unwrap();
-            Ok(format!("Set Submerge to {}", self.submerge))
-        } else if config == "-cOnlySwims" {
-            self.only_swims = value.parse::<bool>().unwrap();
-            Ok(format!("Set Only Swims to {}", self.only_swims))
-        } else if config == "-cNeedsConfirm" {
-            self.needs_confirm = value.parse::<bool>().unwrap();
-            Ok(format!("Set Needs Confirm to {}", self.needs_confirm))
-        } else if config == "-cGawkOnlyFromFront" {
-            self.gawk_only_from_front = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set Gawk Only From Front to {}",
-                self.gawk_only_from_front
-            ))
-        } else if config == "-cDeadOnLand" {
-            self.dead_on_land = value.parse::<bool>().unwrap();
-            Ok(format!("Set Dead On Land to {}", self.dead_on_land))
-        } else if config == "-cDeadOnFlatWater" {
-            self.dead_on_flat_water = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set Dead On Flat Water to {}",
-                self.dead_on_flat_water
-            ))
-        } else if config == "-cDeadUnderwater" {
-            self.dead_underwater = value.parse::<bool>().unwrap();
-            Ok(format!("Set Dead Underwater to {}", self.dead_underwater))
-        } else if config == "-cUsesTreeRubble" {
-            self.uses_tree_rubble = value.parse::<bool>().unwrap();
-            Ok(format!("Set Uses Tree Rubble to {}", self.uses_tree_rubble))
-        } else if config == "-cForcesSceneryRubble" {
-            self.forces_scenery_rubble = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set Forces Scenery Rubble to {}",
-                self.forces_scenery_rubble
-            ))
-        } else if config == "-cBlocksLOS" {
-            self.blocks_los = value.parse::<bool>().unwrap();
-            Ok(format!("Set Blocks LOS to {}", self.blocks_los))
-        } else {
-            Err("Invalid configuration option")
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        match config {
+            "-cPurchaseCost" => {
+                self.purchase_cost = value.parse::<f32>()?;
+                Ok(format!("Set Purchase Cost to {}", self.purchase_cost))
+            }
+            "-cNameID" => {
+                self.name_id = value.parse::<u32>()?;
+                Ok(format!("Set Name ID to {}", self.name_id))
+            }
+            "-cHelpID" => {
+                self.help_id = value.parse::<u32>()?;
+                Ok(format!("Set Help ID to {}", self.help_id))
+            }
+            "-cHabitat" => {
+                self.habitat = value.parse::<u32>()?;
+                Ok(format!("Set Habitat to {}", self.habitat))
+            }
+            "-cLocation" => {
+                self.location = value.parse::<u32>()?;
+                Ok(format!("Set Location to {}", self.location))
+            }
+            "-cEra" => {
+                self.era = value.parse::<u32>()?;
+                Ok(format!("Set Era to {}", self.era))
+            }
+            "-cMaxFoodUnits" => {
+                self.max_food_units = value.parse::<u32>()?;
+                Ok(format!("Set Max Food Units to {}", self.max_food_units))
+            }
+            "-cStink" => {
+                self.stink = value.parse::<bool>()?;
+                Ok(format!("Set Stink to {}", self.stink))
+            }
+            "-cEstheticWeight" => {
+                self.esthetic_weight = value.parse::<u32>()?;
+                Ok(format!("Set Esthetic Weight to {}", self.esthetic_weight))
+            }
+            "-cSelectable" => {
+                self.selectable = value.parse::<bool>()?;
+                Ok(format!("Set Selectable to {}", self.selectable))
+            }
+            "-cDeletable" => {
+                self.deletable = value.parse::<bool>()?;
+                Ok(format!("Set Deletable to {}", self.deletable))
+            }
+            "-cFoliage" => {
+                self.foliage = value.parse::<bool>()?;
+                Ok(format!("Set Foliage to {}", self.foliage))
+            }
+            "-cAutoRotate" => {
+                self.auto_rotate = value.parse::<bool>()?;
+                Ok(format!("Set Auto Rotate to {}", self.auto_rotate))
+            }
+            "-cLand" => {
+                self.land = value.parse::<bool>()?;
+                Ok(format!("Set Land to {}", self.land))
+            }
+            "-cSwims" => {
+                self.swims = value.parse::<bool>()?;
+                Ok(format!("Set Swims to {}", self.swims))
+            }
+            "-cUnderwater" => {
+                self.underwater = value.parse::<bool>()?;
+                Ok(format!("Set Underwater to {}", self.underwater))
+            }
+            "-cSurface" => {
+                self.surface = value.parse::<bool>()?;
+                Ok(format!("Set Surface to {}", self.surface))
+            }
+            "-cSubmerge" => {
+                self.submerge = value.parse::<bool>()?;
+                Ok(format!("Set Submerge to {}", self.submerge))
+            }
+            "-cOnlySwims" => {
+                self.only_swims = value.parse::<bool>()?;
+                Ok(format!("Set Only Swims to {}", self.only_swims))
+            }
+            "-cNeedsConfirm" => {
+                self.needs_confirm = value.parse::<bool>()?;
+                Ok(format!("Set Needs Confirm to {}", self.needs_confirm))
+            }
+            "-cGawkOnlyFromFront" => {
+                self.gawk_only_from_front = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set Gawk Only From Front to {}",
+                    self.gawk_only_from_front
+                ))
+            }
+            "-cDeadOnLand" => {
+                self.dead_on_land = value.parse::<bool>()?;
+                Ok(format!("Set Dead On Land to {}", self.dead_on_land))
+            }
+            "-cDeadOnFlatWater" => {
+                self.dead_on_flat_water = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set Dead On Flat Water to {}",
+                    self.dead_on_flat_water
+                ))
+            }
+            "-cDeadUnderwater" => {
+                self.dead_underwater = value.parse::<bool>()?;
+                Ok(format!("Set Dead Underwater to {}", self.dead_underwater))
+            }
+            "-cUsesTreeRubble" => {
+                self.uses_tree_rubble = value.parse::<bool>()?;
+                Ok(format!("Set Uses Tree Rubble to {}", self.uses_tree_rubble))
+            }
+            "-cForcesSceneryRubble" => {
+                self.forces_scenery_rubble = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set Forces Scenery Rubble to {}",
+                    self.forces_scenery_rubble
+                ))
+            }
+            "-cBlocksLOS" => {
+                self.blocks_los = value.parse::<bool>()?;
+                Ok(format!("Set Blocks LOS to {}", self.blocks_los))
+            }
+            _ => Err(CommandError::new(format!(
+                "Invalid configuration option {}",
+                config
+            ))),
         }
     }
 
@@ -494,126 +553,161 @@ impl ZTBuildingType {
     }
 
     // sets the configuration of the building type in the console
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cCapacity" {
-            self.i_capacity = value.parse::<i32>().unwrap();
-            Ok(format!("Set Capacity to {}", self.i_capacity))
-        } else if config == "-cToySatisfaction" {
-            self.toy_satisfaction = value.parse::<i32>().unwrap();
-            Ok(format!("Set Toy Satisfaction to {}", self.toy_satisfaction))
-        } else if config == "-cTimeInside" {
-            self.time_inside = value.parse::<i32>().unwrap();
-            Ok(format!("Set Time Inside to {}", self.time_inside))
-        } else if config == "-cDefaultCost" {
-            self.default_cost = value.parse::<f32>().unwrap();
-            Ok(format!("Set Default Cost to {}", self.default_cost))
-        } else if config == "-cLowCost" {
-            self.low_cost = value.parse::<f32>().unwrap();
-            Ok(format!("Set Low Cost to {}", self.low_cost))
-        } else if config == "-cMedCost" {
-            self.med_cost = value.parse::<f32>().unwrap();
-            Ok(format!("Set Med Cost to {}", self.med_cost))
-        } else if config == "-cHighCost" {
-            self.high_cost = value.parse::<f32>().unwrap();
-            Ok(format!("Set High Cost to {}", self.high_cost))
-        } else if config == "-cPriceFactor" {
-            self.price_factor = value.parse::<f32>().unwrap();
-            Ok(format!("Set Price Factor to {}", self.price_factor))
-        } else if config == "-cUpkeep" {
-            self.upkeep = value.parse::<f32>().unwrap();
-            Ok(format!("Set Upkeep to {}", self.upkeep))
-        } else if config == "-cHideUser" {
-            self.hide_user = value.parse::<bool>().unwrap();
-            Ok(format!("Set Hide User to {}", self.hide_user))
-        } else if config == "-cSetLetterFacing" {
-            self.set_letter_facing = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set Set Letter Facing to {}",
-                self.set_letter_facing
-            ))
-        } else if config == "-cDrawUser" {
-            self.draw_user = value.parse::<bool>().unwrap();
-            Ok(format!("Set Draw User to {}", self.draw_user))
-        } else if config == "-cHideCostChange" {
-            self.hide_cost_change = value.parse::<bool>().unwrap();
-            Ok(format!("Set Hide Cost Change to {}", self.hide_cost_change))
-        } else if config == "-cHideCommerceInfo" {
-            self.hide_commerce_info = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set Hide Commerce Info to {}",
-                self.hide_commerce_info
-            ))
-        } else if config == "-cHideRegularInfo" {
-            self.hide_regular_info = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set Hide Regular Info to {}",
-                self.hide_regular_info
-            ))
-        } else if config == "-cHoldsOntoUser" {
-            self.holds_onto_user = value.parse::<bool>().unwrap();
-            Ok(format!("Set Holds Onto User to {}", self.holds_onto_user))
-        } else if config == "-cUserTracker" {
-            self.user_tracker = value.parse::<bool>().unwrap();
-            Ok(format!("Set User Tracker to {}", self.user_tracker))
-        } else if config == "-cIdler" {
-            self.idler = value.parse::<bool>().unwrap();
-            Ok(format!("Set Idler to {}", self.idler))
-        } else if config == "-cExhibitViewer" {
-            self.exhibit_viewer = value.parse::<bool>().unwrap();
-            Ok(format!("Set Exhibit Viewer to {}", self.exhibit_viewer))
-        } else if config == "-cAlternatePanelTitle" {
-            self.alternate_panel_title = value.parse::<u32>().unwrap();
-            Ok(format!(
-                "Set Alternate Panel Title to {}",
-                self.alternate_panel_title
-            ))
-        } else if config == "-cDirectEntrance" {
-            self.direct_entrance = value.parse::<bool>().unwrap();
-            Ok(format!("Set Direct Entrance to {}", self.direct_entrance))
-        } else if config == "-cHideBuilding" {
-            self.hide_building = value.parse::<bool>().unwrap();
-            Ok(format!("Set Hide Building to {}", self.hide_building))
-        } else if config == "-cUserStaysOutside" {
-            self.user_stays_outside = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set User Stays Outside to {}",
-                self.user_stays_outside
-            ))
-        } else if config == "-cUserTeleportsInside" {
-            self.user_teleports_inside = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set User Teleports Inside to {}",
-                self.user_teleports_inside
-            ))
-        } else if config == "-cUserUsesExit" {
-            self.user_uses_exit = value.parse::<bool>().unwrap();
-            Ok(format!("Set User Uses Exit to {}", self.user_uses_exit))
-        } else if config == "-cUserUsesEntranceAsEmergencyExit" {
-            self.user_uses_entrance_as_emergency_exit = value.parse::<bool>().unwrap();
-            Ok(format!(
-                "Set User Uses Entrance As Emergency Exit to {}",
-                self.user_uses_entrance_as_emergency_exit
-            ))
-        } else if config == "-cAdultChange" {
-            self.adult_change = value.parse::<i32>().unwrap();
-            Ok(format!("Set Adult Change to {}", self.adult_change))
-        } else if config == "-cChildChange" {
-            self.child_change = value.parse::<i32>().unwrap();
-            Ok(format!("Set Child Change to {}", self.child_change))
-        } else if config == "-cHungerChange" {
-            self.hunger_change = value.parse::<i32>().unwrap();
-            Ok(format!("Set Hunger Change to {}", self.hunger_change))
-        } else if config == "-cThirstChange" {
-            self.thirst_change = value.parse::<i32>().unwrap();
-            Ok(format!("Set Thirst Change to {}", self.thirst_change))
-        } else if config == "-cBathroomChange" {
-            self.bathroom_change = value.parse::<i32>().unwrap();
-            Ok(format!("Set Bathroom Change to {}", self.bathroom_change))
-        } else if config == "-cEnergyChange" {
-            self.energy_change = value.parse::<i32>().unwrap();
-            Ok(format!("Set Energy Change to {}", self.energy_change))
-        } else {
-            Err("Invalid configuration option")
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        match config {
+            "-cCapacity" => {
+                self.i_capacity = value.parse::<i32>().unwrap();
+                Ok(format!("Set Capacity to {}", self.i_capacity))
+            }
+            "-cToySatisfaction" => {
+                self.toy_satisfaction = value.parse::<i32>()?;
+                Ok(format!("Set Toy Satisfaction to {}", self.toy_satisfaction))
+            }
+            "-cTimeInside" => {
+                self.time_inside = value.parse::<i32>()?;
+                Ok(format!("Set Time Inside to {}", self.time_inside))
+            }
+            "-cDefaultCost" => {
+                self.default_cost = value.parse::<f32>()?;
+                Ok(format!("Set Default Cost to {}", self.default_cost))
+            }
+            "-cLowCost" => {
+                self.low_cost = value.parse::<f32>()?;
+                Ok(format!("Set Low Cost to {}", self.low_cost))
+            }
+            "-cMedCost" => {
+                self.med_cost = value.parse::<f32>()?;
+                Ok(format!("Set Med Cost to {}", self.med_cost))
+            }
+            "-cHighCost" => {
+                self.high_cost = value.parse::<f32>()?;
+                Ok(format!("Set High Cost to {}", self.high_cost))
+            }
+            "-cPriceFactor" => {
+                self.price_factor = value.parse::<f32>()?;
+                Ok(format!("Set Price Factor to {}", self.price_factor))
+            }
+            "-cUpkeep" => {
+                self.upkeep = value.parse::<f32>()?;
+                Ok(format!("Set Upkeep to {}", self.upkeep))
+            }
+            "-cHideUser" => {
+                self.hide_user = value.parse::<bool>()?;
+                Ok(format!("Set Hide User to {}", self.hide_user))
+            }
+            "-cSetLetterFacing" => {
+                self.set_letter_facing = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set Set Letter Facing to {}",
+                    self.set_letter_facing
+                ))
+            }
+            "-cDrawUser" => {
+                self.draw_user = value.parse::<bool>()?;
+                Ok(format!("Set Draw User to {}", self.draw_user))
+            }
+            "-cHideCostChange" => {
+                self.hide_cost_change = value.parse::<bool>()?;
+                Ok(format!("Set Hide Cost Change to {}", self.hide_cost_change))
+            }
+            "-cHideCommerceInfo" => {
+                self.hide_commerce_info = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set Hide Commerce Info to {}",
+                    self.hide_commerce_info
+                ))
+            }
+            "-cHideRegularInfo" => {
+                self.hide_regular_info = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set Hide Regular Info to {}",
+                    self.hide_regular_info
+                ))
+            }
+            "-cHoldsOntoUser" => {
+                self.holds_onto_user = value.parse::<bool>()?;
+                Ok(format!("Set Holds Onto User to {}", self.holds_onto_user))
+            }
+            "-cUserTracker" => {
+                self.user_tracker = value.parse::<bool>()?;
+                Ok(format!("Set User Tracker to {}", self.user_tracker))
+            }
+            "-cIdler" => {
+                self.idler = value.parse::<bool>()?;
+                Ok(format!("Set Idler to {}", self.idler))
+            }
+            "-cExhibitViewer" => {
+                self.exhibit_viewer = value.parse::<bool>()?;
+                Ok(format!("Set Exhibit Viewer to {}", self.exhibit_viewer))
+            }
+            "-cAlternatePanelTitle" => {
+                self.alternate_panel_title = value.parse::<u32>()?;
+                Ok(format!(
+                    "Set Alternate Panel Title to {}",
+                    self.alternate_panel_title
+                ))
+            }
+            "-cDirectEntrance" => {
+                self.direct_entrance = value.parse::<bool>()?;
+                Ok(format!("Set Direct Entrance to {}", self.direct_entrance))
+            }
+            "-cHideBuilding" => {
+                self.hide_building = value.parse::<bool>()?;
+                Ok(format!("Set Hide Building to {}", self.hide_building))
+            }
+            "-cUserStaysOutside" => {
+                self.user_stays_outside = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set User Stays Outside to {}",
+                    self.user_stays_outside
+                ))
+            }
+            "-cUserTeleportsInside" => {
+                self.user_teleports_inside = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set User Teleports Inside to {}",
+                    self.user_teleports_inside
+                ))
+            }
+            "-cUserUsesExit" => {
+                self.user_uses_exit = value.parse::<bool>()?;
+                Ok(format!("Set User Uses Exit to {}", self.user_uses_exit))
+            }
+            "-cUserUsesEntranceAsEmergencyExit" => {
+                self.user_uses_entrance_as_emergency_exit = value.parse::<bool>()?;
+                Ok(format!(
+                    "Set User Uses Entrance As Emergency Exit to {}",
+                    self.user_uses_entrance_as_emergency_exit
+                ))
+            }
+            "-cAdultChange" => {
+                self.adult_change = value.parse::<i32>()?;
+                Ok(format!("Set Adult Change to {}", self.adult_change))
+            }
+            "-cChildChange" => {
+                self.child_change = value.parse::<i32>()?;
+                Ok(format!("Set Child Change to {}", self.child_change))
+            }
+            "-cHungerChange" => {
+                self.hunger_change = value.parse::<i32>()?;
+                Ok(format!("Set Hunger Change to {}", self.hunger_change))
+            }
+            "-cThirstChange" => {
+                self.thirst_change = value.parse::<i32>()?;
+                Ok(format!("Set Thirst Change to {}", self.thirst_change))
+            }
+            "-cBathroomChange" => {
+                self.bathroom_change = value.parse::<i32>()?;
+                Ok(format!("Set Bathroom Change to {}", self.bathroom_change))
+            }
+            "-cEnergyChange" => {
+                self.energy_change = value.parse::<i32>()?;
+                Ok(format!("Set Energy Change to {}", self.energy_change))
+            }
+            _ => Err(CommandError::new(format!(
+                "Invalid configuration option {}",
+                config
+            ))),
         }
     }
 
@@ -707,48 +801,63 @@ impl ZTFenceType {
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x188))
     }
 
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cStrength" {
-            self.strength = value.parse::<i32>().unwrap();
-            Ok(format!("Set Strength to {}", self.strength))
-        } else if config == "-cLife" {
-            self.life = value.parse::<i32>().unwrap();
-            Ok(format!("Set Life to {}", self.life))
-        } else if config == "-cDecayedLife" {
-            self.decayed_life = value.parse::<i32>().unwrap();
-            Ok(format!("Set Decayed Life to {}", self.decayed_life))
-        } else if config == "-cDecayedDelta" {
-            self.decayed_delta = value.parse::<i32>().unwrap();
-            Ok(format!("Set Decayed Delta to {}", self.decayed_delta))
-        } else if config == "-cBreakSoundAtten" {
-            self.break_sound_atten = value.parse::<i32>().unwrap();
-            Ok(format!(
-                "Set Break Sound Atten to {}",
-                self.break_sound_atten
-            ))
-        } else if config == "-cOpenSoundAtten" {
-            self.open_sound_atten = value.parse::<i32>().unwrap();
-            Ok(format!("Set Open Sound Atten to {}", self.open_sound_atten))
-        } else if config == "-cSeeThrough" {
-            self.see_through = value.parse::<bool>().unwrap();
-            Ok(format!("Set See Through to {}", self.see_through))
-        } else if config == "-cIsJumpable" {
-            self.is_jumpable = value.parse::<bool>().unwrap();
-            Ok(format!("Set Is Jumpable to {}", self.is_jumpable))
-        } else if config == "-cIsClimbable" {
-            self.is_climbable = value.parse::<bool>().unwrap();
-            Ok(format!("Set Is Climbable to {}", self.is_climbable))
-        } else if config == "-cIndestructible" {
-            self.indestructible = value.parse::<bool>().unwrap();
-            Ok(format!("Set Indestructible to {}", self.indestructible))
-        } else if config == "-cIsElectrified" {
-            self.is_electrified = value.parse::<bool>().unwrap();
-            Ok(format!("Set Is Electrified to {}", self.is_electrified))
-        } else if config == "-cNoDrawWater" {
-            self.no_draw_water = value.parse::<bool>().unwrap();
-            Ok(format!("Set No Draw Water to {}", self.no_draw_water))
-        } else {
-            Err("Invalid configuration option")
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        match config {
+            "-cStrength" => {
+                self.strength = value.parse::<i32>()?;
+                Ok(format!("Set Strength to {}", self.strength))
+            }
+            "-cLife" => {
+                self.life = value.parse::<i32>()?;
+                Ok(format!("Set Life to {}", self.life))
+            }
+            "-cDecayedLife" => {
+                self.decayed_life = value.parse::<i32>()?;
+                Ok(format!("Set Decayed Life to {}", self.decayed_life))
+            }
+            "-cDecayedDelta" => {
+                self.decayed_delta = value.parse::<i32>()?;
+                Ok(format!("Set Decayed Delta to {}", self.decayed_delta))
+            }
+            "-cBreakSoundAtten" => {
+                self.break_sound_atten = value.parse::<i32>()?;
+                Ok(format!(
+                    "Set Break Sound Atten to {}",
+                    self.break_sound_atten
+                ))
+            }
+            "-cOpenSoundAtten" => {
+                self.open_sound_atten = value.parse::<i32>()?;
+                Ok(format!("Set Open Sound Atten to {}", self.open_sound_atten))
+            }
+            "-cSeeThrough" => {
+                self.see_through = value.parse::<bool>()?;
+                Ok(format!("Set See Through to {}", self.see_through))
+            }
+            "-cIsJumpable" => {
+                self.is_jumpable = value.parse::<bool>()?;
+                Ok(format!("Set Is Jumpable to {}", self.is_jumpable))
+            }
+            "-cIsClimbable" => {
+                self.is_climbable = value.parse::<bool>()?;
+                Ok(format!("Set Is Climbable to {}", self.is_climbable))
+            }
+            "-cIndestructible" => {
+                self.indestructible = value.parse::<bool>()?;
+                Ok(format!("Set Indestructible to {}", self.indestructible))
+            }
+            "-cIsElectrified" => {
+                self.is_electrified = value.parse::<bool>()?;
+                Ok(format!("Set Is Electrified to {}", self.is_electrified))
+            }
+            "-cNoDrawWater" => {
+                self.no_draw_water = value.parse::<bool>()?;
+                Ok(format!("Set No Draw Water to {}", self.no_draw_water))
+            }
+            _ => Err(CommandError::new(format!(
+                "Invalid configuration option {}",
+                config
+            ))),
         }
     }
 
@@ -919,42 +1028,54 @@ impl ZTTankFilterType {
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x190))
     }
 
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cStartingHealth" {
-            self.starting_health = value.parse::<i32>().unwrap();
-            Ok(format!("Set Starting Health to {}", self.starting_health))
-        } else if config == "-cDecayedHealth" {
-            self.decayed_health = value.parse::<i32>().unwrap();
-            Ok(format!("Set Decayed Health to {}", self.decayed_health))
-        } else if config == "-cDecayTime" {
-            self.decay_time = value.parse::<i32>().unwrap();
-            Ok(format!("Set Decay Time to {}", self.decay_time))
-        } else if config == "-cFilterDelay" {
-            self.filter_delay = value.parse::<i32>().unwrap();
-            Ok(format!("Set Filter Delay to {}", self.filter_delay))
-        } else if config == "-cFilterUpkeep" {
-            self.filter_upkeep = value.parse::<i32>().unwrap();
-            Ok(format!("Set Filter Upkeep to {}", self.filter_upkeep))
-        } else if config == "-cFilterCleanAmount" {
-            self.filter_clean_amount = value.parse::<i32>().unwrap();
-            Ok(format!(
-                "Set Filter Clean Amount to {}",
-                self.filter_clean_amount
-            ))
-        } else if config == "-cFilterDecayedCleanAmount" {
-            self.filter_decayed_clean_amount = value.parse::<i32>().unwrap();
-            Ok(format!(
-                "Set Filter Decayed Clean Amount to {}",
-                self.filter_decayed_clean_amount
-            ))
-        } else if config == "-cHealthyAtten" {
-            self.healthy_atten = value.parse::<i32>().unwrap();
-            Ok(format!("Set Healthy Atten to {}", self.healthy_atten))
-        } else if config == "-cDecayedAtten" {
-            self.decayed_atten = value.parse::<i32>().unwrap();
-            Ok(format!("Set Decayed Atten to {}", self.decayed_atten))
-        } else {
-            Err("Invalid configuration option")
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        match config {
+            "-cStartingHealth" => {
+                self.starting_health = value.parse::<i32>().unwrap();
+                Ok(format!("Set Starting Health to {}", self.starting_health))
+            }
+            "-cDecayedHealth" => {
+                self.decayed_health = value.parse::<i32>()?;
+                Ok(format!("Set Decayed Health to {}", self.decayed_health))
+            }
+            "-cDecayTime" => {
+                self.decay_time = value.parse::<i32>()?;
+                Ok(format!("Set Decay Time to {}", self.decay_time))
+            }
+            "-cFilterDelay" => {
+                self.filter_delay = value.parse::<i32>()?;
+                Ok(format!("Set Filter Delay to {}", self.filter_delay))
+            }
+            "-cFilterUpkeep" => {
+                self.filter_upkeep = value.parse::<i32>()?;
+                Ok(format!("Set Filter Upkeep to {}", self.filter_upkeep))
+            }
+            "-cFilterCleanAmount" => {
+                self.filter_clean_amount = value.parse::<i32>()?;
+                Ok(format!(
+                    "Set Filter Clean Amount to {}",
+                    self.filter_clean_amount
+                ))
+            }
+            "-cFilterDecayedCleanAmount" => {
+                self.filter_decayed_clean_amount = value.parse::<i32>()?;
+                Ok(format!(
+                    "Set Filter Decayed Clean Amount to {}",
+                    self.filter_decayed_clean_amount
+                ))
+            }
+            "-cHealthyAtten" => {
+                self.healthy_atten = value.parse::<i32>()?;
+                Ok(format!("Set Healthy Atten to {}", self.healthy_atten))
+            }
+            "-cDecayedAtten" => {
+                self.decayed_atten = value.parse::<i32>()?;
+                Ok(format!("Set Decayed Atten to {}", self.decayed_atten))
+            }
+            _ => Err(CommandError::new(format!(
+                "Invalid configuration option {}",
+                config
+            ))),
         }
     }
 
@@ -1228,6 +1349,8 @@ fn print_config_for_type() -> String {
     info!("Configuration printed successfully.");
     config
 }
+
+
 
 // parses the subargs for the entity type
 fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {

@@ -8,9 +8,55 @@ use std::{
     thread,
 };
 
+use std::error::Error;
+use std::fmt;
+
 use once_cell::sync::Lazy; //TODO: Use std::sync::LazyCell when it becomes stable
 use retour_utils::hook_module;
 use tracing::info;
+
+#[derive(Debug)]
+pub struct CommandError {
+    message: String,
+}
+
+impl CommandError {
+    pub fn new(message: String) -> Self {
+        CommandError { message }
+    }
+}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CommandError: {}", self.message)
+    }
+}
+
+impl Error for CommandError {}
+
+impl From<std::str::ParseBoolError> for CommandError {
+    fn from(err: std::str::ParseBoolError) -> Self {
+        CommandError {
+            message: format!("Failed to parse bool: {}", err),
+        }
+    }
+}
+
+impl From<std::num::ParseIntError> for CommandError {
+    fn from(err: std::num::ParseIntError) -> Self {
+        CommandError {
+            message: format!("Failed to parse int: {}", err),
+        }
+    }
+}
+
+impl From<std::num::ParseFloatError> for CommandError {
+    fn from(err: std::num::ParseFloatError) -> Self {
+        CommandError {
+            message: format!("Failed to parse float: {}", err),
+        }
+    }
+}
 
 #[hook_module("zoo.exe")]
 pub mod zoo_console {
