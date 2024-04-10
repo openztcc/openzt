@@ -4,7 +4,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields};
 
-#[proc_macro_derive(FieldAccessorAsString)]
+#[proc_macro_derive(FieldAccessorAsString, attributes(skip_field, deref_field))]
 pub fn set_fields(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let struct_name = &input.ident;
@@ -18,14 +18,35 @@ pub fn set_fields(input: TokenStream) -> TokenStream {
 
     let mut field_names = vec![];
     let mut field_types = vec![];
+    let mut deref_field_exists = false;
+    let mut set_error_match = quote! {Err("Unknown field name".to_string())};
+    let mut get_error_match = quote! {Err("Unknown field name".to_string())};
+    let mut is_error_match = quote! {false};
 
     for field in fields {
+        if should_skip(&field.attrs) {
+            continue;
+        }
+        if is_deref(&field.attrs) {
+            assert!(!deref_field_exists, "Only one field can be marked as deref_field");
+            let deref_field = field.ident.as_ref().expect("Expected field name");
+            get_error_match = quote! {self.#deref_field.get_field(field_name)};
+            set_error_match = quote! {self.#deref_field.set_field(field_name, value)};
+            is_error_match = quote! {false || self.#deref_field.is_field(field_name)};
+            deref_field_exists = true;
+            continue
+        }
+
         let field_name = field.ident.as_ref().expect("Expected field name");
         let field_type = &field.ty;
 
         field_names.push(field_name);
         field_types.push(field_type);
     }
+
+    // if Some(deref_field_name) = deref_field {
+
+    // }
 
     let expanded = quote! {
         impl #struct_name {
@@ -40,23 +61,43 @@ pub fn set_fields(input: TokenStream) -> TokenStream {
                             Err(err) => Err(format!("Failed to parse value: {}", err)),
                         }
                     },)*
-                    _ => Err("Unknown field name".to_string()),
+                    _ => #set_error_match,
                 }
             }
-            fn get_field(&self, field_name: &str) -> String {
+            fn get_field(&self, field_name: &str) -> Result<String, String> {
                 match field_name {
-                    #(stringify!(#field_names) => self.#field_names.to_string(),)*
-                    _ => panic!("Unknown field name: {}", field_name),
+                    #(stringify!(#field_names) => Ok(self.#field_names.to_string()),)*
+                    _ => #get_error_match,
                 }
             }
             fn is_field(&self, field_name: &str) -> bool {
                 match field_name {
                     #(stringify!(#field_names) => true,)*
-                    _ => false,
+                    _ => #is_error_match,
                 }
             }
         }
     };
 
     expanded.into()
+}
+
+fn should_skip(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if let Some(ident) = attr.path().get_ident() {
+            ident == "skip_field"
+        } else {
+            false
+        }
+    })
+}
+
+fn is_deref(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if let Some(ident) = attr.path().get_ident() {
+            ident == "deref_field"
+        } else {
+            false
+        }
+    })
 }
