@@ -40,7 +40,7 @@ pub fn set_fields(input: TokenStream) -> TokenStream {
                             Err(err) => Err(format!("Failed to parse value: {}", err)),
                         }
                     },)*
-                    _ => Err("Unknown field name"),
+                    _ => Err("Unknown field name".to_string()),
                 }
             }
             fn get_field(&self, field_name: &str) -> String {
