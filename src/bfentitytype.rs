@@ -1662,6 +1662,12 @@ impl ZTGuestType {
     }
 }
 
+impl Deref for ZTGuestType {
+    type Target = ZTUnitType;
+    fn deref(&self) -> &Self::Target {
+        &self.ztunit_type
+    }
+}
 
 // ------------ Custom Command Implementation ------------ //
 
