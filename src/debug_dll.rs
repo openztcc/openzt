@@ -6,6 +6,7 @@ use winapi::um::memoryapi::VirtualProtect;
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::PAGE_EXECUTE_READWRITE;
 
+use crate::console::CommandError;
 use crate::load_ini::DebugSettings;
 
 const SEND_DEBUGGER_ADDRESS: u32 = 0x00643e44;
@@ -220,9 +221,9 @@ pub fn save_debug_settings(settings: DebugSettings) {
     save_to_memory::<u32>(LOG_CUTOFF_ADDRESS, settings.log_cutoff as u32);
 }
 
-pub fn command_set_setting(args: Vec<&str>) -> Result<String, &'static str> {
+pub fn command_set_setting(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 2 {
-        return Err("Invalid number of arguments");
+        return Err("Invalid number of arguments").map_err(Into::into);
     }
     let setting = args[0].to_string();
     let value = args[1].to_string();
@@ -281,9 +282,9 @@ fn handle_u32_setting(setting: &str, value: String) -> String {
     }
 }
 
-pub fn command_get_setting(args: Vec<&str>) -> Result<String, &'static str> {
+pub fn command_get_setting(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 1 {
-        return Err("Invalid number of arguments");
+        return Err("Invalid number of arguments").map_err(Into::into);
     }
     let setting = args[0].to_string();
     Ok(get_setting(setting))
@@ -338,9 +339,9 @@ fn handle_get_u32_setting(setting: &str) -> String {
     format!("{}: {}", setting, value)
 }
 
-pub fn command_show_settings(args: Vec<&str>) -> Result<String, &'static str> {
+pub fn command_show_settings(args: Vec<&str>) -> Result<String, CommandError> {
     if !args.is_empty() {
-        return Err("Invalid number of arguments");
+        return Err("Invalid number of arguments").map_err(Into::into);
     }
     Ok(show_settings())
 }

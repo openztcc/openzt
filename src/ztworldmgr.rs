@@ -6,9 +6,10 @@ use tracing::info;
 
 use crate::{
     add_to_command_register,
-    bfentitytype::ZTSceneryType,
+    bfentitytype::{ZTSceneryType, EntityTypeImpl},
     debug_dll::{get_from_memory, get_string_from_memory},
     expansions::is_member,
+    console::CommandError,
 };
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
@@ -172,7 +173,7 @@ fn log_zt_world_mgr(zt_world_mgr: &ZTWorldMgr) {
     info!("zt_world_mgr: {:#?}", zt_world_mgr);
 }
 
-fn command_get_zt_world_mgr_entities(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_zt_world_mgr_entities(_args: Vec<&str>) -> Result<String, CommandError> {
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let entities = get_zt_world_mgr_entities(&zt_world_mgr);
     info!("Found {} entities", entities.len());
@@ -186,7 +187,7 @@ fn command_get_zt_world_mgr_entities(_args: Vec<&str>) -> Result<String, &'stati
     Ok(string_array.join("\n"))
 }
 
-fn command_get_zt_world_mgr_types(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_zt_world_mgr_types(_args: Vec<&str>) -> Result<String, CommandError> {
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let types = get_zt_world_mgr_types(&zt_world_mgr);
     info!("Found {} types", types.len());
@@ -200,12 +201,12 @@ fn command_get_zt_world_mgr_types(_args: Vec<&str>) -> Result<String, &'static s
     Ok(string_array.join("\n"))
 }
 
-fn command_get_zt_world_mgr(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_zt_world_mgr(_args: Vec<&str>) -> Result<String, CommandError> {
     let zt_world_mgr = read_zt_world_mgr_from_global();
     Ok(zt_world_mgr.to_string())
 }
 
-fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, CommandError> {
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let types = get_zt_world_mgr_types(&zt_world_mgr);
     let mut summary = "\n".to_string();
@@ -333,14 +334,14 @@ fn get_entity_type_by_id(id: u32) -> u32 {
     0
 }
 
-fn command_make_sel(args: Vec<&str>) -> Result<String, &'static str> {
+fn command_make_sel(args: Vec<&str>) -> Result<String, CommandError> {
     if args.is_empty() {
-        Err("Usage: make_sel <id>")
+        Err("Usage: make_sel <id>").map_err(Into::into)
     } else {
         let id = args[0].parse::<u32>().unwrap();
         let entity_type_ptr = get_entity_type_by_id(id);
         if entity_type_ptr == 0 {
-            return Err("Entity type not found");
+            return Err("Entity type not found").map_err(Into::into);
         }
         let entity_type = ZTSceneryType::new(entity_type_ptr).unwrap();
         if entity_type.selectable {

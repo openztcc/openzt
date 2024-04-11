@@ -21,6 +21,7 @@ use crate::{
     animation::Animation,
     console::add_to_command_register,
     debug_dll::{get_from_memory, get_string_from_memory, save_to_memory},
+    console::CommandError,
 };
 
 const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
@@ -619,7 +620,7 @@ impl fmt::Display for BFResourceZip {
     }
 }
 
-fn command_list_resources(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_list_resources(_args: Vec<&str>) -> Result<String, CommandError> {
     let mut result_string = String::new();
     let bf_resource_dir_contents = read_bf_resource_dir_contents_from_memory();
     for bf_resource_dir_content in bf_resource_dir_contents {
@@ -640,7 +641,7 @@ fn command_list_resources(_args: Vec<&str>) -> Result<String, &'static str> {
     Ok(result_string)
 }
 
-fn command_get_bf_resource_mgr(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_bf_resource_mgr(_args: Vec<&str>) -> Result<String, CommandError> {
     let bf_resource_mgr = read_bf_resource_mgr_from_memory();
     Ok(format!("{}", bf_resource_mgr))
 }

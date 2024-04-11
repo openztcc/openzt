@@ -1,9 +1,62 @@
 // ------------ BFEntityType, Implementation, and Related Functions ------------ //
 use std::ops::Deref;
 
+// TODO: These should both be sub crates of a third crate that re-exports the trait and macro
+use field_accessor_as_string::FieldAccessorAsString;
+use field_accessor_as_string_trait::FieldAccessorAsStringTrait;
+use getset::{Getters, Setters};
 use tracing::info;
 
-use getset::Getters;
+// We use this trait to tag all structs that are considered EntityTypes
+pub trait EntityType {}
+
+// We then use a veru simple macro to implement the EntityType trait for all the structs that are considered EntityTypes
+macro_rules! impl_EntityType (( $($int:ident),* ) => {$(impl EntityType for $int {})*});
+
+impl_EntityType!(
+    BFEntityType,
+    ZTSceneryType,
+    ZTBuildingType,
+    ZTFenceType,
+    ZTTankWallType,
+    ZTFoodType,
+    ZTTankFilterType,
+    ZTPathType,
+    ZTRubbleType
+);
+
+pub trait EntityTypeImpl<T>: EntityType + FieldAccessorAsStringTrait {
+    // returns the instance of the EntityType struct
+    fn new(address: u32) -> Option<&'static mut T> {
+        unsafe {
+            let ptr = get_from_memory::<*mut T>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    // TODO: Move this to private trait?
+    fn set_config_inner(&mut self, config: &str, value: &str) -> Result<String, String> {
+        let trimmed_field_name = config.strip_prefix('-').unwrap_or(config);
+        match self.set_field(trimmed_field_name, value) {
+            Ok(_) => Ok(format!("Set {} to {}", config, value)),
+            Err(e) => Err(format!("Failed to set {} to {}: {}", config, value, e)),
+        }
+    }
+
+    fn get_config(&self, config: &str) -> Result<String, String> {
+        let trimmed_field_name = config.strip_prefix('-').unwrap_or(config);
+        match self.get_field(trimmed_field_name) {
+            Ok(value) => Ok(format!("{}: {}", config, value)),
+            Err(e) => Err(format!("Failed to get {}: {}", config, e)),
+        }
+    }
+}
+
+impl<T: EntityType + FieldAccessorAsStringTrait> EntityTypeImpl<T> for T {}
 
 use crate::{
     console::{add_to_command_register, CommandError},
@@ -12,27 +65,34 @@ use crate::{
     ztworldmgr::determine_entity_type,
 };
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct BFEntityType {
+    #[skip_field]
     pad1: [u8; 0x038],                // ----------------------- padding: 56 bytes
     pub ncolors: u32,                 // 0x038
+    #[skip_field]
     pad2: [u8; 0x050 - 0x03C],        // ----------------------- padding: 20 bytes
     pub icon_zoom: bool,              // 0x050
+    #[skip_field]
     pad3: [u8; 0x054 - 0x051],        // ----------------------- padding: 3 bytes
     pub expansion_id: bool,           // 0x054
     pub movable: bool,                // 0x055
     pub walkable: bool,               // 0x056
     pub walkable_by_tall: bool,       // 0x057
+    #[skip_field]
     pad4: [u8; 0x059 - 0x058],        // ----------------------- padding: 1 byte
     pub rubbleable: bool,             // 0x059
+    #[skip_field]
     pad5: [u8; 0x05B - 0x05A],        // ----------------------- padding: 1 byte
     pub use_numbers_in_name: bool,    // 0x05B
     pub uses_real_shadows: bool,      // 0x05C
     pub has_shadow_images: bool,      // 0x05D
     pub force_shadow_black: bool,     // 0x05E
+    #[skip_field]
     pad6: [u8; 0x060 - 0x05F],        // ----------------------- padding: 1 byte
     pub draws_late: bool,             // 0x060
+    #[skip_field]
     pad7: [u8; 0x064 - 0x061],        // ----------------------- padding: 3 bytes
     pub height: u32,                  // 0x064
     pub depth: u32,                   // 0x068
@@ -42,6 +102,7 @@ pub struct BFEntityType {
     pub show: bool,                   // 0x06F
     pub hit_threshold: u32,           // 0x070
     pub avoid_edges: bool,            // 0x074
+    #[skip_field]
     pad10: [u8; 0x0B4 - 0x075],       // ----------------------- padding: 47 bytes
     pub footprintx: i32,              // 0x0B4
     pub footprinty: i32,              // 0x0B8
@@ -50,26 +111,11 @@ pub struct BFEntityType {
     pub placement_footprinty: i32,    // 0x0C4
     pub placement_footprintz: i32,    // 0x0C8
     pub available_at_startup: bool,   // 0x0CC
+    #[skip_field]
     pad11: [u8; 0x100 - 0x0CD],       // ----------------------- padding: 35 bytes
 }
 
 impl BFEntityType {
-    // returns the instance of the BFEntityType struct
-    pub fn new(address: u32) -> Option<&'static mut BFEntityType> {
-        unsafe {
-            // get the pointer to the BFEntityType instance
-            let ptr = get_from_memory::<*mut BFEntityType>(address);
-
-            // is pointer not null
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                // pointer is null
-                None
-            }
-        }
-    }
-
     // returns the codename of the entity type
     pub fn get_codename(&self) -> String {
         let obj_ptr = self as *const BFEntityType as u32;
@@ -88,147 +134,9 @@ impl BFEntityType {
     }
 
     // allows setting the configuration of the entity type
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cIconZoom" => {
-                self.icon_zoom = value.parse::<bool>()?;
-                Ok(format!("Set cIconZoom to {}", self.icon_zoom))
-            }
-            "-cExpansionID" => {
-                self.expansion_id = value.parse::<bool>()?;
-                Ok(format!("Set cExpansionID to {}", self.expansion_id))
-            }
-            "-cMovable" => {
-                self.movable = value.parse::<bool>()?;
-                Ok(format!("Set cMovable to {}", self.movable))
-            }
-            "-cWalkable" => {
-                self.walkable = value.parse::<bool>()?;
-                Ok(format!("Set cWalkable to {}", self.walkable))
-            }
-            "-cWalkableByTall" => {
-                self.walkable_by_tall = value.parse::<bool>()?;
-                Ok(format!("Set cWalkableByTall to {}", self.walkable_by_tall))
-            }
-            "-cRubbleable" => {
-                self.rubbleable = value.parse::<bool>()?;
-                Ok(format!("Set cRubbleable to {}", self.rubbleable))
-            }
-            "-cUseNumbersInName" => {
-                self.use_numbers_in_name = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set cUseNumbersInName to {}",
-                    self.use_numbers_in_name
-                ))
-            }
-            "-cUsesRealShadows" => {
-                self.uses_real_shadows = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set cUsesRealShadows to {}",
-                    self.uses_real_shadows
-                ))
-            }
-            "-cHasShadowImages" => {
-                self.has_shadow_images = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set cHasShadowImages to {}",
-                    self.has_shadow_images
-                ))
-            }
-            "-cForceShadowBlack" => {
-                self.force_shadow_black = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set cForceShadowBlack to {}",
-                    self.force_shadow_black
-                ))
-            }
-            "-cDrawsLate" => {
-                self.draws_late = value.parse::<bool>()?;
-                Ok(format!("Set cDrawsLate to {}", self.draws_late))
-            }
-            "-cHeight" => {
-                self.height = value.parse::<u32>()?;
-                Ok(format!("Set cHeight to {}", self.height))
-            }
-            "-cDepth" => {
-                self.depth = value.parse::<u32>()?;
-                Ok(format!("Set cDepth to {}", self.depth))
-            }
-            "-cHasUnderwaterSection" => {
-                self.has_underwater_section = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set cHasUnderwaterSection to {}",
-                    self.has_underwater_section
-                ))
-            }
-            "-cIsTransient" => {
-                self.is_transient = value.parse::<bool>()?;
-                Ok(format!("Set cIsTransient to {}", self.is_transient))
-            }
-            "-cUsesPlacementCube" => {
-                self.uses_placement_cube = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set cUsesPlacementCube to {}",
-                    self.uses_placement_cube
-                ))
-            }
-            "-cShow" => {
-                self.show = value.parse::<bool>()?;
-                Ok(format!("Set cShow to {}", self.show))
-            }
-            "-cHitThreshold" => {
-                self.hit_threshold = value.parse::<u32>()?;
-                Ok(format!("Set cHitThreshold to {}", self.hit_threshold))
-            }
-            "-cAvoidEdges" => {
-                self.avoid_edges = value.parse::<bool>()?;
-                Ok(format!("Set cAvoidEdges to {}", self.avoid_edges))
-            }
-            "-cFootprintX" => {
-                self.footprintx = value.parse::<i32>()?;
-                Ok(format!("Set cFootprintX to {}", self.footprintx))
-            }
-            "-cFootprintY" => {
-                self.footprinty = value.parse::<i32>()?;
-                Ok(format!("Set cFootprintY to {}", self.footprinty))
-            }
-            "-cFootprintZ" => {
-                self.footprintz = value.parse::<i32>()?;
-                Ok(format!("Set cFootprintZ to {}", self.footprintz))
-            }
-            "-cPlacementFootprintX" => {
-                self.placement_footprintx = value.parse::<i32>()?;
-                Ok(format!(
-                    "Set cPlacementFootprintX to {}",
-                    self.placement_footprintx
-                ))
-            }
-            "-cPlacementFootprintY" => {
-                self.placement_footprinty = value.parse::<i32>()?;
-                Ok(format!(
-                    "Set cPlacementFootprintY to {}",
-                    self.placement_footprinty
-                ))
-            }
-            "-cPlacementFootprintZ" => {
-                self.placement_footprintz = value.parse::<i32>()?;
-                Ok(format!(
-                    "Set cPlacementFootprintZ to {}",
-                    self.placement_footprintz
-                ))
-            }
-            "-cAvailableAtStartup" => {
-                self.available_at_startup = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set cAvailableAtStartup to {}",
-                    self.available_at_startup
-                ))
-            }
-            _ => Err(CommandError::new(format!(
-                "Invalid configuration option: {}",
-                config
-            ))),
-        }
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+        //TODO: Add matches and handling for string values
+        self.set_config_inner(config, value)
     }
 
     // prints [colorrep] section of the configuration
@@ -288,9 +196,10 @@ impl BFEntityType {
 
 // ------------ ZTSceneryType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTSceneryType {
+    #[deref_field]
     pub bfentitytype: BFEntityType, // bytes: 0x100 - 0x000 = 0x100 = 256 bytes
     pub purchase_cost: f32,         // 0x100
     pub name_id: u32,               // 0x104
@@ -300,12 +209,15 @@ pub struct ZTSceneryType {
     pub era: u32,                   // 0x114
     pub max_food_units: u32,        // 0x118
     pub stink: bool,                // 0x11C
+    #[skip_field]
     pad3: [u8; 0x120 - 0x11D],      // ----------------------- padding: 3 bytes
     pub esthetic_weight: u32,       // 0x120
+    #[skip_field]
     pad4: [u8; 0x128 - 0x124],      // ----------------------- padding: 4 bytes
     pub selectable: bool,           // 0x128
     pub deletable: bool,            // 0x129
     pub foliage: bool,              // 0x12A
+    #[skip_field]
     pad6: [u8; 0x12D - 0x12B],      // ----------------------- padding: 2 bytes
     pub auto_rotate: bool,          // 0x12D
     pub land: bool,                 // 0x12E
@@ -322,150 +234,19 @@ pub struct ZTSceneryType {
     pub uses_tree_rubble: bool,     // 0x139
     pub forces_scenery_rubble: bool, // 0x13A
     pub blocks_los: bool,           // 0x13B
+    #[skip_field]
     pad7: [u8; 0x168 - 0x13C],      // ----------------------- padding: 51 bytes
 }
 
 impl ZTSceneryType {
-    pub fn new(address: u32) -> Option<&'static mut ZTSceneryType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTSceneryType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
     pub fn get_info_image_name(&self) -> String {
         let obj_ptr = self as *const ZTSceneryType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x14C))
     }
 
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cPurchaseCost" => {
-                self.purchase_cost = value.parse::<f32>()?;
-                Ok(format!("Set Purchase Cost to {}", self.purchase_cost))
-            }
-            "-cNameID" => {
-                self.name_id = value.parse::<u32>()?;
-                Ok(format!("Set Name ID to {}", self.name_id))
-            }
-            "-cHelpID" => {
-                self.help_id = value.parse::<u32>()?;
-                Ok(format!("Set Help ID to {}", self.help_id))
-            }
-            "-cHabitat" => {
-                self.habitat = value.parse::<u32>()?;
-                Ok(format!("Set Habitat to {}", self.habitat))
-            }
-            "-cLocation" => {
-                self.location = value.parse::<u32>()?;
-                Ok(format!("Set Location to {}", self.location))
-            }
-            "-cEra" => {
-                self.era = value.parse::<u32>()?;
-                Ok(format!("Set Era to {}", self.era))
-            }
-            "-cMaxFoodUnits" => {
-                self.max_food_units = value.parse::<u32>()?;
-                Ok(format!("Set Max Food Units to {}", self.max_food_units))
-            }
-            "-cStink" => {
-                self.stink = value.parse::<bool>()?;
-                Ok(format!("Set Stink to {}", self.stink))
-            }
-            "-cEstheticWeight" => {
-                self.esthetic_weight = value.parse::<u32>()?;
-                Ok(format!("Set Esthetic Weight to {}", self.esthetic_weight))
-            }
-            "-cSelectable" => {
-                self.selectable = value.parse::<bool>()?;
-                Ok(format!("Set Selectable to {}", self.selectable))
-            }
-            "-cDeletable" => {
-                self.deletable = value.parse::<bool>()?;
-                Ok(format!("Set Deletable to {}", self.deletable))
-            }
-            "-cFoliage" => {
-                self.foliage = value.parse::<bool>()?;
-                Ok(format!("Set Foliage to {}", self.foliage))
-            }
-            "-cAutoRotate" => {
-                self.auto_rotate = value.parse::<bool>()?;
-                Ok(format!("Set Auto Rotate to {}", self.auto_rotate))
-            }
-            "-cLand" => {
-                self.land = value.parse::<bool>()?;
-                Ok(format!("Set Land to {}", self.land))
-            }
-            "-cSwims" => {
-                self.swims = value.parse::<bool>()?;
-                Ok(format!("Set Swims to {}", self.swims))
-            }
-            "-cUnderwater" => {
-                self.underwater = value.parse::<bool>()?;
-                Ok(format!("Set Underwater to {}", self.underwater))
-            }
-            "-cSurface" => {
-                self.surface = value.parse::<bool>()?;
-                Ok(format!("Set Surface to {}", self.surface))
-            }
-            "-cSubmerge" => {
-                self.submerge = value.parse::<bool>()?;
-                Ok(format!("Set Submerge to {}", self.submerge))
-            }
-            "-cOnlySwims" => {
-                self.only_swims = value.parse::<bool>()?;
-                Ok(format!("Set Only Swims to {}", self.only_swims))
-            }
-            "-cNeedsConfirm" => {
-                self.needs_confirm = value.parse::<bool>()?;
-                Ok(format!("Set Needs Confirm to {}", self.needs_confirm))
-            }
-            "-cGawkOnlyFromFront" => {
-                self.gawk_only_from_front = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set Gawk Only From Front to {}",
-                    self.gawk_only_from_front
-                ))
-            }
-            "-cDeadOnLand" => {
-                self.dead_on_land = value.parse::<bool>()?;
-                Ok(format!("Set Dead On Land to {}", self.dead_on_land))
-            }
-            "-cDeadOnFlatWater" => {
-                self.dead_on_flat_water = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set Dead On Flat Water to {}",
-                    self.dead_on_flat_water
-                ))
-            }
-            "-cDeadUnderwater" => {
-                self.dead_underwater = value.parse::<bool>()?;
-                Ok(format!("Set Dead Underwater to {}", self.dead_underwater))
-            }
-            "-cUsesTreeRubble" => {
-                self.uses_tree_rubble = value.parse::<bool>()?;
-                Ok(format!("Set Uses Tree Rubble to {}", self.uses_tree_rubble))
-            }
-            "-cForcesSceneryRubble" => {
-                self.forces_scenery_rubble = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set Forces Scenery Rubble to {}",
-                    self.forces_scenery_rubble
-                ))
-            }
-            "-cBlocksLOS" => {
-                self.blocks_los = value.parse::<bool>()?;
-                Ok(format!("Set Blocks LOS to {}", self.blocks_los))
-            }
-            _ => Err(CommandError::new(format!(
-                "Invalid configuration option {}",
-                config
-            ))),
-        }
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+        //TODO: Add matches and handling for string values
+        self.set_config_inner(config, value)
     }
 
     fn print_config_integers(&self) -> String {
@@ -509,10 +290,12 @@ impl Deref for ZTSceneryType {
 }
 
 // ------------ ZTBuildingType, Implementation, and Related Functions ------------ //
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTBuildingType {
+    #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x16C = 364 bytes
+    #[skip_field]
     pad0: [u8; 0x16C - 0x168],        // -------------------------- padding: 4 bytes
     pub i_capacity: i32,              // 0x16C
     pub toy_satisfaction: i32,        // 0x170
@@ -523,6 +306,7 @@ struct ZTBuildingType {
     pub high_cost: f32,               // 0x184
     pub price_factor: f32,            // 0x188
     pub upkeep: f32,                  // 0x18C
+    #[skip_field]
     pad1: [u8; 0x194 - 0x190],        // -------------------------- padding: 4 bytes
     pub hide_user: bool,              // 0x194
     pub set_letter_facing: bool,      // 0x195
@@ -534,6 +318,7 @@ struct ZTBuildingType {
     pub user_tracker: bool,           // 0x19B
     pub idler: bool,                  // 0x19C
     pub exhibit_viewer: bool,         // 0x19D
+    #[skip_field]
     pad2: [u8; 0x1A0 - 0x19E],        // -------------------------- padding: 2 bytes
     pub alternate_panel_title: u32,   // 0x1A0
     pub direct_entrance: bool,        // 0x1A4
@@ -542,6 +327,7 @@ struct ZTBuildingType {
     pub user_teleports_inside: bool,  // 0x1A7
     pub user_uses_exit: bool,         // 0x1A8
     pub user_uses_entrance_as_emergency_exit: bool, // 0x1A9
+    #[skip_field]
     pad3: [u8; 0x1B8 - 0x1AA],        // -------------------------- padding: 9 bytes
     pub adult_change: i32,            // 0x1B8
     pub child_change: i32,            // 0x1BC
@@ -552,174 +338,10 @@ struct ZTBuildingType {
 }
 
 impl ZTBuildingType {
-    fn new(address: u32) -> Option<&'static mut ZTBuildingType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTBuildingType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
     // sets the configuration of the building type in the console
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cCapacity" => {
-                self.i_capacity = value.parse::<i32>().unwrap();
-                Ok(format!("Set Capacity to {}", self.i_capacity))
-            }
-            "-cToySatisfaction" => {
-                self.toy_satisfaction = value.parse::<i32>()?;
-                Ok(format!("Set Toy Satisfaction to {}", self.toy_satisfaction))
-            }
-            "-cTimeInside" => {
-                self.time_inside = value.parse::<i32>()?;
-                Ok(format!("Set Time Inside to {}", self.time_inside))
-            }
-            "-cDefaultCost" => {
-                self.default_cost = value.parse::<f32>()?;
-                Ok(format!("Set Default Cost to {}", self.default_cost))
-            }
-            "-cLowCost" => {
-                self.low_cost = value.parse::<f32>()?;
-                Ok(format!("Set Low Cost to {}", self.low_cost))
-            }
-            "-cMedCost" => {
-                self.med_cost = value.parse::<f32>()?;
-                Ok(format!("Set Med Cost to {}", self.med_cost))
-            }
-            "-cHighCost" => {
-                self.high_cost = value.parse::<f32>()?;
-                Ok(format!("Set High Cost to {}", self.high_cost))
-            }
-            "-cPriceFactor" => {
-                self.price_factor = value.parse::<f32>()?;
-                Ok(format!("Set Price Factor to {}", self.price_factor))
-            }
-            "-cUpkeep" => {
-                self.upkeep = value.parse::<f32>()?;
-                Ok(format!("Set Upkeep to {}", self.upkeep))
-            }
-            "-cHideUser" => {
-                self.hide_user = value.parse::<bool>()?;
-                Ok(format!("Set Hide User to {}", self.hide_user))
-            }
-            "-cSetLetterFacing" => {
-                self.set_letter_facing = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set Set Letter Facing to {}",
-                    self.set_letter_facing
-                ))
-            }
-            "-cDrawUser" => {
-                self.draw_user = value.parse::<bool>()?;
-                Ok(format!("Set Draw User to {}", self.draw_user))
-            }
-            "-cHideCostChange" => {
-                self.hide_cost_change = value.parse::<bool>()?;
-                Ok(format!("Set Hide Cost Change to {}", self.hide_cost_change))
-            }
-            "-cHideCommerceInfo" => {
-                self.hide_commerce_info = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set Hide Commerce Info to {}",
-                    self.hide_commerce_info
-                ))
-            }
-            "-cHideRegularInfo" => {
-                self.hide_regular_info = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set Hide Regular Info to {}",
-                    self.hide_regular_info
-                ))
-            }
-            "-cHoldsOntoUser" => {
-                self.holds_onto_user = value.parse::<bool>()?;
-                Ok(format!("Set Holds Onto User to {}", self.holds_onto_user))
-            }
-            "-cUserTracker" => {
-                self.user_tracker = value.parse::<bool>()?;
-                Ok(format!("Set User Tracker to {}", self.user_tracker))
-            }
-            "-cIdler" => {
-                self.idler = value.parse::<bool>()?;
-                Ok(format!("Set Idler to {}", self.idler))
-            }
-            "-cExhibitViewer" => {
-                self.exhibit_viewer = value.parse::<bool>()?;
-                Ok(format!("Set Exhibit Viewer to {}", self.exhibit_viewer))
-            }
-            "-cAlternatePanelTitle" => {
-                self.alternate_panel_title = value.parse::<u32>()?;
-                Ok(format!(
-                    "Set Alternate Panel Title to {}",
-                    self.alternate_panel_title
-                ))
-            }
-            "-cDirectEntrance" => {
-                self.direct_entrance = value.parse::<bool>()?;
-                Ok(format!("Set Direct Entrance to {}", self.direct_entrance))
-            }
-            "-cHideBuilding" => {
-                self.hide_building = value.parse::<bool>()?;
-                Ok(format!("Set Hide Building to {}", self.hide_building))
-            }
-            "-cUserStaysOutside" => {
-                self.user_stays_outside = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set User Stays Outside to {}",
-                    self.user_stays_outside
-                ))
-            }
-            "-cUserTeleportsInside" => {
-                self.user_teleports_inside = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set User Teleports Inside to {}",
-                    self.user_teleports_inside
-                ))
-            }
-            "-cUserUsesExit" => {
-                self.user_uses_exit = value.parse::<bool>()?;
-                Ok(format!("Set User Uses Exit to {}", self.user_uses_exit))
-            }
-            "-cUserUsesEntranceAsEmergencyExit" => {
-                self.user_uses_entrance_as_emergency_exit = value.parse::<bool>()?;
-                Ok(format!(
-                    "Set User Uses Entrance As Emergency Exit to {}",
-                    self.user_uses_entrance_as_emergency_exit
-                ))
-            }
-            "-cAdultChange" => {
-                self.adult_change = value.parse::<i32>()?;
-                Ok(format!("Set Adult Change to {}", self.adult_change))
-            }
-            "-cChildChange" => {
-                self.child_change = value.parse::<i32>()?;
-                Ok(format!("Set Child Change to {}", self.child_change))
-            }
-            "-cHungerChange" => {
-                self.hunger_change = value.parse::<i32>()?;
-                Ok(format!("Set Hunger Change to {}", self.hunger_change))
-            }
-            "-cThirstChange" => {
-                self.thirst_change = value.parse::<i32>()?;
-                Ok(format!("Set Thirst Change to {}", self.thirst_change))
-            }
-            "-cBathroomChange" => {
-                self.bathroom_change = value.parse::<i32>()?;
-                Ok(format!("Set Bathroom Change to {}", self.bathroom_change))
-            }
-            "-cEnergyChange" => {
-                self.energy_change = value.parse::<i32>()?;
-                Ok(format!("Set Energy Change to {}", self.energy_change))
-            }
-            _ => Err(CommandError::new(format!(
-                "Invalid configuration option {}",
-                config
-            ))),
-        }
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+        //TODO: Add matches and handling for string values
+        self.set_config_inner(config, value)
     }
 
     // print [Configuration/Floats] section of the configuration
@@ -776,9 +398,10 @@ impl Deref for ZTBuildingType {
 
 // ------------ ZTFenceType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTFenceType {
+    #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     pub strength: i32,                // 0x168
     pub life: i32,                    // 0x16C
@@ -788,6 +411,7 @@ pub struct ZTFenceType {
     pub open_sound_atten: i32,        // 0x17C
     // break_sound: String, // 0x184
     // open_sound: String, // 0x188
+    #[skip_field]
     pad2: [u8; 0x194 - 0x180], // ----------------------- padding: 20 bytes
     pub see_through: bool,     // 0x194
     pub is_jumpable: bool,     // 0x195
@@ -798,17 +422,6 @@ pub struct ZTFenceType {
 }
 
 impl ZTFenceType {
-    pub fn new(address: u32) -> Option<&'static mut ZTFenceType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTFenceType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
     fn get_break_sound(&self) -> String {
         let obj_ptr = self as *const ZTFenceType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x184))
@@ -819,64 +432,9 @@ impl ZTFenceType {
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x188))
     }
 
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cStrength" => {
-                self.strength = value.parse::<i32>()?;
-                Ok(format!("Set Strength to {}", self.strength))
-            }
-            "-cLife" => {
-                self.life = value.parse::<i32>()?;
-                Ok(format!("Set Life to {}", self.life))
-            }
-            "-cDecayedLife" => {
-                self.decayed_life = value.parse::<i32>()?;
-                Ok(format!("Set Decayed Life to {}", self.decayed_life))
-            }
-            "-cDecayedDelta" => {
-                self.decayed_delta = value.parse::<i32>()?;
-                Ok(format!("Set Decayed Delta to {}", self.decayed_delta))
-            }
-            "-cBreakSoundAtten" => {
-                self.break_sound_atten = value.parse::<i32>()?;
-                Ok(format!(
-                    "Set Break Sound Atten to {}",
-                    self.break_sound_atten
-                ))
-            }
-            "-cOpenSoundAtten" => {
-                self.open_sound_atten = value.parse::<i32>()?;
-                Ok(format!("Set Open Sound Atten to {}", self.open_sound_atten))
-            }
-            "-cSeeThrough" => {
-                self.see_through = value.parse::<bool>()?;
-                Ok(format!("Set See Through to {}", self.see_through))
-            }
-            "-cIsJumpable" => {
-                self.is_jumpable = value.parse::<bool>()?;
-                Ok(format!("Set Is Jumpable to {}", self.is_jumpable))
-            }
-            "-cIsClimbable" => {
-                self.is_climbable = value.parse::<bool>()?;
-                Ok(format!("Set Is Climbable to {}", self.is_climbable))
-            }
-            "-cIndestructible" => {
-                self.indestructible = value.parse::<bool>()?;
-                Ok(format!("Set Indestructible to {}", self.indestructible))
-            }
-            "-cIsElectrified" => {
-                self.is_electrified = value.parse::<bool>()?;
-                Ok(format!("Set Is Electrified to {}", self.is_electrified))
-            }
-            "-cNoDrawWater" => {
-                self.no_draw_water = value.parse::<bool>()?;
-                Ok(format!("Set No Draw Water to {}", self.no_draw_water))
-            }
-            _ => Err(CommandError::new(format!(
-                "Invalid configuration option {}",
-                config
-            ))),
-        }
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+        //TODO: Add matches and handling for string values
+        self.set_config_inner(config, value)
     }
 
     fn print_config_integers(&self) -> String {
@@ -908,9 +466,10 @@ impl Deref for ZTFenceType {
 
 // ------------ ZTTankWallType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTTankWallType {
+    #[deref_field]
     pub ztfencetype: ZTFenceType, // bytes: 0x19C - 0x168 = 0x34 = 52 bytes
     // pub portal_open_sound: u32, // 0x19C
     // pub portal_close_sound: u32, // 0x1A0
@@ -919,17 +478,6 @@ pub struct ZTTankWallType {
 }
 
 impl ZTTankWallType {
-    pub fn new(address: u32) -> Option<&'static mut ZTTankWallType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTTankWallType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
     fn get_portal_open_sound(&self) -> String {
         let obj_ptr = self as *const ZTTankWallType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x1A4))
@@ -940,7 +488,7 @@ impl ZTTankWallType {
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x1B0))
     }
 
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
         // if config == "-cPortalOpenSound" {
         //     self.portal_open_sound = value.parse::<u32>().unwrap();
         //     Ok(format!("Set Portal Open Sound to {}", self.portal_open_sound))
@@ -949,21 +497,9 @@ impl ZTTankWallType {
         //     self.portal_close_sound = value.parse::<u32>().unwrap();
         //     Ok(format!("Set Portal Close Sound to {}", self.portal_close_sound))
         // }
-        if config == "-cPortalOpenSoundAtten" {
-            self.portal_open_sound_atten = value.parse::<i32>().unwrap();
-            Ok(format!(
-                "Set Portal Open Sound Atten to {}",
-                self.portal_open_sound_atten
-            ))
-        } else if config == "-cPortalCloseSoundAtten" {
-            self.portal_close_sound_atten = value.parse::<i32>().unwrap();
-            Ok(format!(
-                "Set Portal Close Sound Atten to {}",
-                self.portal_close_sound_atten
-            ))
-        } else {
-            Err("Invalid configuration option")
-        }
+
+        //TODO: Add matches and handling for string values
+        self.set_config_inner(config, value)
     }
 
     fn print_portal_sounds(&self) -> String {
@@ -985,32 +521,18 @@ impl Deref for ZTTankWallType {
 
 // ------------ ZTFoodType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTFoodType {
+    #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     pub keeper_food_type: u32,        // 0x168
 }
 
 impl ZTFoodType {
-    pub fn new(address: u32) -> Option<&'static mut ZTFoodType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTFoodType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cKeeperFoodType" {
-            self.keeper_food_type = value.parse::<u32>().unwrap();
-            Ok(format!("Set Keeper Food Type to {}", self.keeper_food_type))
-        } else {
-            Err("Invalid configuration option")
-        }
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+        //TODO: Add matches and handling for string values
+        self.set_config_inner(config, value)
     }
 
     pub fn print_config_integers(&self) -> String {
@@ -1027,9 +549,10 @@ impl Deref for ZTFoodType {
 
 // ------------ ZTTankeFilterType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTTankFilterType {
+    #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     pub starting_health: i32,         // 0x168
     pub decayed_health: i32,          // 0x16C
@@ -1040,23 +563,13 @@ pub struct ZTTankFilterType {
     pub filter_decayed_clean_amount: i32, // 0x180
     // healthy_sound: String, // 0x184
     // decayed_sound: String, // 0x190
+    #[skip_field]
     pad1: [u8; 0x19C - 0x184], // ----------------------- padding: 24 bytes
     pub healthy_atten: i32,    // 0x19C
     pub decayed_atten: i32,    // 0x1A0
 }
 
 impl ZTTankFilterType {
-    pub fn new(address: u32) -> Option<&'static mut ZTTankFilterType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTTankFilterType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
     fn get_healthy_sound(&self) -> String {
         let obj_ptr = self as *const ZTTankFilterType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x184))
@@ -1067,55 +580,9 @@ impl ZTTankFilterType {
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x190))
     }
 
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cStartingHealth" => {
-                self.starting_health = value.parse::<i32>().unwrap();
-                Ok(format!("Set Starting Health to {}", self.starting_health))
-            }
-            "-cDecayedHealth" => {
-                self.decayed_health = value.parse::<i32>()?;
-                Ok(format!("Set Decayed Health to {}", self.decayed_health))
-            }
-            "-cDecayTime" => {
-                self.decay_time = value.parse::<i32>()?;
-                Ok(format!("Set Decay Time to {}", self.decay_time))
-            }
-            "-cFilterDelay" => {
-                self.filter_delay = value.parse::<i32>()?;
-                Ok(format!("Set Filter Delay to {}", self.filter_delay))
-            }
-            "-cFilterUpkeep" => {
-                self.filter_upkeep = value.parse::<i32>()?;
-                Ok(format!("Set Filter Upkeep to {}", self.filter_upkeep))
-            }
-            "-cFilterCleanAmount" => {
-                self.filter_clean_amount = value.parse::<i32>()?;
-                Ok(format!(
-                    "Set Filter Clean Amount to {}",
-                    self.filter_clean_amount
-                ))
-            }
-            "-cFilterDecayedCleanAmount" => {
-                self.filter_decayed_clean_amount = value.parse::<i32>()?;
-                Ok(format!(
-                    "Set Filter Decayed Clean Amount to {}",
-                    self.filter_decayed_clean_amount
-                ))
-            }
-            "-cHealthyAtten" => {
-                self.healthy_atten = value.parse::<i32>()?;
-                Ok(format!("Set Healthy Atten to {}", self.healthy_atten))
-            }
-            "-cDecayedAtten" => {
-                self.decayed_atten = value.parse::<i32>()?;
-                Ok(format!("Set Decayed Atten to {}", self.decayed_atten))
-            }
-            _ => Err(CommandError::new(format!(
-                "Invalid configuration option {}",
-                config
-            ))),
-        }
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+        //TODO: Add matches and handling for string values
+        self.set_config_inner(config, value)
     }
 
     fn print_config_integers(&self) -> String {
@@ -1153,33 +620,19 @@ impl Deref for ZTTankFilterType {
 
 // ------------ ZTPathType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTPathType {
+    #[deref_field]
     ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     pub material: u32,            // 0x168
                                   // TODO: missing Shapes structure in paths. Could not find.
 }
 
 impl ZTPathType {
-    pub fn new(address: u32) -> Option<&'static mut ZTPathType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTPathType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cMaterial" {
-            self.material = value.parse::<u32>().unwrap();
-            Ok(format!("Set Material to {}", self.material))
-        } else {
-            Err("Invalid configuration option")
-        }
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+        //TODO: Add matches and handling for string values
+        self.set_config_inner(config, value)
     }
 
     pub fn print_config_integers(&self) -> String {
@@ -1196,46 +649,30 @@ impl Deref for ZTPathType {
 
 // ------------ ZTRubbleType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTRubbleType {
+    #[deref_field]
     ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     // explosion_sound: String, // 0x168
+    #[skip_field]
     pad0: [u8; 0x16C - 0x168], // ----------------------- padding: 4 bytes
     pub explosion_sound_atten: i32, // 0x16C
 }
 
 impl ZTRubbleType {
-    pub fn new(address: u32) -> Option<&'static mut ZTRubbleType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTRubbleType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
     fn get_explosion_sound(&self) -> String {
         let obj_ptr = self as *const ZTRubbleType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x168))
     }
 
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
         // if config == "-cExplosionSound" {
         //     self.explosion_sound = value.parse::<String>().unwrap();
         //     Ok(format!("Set Explosion Sound to {}", self.explosion_sound))
         // }
-        if config == "-cExplosionSoundAtten" {
-            self.explosion_sound_atten = value.parse::<i32>().unwrap();
-            Ok(format!(
-                "Set Explosion Sound Atten to {}",
-                self.explosion_sound_atten
-            ))
-        } else {
-            Err("Invalid configuration option")
-        }
+        //TODO: Add matches and handling for string values
+        self.set_config_inner(config, value)
     }
 
     pub fn print_config_integers(&self) -> String {
@@ -1256,11 +693,11 @@ impl Deref for ZTRubbleType {
 
 // ------------ Custom Command Implementation ------------ //
 
-fn command_sel_type(args: Vec<&str>) -> Result<String, &'static str> {
+fn command_sel_type(args: Vec<&str>) -> Result<String, CommandError> {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
     let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
     if entity_type_address == 0 {
-        return Err("No entity selected");
+        return Err("No entity selected").map_err(Into::into);
     }
 
     let entity_type = BFEntityType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
@@ -1277,7 +714,7 @@ fn command_sel_type(args: Vec<&str>) -> Result<String, &'static str> {
         Ok(print_config_for_type())
     } else if args.len() == 2 {
         // parse the subargs for the entity type
-        parse_subargs_for_type(args)
+        Ok(parse_subargs_for_type(args)?)
     } else {
         Ok("Invalid argument".to_string())
     }
@@ -1410,10 +847,8 @@ fn print_config_for_type() -> String {
     config
 }
 
-
-
 // parses the subargs for the entity type
-fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
+fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, String> {
     let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
     let building_type = ZTBuildingType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
 
@@ -1463,7 +898,7 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     } else if result_rubble_type.is_ok() {
         result_rubble_type
     } else {
-        Err("Invalid configuration option")
+        Err("Invalid configuration option".to_string())
     }
 }
 

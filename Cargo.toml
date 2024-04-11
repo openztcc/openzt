@@ -25,6 +25,8 @@ bf_configparser = { git = "https://github.com/openztcc/bf-configparser", version
 anyhow = "1.0.80"
 getset = "0.1.2"
 maplit = "1.0.2"
+field_accessor_as_string = { path = "libs/field_accessor_as_string" }
+field_accessor_as_string_trait = { path = "libs/field_accessor_as_string_trait" }
 
 [lib]
 name = "openzt"

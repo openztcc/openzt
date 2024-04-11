@@ -58,6 +58,20 @@ impl From<std::num::ParseFloatError> for CommandError {
     }
 }
 
+impl From<String> for CommandError {
+    fn from(err: String) -> Self {
+        CommandError { message: err }
+    }
+}
+
+impl From<&str> for CommandError {
+    fn from(err: &str) -> Self {
+        CommandError {
+            message: err.to_string(),
+        }
+    }
+}
+
 #[hook_module("zoo.exe")]
 pub mod zoo_console {
     use super::{add_to_command_register, call_next_command, command_list_commands, start_server};
@@ -77,7 +91,7 @@ pub mod zoo_console {
     }
 }
 
-type CommandCallback = fn(args: Vec<&str>) -> Result<String, &'static str>;
+type CommandCallback = fn(args: Vec<&str>) -> Result<String, CommandError>;
 
 static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, CommandCallback>>> =
     Lazy::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
@@ -92,7 +106,7 @@ pub fn add_to_command_register(command_name: String, command_callback: CommandCa
     data_mutex.insert(command_name, command_callback);
 }
 
-fn call_command(command_name: String, args: Vec<&str>) -> Result<String, &'static str> {
+fn call_command(command_name: String, args: Vec<&str>) -> Result<String, CommandError> {
     info!("Calling command {} with args {:?}", command_name, args);
     let command = {
         let data_mutex = COMMAND_REGISTRY.lock().unwrap();
@@ -100,7 +114,7 @@ fn call_command(command_name: String, args: Vec<&str>) -> Result<String, &'stati
     };
     match command {
         Some(command) => command(args),
-        None => Err("Command not found"),
+        None => Err("Command not found").map_err(Into::into),
     }
 }
 
@@ -146,7 +160,7 @@ pub fn get_from_command_queue() -> Option<String> {
     data_mutex.pop()
 }
 
-pub fn command_list_commands(_args: Vec<&str>) -> Result<String, &'static str> {
+pub fn command_list_commands(_args: Vec<&str>) -> Result<String, CommandError> {
     info!("Getting command list");
     match COMMAND_REGISTRY.lock() {
         Ok(data_mutex) => {
@@ -159,7 +173,7 @@ pub fn command_list_commands(_args: Vec<&str>) -> Result<String, &'static str> {
         }
         Err(err) => {
             info!("Error getting command list: {}", err);
-            Err("Error getting command list")
+            Err("Error getting command list").map_err(Into::into)
         }
     }
 }

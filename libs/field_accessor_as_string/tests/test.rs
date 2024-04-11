@@ -3,6 +3,7 @@ mod tests {
     use std::ops::Deref;
 
     use field_accessor_as_string::FieldAccessorAsString;
+    use field_accessor_as_string_trait::FieldAccessorAsStringTrait;
 
     #[derive(Default, FieldAccessorAsString)]
     struct MyStruct {

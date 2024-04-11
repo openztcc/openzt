@@ -17,18 +17,13 @@ use tracing::{error, info};
 use zip::read::ZipFile;
 
 use crate::{
-    add_to_command_register,
-    debug_dll::{
+    add_to_command_register, console::CommandError, debug_dll::{
         get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory,
-    },
-    resource_manager::{
+    }, resource_manager::{
         add_handler, add_raw_bytes_to_map_with_path_override,
         add_txt_file_to_map_with_path_override, modify_ztfile_as_animation, modify_ztfile_as_ini,
         Handler,
-    },
-    string_registry::add_string_to_registry,
-    ztui::{get_random_sex, get_selected_sex, BuyTab},
-    ztworldmgr::{ZTEntityType, ZTEntityTypeClass},
+    }, string_registry::add_string_to_registry, ztui::{get_random_sex, get_selected_sex, BuyTab}, ztworldmgr::{ZTEntityType, ZTEntityTypeClass}
 };
 
 static OFFICIAL_FILESET: Lazy<HashSet<&str>> = Lazy::new(|| {
@@ -182,7 +177,7 @@ fn get_cc_expansion_name(subdir: &str) -> String {
         + subdir
 }
 
-fn command_get_members(_: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
     let data_mutex = MEMBER_SETS.lock().unwrap();
     let mut result = String::new();
 
@@ -201,10 +196,10 @@ fn command_get_members(_: Vec<&str>) -> Result<String, &'static str> {
 // There are no accessors for Expansions, ZT accesses expansions by directly iterating over the array, adding to the array also saves ptrs to ZT's memory keeping things in sync
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
-fn add_expansion(expansion: Expansion, save_to_memory: bool) -> Result<(), &'static str> {
+fn add_expansion(expansion: Expansion, save_to_memory: bool) -> Result<(), String> {
     let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
     if data_mutex.len() >= MAX_EXPANSION_SIZE {
-        return Err("Max expansion size reached");
+        return Err("Max expansion size reached".to_string());
     }
     data_mutex.push(expansion);
 
@@ -342,7 +337,7 @@ impl Display for ExpansionList {
     }
 }
 
-fn command_get_expansions(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_expansions(_args: Vec<&str>) -> Result<String, CommandError> {
     let mut string_array = Vec::new();
     for expansion in read_expansions_from_memory() {
         string_array.push(expansion.to_string());
@@ -351,7 +346,7 @@ fn command_get_expansions(_args: Vec<&str>) -> Result<String, &'static str> {
     Ok(string_array.join("\n"))
 }
 
-fn command_get_current_expansion(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_current_expansion(_args: Vec<&str>) -> Result<String, CommandError> {
     Ok(read_current_expansion().to_string())
 }
 

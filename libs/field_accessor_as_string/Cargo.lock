@@ -6,9 +6,14 @@ version = 3
 name = "field_accessor_as_string"
 version = "0.1.0"
 dependencies = [
+ "field_accessor_as_string_trait",
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "field_accessor_as_string_trait"
+version = "0.1.0"
 
 [[package]]
 name = "proc-macro2"

@@ -44,12 +44,8 @@ pub fn set_fields(input: TokenStream) -> TokenStream {
         field_types.push(field_type);
     }
 
-    // if Some(deref_field_name) = deref_field {
-
-    // }
-
     let expanded = quote! {
-        impl #struct_name {
+        impl field_accessor_as_string_trait::FieldAccessorAsStringTrait for #struct_name {
             fn set_field(&mut self, field_name: &str, value: &str) -> Result<(), String> {
                 match field_name {
                     #(stringify!(#field_names) => {
