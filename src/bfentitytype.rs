@@ -23,6 +23,8 @@ impl_EntityType!(
     ZTTankFilterType,
     ZTPathType,
     ZTRubbleType
+    BFUnitType
+    ZTUnitType
 );
 
 pub trait EntityTypeImpl<T>: EntityType + FieldAccessorAsStringTrait {
@@ -69,50 +71,50 @@ use crate::{
 #[repr(C)]
 pub struct BFEntityType {
     #[skip_field]
-    pad1: [u8; 0x038],                // ----------------------- padding: 56 bytes
-    pub ncolors: u32,                 // 0x038
+    pad1: [u8; 0x038], // ----------------------- padding: 56 bytes
+    pub ncolors: u32, // 0x038
     #[skip_field]
-    pad2: [u8; 0x050 - 0x03C],        // ----------------------- padding: 20 bytes
-    pub icon_zoom: bool,              // 0x050
+    pad2: [u8; 0x050 - 0x03C], // ----------------------- padding: 20 bytes
+    pub icon_zoom: bool, // 0x050
     #[skip_field]
-    pad3: [u8; 0x054 - 0x051],        // ----------------------- padding: 3 bytes
-    pub expansion_id: bool,           // 0x054
-    pub movable: bool,                // 0x055
-    pub walkable: bool,               // 0x056
-    pub walkable_by_tall: bool,       // 0x057
+    pad3: [u8; 0x054 - 0x051], // ----------------------- padding: 3 bytes
+    pub expansion_id: bool, // 0x054
+    pub movable: bool, // 0x055
+    pub walkable: bool, // 0x056
+    pub walkable_by_tall: bool, // 0x057
     #[skip_field]
-    pad4: [u8; 0x059 - 0x058],        // ----------------------- padding: 1 byte
-    pub rubbleable: bool,             // 0x059
+    pad4: [u8; 0x059 - 0x058], // ----------------------- padding: 1 byte
+    pub rubbleable: bool, // 0x059
     #[skip_field]
-    pad5: [u8; 0x05B - 0x05A],        // ----------------------- padding: 1 byte
-    pub use_numbers_in_name: bool,    // 0x05B
-    pub uses_real_shadows: bool,      // 0x05C
-    pub has_shadow_images: bool,      // 0x05D
-    pub force_shadow_black: bool,     // 0x05E
+    pad5: [u8; 0x05B - 0x05A], // ----------------------- padding: 1 byte
+    pub use_numbers_in_name: bool, // 0x05B
+    pub uses_real_shadows: bool, // 0x05C
+    pub has_shadow_images: bool, // 0x05D
+    pub force_shadow_black: bool, // 0x05E
     #[skip_field]
-    pad6: [u8; 0x060 - 0x05F],        // ----------------------- padding: 1 byte
-    pub draws_late: bool,             // 0x060
+    pad6: [u8; 0x060 - 0x05F], // ----------------------- padding: 1 byte
+    pub draws_late: bool, // 0x060
     #[skip_field]
-    pad7: [u8; 0x064 - 0x061],        // ----------------------- padding: 3 bytes
-    pub height: u32,                  // 0x064
-    pub depth: u32,                   // 0x068
+    pad7: [u8; 0x064 - 0x061], // ----------------------- padding: 3 bytes
+    pub height: u32,  // 0x064
+    pub depth: u32,   // 0x068
     pub has_underwater_section: bool, // 0x06C
-    pub is_transient: bool,           // 0x06D
-    pub uses_placement_cube: bool,    // 0x06E
-    pub show: bool,                   // 0x06F
-    pub hit_threshold: u32,           // 0x070
-    pub avoid_edges: bool,            // 0x074
+    pub is_transient: bool, // 0x06D
+    pub uses_placement_cube: bool, // 0x06E
+    pub show: bool,   // 0x06F
+    pub hit_threshold: u32, // 0x070
+    pub avoid_edges: bool, // 0x074
     #[skip_field]
-    pad10: [u8; 0x0B4 - 0x075],       // ----------------------- padding: 47 bytes
-    pub footprintx: i32,              // 0x0B4
-    pub footprinty: i32,              // 0x0B8
-    pub footprintz: i32,              // 0x0BC
-    pub placement_footprintx: i32,    // 0x0C0
-    pub placement_footprinty: i32,    // 0x0C4
-    pub placement_footprintz: i32,    // 0x0C8
-    pub available_at_startup: bool,   // 0x0CC
+    pad10: [u8; 0x0B4 - 0x075], // ----------------------- padding: 47 bytes
+    pub footprintx: i32, // 0x0B4
+    pub footprinty: i32, // 0x0B8
+    pub footprintz: i32, // 0x0BC
+    pub placement_footprintx: i32, // 0x0C0
+    pub placement_footprinty: i32, // 0x0C4
+    pub placement_footprintz: i32, // 0x0C8
+    pub available_at_startup: bool, // 0x0CC
     #[skip_field]
-    pad11: [u8; 0x100 - 0x0CD],       // ----------------------- padding: 35 bytes
+    pad11: [u8; 0x100 - 0x0CD], // ----------------------- padding: 35 bytes
 }
 
 impl BFEntityType {
@@ -201,41 +203,41 @@ impl BFEntityType {
 pub struct ZTSceneryType {
     #[deref_field]
     pub bfentitytype: BFEntityType, // bytes: 0x100 - 0x000 = 0x100 = 256 bytes
-    pub purchase_cost: f32,         // 0x100
-    pub name_id: u32,               // 0x104
-    pub help_id: u32,               // 0x108
-    pub habitat: u32,               // 0x10C
-    pub location: u32,              // 0x110
-    pub era: u32,                   // 0x114
-    pub max_food_units: u32,        // 0x118
-    pub stink: bool,                // 0x11C
+    pub purchase_cost: f32,  // 0x100
+    pub name_id: u32,        // 0x104
+    pub help_id: u32,        // 0x108
+    pub habitat: u32,        // 0x10C
+    pub location: u32,       // 0x110
+    pub era: u32,            // 0x114
+    pub max_food_units: u32, // 0x118
+    pub stink: bool,         // 0x11C
     #[skip_field]
-    pad3: [u8; 0x120 - 0x11D],      // ----------------------- padding: 3 bytes
-    pub esthetic_weight: u32,       // 0x120
+    pad3: [u8; 0x120 - 0x11D], // ----------------------- padding: 3 bytes
+    pub esthetic_weight: u32, // 0x120
     #[skip_field]
-    pad4: [u8; 0x128 - 0x124],      // ----------------------- padding: 4 bytes
-    pub selectable: bool,           // 0x128
-    pub deletable: bool,            // 0x129
-    pub foliage: bool,              // 0x12A
+    pad4: [u8; 0x128 - 0x124], // ----------------------- padding: 4 bytes
+    pub selectable: bool,    // 0x128
+    pub deletable: bool,     // 0x129
+    pub foliage: bool,       // 0x12A
     #[skip_field]
-    pad6: [u8; 0x12D - 0x12B],      // ----------------------- padding: 2 bytes
-    pub auto_rotate: bool,          // 0x12D
-    pub land: bool,                 // 0x12E
-    pub swims: bool,                // 0x12F
-    pub underwater: bool,           // 0x130
-    pub surface: bool,              // 0x131
-    pub submerge: bool,             // 0x132
-    pub only_swims: bool,           // 0x133
-    pub needs_confirm: bool,        // 0x134
+    pad6: [u8; 0x12D - 0x12B], // ----------------------- padding: 2 bytes
+    pub auto_rotate: bool,   // 0x12D
+    pub land: bool,          // 0x12E
+    pub swims: bool,         // 0x12F
+    pub underwater: bool,    // 0x130
+    pub surface: bool,       // 0x131
+    pub submerge: bool,      // 0x132
+    pub only_swims: bool,    // 0x133
+    pub needs_confirm: bool, // 0x134
     pub gawk_only_from_front: bool, // 0x135
-    pub dead_on_land: bool,         // 0x136
-    pub dead_on_flat_water: bool,   // 0x137
-    pub dead_underwater: bool,      // 0x138
-    pub uses_tree_rubble: bool,     // 0x139
+    pub dead_on_land: bool,  // 0x136
+    pub dead_on_flat_water: bool, // 0x137
+    pub dead_underwater: bool, // 0x138
+    pub uses_tree_rubble: bool, // 0x139
     pub forces_scenery_rubble: bool, // 0x13A
-    pub blocks_los: bool,           // 0x13B
+    pub blocks_los: bool,    // 0x13B
     #[skip_field]
-    pad7: [u8; 0x168 - 0x13C],      // ----------------------- padding: 51 bytes
+    pad7: [u8; 0x168 - 0x13C], // ----------------------- padding: 51 bytes
 }
 
 impl ZTSceneryType {
@@ -296,45 +298,45 @@ struct ZTBuildingType {
     #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x16C = 364 bytes
     #[skip_field]
-    pad0: [u8; 0x16C - 0x168],        // -------------------------- padding: 4 bytes
-    pub i_capacity: i32,              // 0x16C
-    pub toy_satisfaction: i32,        // 0x170
-    pub time_inside: i32,             // 0x174
-    pub default_cost: f32,            // 0x178
-    pub low_cost: f32,                // 0x17C
-    pub med_cost: f32,                // 0x180
-    pub high_cost: f32,               // 0x184
-    pub price_factor: f32,            // 0x188
-    pub upkeep: f32,                  // 0x18C
+    pad0: [u8; 0x16C - 0x168], // -------------------------- padding: 4 bytes
+    pub i_capacity: i32,       // 0x16C
+    pub toy_satisfaction: i32, // 0x170
+    pub time_inside: i32,      // 0x174
+    pub default_cost: f32,     // 0x178
+    pub low_cost: f32,         // 0x17C
+    pub med_cost: f32,         // 0x180
+    pub high_cost: f32,        // 0x184
+    pub price_factor: f32,     // 0x188
+    pub upkeep: f32,           // 0x18C
     #[skip_field]
-    pad1: [u8; 0x194 - 0x190],        // -------------------------- padding: 4 bytes
-    pub hide_user: bool,              // 0x194
-    pub set_letter_facing: bool,      // 0x195
-    pub draw_user: bool,              // 0x196
-    pub hide_cost_change: bool,       // 0x197
-    pub hide_commerce_info: bool,     // 0x198
-    pub hide_regular_info: bool,      // 0x199
-    pub holds_onto_user: bool,        // 0x19A
-    pub user_tracker: bool,           // 0x19B
-    pub idler: bool,                  // 0x19C
-    pub exhibit_viewer: bool,         // 0x19D
+    pad1: [u8; 0x194 - 0x190], // -------------------------- padding: 4 bytes
+    pub hide_user: bool,       // 0x194
+    pub set_letter_facing: bool, // 0x195
+    pub draw_user: bool,       // 0x196
+    pub hide_cost_change: bool, // 0x197
+    pub hide_commerce_info: bool, // 0x198
+    pub hide_regular_info: bool, // 0x199
+    pub holds_onto_user: bool, // 0x19A
+    pub user_tracker: bool,    // 0x19B
+    pub idler: bool,           // 0x19C
+    pub exhibit_viewer: bool,  // 0x19D
     #[skip_field]
-    pad2: [u8; 0x1A0 - 0x19E],        // -------------------------- padding: 2 bytes
-    pub alternate_panel_title: u32,   // 0x1A0
-    pub direct_entrance: bool,        // 0x1A4
-    pub hide_building: bool,          // 0x1A5
-    pub user_stays_outside: bool,     // 0x1A6
-    pub user_teleports_inside: bool,  // 0x1A7
-    pub user_uses_exit: bool,         // 0x1A8
+    pad2: [u8; 0x1A0 - 0x19E], // -------------------------- padding: 2 bytes
+    pub alternate_panel_title: u32, // 0x1A0
+    pub direct_entrance: bool, // 0x1A4
+    pub hide_building: bool,   // 0x1A5
+    pub user_stays_outside: bool, // 0x1A6
+    pub user_teleports_inside: bool, // 0x1A7
+    pub user_uses_exit: bool,  // 0x1A8
     pub user_uses_entrance_as_emergency_exit: bool, // 0x1A9
     #[skip_field]
-    pad3: [u8; 0x1B8 - 0x1AA],        // -------------------------- padding: 9 bytes
-    pub adult_change: i32,            // 0x1B8
-    pub child_change: i32,            // 0x1BC
-    pub hunger_change: i32,           // 0x1C0
-    pub thirst_change: i32,           // 0x1C4
-    pub bathroom_change: i32,         // 0x1C8
-    pub energy_change: i32,           // 0x1CC
+    pad3: [u8; 0x1B8 - 0x1AA], // -------------------------- padding: 9 bytes
+    pub adult_change: i32,     // 0x1B8
+    pub child_change: i32,     // 0x1BC
+    pub hunger_change: i32,    // 0x1C0
+    pub thirst_change: i32,    // 0x1C4
+    pub bathroom_change: i32,  // 0x1C8
+    pub energy_change: i32,    // 0x1CC
 }
 
 impl ZTBuildingType {
@@ -403,22 +405,22 @@ impl Deref for ZTBuildingType {
 pub struct ZTFenceType {
     #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
-    pub strength: i32,                // 0x168
-    pub life: i32,                    // 0x16C
-    pub decayed_life: i32,            // 0x170
-    pub decayed_delta: i32,           // 0x174
-    pub break_sound_atten: i32,       // 0x178
-    pub open_sound_atten: i32,        // 0x17C
+    pub strength: i32,          // 0x168
+    pub life: i32,              // 0x16C
+    pub decayed_life: i32,      // 0x170
+    pub decayed_delta: i32,     // 0x174
+    pub break_sound_atten: i32, // 0x178
+    pub open_sound_atten: i32,  // 0x17C
     // break_sound: String, // 0x184
     // open_sound: String, // 0x188
     #[skip_field]
     pad2: [u8; 0x194 - 0x180], // ----------------------- padding: 20 bytes
-    pub see_through: bool,     // 0x194
-    pub is_jumpable: bool,     // 0x195
-    pub is_climbable: bool,    // 0x196
-    pub indestructible: bool,  // 0x197
-    pub is_electrified: bool,  // 0x198
-    pub no_draw_water: bool,   // 0x199
+    pub see_through: bool,    // 0x194
+    pub is_jumpable: bool,    // 0x195
+    pub is_climbable: bool,   // 0x196
+    pub indestructible: bool, // 0x197
+    pub is_electrified: bool, // 0x198
+    pub no_draw_water: bool,  // 0x199
 }
 
 impl ZTFenceType {
@@ -526,7 +528,7 @@ impl Deref for ZTTankWallType {
 pub struct ZTFoodType {
     #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
-    pub keeper_food_type: u32,        // 0x168
+    pub keeper_food_type: u32, // 0x168
 }
 
 impl ZTFoodType {
@@ -554,19 +556,19 @@ impl Deref for ZTFoodType {
 pub struct ZTTankFilterType {
     #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
-    pub starting_health: i32,         // 0x168
-    pub decayed_health: i32,          // 0x16C
-    pub decay_time: i32,              // 0x170
-    pub filter_delay: i32,            // 0x174
-    pub filter_upkeep: i32,           // 0x178
-    pub filter_clean_amount: i32,     // 0x17C
+    pub starting_health: i32,             // 0x168
+    pub decayed_health: i32,              // 0x16C
+    pub decay_time: i32,                  // 0x170
+    pub filter_delay: i32,                // 0x174
+    pub filter_upkeep: i32,               // 0x178
+    pub filter_clean_amount: i32,         // 0x17C
     pub filter_decayed_clean_amount: i32, // 0x180
     // healthy_sound: String, // 0x184
     // decayed_sound: String, // 0x190
     #[skip_field]
     pad1: [u8; 0x19C - 0x184], // ----------------------- padding: 24 bytes
-    pub healthy_atten: i32,    // 0x19C
-    pub decayed_atten: i32,    // 0x1A0
+    pub healthy_atten: i32, // 0x19C
+    pub decayed_atten: i32, // 0x1A0
 }
 
 impl ZTTankFilterType {
@@ -625,8 +627,8 @@ impl Deref for ZTTankFilterType {
 pub struct ZTPathType {
     #[deref_field]
     ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
-    pub material: u32,            // 0x168
-                                  // TODO: missing Shapes structure in paths. Could not find.
+    pub material: u32, // 0x168
+                       // TODO: missing Shapes structure in paths. Could not find.
 }
 
 impl ZTPathType {
@@ -693,61 +695,26 @@ impl Deref for ZTRubbleType {
 
 // ------------ BFUnitType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct BFUnitType {
+    #[deref_field]
     bfentitytype: BFEntityType, // bytes: 0x100 - 0x000 = 0x100 = 256 bytes
-    pub slow_rate: u32,          // 0x100
-    pub medium_rate: u32,        // 0x104
-    pub fast_rate: u32,          // 0x108
-    pub slow_anim_speed: u16,    // 0x10C
-    pub medium_anim_speed: u16,  // 0x10E
-    pub fast_anim_speed: u16,    // 0x110
-    pad0: [u8; 0x114 - 0x112],   // ----------------------- padding: 2 bytes
-    pub min_height: u32,         // 0x114 <--- unsure if accurate
-    pub max_height: u32,         // 0x118 <--- unsure if accurate
+    pub slow_rate: u32,         // 0x100
+    pub medium_rate: u32,       // 0x104
+    pub fast_rate: u32,         // 0x108
+    pub slow_anim_speed: u16,   // 0x10C
+    pub medium_anim_speed: u16, // 0x10E
+    pub fast_anim_speed: u16,   // 0x110
+    #[skip_field]
+    pad0: [u8; 0x114 - 0x112],  // ----------------------- padding: 2 bytes
+    pub min_height: u32,        // 0x114 <--- unsure if accurate
+    pub max_height: u32,        // 0x118 <--- unsure if accurate
 }
 
 impl BFUnitType {
-    pub fn new(address: u32) -> Option<&'static mut BFUnitType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut BFUnitType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cSlowRate" {
-            self.slow_rate = value.parse::<u32>().unwrap();
-            Ok(format!("Set Slow Rate to {}", self.slow_rate))
-        } else if config == "-cMediumRate" {
-            self.medium_rate = value.parse::<u32>().unwrap();
-            Ok(format!("Set Medium Rate to {}", self.medium_rate))
-        } else if config == "-cFastRate" {
-            self.fast_rate = value.parse::<u32>().unwrap();
-            Ok(format!("Set Fast Rate to {}", self.fast_rate))
-        } else if config == "-cSlowAnimSpeed" {
-            self.slow_anim_speed = value.parse::<u16>().unwrap();
-            Ok(format!("Set Slow Anim Speed to {}", self.slow_anim_speed))
-        } else if config == "-cMediumAnimSpeed" {
-            self.medium_anim_speed = value.parse::<u16>().unwrap();
-            Ok(format!("Set Medium Anim Speed to {}", self.medium_anim_speed))
-        } else if config == "-cFastAnimSpeed" {
-            self.fast_anim_speed = value.parse::<u16>().unwrap();
-            Ok(format!("Set Fast Anim Speed to {}", self.fast_anim_speed))
-        } else if config == "-cMinHeight" {
-            self.min_height = value.parse::<u32>().unwrap();
-            Ok(format!("Set Min Height to {}", self.min_height))
-        } else if config == "-cMaxHeight" {
-            self.max_height = value.parse::<u32>().unwrap();
-            Ok(format!("Set Max Height to {}", self.max_height))
-        } else {
-            Err("Invalid configuration option")
-        }
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+        self.set_config_inner(config, value)
     }
 
     pub fn print_config_integers(&self) -> String {
@@ -773,89 +740,41 @@ impl Deref for BFUnitType {
 
 // ------------ ZTUnitType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTUnitType {
-    pub bfunit_type: BFUnitType, // bytes: 0x11C - 0x100 = 0x1C = 28 bytes
-    pad0: [u8; 0x12C - 0x11C], // ----------------------- padding: 16 bytes
-    pub purchase_cost: f32,      // 0x12C
-    pub name_id: i32,            // 0x130
-    pub help_id: i32,            // 0x134
-    pad1: [u8; 0x150 - 0x138],  // ----------------------- padding: 24 bytes
-    pub map_footprint: i32,      // 0x150
+    #[deref_field]
+    pub bfunit_type: BFUnitType,    // bytes: 0x11C - 0x100 = 0x1C = 28 bytes
+    #[skip_field]
+    pad0: [u8; 0x12C - 0x11C],      // ----------------------- padding: 16 bytes
+    pub purchase_cost: f32,         // 0x12C
+    pub name_id: i32,               // 0x130
+    pub help_id: i32,               // 0x134
+    #[skip_field]
+    pad1: [u8; 0x150 - 0x138],      // ----------------------- padding: 24 bytes
+    pub map_footprint: i32,         // 0x150
     pub slow_anim_speed_water: u16, // 0x154
     pub medium_anim_speed_water: u16, // 0x156
     pub fast_anim_speed_water: u16, // 0x158
-    pad2: [u8; 0x17C - 0x15C],  // ----------------------- padding: 32 bytes
+    #[skip_field]
+    pad2: [u8; 0x17C - 0x15C],      // ----------------------- padding: 32 bytes
     // pub list_image_name: String,    // 0x168 TODO: fix offset for string getters in unittype
-    pub swims: bool,             // 0x17C
-    pub surface: bool,           // 0x17D
-    pub underwater: bool,        // 0x17E
-    pub only_underwater: bool,   // 0x17F
+    pub swims: bool,                // 0x17C
+    pub surface: bool,              // 0x17D
+    pub underwater: bool,           // 0x17E
+    pub only_underwater: bool,      // 0x17F
     pub skip_trick_happiness: bool, // 0x180
-    pub skip_trick_chance: bool, // 0x184
+    pub skip_trick_chance: bool,    // 0x184
 }
 
 impl ZTUnitType {
-    pub fn new(address: u32) -> Option<&'static mut ZTUnitType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTUnitType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
     pub fn get_list_name(&self) -> String {
         let obj_ptr = self as *const ZTUnitType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x168))
     }
 
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cPurchaseCost" {
-            self.purchase_cost = value.parse::<f32>().unwrap();
-            Ok(format!("Set Purchase Cost to {}", self.purchase_cost))
-        } else if config == "-cNameID" {
-            self.name_id = value.parse::<i32>().unwrap();
-            Ok(format!("Set Name ID to {}", self.name_id))
-        } else if config == "-cHelpID" {
-            self.help_id = value.parse::<i32>().unwrap();
-            Ok(format!("Set Help ID to {}", self.help_id))
-        } else if config == "-cMapFootprint" {
-            self.map_footprint = value.parse::<i32>().unwrap();
-            Ok(format!("Set Map Footprint to {}", self.map_footprint))
-        } else if config == "-cSlowAnimSpeedWater" {
-            self.slow_anim_speed_water = value.parse::<u16>().unwrap();
-            Ok(format!("Set Slow Anim Speed Water to {}", self.slow_anim_speed_water))
-        } else if config == "-cMediumAnimSpeedWater" {
-            self.medium_anim_speed_water = value.parse::<u16>().unwrap();
-            Ok(format!("Set Medium Anim Speed Water to {}", self.medium_anim_speed_water))
-        } else if config == "-cFastAnimSpeedWater" {
-            self.fast_anim_speed_water = value.parse::<u16>().unwrap();
-            Ok(format!("Set Fast Anim Speed Water to {}", self.fast_anim_speed_water))
-        } else if config == "-cSwims" {
-            self.swims = value.parse::<bool>().unwrap();
-            Ok(format!("Set Swims to {}", self.swims))
-        } else if config == "-cSurface" {
-            self.surface = value.parse::<bool>().unwrap();
-            Ok(format!("Set Surface to {}", self.surface))
-        } else if config == "-cUnderwater" {
-            self.underwater = value.parse::<bool>().unwrap();
-            Ok(format!("Set Underwater to {}", self.underwater))
-        } else if config == "-cOnlyUnderwater" {
-            self.only_underwater = value.parse::<bool>().unwrap();
-            Ok(format!("Set Only Underwater to {}", self.only_underwater))
-        } else if config == "-cSkipTrickHappiness" {
-            self.skip_trick_happiness = value.parse::<bool>().unwrap();
-            Ok(format!("Set Skip Trick Happiness to {}", self.skip_trick_happiness))
-        } else if config == "-cSkipTrickChance" {
-            self.skip_trick_chance = value.parse::<bool>().unwrap();
-            Ok(format!("Set Skip Trick Chance to {}", self.skip_trick_chance))
-        } else {
-            Err("Invalid configuration option")
-        }
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+        self.set_config_inner(config, value)
     }
 
     pub fn print_config_integers(&self) -> String {
@@ -1019,7 +938,13 @@ fn print_config_for_type() -> String {
         config.push_str(&rubble_type.print_config_integers());
 
         print_info_image_name(entity_type, &mut config);
-    } else if class_type == "Animal" || class_type == "Guest" || class_type == "Keeper" || class_type == "MaintenanceWorker" || class_type == "TourGuide" || class_type == "DRT" {
+    } else if class_type == "Animal"
+        || class_type == "Guest"
+        || class_type == "Keeper"
+        || class_type == "MaintenanceWorker"
+        || class_type == "TourGuide"
+        || class_type == "DRT"
+    {
         info!("Entity type is a ZTUnit. Printing ZTUnit type configuration.");
         let ztunit_type = ZTUnitType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
         config.push_str(&ztunit_type.bfunit_type.bfentitytype.print_config_integers());
