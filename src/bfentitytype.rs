@@ -1214,6 +1214,112 @@ impl Deref for BFUnitType {
     }
 }
 
+// ------------ ZTUnitType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+struct ZTUnitType {
+    pub bfunit_type: BFUnitType, // bytes: 0x11C - 0x100 = 0x1C = 28 bytes
+    pad0: [u8; 0x12C - 0x11C], // ----------------------- padding: 16 bytes
+    pub purchase_cost: f32,      // 0x12C
+    pub name_id: i32,            // 0x130
+    pub help_id: i32,            // 0x134
+    pad1: [u8; 0x150 - 0x138],  // ----------------------- padding: 24 bytes
+    pub map_footprint: i32,      // 0x150
+    pub slow_anim_speed_water: u16, // 0x154
+    pub medium_anim_speed_water: u16, // 0x156
+    pub fast_anim_speed_water: u16, // 0x158
+    pad2: [u8; 0x17C - 0x15C],  // ----------------------- padding: 32 bytes
+    // pub list_image_name: String,    // 0x168 TODO: fix offset for string getters in unittype
+    pub swims: bool,             // 0x17C
+    pub surface: bool,           // 0x17D
+    pub underwater: bool,        // 0x17E
+    pub only_underwater: bool,   // 0x17F
+    pub skip_trick_happiness: bool, // 0x180
+    pub skip_trick_chance: bool, // 0x184
+}
+
+impl ZTUnitType {
+    pub fn new(address: u32) -> Option<&'static mut ZTUnitType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTUnitType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn get_list_name(&self) -> String {
+        let obj_ptr = self as *const ZTUnitType as u32;
+        get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x168))
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cPurchaseCost" {
+            self.purchase_cost = value.parse::<f32>().unwrap();
+            Ok(format!("Set Purchase Cost to {}", self.purchase_cost))
+        } else if config == "-cNameID" {
+            self.name_id = value.parse::<i32>().unwrap();
+            Ok(format!("Set Name ID to {}", self.name_id))
+        } else if config == "-cHelpID" {
+            self.help_id = value.parse::<i32>().unwrap();
+            Ok(format!("Set Help ID to {}", self.help_id))
+        } else if config == "-cMapFootprint" {
+            self.map_footprint = value.parse::<i32>().unwrap();
+            Ok(format!("Set Map Footprint to {}", self.map_footprint))
+        } else if config == "-cSlowAnimSpeedWater" {
+            self.slow_anim_speed_water = value.parse::<u16>().unwrap();
+            Ok(format!("Set Slow Anim Speed Water to {}", self.slow_anim_speed_water))
+        } else if config == "-cMediumAnimSpeedWater" {
+            self.medium_anim_speed_water = value.parse::<u16>().unwrap();
+            Ok(format!("Set Medium Anim Speed Water to {}", self.medium_anim_speed_water))
+        } else if config == "-cFastAnimSpeedWater" {
+            self.fast_anim_speed_water = value.parse::<u16>().unwrap();
+            Ok(format!("Set Fast Anim Speed Water to {}", self.fast_anim_speed_water))
+        } else if config == "-cSwims" {
+            self.swims = value.parse::<bool>().unwrap();
+            Ok(format!("Set Swims to {}", self.swims))
+        } else if config == "-cSurface" {
+            self.surface = value.parse::<bool>().unwrap();
+            Ok(format!("Set Surface to {}", self.surface))
+        } else if config == "-cUnderwater" {
+            self.underwater = value.parse::<bool>().unwrap();
+            Ok(format!("Set Underwater to {}", self.underwater))
+        } else if config == "-cOnlyUnderwater" {
+            self.only_underwater = value.parse::<bool>().unwrap();
+            Ok(format!("Set Only Underwater to {}", self.only_underwater))
+        } else if config == "-cSkipTrickHappiness" {
+            self.skip_trick_happiness = value.parse::<bool>().unwrap();
+            Ok(format!("Set Skip Trick Happiness to {}", self.skip_trick_happiness))
+        } else if config == "-cSkipTrickChance" {
+            self.skip_trick_chance = value.parse::<bool>().unwrap();
+            Ok(format!("Set Skip Trick Chance to {}", self.skip_trick_chance))
+        } else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cPurchaseCost: {}\ncNameID: {}\ncHelpID: {}\ncMapFootprint: {}\ncSlowAnimSpeedWater: {}\ncMediumAnimSpeedWater: {}\ncFastAnimSpeedWater: {}\ncSwims: {}\ncSurface: {}\ncUnderwater: {}\ncOnlyUnderwater: {}\ncSkipTrickHappiness: {}\ncSkipTrickChance: {}\n",
+        self.purchase_cost,
+        self.name_id,
+        self.help_id,
+        self.map_footprint,
+        self.slow_anim_speed_water,
+        self.medium_anim_speed_water,
+        self.fast_anim_speed_water,
+        self.swims as u32,
+        self.surface as u32,
+        self.underwater as u32,
+        self.only_underwater as u32,
+        self.skip_trick_happiness as u32,
+        self.skip_trick_chance as u32,
+        )
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(args: Vec<&str>) -> Result<String, &'static str> {
@@ -1357,11 +1463,14 @@ fn print_config_for_type() -> String {
 
         print_info_image_name(entity_type, &mut config);
     } else if class_type == "Animal" || class_type == "Guest" || class_type == "Keeper" || class_type == "MaintenanceWorker" || class_type == "TourGuide" || class_type == "DRT" {
-        info!("Entity type is a BFUnit. Printing BFUnit type configuration.");
-        let bfunit_type = BFUnitType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-        config.push_str(&bfunit_type.bfentitytype.print_config_integers());
-        config.push_str(&bfunit_type.print_config_integers());
+        info!("Entity type is a ZTUnit. Printing ZTUnit type configuration.");
+        let ztunit_type = ZTUnitType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&ztunit_type.bfunit_type.bfentitytype.print_config_integers());
+        config.push_str(&ztunit_type.bfunit_type.print_config_integers());
+        config.push_str(&ztunit_type.print_config_integers());
+        // config.push_str(&ztunit_type.get_list_name());
 
+        // print_info_image_name(entity_type, &mut config);
     } else {
         info!(
             "Entity type is not a known entity type. Printing base entity type configuration only."
@@ -1409,6 +1518,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_bfunit_type = BFUnitType::new(entity_type_address)
         .unwrap()
         .set_config(_args[0], _args[1]);
+    let result_ztunit_type = ZTUnitType::new(entity_type_address)
+        .unwrap()
+        .set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -1431,6 +1543,8 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
         result_rubble_type
     } else if result_bfunit_type.is_ok() {
         result_bfunit_type
+    } else if result_ztunit_type.is_ok() {
+        result_ztunit_type
     } else {
         Err("Invalid configuration option")
     }
