@@ -4,6 +4,7 @@ use std::ops::Deref;
 use tracing::info;
 
 use getset::Getters;
+use getset::Setters;
 
 use crate::{
     add_to_command_register,
@@ -1133,6 +1134,86 @@ impl Deref for ZTRubbleType {
     }
 }
 
+// ------------ BFUnitType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+pub struct BFUnitType {
+    bfentitytype: BFEntityType, // bytes: 0x100 - 0x000 = 0x100 = 256 bytes
+    pub slow_rate: u32,          // 0x100
+    pub medium_rate: u32,        // 0x104
+    pub fast_rate: u32,          // 0x108
+    pub slow_anim_speed: u16,    // 0x10C
+    pub medium_anim_speed: u16,  // 0x10E
+    pub fast_anim_speed: u16,    // 0x110
+    pad0: [u8; 0x114 - 0x112],   // ----------------------- padding: 2 bytes
+    pub min_height: u32,         // 0x114 <--- unsure if accurate
+    pub max_height: u32,         // 0x118 <--- unsure if accurate
+}
+
+impl BFUnitType {
+    pub fn new(address: u32) -> Option<&'static mut BFUnitType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut BFUnitType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cSlowRate" {
+            self.slow_rate = value.parse::<u32>().unwrap();
+            Ok(format!("Set Slow Rate to {}", self.slow_rate))
+        } else if config == "-cMediumRate" {
+            self.medium_rate = value.parse::<u32>().unwrap();
+            Ok(format!("Set Medium Rate to {}", self.medium_rate))
+        } else if config == "-cFastRate" {
+            self.fast_rate = value.parse::<u32>().unwrap();
+            Ok(format!("Set Fast Rate to {}", self.fast_rate))
+        } else if config == "-cSlowAnimSpeed" {
+            self.slow_anim_speed = value.parse::<u16>().unwrap();
+            Ok(format!("Set Slow Anim Speed to {}", self.slow_anim_speed))
+        } else if config == "-cMediumAnimSpeed" {
+            self.medium_anim_speed = value.parse::<u16>().unwrap();
+            Ok(format!("Set Medium Anim Speed to {}", self.medium_anim_speed))
+        } else if config == "-cFastAnimSpeed" {
+            self.fast_anim_speed = value.parse::<u16>().unwrap();
+            Ok(format!("Set Fast Anim Speed to {}", self.fast_anim_speed))
+        } else if config == "-cMinHeight" {
+            self.min_height = value.parse::<u32>().unwrap();
+            Ok(format!("Set Min Height to {}", self.min_height))
+        } else if config == "-cMaxHeight" {
+            self.max_height = value.parse::<u32>().unwrap();
+            Ok(format!("Set Max Height to {}", self.max_height))
+        } else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cSlowRate: {}\ncMediumRate: {}\ncFastRate: {}\ncSlowAnimSpeed: {}\ncMediumAnimSpeed: {}\ncFastAnimSpeed: {}\ncMinHeight: {}\ncMaxHeight: {}\n",
+        self.slow_rate,
+        self.medium_rate,
+        self.fast_rate,
+        self.slow_anim_speed,
+        self.medium_anim_speed,
+        self.fast_anim_speed,
+        self.min_height,
+        self.max_height,
+        )
+    }
+}
+
+impl Deref for BFUnitType {
+    type Target = BFEntityType;
+    fn deref(&self) -> &Self::Target {
+        &self.bfentitytype
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(args: Vec<&str>) -> Result<String, &'static str> {
@@ -1275,6 +1356,12 @@ fn print_config_for_type() -> String {
         config.push_str(&rubble_type.print_config_integers());
 
         print_info_image_name(entity_type, &mut config);
+    } else if class_type == "Animal" || class_type == "Guest" || class_type == "Keeper" || class_type == "MaintenanceWorker" || class_type == "TourGuide" || class_type == "DRT" {
+        info!("Entity type is a BFUnit. Printing BFUnit type configuration.");
+        let bfunit_type = BFUnitType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&bfunit_type.bfentitytype.print_config_integers());
+        config.push_str(&bfunit_type.print_config_integers());
+
     } else {
         info!(
             "Entity type is not a known entity type. Printing base entity type configuration only."
@@ -1319,6 +1406,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_rubble_type = ZTRubbleType::new(entity_type_address)
         .unwrap()
         .set_config(_args[0], _args[1]);
+    let result_bfunit_type = BFUnitType::new(entity_type_address)
+        .unwrap()
+        .set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -1339,6 +1429,8 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
         result_path_type
     } else if result_rubble_type.is_ok() {
         result_rubble_type
+    } else if result_bfunit_type.is_ok() {
+        result_bfunit_type
     } else {
         Err("Invalid configuration option")
     }
