@@ -1235,8 +1235,9 @@ struct ZTUnitType {
     pub surface: bool,           // 0x17D
     pub underwater: bool,        // 0x17E
     pub only_underwater: bool,   // 0x17F
-    pub skip_trick_happiness: bool, // 0x180
-    pub skip_trick_chance: bool, // 0x184
+    pad3: [u8; 0x180 - 0x17F],  // ----------------------- padding: 1 byte
+    pub skip_trick_happiness: u32, // 0x180 TODO: potentially not accurate
+    pub skip_trick_chance: i32, // 0x184
 }
 
 impl ZTUnitType {
@@ -1291,10 +1292,10 @@ impl ZTUnitType {
             self.only_underwater = value.parse::<bool>().unwrap();
             Ok(format!("Set Only Underwater to {}", self.only_underwater))
         } else if config == "-cSkipTrickHappiness" {
-            self.skip_trick_happiness = value.parse::<bool>().unwrap();
+            self.skip_trick_happiness = value.parse::<u32>().unwrap();
             Ok(format!("Set Skip Trick Happiness to {}", self.skip_trick_happiness))
         } else if config == "-cSkipTrickChance" {
-            self.skip_trick_chance = value.parse::<bool>().unwrap();
+            self.skip_trick_chance = value.parse::<i32>().unwrap();
             Ok(format!("Set Skip Trick Chance to {}", self.skip_trick_chance))
         } else {
             Err("Invalid configuration option")
@@ -1325,45 +1326,44 @@ impl ZTUnitType {
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
 struct ZTGuestType {
-    pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x11C = 0x6C = 108 bytes
-    pad0: [u8; 0x1C8 - 0x188], // ----------------------- padding: 64 bytes
-    pub hunger_check: i32, // 0x1C8
-    pub thirsty_check: i32, // 0x1CC
-    pub bathroom_check: i32, // 0x1D0
-    pub leave_zoo_check: i32, // 0x1D4
-    pub buy_souvenir_check: i32, // 0x1D8
-    pub energy_check: i32, // 0x1DC
-    pub chase_check: i32, // 0x1E0
-    pub trash_check: i32, // 0x1E4
-    pub like_animals_check: i32, // 0x1E8
-    pub viewing_area_check: i32, // 0x1EC
-    pub environment_effect_check: i32, // 0x1F0
-    pub saw_animal_reset: i32, // 0x1F4
-    pad1: [u8; 0x1F8 - 0x1F4], // ----------------------- padding: 4 bytes
-    pub initial_happiness: i32, // 0x1F8
-    pad2: [u8; 0x200 - 0x1FC], // ----------------------- padding: 8 bytes
-    pub max_energy: i32, // 0x200
-    pad3: [u8; 0x210 - 0x204], // ----------------------- padding: 12 bytes
-    pub energy_increment: i32, // 0x210
-    pub energy_threshold: i32, // 0x214
+    pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
+    pad00: [u8; 0x1B4 - 0x188], // ----------------------- padding: 44 bytes
+    pub hunger_check: i32,       // 0x1B4
+    pub thirsty_check: i32,      // 0x1B8
+    pub bathroom_check: i32,     // 0x1BC
+    pub leave_zoo_check: i32,    // 0x1C0
+    pub buy_souvenir_check: i32, // 0x1C4
+    pub energy_check: i32,       // 0x1C8
+    pub chase_check: i32,        // 0x1CC
+    pub trash_check: i32,        // 0x1D0
+    pub like_animals_check: i32, // 0x1D4
+    pub viewing_area_check: i32, // 0x1D8
+    pub environment_effect_check: i32, // 0x1DC
+    pub saw_animal_reset: i32,   // 0x1E0
+    pad01: [u8; 0x1E8 - 0x1E4], // ----------------------- padding: 4 bytes
+    pub initial_happiness: i32,  // 0x1E8
+    pad02: [u8; 0x200 - 0x1EC], // ----------------------- padding: 20 bytes
+    pub max_energy: i32,         // 0x200
+    pad03: [u8; 0x210 - 0x204], // ----------------------- padding: 12 bytes
+    pub energy_increment: i32,   // 0x210
+    pub energy_threshold: i32,   // 0x214
     pub angry_energy_change: i32, // 0x218
-    pub hunger_increment: i32, // 0x21C
-    pub hunger_threshold: i32, // 0x220
+    pub hunger_increment: i32,   // 0x21C
+    pub hunger_threshold: i32,   // 0x220
     pub angry_food_change: i32, // 0x224
     pub preferred_food_change: i32, // 0x228
-    pub thirst_increment: i32, // 0x22C
-    pub thirst_threshold: i32, // 0x230
+    pub thirst_increment: i32,   // 0x22C
+    pub thirst_threshold: i32,   // 0x230
     pub angry_thirst_change: i32, // 0x234
     pub bathroom_increment: i32, // 0x238
     pub bathroom_threshold: i32, // 0x23C
     pub angry_bathroom_change: i32, // 0x240
-    pad4: [u8; 0x244 - 0x240], // ----------------------- padding: 4 bytes
     pub price_happy1_change: i32, // 0x244
     pub price_angry1_change: i32, // 0x248
-    pub leave_chance_low: i32, // 0x24C
-    pub leave_chance_med: i32, // 0x250
-    pub leave_chance_high: i32, // 0x254
-    pub leave_chance_done: i32, // 0x258
+    pub leave_chance_low: i32,   // 0x24C
+    pub leave_chance_med: i32,   // 0x250
+    pub leave_chance_high: i32,  // 0x254
+    pub leave_chance_done: i32,  // 0x258
     pub buy_souvenir_chance_med: i32, // 0x25C
     pub buy_souvenir_chance_high: i32, // 0x260
     pub angry_trash_change: i32, // 0x264
@@ -1385,13 +1385,13 @@ struct ZTGuestType {
     pub object_esthetic_threshold: i32, // 0x2A4
     pub happy_esthetic_change: i32, // 0x2A8
     pub stand_and_eat_change: i32, // 0x2AC
-    pub stink_threshold: i32, // 0x2B0
-    pub sick_chance: i32, // 0x2B4
-    pub sick_change: i32, // 0x2B8
-    pub mimic_chance: i32, // 0x2BC
-    pub test_fence_chance: i32, // 0x2C0
-    pub zap_happiness_hit: i32, //
-    pub tap_wall_chance: i32, //
+    pub stink_threshold: i32,    // 0x2B0
+    pub sick_chance: i32,        // 0x2B4
+    pub sick_change: i32,        // 0x2B8
+    pub mimic_chance: i32,       // 0x2BC
+    pub test_fence_chance: i32,  // 0x2C0
+    pub zap_happiness_hit: i32,  // 0x2C4
+    pub tap_wall_chance: i32,    // 0x2C8
 }
 
 impl ZTGuestType {
