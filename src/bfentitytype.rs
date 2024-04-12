@@ -1235,8 +1235,9 @@ struct ZTUnitType {
     pub surface: bool,           // 0x17D
     pub underwater: bool,        // 0x17E
     pub only_underwater: bool,   // 0x17F
-    pub skip_trick_happiness: bool, // 0x180
-    pub skip_trick_chance: bool, // 0x184
+    pad3: [u8; 0x180 - 0x17F],  // ----------------------- padding: 1 byte
+    pub skip_trick_happiness: u32, // 0x180 TODO: potentially not accurate
+    pub skip_trick_chance: i32, // 0x184
 }
 
 impl ZTUnitType {
@@ -1291,10 +1292,10 @@ impl ZTUnitType {
             self.only_underwater = value.parse::<bool>().unwrap();
             Ok(format!("Set Only Underwater to {}", self.only_underwater))
         } else if config == "-cSkipTrickHappiness" {
-            self.skip_trick_happiness = value.parse::<bool>().unwrap();
+            self.skip_trick_happiness = value.parse::<u32>().unwrap();
             Ok(format!("Set Skip Trick Happiness to {}", self.skip_trick_happiness))
         } else if config == "-cSkipTrickChance" {
-            self.skip_trick_chance = value.parse::<bool>().unwrap();
+            self.skip_trick_chance = value.parse::<i32>().unwrap();
             Ok(format!("Set Skip Trick Chance to {}", self.skip_trick_chance))
         } else {
             Err("Invalid configuration option")
@@ -1317,6 +1318,354 @@ impl ZTUnitType {
         self.skip_trick_happiness as u32,
         self.skip_trick_chance as u32,
         )
+    }
+}
+
+// ------------ ZTGuestType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+struct ZTGuestType {
+    pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
+    pad00: [u8; 0x1B4 - 0x188], // ----------------------- padding: 44 bytes
+    pub hunger_check: i32,       // 0x1B4
+    pub thirsty_check: i32,      // 0x1B8
+    pub bathroom_check: i32,     // 0x1BC
+    pub leave_zoo_check: i32,    // 0x1C0
+    pub buy_souvenir_check: i32, // 0x1C4
+    pub energy_check: i32,       // 0x1C8
+    pub chase_check: i32,        // 0x1CC
+    pub trash_check: i32,        // 0x1D0
+    pub like_animals_check: i32, // 0x1D4
+    pub viewing_area_check: i32, // 0x1D8
+    pub environment_effect_check: i32, // 0x1DC
+    pub saw_animal_reset: i32,   // 0x1E0
+    pad01: [u8; 0x1E8 - 0x1E4], // ----------------------- padding: 4 bytes
+    pub initial_happiness: i32,  // 0x1E8
+    pad02: [u8; 0x200 - 0x1EC], // ----------------------- padding: 20 bytes
+    pub max_energy: i32,         // 0x200
+    pad03: [u8; 0x210 - 0x204], // ----------------------- padding: 12 bytes
+    pub energy_increment: i32,   // 0x210
+    pub energy_threshold: i32,   // 0x214
+    pub angry_energy_change: i32, // 0x218
+    pub hunger_increment: i32,   // 0x21C
+    pub hunger_threshold: i32,   // 0x220
+    pub angry_food_change: i32, // 0x224
+    pub preferred_food_change: i32, // 0x228
+    pub thirst_increment: i32,   // 0x22C
+    pub thirst_threshold: i32,   // 0x230
+    pub angry_thirst_change: i32, // 0x234
+    pub bathroom_increment: i32, // 0x238
+    pub bathroom_threshold: i32, // 0x23C
+    pub angry_bathroom_change: i32, // 0x240
+    pub price_happy1_change: i32, // 0x244
+    pub price_angry1_change: i32, // 0x248
+    pub leave_chance_low: i32,   // 0x24C
+    pub leave_chance_med: i32,   // 0x250
+    pub leave_chance_high: i32,  // 0x254
+    pub leave_chance_done: i32,  // 0x258
+    pub buy_souvenir_chance_med: i32, // 0x25C
+    pub buy_souvenir_chance_high: i32, // 0x260
+    pub angry_trash_change: i32, // 0x264
+    pub trash_in_tile_threshold: i32, // 0x268
+    pub vandalized_objects_in_tile_threshold: i32, // 0x26C
+    pub animal_in_row_change: i32, // 0x270
+    pub different_species_change: i32, // 0x274
+    pub different_species_threshold: i32, // 0x278
+    pub sick_animal_change: i32, // 0x27C
+    pub crowded_viewing_threshold: i32, // 0x280
+    pub crowded_viewing_change: i32, // 0x284
+    pub preferred_animal_change: i32, // 0x288
+    pub happy_animal_change1: i32, // 0x28C
+    pub happy_animal_change2: i32, // 0x290
+    pub angry_animal_change1: i32, // 0x294
+    pub angry_animal_change2: i32, // 0x298
+    pub angry_animal_change3: i32, // 0x29C
+    pub escaped_animal_change: i32, // 0x2A0
+    pub object_esthetic_threshold: i32, // 0x2A4
+    pub happy_esthetic_change: i32, // 0x2A8
+    pub stand_and_eat_change: i32, // 0x2AC
+    pub stink_threshold: i32,    // 0x2B0
+    pub sick_chance: i32,        // 0x2B4
+    pub sick_change: i32,        // 0x2B8
+    pub mimic_chance: i32,       // 0x2BC
+    pub test_fence_chance: i32,  // 0x2C0
+    pub zap_happiness_hit: i32,  // 0x2C4
+    pub tap_wall_chance: i32,    // 0x2C8
+}
+
+impl ZTGuestType {
+    pub fn new(address: u32) -> Option<&'static mut ZTGuestType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTGuestType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cHungerCheck" {
+            self.hunger_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Hunger Check to {}", self.hunger_check))
+        } else if config == "-cThirstyCheck" {
+            self.thirsty_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Thirsty Check to {}", self.thirsty_check))
+        } else if config == "-cBathroomCheck" {
+            self.bathroom_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Bathroom Check to {}", self.bathroom_check))
+        } else if config == "-cLeaveZooCheck" {
+            self.leave_zoo_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Leave Zoo Check to {}", self.leave_zoo_check))
+        } else if config == "-cBuySouvenirCheck" {
+            self.buy_souvenir_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Buy Souvenir Check to {}", self.buy_souvenir_check))
+        } else if config == "-cEnergyCheck" {
+            self.energy_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Energy Check to {}", self.energy_check))
+        } else if config == "-cChaseCheck" {
+            self.chase_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Chase Check to {}", self.chase_check))
+        } else if config == "-cTrashCheck" {
+            self.trash_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Trash Check to {}", self.trash_check))
+        } else if config == "-cLikeAnimalsCheck" {
+            self.like_animals_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Like Animals Check to {}", self.like_animals_check))
+        } else if config == "-cViewingAreaCheck" {
+            self.viewing_area_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Viewing Area Check to {}", self.viewing_area_check))
+        } else if config == "-cEnvironmentEffectCheck" {
+            self.environment_effect_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Environment Effect Check to {}", self.environment_effect_check))
+        } else if config == "-cSawAnimalReset" {
+            self.saw_animal_reset = value.parse::<i32>().unwrap();
+            Ok(format!("Set Saw Animal Reset to {}", self.saw_animal_reset))
+        } else if config == "-cInitialHappiness" {
+            self.initial_happiness = value.parse::<i32>().unwrap();
+            Ok(format!("Set Initial Happiness to {}", self.initial_happiness))
+        } else if config == "-cMaxEnergy" {
+            self.max_energy = value.parse::<i32>().unwrap();
+            Ok(format!("Set Max Energy to {}", self.max_energy))
+        } else if config == "-cEnergyIncrement" {
+            self.energy_increment = value.parse::<i32>().unwrap();
+            Ok(format!("Set Energy Increment to {}", self.energy_increment))
+        } else if config == "-cEnergyThreshold" {
+            self.energy_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Energy Threshold to {}", self.energy_threshold))
+        } else if config == "-cAngryEnergyChange" {
+            self.angry_energy_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Angry Energy Change to {}", self.angry_energy_change))
+        } else if config == "-cHungerIncrement" {
+            self.hunger_increment = value.parse::<i32>().unwrap();
+            Ok(format!("Set Hunger Increment to {}", self.hunger_increment))
+        } else if config == "-cHungerThreshold" {
+            self.hunger_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Hunger Threshold to {}", self.hunger_threshold))
+        } else if config == "-cAngryFoodChange" {
+            self.angry_food_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Angry Food Change to {}", self.angry_food_change))
+        } else if config == "-cPreferredFoodChange" {
+            self.preferred_food_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Preferred Food Change to {}", self.preferred_food_change))
+        } else if config == "-cThirstIncrement" {
+            self.thirst_increment = value.parse::<i32>().unwrap();
+            Ok(format!("Set Thirst Increment to {}", self.thirst_increment))
+        } else if config == "-cThirstThreshold" {
+            self.thirst_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Thirst Threshold to {}", self.thirst_threshold))
+        } else if config == "-cAngryThirstChange" {
+            self.angry_thirst_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Angry Thirst Change to {}", self.angry_thirst_change))
+        } else if config == "-cBathroomIncrement" {
+            self.bathroom_increment = value.parse::<i32>().unwrap();
+            Ok(format!("Set Bathroom Increment to {}", self.bathroom_increment))
+        } else if config == "-cBathroomThreshold" {
+            self.bathroom_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Bathroom Threshold to {}", self.bathroom_threshold))
+        } else if config == "-cAngryBathroomChange" {
+            self.angry_bathroom_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Angry Bathroom Change to {}", self.angry_bathroom_change))
+        } else if config == "-cPriceHappy1Change" {
+            self.price_happy1_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Price Happy1 Change to {}", self.price_happy1_change))
+        } else if config == "-cPriceAngry1Change" {
+            self.price_angry1_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Price Angry1 Change to {}", self.price_angry1_change))
+        } else if config == "-cLeaveChanceLow" {
+            self.leave_chance_low = value.parse::<i32>().unwrap();
+            Ok(format!("Set Leave Chance Low to {}", self.leave_chance_low))
+        } else if config == "-cLeaveChanceMed" {
+            self.leave_chance_med = value.parse::<i32>().unwrap();
+            Ok(format!("Set Leave Chance Med to {}", self.leave_chance_med))
+        } else if config == "-cLeaveChanceHigh" {
+            self.leave_chance_high = value.parse::<i32>().unwrap();
+            Ok(format!("Set Leave Chance High to {}", self.leave_chance_high))
+        } else if config == "-cLeaveChanceDone" {
+            self.leave_chance_done = value.parse::<i32>().unwrap();
+            Ok(format!("Set Leave Chance Done to {}", self.leave_chance_done))
+        } else if config == "-cBuySouvenirChanceMed" {
+            self.buy_souvenir_chance_med = value.parse::<i32>().unwrap();
+            Ok(format!("Set Buy Souvenir Chance Med to {}", self.buy_souvenir_chance_med))
+        } else if config == "-cBuySouvenirChanceHigh" {
+            self.buy_souvenir_chance_high = value.parse::<i32>().unwrap();
+            Ok(format!("Set Buy Souvenir Chance High to {}", self.buy_souvenir_chance_high))
+        } else if config == "-cAngryTrashChange" {
+            self.angry_trash_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Angry Trash Change to {}", self.angry_trash_change))
+        } else if config == "-cTrashInTileThreshold" {
+            self.trash_in_tile_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Trash In Tile Threshold to {}", self.trash_in_tile_threshold))
+        } else if config == "-cVandalizedObjectsInTileThreshold" {
+            self.vandalized_objects_in_tile_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Vandalized Objects In Tile Threshold to {}", self.vandalized_objects_in_tile_threshold))
+        } else if config == "-cAnimalInRowChange" {
+            self.animal_in_row_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Animal In Row Change to {}", self.animal_in_row_change))
+        } else if config == "-cDifferentSpeciesChange" {
+            self.different_species_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Different Species Change to {}", self.different_species_change))
+        } else if config == "-cDifferentSpeciesThreshold" {
+            self.different_species_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Different Species Threshold to {}", self.different_species_threshold))
+        } else if config == "-cSickAnimalChange" {
+            self.sick_animal_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Sick Animal Change to {}", self.sick_animal_change))
+        } else if config == "-cCrowdedViewingThreshold" {
+            self.crowded_viewing_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Crowded Viewing Threshold to {}", self.crowded_viewing_threshold))
+        } else if config == "-cCrowdedViewingChange" {
+            self.crowded_viewing_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Crowded Viewing Change to {}", self.crowded_viewing_change))
+        } else if config == "-cPreferredAnimalChange" {
+            self.preferred_animal_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Preferred Animal Change to {}", self.preferred_animal_change))
+        } else if config == "-cHappyAnimalChange1" {
+            self.happy_animal_change1 = value.parse::<i32>().unwrap();
+            Ok(format!("Set Happy Animal Change1 to {}", self.happy_animal_change1))
+        } else if config == "-cHappyAnimalChange2" {
+            self.happy_animal_change2 = value.parse::<i32>().unwrap();
+            Ok(format!("Set Happy Animal Change2 to {}", self.happy_animal_change2))
+        } else if config == "-cAngryAnimalChange1" {
+            self.angry_animal_change1 = value.parse::<i32>().unwrap();
+            Ok(format!("Set Angry Animal Change1 to {}", self.angry_animal_change1))
+        } else if config == "-cAngryAnimalChange2" {
+            self.angry_animal_change2 = value.parse::<i32>().unwrap();
+            Ok(format!("Set Angry Animal Change2 to {}", self.angry_animal_change2))
+        } else if config == "-cAngryAnimalChange3" {
+            self.angry_animal_change3 = value.parse::<i32>().unwrap();
+            Ok(format!("Set Angry Animal Change3 to {}", self.angry_animal_change3))
+        } else if config == "-cEscapedAnimalChange" {
+            self.escaped_animal_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Escaped Animal Change to {}", self.escaped_animal_change))
+        } else if config == "-cObjectEstheticThreshold" {
+            self.object_esthetic_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Object Esthetic Threshold to {}", self.object_esthetic_threshold))
+        } else if config == "-cHappyEstheticChange" {
+            self.happy_esthetic_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Happy Esthetic Change to {}", self.happy_esthetic_change))
+        } else if config == "-cStandAndEatChange" {
+            self.stand_and_eat_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Stand And Eat Change to {}", self.stand_and_eat_change))
+        } else if config == "-cStinkThreshold" {
+            self.stink_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Stink Threshold to {}", self.stink_threshold))
+        } else if config == "-cSickChance" {
+            self.sick_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Sick Chance to {}", self.sick_chance))
+        } else if config == "-cSickChange" {
+            self.sick_change = value.parse::<i32>().unwrap();
+            Ok(format!("Set Sick Change to {}", self.sick_change))
+        } else if config == "-cMimicChance" {
+            self.mimic_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Mimic Chance to {}", self.mimic_chance))
+        } else if config == "-cTestFenceChance" {
+            self.test_fence_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Test Fence Chance to {}", self.test_fence_chance))
+        } else if config == "-cZapHappinessHit" {
+            self.zap_happiness_hit = value.parse::<i32>().unwrap();
+            Ok(format!("Set Zap Happiness Hit to {}", self.zap_happiness_hit))
+        } else if config == "-cTapWallChance" {
+            self.tap_wall_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Tap Wall Chance to {}", self.tap_wall_chance))
+        } else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cHungerCheck: {}\ncThirstyCheck: {}\ncBathroomCheck: {}\ncLeaveZooCheck: {}\ncBuySouvenirCheck: {}\ncEnergyCheck: {}\ncChaseCheck: {}\ncTrashCheck: {}\ncLikeAnimalsCheck: {}\ncViewingAreaCheck: {}\ncEnvironmentEffectCheck: {}\ncSawAnimalReset: {}\ncInitialHappiness: {}\ncMaxEnergy: {}\ncEnergyIncrement: {}\ncEnergyThreshold: {}\ncAngryEnergyChange: {}\ncHungerIncrement: {}\ncHungerThreshold: {}\ncAngryFoodChange: {}\ncPreferredFoodChange: {}\ncThirstIncrement: {}\ncThirstThreshold: {}\ncAngryThirstChange: {}\ncBathroomIncrement: {}\ncBathroomThreshold: {}\ncAngryBathroomChange: {}\ncPriceHappy1Change: {}\ncPriceAngry1Change: {}\ncLeaveChanceLow: {}\ncLeaveChanceMed: {}\ncLeaveChanceHigh: {}\ncLeaveChanceDone: {}\ncBuySouvenirChanceMed: {}\ncBuySouvenirChanceHigh: {}\ncAngryTrashChange: {}\ncTrashInTileThreshold: {}\ncVandalizedObjectsInTileThreshold: {}\ncAnimalInRowChange: {}\ncDifferentSpeciesChange: {}\ncDifferentSpeciesThreshold: {}\ncSickAnimalChange: {}\ncCrowdedViewingThreshold: {}\ncCrowdedViewingChange: {}\ncPreferredAnimalChange: {}\ncHappyAnimalChange1: {}\ncHappyAnimalChange2: {}\ncAngryAnimalChange1: {}\ncAngryAnimalChange2: {}\ncAngryAnimalChange3: {}\ncEscapedAnimalChange: {}\ncObjectEstheticThreshold: {}\ncHappyEstheticChange: {}\ncStandAndEatChange: {}\ncStinkThreshold: {}\ncSickChance: {}\ncSickChange: {}\ncMimicChance: {}\ncTestFenceChance: {}\ncZapHappinessHit: {}\ncTapWallChance: {}\n",
+        self.hunger_check,
+        self.thirsty_check,
+        self.bathroom_check,
+        self.leave_zoo_check,
+        self.buy_souvenir_check,
+        self.energy_check,
+        self.chase_check,
+        self.trash_check,
+        self.like_animals_check,
+        self.viewing_area_check,
+        self.environment_effect_check,
+        self.saw_animal_reset,
+        self.initial_happiness,
+        self.max_energy,
+        self.energy_increment,
+        self.energy_threshold,
+        self.angry_energy_change,
+        self.hunger_increment,
+        self.hunger_threshold,
+        self.angry_food_change,
+        self.preferred_food_change,
+        self.thirst_increment,
+        self.thirst_threshold,
+        self.angry_thirst_change,
+        self.bathroom_increment,
+        self.bathroom_threshold,
+        self.angry_bathroom_change,
+        self.price_happy1_change,
+        self.price_angry1_change,
+        self.leave_chance_low,
+        self.leave_chance_med,
+        self.leave_chance_high,
+        self.leave_chance_done,
+        self.buy_souvenir_chance_med,
+        self.buy_souvenir_chance_high,
+        self.angry_trash_change,
+        self.trash_in_tile_threshold,
+        self.vandalized_objects_in_tile_threshold,
+        self.animal_in_row_change,
+        self.different_species_change,
+        self.different_species_threshold,
+        self.sick_animal_change,
+        self.crowded_viewing_threshold,
+        self.crowded_viewing_change,
+        self.preferred_animal_change,
+        self.happy_animal_change1,
+        self.happy_animal_change2,
+        self.angry_animal_change1,
+        self.angry_animal_change2,
+        self.angry_animal_change3,
+        self.escaped_animal_change,
+        self.object_esthetic_threshold,
+        self.happy_esthetic_change,
+        self.stand_and_eat_change,
+        self.stink_threshold,
+        self.sick_chance,
+        self.sick_change,
+        self.mimic_chance,
+        self.test_fence_chance,
+        self.zap_happiness_hit,
+        self.tap_wall_chance,
+        )
+    }
+}
+
+impl Deref for ZTGuestType {
+    type Target = ZTUnitType;
+    fn deref(&self) -> &Self::Target {
+        &self.ztunit_type
     }
 }
 
@@ -1462,13 +1811,22 @@ fn print_config_for_type() -> String {
         config.push_str(&rubble_type.print_config_integers());
 
         print_info_image_name(entity_type, &mut config);
-    } else if class_type == "Animal" || class_type == "Guest" || class_type == "Keeper" || class_type == "MaintenanceWorker" || class_type == "TourGuide" || class_type == "DRT" {
+    } else if class_type == "Animal" || class_type == "Keeper" || class_type == "MaintenanceWorker" || class_type == "TourGuide" || class_type == "DRT" {
         info!("Entity type is a ZTUnit. Printing ZTUnit type configuration.");
         let ztunit_type = ZTUnitType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
         config.push_str(&ztunit_type.bfunit_type.bfentitytype.print_config_integers());
         config.push_str(&ztunit_type.bfunit_type.print_config_integers());
         config.push_str(&ztunit_type.print_config_integers());
         // config.push_str(&ztunit_type.get_list_name());
+
+        // print_info_image_name(entity_type, &mut config);
+    } else if class_type == "Guest" {
+        info!("Entity type is a ZTGuest. Printing ZTGuest type configuration.");
+        let ztguest_type = ZTGuestType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&ztguest_type.ztunit_type.bfunit_type.bfentitytype.print_config_integers());
+        config.push_str(&ztguest_type.ztunit_type.bfunit_type.print_config_integers());
+        config.push_str(&ztguest_type.ztunit_type.print_config_integers());
+        config.push_str(&ztguest_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
     } else {
@@ -1521,6 +1879,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_ztunit_type = ZTUnitType::new(entity_type_address)
         .unwrap()
         .set_config(_args[0], _args[1]);
+    let result_ztguest_type = ZTGuestType::new(entity_type_address)
+        .unwrap()
+        .set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -1545,6 +1906,8 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
         result_bfunit_type
     } else if result_ztunit_type.is_ok() {
         result_ztunit_type
+    } else if result_ztguest_type.is_ok() {
+        result_ztguest_type
     } else {
         Err("Invalid configuration option")
     }
