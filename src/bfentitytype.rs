@@ -13,19 +13,7 @@ pub trait EntityType {}
 // We then use a veru simple macro to implement the EntityType trait for all the structs that are considered EntityTypes
 macro_rules! impl_EntityType (( $($int:ident),* ) => {$(impl EntityType for $int {})*});
 
-impl_EntityType!(
-    BFEntityType,
-    ZTSceneryType,
-    ZTBuildingType,
-    ZTFenceType,
-    ZTTankWallType,
-    ZTFoodType,
-    ZTTankFilterType,
-    ZTPathType,
-    ZTRubbleType
-    BFUnitType
-    ZTUnitType
-);
+impl_EntityType!(BFEntityType, ZTSceneryType, ZTBuildingType, ZTFenceType, ZTTankWallType, ZTFoodType, ZTTankFilterType, ZTPathType, ZTRubbleType, BFUnitType, ZTUnitType); // Don't format this line
 
 pub trait EntityTypeImpl<T>: EntityType + FieldAccessorAsStringTrait {
     // returns the instance of the EntityType struct
