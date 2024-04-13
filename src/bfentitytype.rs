@@ -1999,12 +1999,175 @@ impl ZTAnimalType {
             Ok(format!("Set Dirt Chance to {}", self.dirt_chance))
         } else if config == "-cWaterNeeded" {
             self.water_needed = value.parse::<i32>().unwrap();
-            Ok(format!("Set Water Need to {}", self.water_needed))
+            Ok(format!("Set Water Needed to {}", self.water_needed))
+        } else if config == "-cUnderwaterNeeded" {
+            self.underwater_needed = value.parse::<i32>().unwrap();
+            Ok(format!("Set Underwater Needed to {}", self.underwater_needed))
+        } else if config == "-cLandNeeded" {
+            self.land_needed = value.parse::<i32>().unwrap();
+            Ok(format!("Set Land Needed to {}", self.land_needed))
+        } else if config == "-cEnterWaterChance" {
+            self.enter_water_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Enter Water Chance to {}", self.enter_water_chance))
+        } else if config == "-cEnterTankChance" {
+            self.enter_tank_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Enter Tank Chance to {}", self.enter_tank_chance))
+        } else if config == "-cEnterLandChance" {
+            self.enter_land_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Enter Land Chance to {}", self.enter_land_chance))
+        } else if config == "-cDrinkWaterChance" {
+            self.drink_water_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Drink Water Chance to {}", self.drink_water_chance))
+        } else if config == "-cChaseAnimalChance" {
+            self.chase_animal_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Chase Animal Chance to {}", self.chase_animal_chance))
+        } else if config == "-cClimbsCliffs" {
+            self.climbs_cliffs = value.parse::<i32>().unwrap();
+            Ok(format!("Set Climbs Cliffs to {}", self.climbs_cliffs))
+        } else if config == "-cBashStrength" {
+            self.bash_strength = value.parse::<i32>().unwrap();
+            Ok(format!("Set Bash Strength to {}", self.bash_strength))
+        } else if config == "-cAttractiveness" {
+            self.attractiveness = value.parse::<i32>().unwrap();
+            Ok(format!("Set Attractiveness to {}", self.attractiveness))
+        } else if config == "-cKeeperFoodType" {
+            self.keeper_food_type = value.parse::<i32>().unwrap();
+            Ok(format!("Set Keeper Food Type to {}", self.keeper_food_type))
+        } else if config == "-cIsClimber" {
+            self.is_climber = value.parse::<bool>().unwrap();
+            Ok(format!("Set Is Climber to {}", self.is_climber))
+        } else if config == "-cIsJumper" {
+            self.is_jumper = value.parse::<bool>().unwrap();
+            Ok(format!("Set Is Jumper to {}", self.is_jumper))
+        } else if config == "-cSmallZoodoo" {
+            self.small_zoodoo = value.parse::<i32>().unwrap();
+            Ok(format!("Set Small Zoodoo to {}", self.small_zoodoo))
+        } else if config == "-cDinoZoodoo" {
+            self.dino_zoodoo = value.parse::<i32>().unwrap();
+            Ok(format!("Set Dino Zoodoo to {}", self.dino_zoodoo))
+        } else if config == "-cGiantZoodoo" {
+            self.giant_zoodoo = value.parse::<i32>().unwrap();
+            Ok(format!("Set Giant Zoodoo to {}", self.giant_zoodoo))
+        } else if config == "-cIsSpecialAnimal" {
+            self.is_special_animal = value.parse::<bool>().unwrap();
+            Ok(format!("Set Is Special Animal to {}", self.is_special_animal))
+        } else if config == "-cNeedShelter" {
+            self.need_shelter = value.parse::<bool>().unwrap();
+            Ok(format!("Set Need Shelter to {}", self.need_shelter))
+        } else if config == "-cNeedToys" {
+            self.need_toys = value.parse::<bool>().unwrap();
+            Ok(format!("Set Need Toys to {}", self.need_toys))
+        } else if config == "-cBabiesAttack" {
+            self.babies_attack = value.parse::<bool>().unwrap();
+            Ok(format!("Set Babies Attack to {}", self.babies_attack))
         } else {
             Err("Invalid configuration option")
         }
+
+        pub fn print_config_integers(&self) -> String {
+        format!(
+            "Box Footprint X: {}\nBox Footprint Y: {}\nBox Footprint Z: {}\nFamily: {}\nGenus: {}\nHabitat: {}\nLocation: {}\nEra: {}\nBreath Threshold: {}\nBreath Increment: {}\nHunger Threshold: {}\nHungry Health Change: {}\nHunger Increment: {}\nFood Unit Value: {}\nKeeper Food Units Eaten: {}\nNeeded Food: {}\nNo Food Change: {}\nInitial Happiness: {}\nMax Hits: {}\nPct Hits: {}\nMax Energy: {}\nMax Dirty: {}\nMin Dirty: {}\nSick Change: {}\nOther Animal Sick Change: {}\nSick Chance: {}\nSick Random Chance: {}\nCrowd: {}\nCrowd Happiness Change: {}\nZap Happiness Change: {}\nCaptivity: {}\nReproduction Chance: {}\nReproduction Interval: {}\nMating Type: {}\nOffspring: {}\nKeeper Frequency: {}\nNot Enough Keepers Change: {}\nSocial: {}\nHabitat Size: {}\nNumber Animals Min: {}\nNumber Animals Max: {}\nNumber Min Change: {}\nNumber Max Change: {}\nHabitat Preference: {}\nBaby Born Change: {}\nEnergy Increment: {}\nEnergy Threshold: {}\nDirty Increment: {}\nDirty Threshold: {}\nSick Time: {}\nBaby To Adult: {}\nOther Food: {}\nTree Pref: {}\nRock Pref: {}\nSpace Pref: {}\nElevation Pref: {}\nDepth Min: {}\nDepth Max: {}\nDepth Change: {}\nSalinity Change: {}\nSalinity Health Change: {}\nHappy Reproduce Threshold: {}\nBuilding Use Chance: {}\nNo Mate Change: {}\nTime Death: {}\nDeath Chance: {}\nDirt Chance: {}\nWater Needed: {}\nUnderwater Needed: {}\nLand Needed: {}\nEnter Water Chance: {}\nEnter Tank Chance: {}\nEnter Land Chance: {}\nDrink Water Chance: {}\nChase Animal Chance: {}\nClimbs Cliffs: {}\nBash Strength: {}\nAttractiveness: {}\nKeeper Food Type: {}\nIs Climber: {}\nIs Jumper: {}\nSmall Zoodoo: {}\nDino Zoodoo: {}\nGiant Zoodoo: {}\nIs Special Animal: {}\
+            Need Shelter: {}\nNeed Toys: {}\nBabies Attack: {}\n",
+            self.box_footprint_x,
+            self.box_footprint_y,
+            self.box_footprint_z,
+            self.family,
+            self.genus,
+            self.habitat,
+            self.location,
+            self.era,
+            self.breath_threshold,
+            self.breath_increment,
+            self.hunger_threshold,
+            self.hungry_health_change,
+            self.hunger_increment,
+            self.food_unit_value,
+            self.keeper_food_units_eaten,
+            self.needed_food,
+            self.no_food_change,
+            self.initial_happiness,
+            self.max_hits,
+            self.pct_hits,
+            self.max_energy,
+            self.max_dirty,
+            self.min_dirty,
+            self.sick_change,
+            self.other_animal_sick_change,
+            self.sick_chance,
+            self.sick_random_chance,
+            self.crowd,
+            self.crowd_happiness_change,
+            self.zap_happiness_change,
+            self.captivity,
+            self.reproduction_chance,
+            self.reproduction_interval,
+            self.mating_type,
+            self.offspring,
+            self.keeper_frequency,
+            self.not_enough_keepers_change,
+            self.social,
+            self.habitat_size,
+            self.number_animals_min,
+            self.number_animals_max,
+            self.number_min_change,
+            self.number_max_change,
+            self.habitat_preference,
+            self.baby_born_change,
+            self.energy_increment,
+            self.energy_threshold,
+            self.dirty_increment,
+            self.dirty_threshold,
+            self.sick_time,
+            self.baby_to_adult,
+            self.other_food,
+            self.tree_pref,
+            self.rock_pref,
+            self.space_pref,
+            self.elevation_pref,
+            self.depth_min,
+            self.depth_max,
+            self.depth_change,
+            self.salinity_change,
+            self.salinity_health_change,
+            self.happy_reproduce_threshold,
+            self.building_use_chance,
+            self.no_mate_change,
+            self.time_death,
+            self.death_chance,
+            self.dirt_chance,
+            self.water_needed,
+            self.underwater_needed,
+            self.land_needed,
+            self.enter_water_chance,
+            self.enter_tank_chance,
+            self.enter_land_chance,
+            self.drink_water_chance,
+            self.chase_animal_chance,
+            self.climbs_cliffs,
+            self.bash_strength,
+            self.attractiveness,
+            self.keeper_food_type,
+            self.is_climber,
+            self.is_jumper,
+            self.small_zoodoo,
+            self.dino_zoodoo,
+            self.giant_zoodoo,
+            self.is_special_animal,
+            self.need_shelter,
+            self.need_toys,
+            self.babies_attack
+        )
     }
 }
+
+impl Deref for ZTAnimalType {
+    type Target = BFEntityType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bfentitytype
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(args: Vec<&str>) -> Result<String, &'static str> {
@@ -2147,7 +2310,7 @@ fn print_config_for_type() -> String {
         config.push_str(&rubble_type.print_config_integers());
 
         print_info_image_name(entity_type, &mut config);
-    } else if class_type == "Animal" || class_type == "Keeper" || class_type == "MaintenanceWorker" || class_type == "TourGuide" || class_type == "DRT" {
+    } else if class_type == "Keeper" || class_type == "MaintenanceWorker" || class_type == "TourGuide" || class_type == "DRT" {
         info!("Entity type is a ZTUnit. Printing ZTUnit type configuration.");
         let ztunit_type = ZTUnitType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
         config.push_str(&ztunit_type.bfunit_type.bfentitytype.print_config_integers());
@@ -2165,10 +2328,15 @@ fn print_config_for_type() -> String {
         config.push_str(&ztguest_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
+    } else if class_type == "Animal" {
+        info!("Entity type is a ZTAnimal. Printing ZTAnimal type configuration.");
+        let ztanimal_type = ZTAnimalType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&ztanimal_type.bfentitytype.print_config_integers());
+        config.push_str(&ztanimal_type.print_config_integers());
+
+        // print_info_image_name(entity_type, &mut config);
     } else {
-        info!(
-            "Entity type is not a known entity type. Printing base entity type configuration only."
-        );
+        info!("Entity type is not a known type. Skipping additional configuration.");
     }
 
     // print [colorrep] section of the configuration - available in all entity types
@@ -2218,6 +2386,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_ztguest_type = ZTGuestType::new(entity_type_address)
         .unwrap()
         .set_config(_args[0], _args[1]);
+    let result_ztanimal_type = ZTAnimalType::new(entity_type_address)
+        .unwrap()
+        .set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -2244,6 +2415,8 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
         result_ztunit_type
     } else if result_ztguest_type.is_ok() {
         result_ztguest_type
+    } else if result_ztanimal_type.is_ok() {
+        result_ztanimal_type
     } else {
         Err("Invalid configuration option")
     }
