@@ -2293,6 +2293,53 @@ impl Deref for ZTMaintType {
     }
 }
 
+// ------------ ZTHelicopterType, Implementation, and Related Functions ------------ //
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+struct ZTHelicopterType {
+    pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
+    pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
+    // pub loop_sound_name: i32, // 0x1F4 TODO: implement string ptr as function getter
+    pad02: [u8; 0x1F8 - 0x1F4], // ----------------------- padding: 4 bytes
+    pub loop_sound_atten: i32, // 0x1F8
+}
+
+impl ZTHelicopterType {
+    pub fn new(address: u32) -> Option<&'static mut ZTHelicopterType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTHelicopterType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cLoopSoundAtten" {
+            self.loop_sound_atten = value.parse::<i32>().unwrap();
+            Ok(format!("Set Loop Sound Atten to {}", self.loop_sound_atten))
+        } else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cLoopSoundAtten: {}\n",
+        self.loop_sound_atten,
+        )
+    }
+}
+
+impl Deref for ZTHelicopterType {
+    type Target = ZTStaffType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ztstaff_type
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(args: Vec<&str>) -> Result<String, &'static str> {
@@ -2453,7 +2500,7 @@ fn print_config_for_type() -> String {
         config.push_str(&ztanimal_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
-    } else if class_type == "Keeper" || class_type == "TourGuide" || class_type == "DRT" {
+    } else if class_type == "Keeper" || class_type == "TourGuide" {
         info!("Entity type is a ZTStaff. Printing ZTStaff type configuration.");
         let ztstaff_type = ZTStaffType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
         config.push_str(&ztstaff_type.ztunit_type.bfunit_type.bfentitytype.print_config_integers());
@@ -2472,8 +2519,18 @@ fn print_config_for_type() -> String {
         config.push_str(&ztmaint_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
+    } else if class_type == "DRT" {
+        info!("Entity type is a ZTHelicopter. Printing ZTHelicopter type configuration.");
+        let zthelicopter_type = ZTHelicopterType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&zthelicopter_type.ztstaff_type.ztunit_type.bfunit_type.bfentitytype.print_config_integers());
+        config.push_str(&zthelicopter_type.ztstaff_type.ztunit_type.bfunit_type.print_config_integers());
+        config.push_str(&zthelicopter_type.ztstaff_type.ztunit_type.print_config_integers());
+        config.push_str(&zthelicopter_type.ztstaff_type.print_config_integers());
+        config.push_str(&zthelicopter_type.print_config_integers());
+
+        // print_info_image_name(entity_type, &mut config);
     } else {
-        info!("Entity type is not a known type. Skipping configuration.");
+        info!("Entity type is not a recognized type. Printing basic configuration.");
     }
 
     // print [colorrep] section of the configuration - available in all entity types
@@ -2532,6 +2589,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_ztmaint_type = ZTMaintType::new(entity_type_address)
         .unwrap()
         .set_config(_args[0], _args[1]);
+    let result_zthelicopter_type = ZTHelicopterType::new(entity_type_address)
+        .unwrap()
+        .set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -2562,6 +2622,10 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
         result_ztanimal_type
     } else if result_ztstaff_type.is_ok() {
         result_ztstaff_type
+    } else if result_ztmaint_type.is_ok() {
+        result_ztmaint_type
+    } else if result_zthelicopter_type.is_ok() {
+        result_zthelicopter_type
     } else {
         Err("Invalid configuration option")
     }
