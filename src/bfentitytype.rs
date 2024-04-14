@@ -2294,6 +2294,10 @@ impl Deref for ZTMaintType {
 }
 
 // ------------ ZTHelicopterType, Implementation, and Related Functions ------------ //
+
+// TODO: DRT staff are not selectable in-game, so this struct needs a bit more testing to ensure it works as expected.
+// For now, assumptions are that the offets are correct and the struct is implemented correctly.
+
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
 struct ZTHelicopterType {
@@ -2333,6 +2337,77 @@ impl ZTHelicopterType {
 }
 
 impl Deref for ZTHelicopterType {
+    type Target = ZTStaffType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ztstaff_type
+    }
+}
+
+// ------------ ZTGuideType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+struct ZTGuideType {
+    pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
+    pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
+    pub inform_guest_time: i32, // 0x1F4
+    pub tour_guide_bonus: i32, // 0x1F8
+    pub crowd_check: i32, // 0x1FC
+    pub crowd_radius: i32, // 0x200
+    pub follow_chance: i32, // 0x204
+    pub max_group_size: i32, // 0x208
+}
+
+impl ZTGuideType {
+    pub fn new(address: u32) -> Option<&'static mut ZTGuideType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTGuideType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cInformGuestTime" {
+            self.inform_guest_time = value.parse::<i32>().unwrap();
+            Ok(format!("Set Inform Guest Time to {}", self.inform_guest_time))
+        } else if config == "-cTourGuideBonus" {
+            self.tour_guide_bonus = value.parse::<i32>().unwrap();
+            Ok(format!("Set Tour Guide Bonus to {}", self.tour_guide_bonus))
+        } else if config == "-cCrowdCheck" {
+            self.crowd_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Crowd Check to {}", self.crowd_check))
+        } else if config == "-cCrowdRadius" {
+            self.crowd_radius = value.parse::<i32>().unwrap();
+            Ok(format!("Set Crowd Radius to {}", self.crowd_radius))
+        } else if config == "-cFollowChance" {
+            self.follow_chance = value.parse::<i32>().unwrap();
+            Ok(format!("Set Follow Chance to {}", self.follow_chance))
+        } else if config == "-cMaxGroupSize" {
+            self.max_group_size = value.parse::<i32>().unwrap();
+            Ok(format!("Set Max Group Size to {}", self.max_group_size))
+        } else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cInformGuestTime: {}\ncTourGuideBonus: {}\ncCrowdCheck: {}\ncCrowdRadius: {}\ncFollowChance: {}\ncMaxGroupSize: {}\n",
+        self.inform_guest_time,
+        self.tour_guide_bonus,
+        self.crowd_check,
+        self.crowd_radius,
+        self.follow_chance,
+        self.max_group_size,
+        )
+    }
+}
+
+impl Deref for ZTGuideType {
     type Target = ZTStaffType;
 
     fn deref(&self) -> &Self::Target {
@@ -2500,7 +2575,7 @@ fn print_config_for_type() -> String {
         config.push_str(&ztanimal_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
-    } else if class_type == "Keeper" || class_type == "TourGuide" {
+    } else if class_type == "Keeper" {
         info!("Entity type is a ZTStaff. Printing ZTStaff type configuration.");
         let ztstaff_type = ZTStaffType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
         config.push_str(&ztstaff_type.ztunit_type.bfunit_type.bfentitytype.print_config_integers());
@@ -2529,8 +2604,16 @@ fn print_config_for_type() -> String {
         config.push_str(&zthelicopter_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
-    } else {
-        info!("Entity type is not a recognized type. Printing basic configuration.");
+    } else if class_type == "TourGuide" {
+        info!("Entity type is a ZTGuide. Printing ZTGuide type configuration.");
+        let ztguide_type = ZTGuideType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&ztguide_type.ztstaff_type.ztunit_type.bfunit_type.bfentitytype.print_config_integers());
+        config.push_str(&ztguide_type.ztstaff_type.ztunit_type.bfunit_type.print_config_integers());
+        config.push_str(&ztguide_type.ztstaff_type.ztunit_type.print_config_integers());
+        config.push_str(&ztguide_type.ztstaff_type.print_config_integers());
+        config.push_str(&ztguide_type.print_config_integers());
+
+        // print_info_image_name(entity_type, &mut config);
     }
 
     // print [colorrep] section of the configuration - available in all entity types
@@ -2592,6 +2675,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_zthelicopter_type = ZTHelicopterType::new(entity_type_address)
         .unwrap()
         .set_config(_args[0], _args[1]);
+    let result_ztguide_type = ZTGuideType::new(entity_type_address)
+        .unwrap()
+        .set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -2626,6 +2712,8 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
         result_ztmaint_type
     } else if result_zthelicopter_type.is_ok() {
         result_zthelicopter_type
+    } else if result_ztguide_type.is_ok() {
+        result_ztguide_type
     } else {
         Err("Invalid configuration option")
     }
