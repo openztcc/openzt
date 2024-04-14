@@ -2415,6 +2415,88 @@ impl Deref for ZTGuideType {
     }
 }
 
+// ------------ ZTKeeperType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+struct ZTKeeperType {
+    pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
+    pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
+    pub food_units_second: i32, // 0x1F4
+    pub clean_time: i32, // 0x1F8
+    pub heal_units_second: i32, // 0x1FC
+    pub food_per_tile: i32, // 0x200
+    // pub sickly_animal_pct: i32, // 0x6386F8
+    pub clean_tank_pct: i32, // 0x204
+    pub clean_tank_threshold: i32, // 0x208
+    // pub dirt: i16, // 0x20C TODO: Appears to pull from a different address, possibly a different struct
+}
+
+impl ZTKeeperType {
+    pub fn new(address: u32) -> Option<&'static mut ZTKeeperType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTKeeperType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    // TODO: fix sickly_animal_pct, currently crashes when trying to access it
+    pub fn get_sickly_animal_pct(&self) -> i32 {
+        unsafe {
+            let ptr = get_from_memory::<*mut i32>(0x6386F8);
+            if !ptr.is_null() {
+                *ptr
+            } else {
+                0
+            }
+        }
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cFoodUnitsSecond" {
+            self.food_units_second = value.parse::<i32>().unwrap();
+            Ok(format!("Set Food Units Second to {}", self.food_units_second))
+        } else if config == "-cCleanTime" {
+            self.clean_time = value.parse::<i32>().unwrap();
+            Ok(format!("Set Clean Time to {}", self.clean_time))
+        } else if config == "-cHealUnitsSecond" {
+            self.heal_units_second = value.parse::<i32>().unwrap();
+            Ok(format!("Set Heal Units Second to {}", self.heal_units_second))
+        } else if config == "-cFoodPerTile" {
+            self.food_per_tile = value.parse::<i32>().unwrap();
+            Ok(format!("Set Food Per Tile to {}", self.food_per_tile))
+        } else if config == "-cCleanTankPct" {
+            self.clean_tank_pct = value.parse::<i32>().unwrap();
+            Ok(format!("Set Clean Tank Pct to {}", self.clean_tank_pct))
+        } else if config == "-cCleanTankThreshold" {
+            self.clean_tank_threshold = value.parse::<i32>().unwrap();
+            Ok(format!("Set Clean Tank Threshold to {}", self.clean_tank_threshold))
+        } else if config == "-cDirt" {
+            self.dirt = value.parse::<u16>().unwrap();
+            Ok(format!("Set Dirt to {}", self.dirt))
+        } else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cFoodUnitsSecond: {}\ncCleanTime: {}\ncHealUnitsSecond: {}\ncFoodPerTile: {}\ncCleanTankPct: {}\ncCleanTankThreshold: {}\n", //cDirt: {}\n", //cSicklyAnimalPct: {}\n",
+        self.food_units_second,
+        self.clean_time,
+        self.heal_units_second,
+        self.food_per_tile,
+        self.clean_tank_pct,
+        self.clean_tank_threshold,
+        // self.dirt,
+        //self.get_sickly_animal_pct(),
+        )
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(args: Vec<&str>) -> Result<String, &'static str> {
@@ -2575,15 +2657,6 @@ fn print_config_for_type() -> String {
         config.push_str(&ztanimal_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
-    } else if class_type == "Keeper" {
-        info!("Entity type is a ZTStaff. Printing ZTStaff type configuration.");
-        let ztstaff_type = ZTStaffType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-        config.push_str(&ztstaff_type.ztunit_type.bfunit_type.bfentitytype.print_config_integers());
-        config.push_str(&ztstaff_type.ztunit_type.bfunit_type.print_config_integers());
-        config.push_str(&ztstaff_type.ztunit_type.print_config_integers());
-        config.push_str(&ztstaff_type.print_config_integers());
-
-        // print_info_image_name(entity_type, &mut config);
     } else if class_type == "MaintenanceWorker" {
         info!("Entity type is a ZTMaint. Printing ZTMaint type configuration.");
         let ztmaint_type = ZTMaintType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
@@ -2614,6 +2687,18 @@ fn print_config_for_type() -> String {
         config.push_str(&ztguide_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
+    } else if class_type == "Keeper" {
+        info!("Entity type is a ZTKeeper. Printing ZTKeeper type configuration.");
+        let ztkeeper_type = ZTKeeperType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&ztkeeper_type.ztstaff_type.ztunit_type.bfunit_type.bfentitytype.print_config_integers());
+        config.push_str(&ztkeeper_type.ztstaff_type.ztunit_type.bfunit_type.print_config_integers());
+        config.push_str(&ztkeeper_type.ztstaff_type.ztunit_type.print_config_integers());
+        config.push_str(&ztkeeper_type.ztstaff_type.print_config_integers());
+        config.push_str(&ztkeeper_type.print_config_integers());
+
+        // print_info_image_name(entity_type, &mut config);
+    } else {
+        info!("Entity type is not a known type. Printing basic configuration.");
     }
 
     // print [colorrep] section of the configuration - available in all entity types
@@ -2678,6 +2763,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_ztguide_type = ZTGuideType::new(entity_type_address)
         .unwrap()
         .set_config(_args[0], _args[1]);
+    let result_ztkeeper_type = ZTKeeperType::new(entity_type_address)
+        .unwrap()
+        .set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -2714,6 +2802,8 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
         result_zthelicopter_type
     } else if result_ztguide_type.is_ok() {
         result_ztguide_type
+    } else if result_ztkeeper_type.is_ok() {
+        result_ztkeeper_type
     } else {
         Err("Invalid configuration option")
     }
