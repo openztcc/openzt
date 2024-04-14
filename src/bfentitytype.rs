@@ -1675,7 +1675,7 @@ impl Deref for ZTGuestType {
 #[repr(C)]
 struct ZTAnimalType {
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
-    pad00: [u8; 0x1B4 - 0x188], // ----------------------- padding: 44 bytes
+    pad00: [u8; 0x1D8 - 0x188], // ----------------------- padding: 72 bytes
     box_footprint_x: i32, // 0x1D8
     box_footprint_y: i32, // 0x1DC
     box_footprint_z: i32, // 0x1E0
@@ -1695,7 +1695,6 @@ struct ZTAnimalType {
     keeper_food_units_eaten: i32, // 0x21C
     needed_food: i32, // 0x220
     no_food_change: i32, // 0x224
-    pad03: [u8; 0x234 - 0x228], // ----------------------- padding: 12 bytes
     initial_happiness: i32, // 0x228
     pad04: [u8; 0x234 - 0x22C], // ----------------------- padding: 12 bytes
     max_hits: i32, // 0x234
@@ -1719,6 +1718,7 @@ struct ZTAnimalType {
     mating_type: i32, // 0x280
     offspring: i32, // 0x284
     keeper_frequency: i32, // 0x288
+    pad007: [u8; 0x290 - 0x28C], // ----------------------- padding: 4 bytes
     not_enough_keepers_change: i32, // 0x290
     social: i32, // 0x294
     habitat_size: i32, // 0x298
@@ -1774,9 +1774,9 @@ struct ZTAnimalType {
     keeper_food_type: i32, // 0x3C8
     is_climber: bool, // 0x3CC
     is_jumper: bool, // 0x3CD
-    small_zoodoo: i32, // 0x3CE
-    dino_zoodoo: i32, // 0x3CF
-    giant_zoodoo: i32, // 0x3D0
+    small_zoodoo: bool, // 0x3CE
+    dino_zoodoo: bool, // 0x3CF
+    giant_zoodoo: bool, // 0x3D0
     is_special_animal: bool, // 0x3D1
     need_shelter: bool, // 0x3D2
     need_toys: bool, // 0x3D3
