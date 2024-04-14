@@ -2168,6 +2168,75 @@ impl Deref for ZTAnimalType {
     }
 }
 
+// ------------ ZTStaffType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+struct ZTStaffType {
+    pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
+    pad01: [u8; 0x1B4 - 0x188], // ----------------------- padding: 44 bytes
+    pub work_check: i32, // 0x1B4
+    pub chase_check: i32, // 0x1B8
+    pad02: [u8; 0x1BC - 0x1BC], // ----------------------- padding: 4 bytes
+    pub monthly_cost: f32, // 0x1BC
+    // pub training_icon_name: string ptr, // 0x1D8 TODO: implement string ptr as function getter
+    pad03: [u8; 0x1E8 - 0x1C0], // ----------------------- padding: 24 bytes
+    pub duties_text_id: i32, // 0x1E8
+    pub weapon_range: i32, // 0x1EC
+}
+
+impl ZTStaffType {
+    pub fn new(address: u32) -> Option<&'static mut ZTStaffType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTStaffType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cWorkCheck" {
+            self.work_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Work Check to {}", self.work_check))
+        } else if config == "-cChaseCheck" {
+            self.chase_check = value.parse::<i32>().unwrap();
+            Ok(format!("Set Chase Check to {}", self.chase_check))
+        } else if config == "-cMonthlyCost" {
+            self.monthly_cost = value.parse::<f32>().unwrap();
+            Ok(format!("Set Monthly Cost to {}", self.monthly_cost))
+        } else if config == "-cDutiesTextID" {
+            self.duties_text_id = value.parse::<i32>().unwrap();
+            Ok(format!("Set Duties Text ID to {}", self.duties_text_id))
+        } else if config == "-cWeaponRange" {
+            self.weapon_range = value.parse::<i32>().unwrap();
+            Ok(format!("Set Weapon Range to {}", self.weapon_range))
+        } else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cWorkCheck: {}\ncChaseCheck: {}\ncMonthlyCost: {}\ncDutiesTextID: {}\ncWeaponRange: {}\n",
+        self.work_check,
+        self.chase_check,
+        self.monthly_cost,
+        self.duties_text_id,
+        self.weapon_range,
+        )
+    }
+}
+
+impl Deref for ZTStaffType {
+    type Target = ZTUnitType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ztunit_type
+    }
+}
+
 // ------------ Custom Command Implementation ------------ //
 
 fn command_sel_type(args: Vec<&str>) -> Result<String, &'static str> {
