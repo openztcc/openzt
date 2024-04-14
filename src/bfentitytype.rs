@@ -2475,10 +2475,12 @@ impl ZTKeeperType {
         } else if config == "-cCleanTankThreshold" {
             self.clean_tank_threshold = value.parse::<i32>().unwrap();
             Ok(format!("Set Clean Tank Threshold to {}", self.clean_tank_threshold))
-        } else if config == "-cDirt" {
-            self.dirt = value.parse::<u16>().unwrap();
-            Ok(format!("Set Dirt to {}", self.dirt))
-        } else {
+        } 
+        // else if config == "-cDirt" {
+        //     self.dirt = value.parse::<u16>().unwrap();
+        //     Ok(format!("Set Dirt to {}", self.dirt))
+        // } 
+        else {
             Err("Invalid configuration option")
         }
     }
