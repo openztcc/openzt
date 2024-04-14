@@ -2379,15 +2379,6 @@ fn print_config_for_type() -> String {
         config.push_str(&rubble_type.print_config_integers());
 
         print_info_image_name(entity_type, &mut config);
-    } else if class_type == "Keeper" || class_type == "MaintenanceWorker" || class_type == "TourGuide" || class_type == "DRT" {
-        info!("Entity type is a ZTUnit. Printing ZTUnit type configuration.");
-        let ztunit_type = ZTUnitType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-        config.push_str(&ztunit_type.bfunit_type.bfentitytype.print_config_integers());
-        config.push_str(&ztunit_type.bfunit_type.print_config_integers());
-        config.push_str(&ztunit_type.print_config_integers());
-        // config.push_str(&ztunit_type.get_list_name());
-
-        // print_info_image_name(entity_type, &mut config);
     } else if class_type == "Guest" {
         info!("Entity type is a ZTGuest. Printing ZTGuest type configuration.");
         let ztguest_type = ZTGuestType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
@@ -2404,6 +2395,15 @@ fn print_config_for_type() -> String {
         config.push_str(&ztanimal_type.ztunit_type.bfunit_type.print_config_integers());
         config.push_str(&ztanimal_type.ztunit_type.print_config_integers());
         config.push_str(&ztanimal_type.print_config_integers());
+
+        // print_info_image_name(entity_type, &mut config);
+    } else if class_type == "Keeper" || class_type == "MaintenanceWorker" || class_type == "TourGuide" || class_type == "DRT" {
+        info!("Entity type is a ZTStaff. Printing ZTStaff type configuration.");
+        let ztstaff_type = ZTStaffType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
+        config.push_str(&ztstaff_type.ztunit_type.bfunit_type.bfentitytype.print_config_integers());
+        config.push_str(&ztstaff_type.ztunit_type.bfunit_type.print_config_integers());
+        config.push_str(&ztstaff_type.ztunit_type.print_config_integers());
+        config.push_str(&ztstaff_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
     } else {
@@ -2460,6 +2460,9 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
     let result_ztanimal_type = ZTAnimalType::new(entity_type_address)
         .unwrap()
         .set_config(_args[0], _args[1]);
+    let result_ztstaff_type = ZTStaffType::new(entity_type_address)
+        .unwrap()
+        .set_config(_args[0], _args[1]);
 
     // return the result of the first successful configuration change
     if result_entity_type.is_ok() {
@@ -2488,6 +2491,8 @@ fn parse_subargs_for_type(_args: Vec<&str>) -> Result<String, &'static str> {
         result_ztguest_type
     } else if result_ztanimal_type.is_ok() {
         result_ztanimal_type
+    } else if result_ztstaff_type.is_ok() {
+        result_ztstaff_type
     } else {
         Err("Invalid configuration option")
     }
