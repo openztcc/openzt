@@ -1674,8 +1674,8 @@ impl Deref for ZTGuestType {
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
 struct ZTAnimalType {
-    ztunit_type: ZTUnitType, // bytes: 0x1D8 - 0x100 = 0xD8 = 216 bytes
-    pad00: [u8; 0x1D8 - 0x100], // ----------------------- padding: 216 bytes
+    pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
+    pad00: [u8; 0x1B4 - 0x188], // ----------------------- padding: 44 bytes
     box_footprint_x: i32, // 0x1D8
     box_footprint_y: i32, // 0x1DC
     box_footprint_z: i32, // 0x1E0
@@ -2063,108 +2063,109 @@ impl ZTAnimalType {
         } else {
             Err("Invalid configuration option")
         }
+    }
 
-        pub fn print_config_integers(&self) -> String {
-        format!(
-            "Box Footprint X: {}\nBox Footprint Y: {}\nBox Footprint Z: {}\nFamily: {}\nGenus: {}\nHabitat: {}\nLocation: {}\nEra: {}\nBreath Threshold: {}\nBreath Increment: {}\nHunger Threshold: {}\nHungry Health Change: {}\nHunger Increment: {}\nFood Unit Value: {}\nKeeper Food Units Eaten: {}\nNeeded Food: {}\nNo Food Change: {}\nInitial Happiness: {}\nMax Hits: {}\nPct Hits: {}\nMax Energy: {}\nMax Dirty: {}\nMin Dirty: {}\nSick Change: {}\nOther Animal Sick Change: {}\nSick Chance: {}\nSick Random Chance: {}\nCrowd: {}\nCrowd Happiness Change: {}\nZap Happiness Change: {}\nCaptivity: {}\nReproduction Chance: {}\nReproduction Interval: {}\nMating Type: {}\nOffspring: {}\nKeeper Frequency: {}\nNot Enough Keepers Change: {}\nSocial: {}\nHabitat Size: {}\nNumber Animals Min: {}\nNumber Animals Max: {}\nNumber Min Change: {}\nNumber Max Change: {}\nHabitat Preference: {}\nBaby Born Change: {}\nEnergy Increment: {}\nEnergy Threshold: {}\nDirty Increment: {}\nDirty Threshold: {}\nSick Time: {}\nBaby To Adult: {}\nOther Food: {}\nTree Pref: {}\nRock Pref: {}\nSpace Pref: {}\nElevation Pref: {}\nDepth Min: {}\nDepth Max: {}\nDepth Change: {}\nSalinity Change: {}\nSalinity Health Change: {}\nHappy Reproduce Threshold: {}\nBuilding Use Chance: {}\nNo Mate Change: {}\nTime Death: {}\nDeath Chance: {}\nDirt Chance: {}\nWater Needed: {}\nUnderwater Needed: {}\nLand Needed: {}\nEnter Water Chance: {}\nEnter Tank Chance: {}\nEnter Land Chance: {}\nDrink Water Chance: {}\nChase Animal Chance: {}\nClimbs Cliffs: {}\nBash Strength: {}\nAttractiveness: {}\nKeeper Food Type: {}\nIs Climber: {}\nIs Jumper: {}\nSmall Zoodoo: {}\nDino Zoodoo: {}\nGiant Zoodoo: {}\nIs Special Animal: {}\
-            Need Shelter: {}\nNeed Toys: {}\nBabies Attack: {}\n",
-            self.box_footprint_x,
-            self.box_footprint_y,
-            self.box_footprint_z,
-            self.family,
-            self.genus,
-            self.habitat,
-            self.location,
-            self.era,
-            self.breath_threshold,
-            self.breath_increment,
-            self.hunger_threshold,
-            self.hungry_health_change,
-            self.hunger_increment,
-            self.food_unit_value,
-            self.keeper_food_units_eaten,
-            self.needed_food,
-            self.no_food_change,
-            self.initial_happiness,
-            self.max_hits,
-            self.pct_hits,
-            self.max_energy,
-            self.max_dirty,
-            self.min_dirty,
-            self.sick_change,
-            self.other_animal_sick_change,
-            self.sick_chance,
-            self.sick_random_chance,
-            self.crowd,
-            self.crowd_happiness_change,
-            self.zap_happiness_change,
-            self.captivity,
-            self.reproduction_chance,
-            self.reproduction_interval,
-            self.mating_type,
-            self.offspring,
-            self.keeper_frequency,
-            self.not_enough_keepers_change,
-            self.social,
-            self.habitat_size,
-            self.number_animals_min,
-            self.number_animals_max,
-            self.number_min_change,
-            self.number_max_change,
-            self.habitat_preference,
-            self.baby_born_change,
-            self.energy_increment,
-            self.energy_threshold,
-            self.dirty_increment,
-            self.dirty_threshold,
-            self.sick_time,
-            self.baby_to_adult,
-            self.other_food,
-            self.tree_pref,
-            self.rock_pref,
-            self.space_pref,
-            self.elevation_pref,
-            self.depth_min,
-            self.depth_max,
-            self.depth_change,
-            self.salinity_change,
-            self.salinity_health_change,
-            self.happy_reproduce_threshold,
-            self.building_use_chance,
-            self.no_mate_change,
-            self.time_death,
-            self.death_chance,
-            self.dirt_chance,
-            self.water_needed,
-            self.underwater_needed,
-            self.land_needed,
-            self.enter_water_chance,
-            self.enter_tank_chance,
-            self.enter_land_chance,
-            self.drink_water_chance,
-            self.chase_animal_chance,
-            self.climbs_cliffs,
-            self.bash_strength,
-            self.attractiveness,
-            self.keeper_food_type,
-            self.is_climber,
-            self.is_jumper,
-            self.small_zoodoo,
-            self.dino_zoodoo,
-            self.giant_zoodoo,
-            self.is_special_animal,
-            self.need_shelter,
-            self.need_toys,
-            self.babies_attack
+    pub fn print_config_integers(&self) -> String {
+    format!(
+        "Box Footprint X: {}\nBox Footprint Y: {}\nBox Footprint Z: {}\nFamily: {}\nGenus: {}\nHabitat: {}\nLocation: {}\nEra: {}\nBreath Threshold: {}\nBreath Increment: {}\nHunger Threshold: {}\nHungry Health Change: {}\nHunger Increment: {}\nFood Unit Value: {}\nKeeper Food Units Eaten: {}\nNeeded Food: {}\nNo Food Change: {}\nInitial Happiness: {}\nMax Hits: {}\nPct Hits: {}\nMax Energy: {}\nMax Dirty: {}\nMin Dirty: {}\nSick Change: {}\nOther Animal Sick Change: {}\nSick Chance: {}\nSick Random Chance: {}\nCrowd: {}\nCrowd Happiness Change: {}\nZap Happiness Change: {}\nCaptivity: {}\nReproduction Chance: {}\nReproduction Interval: {}\nMating Type: {}\nOffspring: {}\nKeeper Frequency: {}\nNot Enough Keepers Change: {}\nSocial: {}\nHabitat Size: {}\nNumber Animals Min: {}\nNumber Animals Max: {}\nNumber Min Change: {}\nNumber Max Change: {}\nHabitat Preference: {}\nBaby Born Change: {}\nEnergy Increment: {}\nEnergy Threshold: {}\nDirty Increment: {}\nDirty Threshold: {}\nSick Time: {}\nBaby To Adult: {}\nOther Food: {}\nTree Pref: {}\nRock Pref: {}\nSpace Pref: {}\nElevation Pref: {}\nDepth Min: {}\nDepth Max: {}\nDepth Change: {}\nSalinity Change: {}\nSalinity Health Change: {}\nHappy Reproduce Threshold: {}\nBuilding Use Chance: {}\nNo Mate Change: {}\nTime Death: {}\nDeath Chance: {}\nDirt Chance: {}\nWater Needed: {}\nUnderwater Needed: {}\nLand Needed: {}\nEnter Water Chance: {}\nEnter Tank Chance: {}\nEnter Land Chance: {}\nDrink Water Chance: {}\nChase Animal Chance: {}\nClimbs Cliffs: {}\nBash Strength: {}\nAttractiveness: {}\nKeeper Food Type: {}\nIs Climber: {}\nIs Jumper: {}\nSmall Zoodoo: {}\nDino Zoodoo: {}\nGiant Zoodoo: {}\nIs Special Animal: {}\
+        Need Shelter: {}\nNeed Toys: {}\nBabies Attack: {}\n",
+        self.box_footprint_x,
+        self.box_footprint_y,
+        self.box_footprint_z,
+        self.family,
+        self.genus,
+        self.habitat,
+        self.location,
+        self.era,
+        self.breath_threshold,
+        self.breath_increment,
+        self.hunger_threshold,
+        self.hungry_health_change,
+        self.hunger_increment,
+        self.food_unit_value,
+        self.keeper_food_units_eaten,
+        self.needed_food,
+        self.no_food_change,
+        self.initial_happiness,
+        self.max_hits,
+        self.pct_hits,
+        self.max_energy,
+        self.max_dirty,
+        self.min_dirty,
+        self.sick_change,
+        self.other_animal_sick_change,
+        self.sick_chance,
+        self.sick_random_chance,
+        self.crowd,
+        self.crowd_happiness_change,
+        self.zap_happiness_change,
+        self.captivity,
+        self.reproduction_chance,
+        self.reproduction_interval,
+        self.mating_type,
+        self.offspring,
+        self.keeper_frequency,
+        self.not_enough_keepers_change,
+        self.social,
+        self.habitat_size,
+        self.number_animals_min,
+        self.number_animals_max,
+        self.number_min_change,
+        self.number_max_change,
+        self.habitat_preference,
+        self.baby_born_change,
+        self.energy_increment,
+        self.energy_threshold,
+        self.dirty_increment,
+        self.dirty_threshold,
+        self.sick_time,
+        self.baby_to_adult,
+        self.other_food,
+        self.tree_pref,
+        self.rock_pref,
+        self.space_pref,
+        self.elevation_pref,
+        self.depth_min,
+        self.depth_max,
+        self.depth_change,
+        self.salinity_change,
+        self.salinity_health_change,
+        self.happy_reproduce_threshold,
+        self.building_use_chance,
+        self.no_mate_change,
+        self.time_death,
+        self.death_chance,
+        self.dirt_chance,
+        self.water_needed,
+        self.underwater_needed,
+        self.land_needed,
+        self.enter_water_chance,
+        self.enter_tank_chance,
+        self.enter_land_chance,
+        self.drink_water_chance,
+        self.chase_animal_chance,
+        self.climbs_cliffs,
+        self.bash_strength,
+        self.attractiveness,
+        self.keeper_food_type,
+        self.is_climber,
+        self.is_jumper,
+        self.small_zoodoo,
+        self.dino_zoodoo,
+        self.giant_zoodoo,
+        self.is_special_animal,
+        self.need_shelter,
+        self.need_toys,
+        self.babies_attack
         )
     }
 }
 
 impl Deref for ZTAnimalType {
-    type Target = BFEntityType;
+    type Target = ZTUnitType;
 
     fn deref(&self) -> &Self::Target {
-        &self.bfentitytype
+        &self.ztunit_type
     }
 }
 
@@ -2331,7 +2332,9 @@ fn print_config_for_type() -> String {
     } else if class_type == "Animal" {
         info!("Entity type is a ZTAnimal. Printing ZTAnimal type configuration.");
         let ztanimal_type = ZTAnimalType::new(entity_type_address).unwrap(); // create a copied instance of the entity type
-        config.push_str(&ztanimal_type.bfentitytype.print_config_integers());
+        config.push_str(&ztanimal_type.ztunit_type.bfunit_type.bfentitytype.print_config_integers());
+        config.push_str(&ztanimal_type.ztunit_type.bfunit_type.print_config_integers());
+        config.push_str(&ztanimal_type.ztunit_type.print_config_integers());
         config.push_str(&ztanimal_type.print_config_integers());
 
         // print_info_image_name(entity_type, &mut config);
