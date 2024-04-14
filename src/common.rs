@@ -28,6 +28,17 @@ impl ZTString {
     pub fn capacity(&self) -> usize {
         (self.buffer_end_ptr - self.start_ptr) as usize
     }
+
+    pub fn replace(&mut self, new_string: String) -> Result<(), String> {
+        if new_string.len() + 1 > self.capacity() {
+            Err("New string is too long".to_string())
+        } else {
+            let new_end_ptr = self.start_ptr + new_string.len() as u32;
+            save_string_to_memory(self.start_ptr, &new_string);
+            self.end_ptr = new_end_ptr;
+            Ok(())
+        }
+    }
 }
 
 // impl ToString for ZTString {
