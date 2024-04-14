@@ -13,7 +13,7 @@ use std::fmt;
 
 use once_cell::sync::Lazy; //TODO: Use std::sync::LazyCell when it becomes stable
 use retour_utils::hook_module;
-use tracing::info;
+use tracing::{info, error};
 
 #[derive(Debug)]
 pub struct CommandError {
@@ -75,6 +75,7 @@ impl From<&str> for CommandError {
 #[hook_module("zoo.exe")]
 pub mod zoo_console {
     use super::{add_to_command_register, call_next_command, command_list_commands, start_server};
+    use tracing::error;
 
     #[hook(unsafe extern "thiscall" ZTApp_updateGame, offset = 0x0001a6d1)]
     fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
@@ -83,7 +84,11 @@ pub mod zoo_console {
     }
 
     pub fn init() {
-        unsafe { init_detours().unwrap() };
+        unsafe { 
+            if !init_detours().is_ok() {
+                error!("Failed to initialize console detours");
+            }
+        };
         add_to_command_register("list_commands".to_owned(), command_list_commands);
         std::thread::spawn(|| {
             start_server();
@@ -102,19 +107,26 @@ static COMMAND_QUEUE: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<S
 
 pub fn add_to_command_register(command_name: String, command_callback: CommandCallback) {
     info!("Registring command {} to registry", command_name);
-    let mut data_mutex = COMMAND_REGISTRY.lock().unwrap();
+    let Ok(mut data_mutex) = COMMAND_REGISTRY.lock() else {
+        error!("Failed to lock command registry mutex when adding command {} to registry", command_name);
+        return;
+
+    };
     data_mutex.insert(command_name, command_callback);
 }
 
 fn call_command(command_name: String, args: Vec<&str>) -> Result<String, CommandError> {
     info!("Calling command {} with args {:?}", command_name, args);
     let command = {
-        let data_mutex = COMMAND_REGISTRY.lock().unwrap();
+        let Ok(data_mutex) = COMMAND_REGISTRY.lock() else {
+            error!("Failed to lock command registry mutex when calling command {}", command_name);
+            return Err(Into::into("Failed to lock command registry mutex when calling command"));
+        };
         data_mutex.get(&command_name).cloned()
     };
     match command {
         Some(command) => command(args),
-        None => Err("Command not found").map_err(Into::into),
+        None => Err(Into::into("Command not found")),
     }
 }
 
@@ -214,7 +226,10 @@ fn handle_client(mut stream: TcpStream) {
 }
 
 pub fn start_server() {
-    let listener = TcpListener::bind("127.0.0.1:8080").expect("Failed to bind socket");
+    let Ok(listener) = TcpListener::bind("127.0.0.1:8080") else {
+        error!("Failed to bind socket 127.0.0.1:8080, console will not work");
+        return;
+    };
 
     info!("Listening on 127.0.0.1:8080...");
 

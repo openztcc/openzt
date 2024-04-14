@@ -4,10 +4,9 @@ use tracing::info;
 
 use crate::{
     common::ZTString,
-    console::add_to_command_register,
+    console::{add_to_command_register, CommandError},
     debug_dll::{get_from_memory, get_string_from_memory_bounded},
-    ztworldmgr::read_zt_entity_from_memory,
-    console::CommandError,
+    ztworldmgr::{read_zt_entity_from_memory, ZTEntityTypeClass},
 };
 
 const BFUIMGR_PTR: u32 = 0x00638de0;
@@ -240,7 +239,7 @@ pub fn get_selected_entity() -> u32 {
 }
 
 // returns the address of the selected entity type
-pub fn get_selected_entity_type() -> u32 {
+pub fn get_selected_entity_type_address() -> u32 {
     let selected_entity = get_selected_entity();
     if selected_entity == 0 {
         return 0;

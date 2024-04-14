@@ -366,7 +366,7 @@ impl EntityType for ZTSceneryType {
             self.blocks_los = value.parse()?;
             Ok(format!("Set Blocks LOS to {}", self.blocks_los))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.bfentitytype.set_config(config, value)?)
         }
     }
 
@@ -569,7 +569,7 @@ impl EntityType for ZTBuildingType {
             self.energy_change = value.parse()?;
             Ok(format!("Set Energy Change to {}", self.energy_change))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.ztscenerytype.set_config(config, value)?)
         }
     }
 
@@ -709,7 +709,7 @@ impl EntityType for ZTFenceType {
             self.no_draw_water = value.parse()?;
             Ok(format!("Set No Draw Water to {}", self.no_draw_water))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.ztscenerytype.set_config(config, value)?)
         }
     }
 
@@ -803,7 +803,7 @@ impl EntityType for ZTTankWallType {
             self.portal_close_sound_atten = value.parse()?;
             Ok(format!("Set Portal Close Sound Atten to {}", self.portal_close_sound_atten))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.ztfencetype.set_config(config, value)?)
         }
     }
     
@@ -847,7 +847,7 @@ impl EntityType for ZTFoodType {
             self.keeper_food_type = value.parse()?;
             Ok(format!("Set Keeper Food Type to {}", self.keeper_food_type))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.ztscenerytype.set_config(config, value)?)
         }
     }
 
@@ -937,7 +937,7 @@ impl EntityType for ZTTankFilterType {
             self.decayed_atten = value.parse()?;
             Ok(format!("Set Decayed Atten to {}", self.decayed_atten))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.ztscenerytype.set_config(config, value)?)
         }
     }
 
@@ -1001,7 +1001,7 @@ impl EntityType for ZTPathType {
             self.material = value.parse()?;
             Ok(format!("Set Material to {}", self.material))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.ztscenerytype.set_config(config, value)?)
         }
     }
 
@@ -1059,7 +1059,7 @@ impl EntityType for ZTRubbleType {
             self.explosion_sound_atten = value.parse()?;
             Ok(format!("Set Explosion Sound Atten to {}", self.explosion_sound_atten))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.ztscenerytype.set_config(config, value)?)
         }
     }
 
@@ -1136,7 +1136,7 @@ impl EntityType for BFUnitType {
             self.max_height = value.parse()?;
             Ok(format!("Set Max Height to {}", self.max_height))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.bfentitytype.set_config(config, value)?)
         }
     }
 
@@ -1249,7 +1249,7 @@ impl EntityType for ZTUnitType {
             self.skip_trick_chance = value.parse()?;
             Ok(format!("Set Skip Trick Chance to {}", self.skip_trick_chance))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.bfunit_type.set_config(config, value)?)
         }
     }
 
@@ -1544,7 +1544,7 @@ impl EntityType for ZTGuestType {
             self.tap_wall_chance = value.parse()?;
             Ok(format!("Set Tap Wall Chance to {}", self.tap_wall_chance))
         } else {
-            Err(CommandError::new(format!("Invalid configuration option: {}", config)))
+            Ok(self.ztunit_type.set_config(config, value)?)
         }
     }
 
@@ -1640,7 +1640,7 @@ impl Deref for ZTGuestType {
 fn command_sel_type(args: Vec<&str>) -> Result<String, CommandError> {
     let entity_type_address = get_selected_entity_type_address();
     // let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
-    let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
+    // let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
     if entity_type_address == 0 {
         return Err(CommandError::new("No entity selected".to_string()));
     }
@@ -1649,14 +1649,14 @@ fn command_sel_type(args: Vec<&str>) -> Result<String, CommandError> {
     //     return Err(CommandError::new("Failed to create entity type".to_string()));
     // }; // create a copied instance of the entity type
 
-    let Ok(mut entity_type) = get_bfentitytype(entity_type_address) else {
+    let Ok(mut entity_type) = get_bfentitytype(entity_type_address.clone()) else {
         return Err(CommandError::new("Failed to create entity type".to_string()));
     };
                                                                        
     if args.is_empty() {
         Ok(entity_type.print_config_details())
     } else if args[0] == "-v" {                 // if -v flag is used, print the entity type configuration and other details
-        info!("Printing configuration for entity type at address {:#x}", entity_type_print);
+        info!("Printing configuration for entity type at address {:#x}", entity_type_address as u32);
         // print the entity type configuration for the selected entity type
         Ok(entity_type.print_config())
     } else if args.len() == 2 {
@@ -1676,8 +1676,6 @@ fn print_info_image_name(entity_type: &BFEntityType, config: &mut String) {
         config.push_str(&entity_type.get_info_image_name());
     }
 }
-
-    // let entity_type_address = get_selected_entity_type_address(); // grab the address of the selected entity type
 
 fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> {
     // let entity: Box<&mut dyn EntityType> = match ZTEntityTypeClass::from(address) { // create a copied instance of the entity type

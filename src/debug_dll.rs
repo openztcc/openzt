@@ -76,6 +76,17 @@ pub fn debug_logger(message: &str) {
     info!(message);
 }
 
+pub fn map_from_memory<T>(address: u32) -> Option<&'static mut T> {
+    unsafe {
+        let ptr = get_from_memory::<*mut T>(address);
+        if !ptr.is_null() {
+            Some(&mut *ptr)
+        } else {
+            None
+        }
+    }
+}
+
 pub fn get_from_memory<T>(address: u32) -> T {
     unsafe { ptr::read(address as *const T) }
 }

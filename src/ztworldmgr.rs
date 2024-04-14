@@ -5,11 +5,7 @@ use num_enum::FromPrimitive;
 use tracing::info;
 
 use crate::{
-    add_to_command_register,
-    bfentitytype::{ZTSceneryType, EntityTypeImpl},
-    debug_dll::{get_from_memory, get_string_from_memory},
-    expansions::is_member,
-    console::CommandError,
+    add_to_command_register, bfentitytype::ZTSceneryType, console::CommandError, debug_dll::{get_from_memory, get_string_from_memory, map_from_memory}, expansions::is_member
 };
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
@@ -315,7 +311,7 @@ fn get_entity_type_by_id(id: u32) -> u32 {
     while i > 0 {
         let entity_type_ptr = entity_type_array_start + i * 0x4;
         info!("Checking entity type at {:#x}", entity_type_ptr);
-        let entity_type = ZTSceneryType::new(entity_type_ptr).unwrap();
+        let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr).unwrap();
         info!("Entity type name id: {}", entity_type.name_id);
         if entity_type.name_id == id {
             info!(
@@ -336,14 +332,14 @@ fn get_entity_type_by_id(id: u32) -> u32 {
 
 fn command_make_sel(args: Vec<&str>) -> Result<String, CommandError> {
     if args.is_empty() {
-        Err("Usage: make_sel <id>").map_err(Into::into)
+        Err(Into::into("Usage: make_sel <id>"))
     } else {
         let id = args[0].parse::<u32>().unwrap();
         let entity_type_ptr = get_entity_type_by_id(id);
         if entity_type_ptr == 0 {
-            return Err("Entity type not found").map_err(Into::into);
+            return Err(Into::into("Entity type not found"));
         }
-        let entity_type = ZTSceneryType::new(entity_type_ptr).unwrap();
+        let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr).unwrap();
         if entity_type.selectable {
             return Ok(format!(
                 "Entity type {} is already selectable",
@@ -358,27 +354,27 @@ fn command_make_sel(args: Vec<&str>) -> Result<String, CommandError> {
     }
 }
 
-pub fn determine_entity_type(address: u32) -> String {
-    let entity_type_address = get_from_memory::<u32>(address);
-    let vtable_ptr = get_from_memory::<u32>(entity_type_address);
+// pub fn determine_entity_type(address: u32) -> String {
+//     let entity_type_address = get_from_memory::<u32>(address);
+//     let vtable_ptr = get_from_memory::<u32>(entity_type_address);
 
-    match vtable_ptr {
-        0x630268 => "Animal",
-        0x62e1e8 => "Ambient",
-        0x62e330 => "Guest",
-        0x63034c => "Fences",
-        0x62e8ac => "TourGuide",
-        0x6307e4 => "Building",
-        0x6303f4 => "Scenery",
-        0x630544 => "Food",
-        0x630694 => "TankFilter",
-        0x63049c => "Path",
-        0x63073c => "Rubble",
-        0x6305ec => "TankWall",
-        0x62e7d8 => "Keeper",
-        0x62e704 => "MaintenanceWorker",
-        0x62e980 => "DRT",
-        _ => "Unknown",
-    }
-    .to_string()
-}
+//     match vtable_ptr {
+//         0x630268 => "Animal",
+//         0x62e1e8 => "Ambient",
+//         0x62e330 => "Guest",
+//         0x63034c => "Fences",
+//         0x62e8ac => "TourGuide",
+//         0x6307e4 => "Building",
+//         0x6303f4 => "Scenery",
+//         0x630544 => "Food",
+//         0x630694 => "TankFilter",
+//         0x63049c => "Path",
+//         0x63073c => "Rubble",
+//         0x6305ec => "TankWall",
+//         0x62e7d8 => "Keeper",
+//         0x62e704 => "MaintenanceWorker",
+//         0x62e980 => "DRT",
+//         _ => "Unknown",
+//     }
+//     .to_string()
+// }
