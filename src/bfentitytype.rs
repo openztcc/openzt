@@ -1750,290 +1750,280 @@ struct ZTAnimalType {
 
 }
 
-impl ZTAnimalType {
-    pub fn new(address: u32) -> Option<&'static mut ZTAnimalType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTAnimalType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+impl EntityType for ZTAnimalType {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
         if config == "-cBoxFootprintX" {
-            self.box_footprint_x = value.parse::<i32>().unwrap();
+            self.box_footprint_x = value.parse()?;
             Ok(format!("Set Box Footprint X to {}", self.box_footprint_x))
         } else if config == "-cBoxFootprintY" {
-            self.box_footprint_y = value.parse::<i32>().unwrap();
+            self.box_footprint_y = value.parse()?;
             Ok(format!("Set Box Footprint Y to {}", self.box_footprint_y))
         } else if config == "-cBoxFootprintZ" {
-            self.box_footprint_z = value.parse::<i32>().unwrap();
+            self.box_footprint_z = value.parse()?;
             Ok(format!("Set Box Footprint Z to {}", self.box_footprint_z))
         } else if config == "-cFamily" {
-            self.family = value.parse::<i32>().unwrap();
+            self.family = value.parse()?;
             Ok(format!("Set Family to {}", self.family))
         } else if config == "-cGenus" {
-            self.genus = value.parse::<i32>().unwrap();
+            self.genus = value.parse()?;
             Ok(format!("Set Genus to {}", self.genus))
         } else if config == "-cHabitat" {
-            self.habitat = value.parse::<i32>().unwrap();
+            self.habitat = value.parse()?;
             Ok(format!("Set Habitat to {}", self.habitat))
         } else if config == "-cLocation" {
-            self.location = value.parse::<i32>().unwrap();
+            self.location = value.parse()?;
             Ok(format!("Set Location to {}", self.location))
         } else if config == "-cEra" {
-            self.era = value.parse::<i32>().unwrap();
+            self.era = value.parse()?;
             Ok(format!("Set Era to {}", self.era))
         } else if config == "-cBreathThreshold" {
-            self.breath_threshold = value.parse::<i32>().unwrap();
+            self.breath_threshold = value.parse()?;
             Ok(format!("Set Breath Threshold to {}", self.breath_threshold))
         } else if config == "-cBreathIncrement" {
-            self.breath_increment = value.parse::<i32>().unwrap();
+            self.breath_increment = value.parse()?;
             Ok(format!("Set Breath Increment to {}", self.breath_increment))
         } else if config == "-cHungerThreshold" {
-            self.hunger_threshold = value.parse::<i32>().unwrap();
+            self.hunger_threshold = value.parse()?;
             Ok(format!("Set Hunger Threshold to {}", self.hunger_threshold))
         } else if config == "-cHungryHealthChange" {
-            self.hungry_health_change = value.parse::<i32>().unwrap();
+            self.hungry_health_change = value.parse()?;
             Ok(format!("Set Hungry Health Change to {}", self.hungry_health_change))
         } else if config == "-cHungerIncrement" {
-            self.hunger_increment = value.parse::<i32>().unwrap();
+            self.hunger_increment = value.parse()?;
             Ok(format!("Set Hunger Increment to {}", self.hunger_increment))
         } else if config == "-cFoodUnitValue" {
-            self.food_unit_value = value.parse::<i32>().unwrap();
+            self.food_unit_value = value.parse()?;
             Ok(format!("Set Food Unit Value to {}", self.food_unit_value))
         } else if config == "-cKeeperFoodUnitsEaten" {
-            self.keeper_food_units_eaten = value.parse::<i32>().unwrap();
+            self.keeper_food_units_eaten = value.parse()?;
             Ok(format!("Set Keeper Food Units Eaten to {}", self.keeper_food_units_eaten))
         } else if config == "-cNeededFood" {
-            self.needed_food = value.parse::<i32>().unwrap();
+            self.needed_food = value.parse()?;
             Ok(format!("Set Needed Food to {}", self.needed_food))
         } else if config == "-cNoFoodChange" {
-            self.no_food_change = value.parse::<i32>().unwrap();
+            self.no_food_change = value.parse()?;
             Ok(format!("Set No Food Change to {}", self.no_food_change))
         } else if config == "-cInitialHappiness" {
-            self.initial_happiness = value.parse::<i32>().unwrap();
+            self.initial_happiness = value.parse()?;
             Ok(format!("Set Initial Happiness to {}", self.initial_happiness))
         } else if config == "-cMaxHits" {
-            self.max_hits = value.parse::<i32>().unwrap();
+            self.max_hits = value.parse()?;
             Ok(format!("Set Max Hits to {}", self.max_hits))
         } else if config == "-cPctHits" {
-            self.pct_hits = value.parse::<i32>().unwrap();
+            self.pct_hits = value.parse()?;
             Ok(format!("Set Pct Hits to {}", self.pct_hits))
         } else if config == "-cMaxEnergy" {
-            self.max_energy = value.parse::<i32>().unwrap();
+            self.max_energy = value.parse()?;
             Ok(format!("Set Max Energy to {}", self.max_energy))
         } else if config == "-cMaxDirty" {
-            self.max_dirty = value.parse::<i32>().unwrap();
+            self.max_dirty = value.parse()?;
             Ok(format!("Set Max Dirty to {}", self.max_dirty))
         } else if config == "-cMinDirty" {
-            self.min_dirty = value.parse::<i32>().unwrap();
+            self.min_dirty = value.parse()?;
             Ok(format!("Set Min Dirty to {}", self.min_dirty))
         } else if config == "-cSickChange" {
-            self.sick_change = value.parse::<i32>().unwrap();
+            self.sick_change = value.parse()?;
             Ok(format!("Set Sick Change to {}", self.sick_change))
         } else if config == "-cOtherAnimalSickChange" {
-            self.other_animal_sick_change = value.parse::<i32>().unwrap();
+            self.other_animal_sick_change = value.parse()?;
             Ok(format!("Set Other Animal Sick Change to {}", self.other_animal_sick_change))
         } else if config == "-cSickChance" {
-            self.sick_chance = value.parse::<i32>().unwrap();
+            self.sick_chance = value.parse()?;
             Ok(format!("Set Sick Chance to {}", self.sick_chance))
         } else if config == "-cSickRandomChance" {
-            self.sick_random_chance = value.parse::<i32>().unwrap();
+            self.sick_random_chance = value.parse()?;
             Ok(format!("Set Sick Random Chance to {}", self.sick_random_chance))
         } else if config == "-cCrowd" {
-            self.crowd = value.parse::<i32>().unwrap();
+            self.crowd = value.parse()?;
             Ok(format!("Set Crowd to {}", self.crowd))
         } else if config == "-cCrowdHappinessChange" {
-            self.crowd_happiness_change = value.parse::<i32>().unwrap();
+            self.crowd_happiness_change = value.parse()?;
             Ok(format!("Set Crowd Happiness Change to {}", self.crowd_happiness_change))
         } else if config == "-cZapHappinessChange" {
-            self.zap_happiness_change = value.parse::<i32>().unwrap();
+            self.zap_happiness_change = value.parse()?;
             Ok(format!("Set Zap Happiness Change to {}", self.zap_happiness_change))
         } else if config == "-cCaptivity" {
-            self.captivity = value.parse::<i32>().unwrap();
+            self.captivity = value.parse()?;
             Ok(format!("Set Captivity to {}", self.captivity))
         } else if config == "-cReproductionChance" {
-            self.reproduction_chance = value.parse::<i32>().unwrap();
+            self.reproduction_chance = value.parse()?;
             Ok(format!("Set Reproduction Chance to {}", self.reproduction_chance))
         } else if config == "-cReproductionInterval" {
-            self.reproduction_interval = value.parse::<i32>().unwrap();
+            self.reproduction_interval = value.parse()?;
             Ok(format!("Set Reproduction Interval to {}", self.reproduction_interval))
         } else if config == "-cMatingType" {
-            self.mating_type = value.parse::<i32>().unwrap();
+            self.mating_type = value.parse()?;
             Ok(format!("Set Mating Type to {}", self.mating_type))
         } else if config == "-cOffspring" {
-            self.offspring = value.parse::<i32>().unwrap();
+            self.offspring = value.parse()?;
             Ok(format!("Set Offspring to {}", self.offspring))
         } else if config == "-cKeeperFrequency" {
-            self.keeper_frequency = value.parse::<i32>().unwrap();
+            self.keeper_frequency = value.parse()?;
             Ok(format!("Set Keeper Frequency to {}", self.keeper_frequency))
         } else if config == "-cNotEnoughKeepersChange" {
-            self.not_enough_keepers_change = value.parse::<i32>().unwrap();
+            self.not_enough_keepers_change = value.parse()?;
             Ok(format!("Set Not Enough Keepers Change to {}", self.not_enough_keepers_change))
         } else if config == "-cSocial" {
-            self.social = value.parse::<i32>().unwrap();
+            self.social = value.parse()?;
             Ok(format!("Set Social to {}", self.social))
         } else if config == "-cHabitatSize" {
-            self.habitat_size = value.parse::<i32>().unwrap();
+            self.habitat_size = value.parse()?;
             Ok(format!("Set Habitat Size to {}", self.habitat_size))
         } else if config == "-cNumberAnimalsMin" {
-            self.number_animals_min = value.parse::<i32>().unwrap();
+            self.number_animals_min = value.parse()?;
             Ok(format!("Set Number Animals Min to {}", self.number_animals_min))
         } else if config == "-cNumberAnimalsMax" {
-            self.number_animals_max = value.parse::<i32>().unwrap();
+            self.number_animals_max = value.parse()?;
             Ok(format!("Set Number Animals Max to {}", self.number_animals_max))
         } else if config == "-cNumberMinChange" {
-            self.number_min_change = value.parse::<i32>().unwrap();
+            self.number_min_change = value.parse()?;
             Ok(format!("Set Number Min Change to {}", self.number_min_change))
         } else if config == "-cNumberMaxChange" {
-            self.number_max_change = value.parse::<i32>().unwrap();
+            self.number_max_change = value.parse()?;
             Ok(format!("Set Number Max Change to {}", self.number_max_change))
         } else if config == "-cHabitatPreference" {
-            self.habitat_preference = value.parse::<i32>().unwrap();
+            self.habitat_preference = value.parse()?;
             Ok(format!("Set Habitat Preference to {}", self.habitat_preference))
         } else if config == "-cBabyBornChange" {
-            self.baby_born_change = value.parse::<i32>().unwrap();
+            self.baby_born_change = value.parse()?;
             Ok(format!("Set Baby Born Change to {}", self.baby_born_change))
         } else if config == "-cEnergyIncrement" {
-            self.energy_increment = value.parse::<i32>().unwrap();
+            self.energy_increment = value.parse()?;
             Ok(format!("Set Energy Increment to {}", self.energy_increment))
         } else if config == "-cEnergyThreshold" {
-            self.energy_threshold = value.parse::<i32>().unwrap();
+            self.energy_threshold = value.parse()?;
             Ok(format!("Set Energy Threshold to {}", self.energy_threshold))
         } else if config == "-cDirtyIncrement" {
-            self.dirty_increment = value.parse::<i32>().unwrap();
+            self.dirty_increment = value.parse()?;
             Ok(format!("Set Dirty Increment to {}", self.dirty_increment))
         } else if config == "-cDirtyThreshold" {
-            self.dirty_threshold = value.parse::<i32>().unwrap();
+            self.dirty_threshold = value.parse()?;
             Ok(format!("Set Dirty Threshold to {}", self.dirty_threshold))
         } else if config == "-cSickTime" {
-            self.sick_time = value.parse::<i32>().unwrap();
+            self.sick_time = value.parse()?;
             Ok(format!("Set Sick Time to {}", self.sick_time))
         } else if config == "-cBabyToAdult" {
-            self.baby_to_adult = value.parse::<i32>().unwrap();
+            self.baby_to_adult = value.parse()?;
             Ok(format!("Set Baby To Adult to {}", self.baby_to_adult))
         } else if config == "-cOtherFood" {
-            self.other_food = value.parse::<i32>().unwrap();
+            self.other_food = value.parse()?;
             Ok(format!("Set Other Food to {}", self.other_food))
         } else if config == "-cTreePref" {
-            self.tree_pref = value.parse::<i32>().unwrap();
+            self.tree_pref = value.parse()?;
             Ok(format!("Set Tree Pref to {}", self.tree_pref))
         } else if config == "-cRockPref" {
-            self.rock_pref = value.parse::<i32>().unwrap();
+            self.rock_pref = value.parse()?;
             Ok(format!("Set Rock Pref to {}", self.rock_pref))
         } else if config == "-cSpacePref" {
-            self.space_pref = value.parse::<i32>().unwrap();
+            self.space_pref = value.parse()?;
             Ok(format!("Set Space Pref to {}", self.space_pref))
         } else if config == "-cElevationPref" {
-            self.elevation_pref = value.parse::<i32>().unwrap();
+            self.elevation_pref = value.parse()?;
             Ok(format!("Set Elevation Pref to {}", self.elevation_pref))
         } else if config == "-cDepthMin" {
-            self.depth_min = value.parse::<i32>().unwrap();
+            self.depth_min = value.parse()?;
             Ok(format!("Set Depth Min to {}", self.depth_min))
         } else if config == "-cDepthMax" {
-            self.depth_max = value.parse::<i32>().unwrap();
+            self.depth_max = value.parse()?;
             Ok(format!("Set Depth Max to {}", self.depth_max))
         } else if config == "-cDepthChange" {
-            self.depth_change = value.parse::<i32>().unwrap();
+            self.depth_change = value.parse()?;
             Ok(format!("Set Depth Change to {}", self.depth_change))
         } else if config == "-cSalinityChange" {
-            self.salinity_change = value.parse::<i32>().unwrap();
+            self.salinity_change = value.parse()?;
             Ok(format!("Set Salinity Change to {}", self.salinity_change))
         } else if config == "-cSalinityHealthChange" {
-            self.salinity_health_change = value.parse::<i32>().unwrap();
+            self.salinity_health_change = value.parse()?;
             Ok(format!("Set Salinity Health Change to {}", self.salinity_health_change))
         } else if config == "-cHappyReproduceThreshold" {
-            self.happy_reproduce_threshold = value.parse::<i32>().unwrap();
+            self.happy_reproduce_threshold = value.parse()?;
             Ok(format!("Set Happy Reproduce Threshold to {}", self.happy_reproduce_threshold))
         } else if config == "-cBuildingUseChance" {
-            self.building_use_chance = value.parse::<i32>().unwrap();
+            self.building_use_chance = value.parse()?;
             Ok(format!("Set Building Use Chance to {}", self.building_use_chance))
         } else if config == "-cNoMateChange" {
-            self.no_mate_change = value.parse::<i32>().unwrap();
+            self.no_mate_change = value.parse()?;
             Ok(format!("Set No Mate Change to {}", self.no_mate_change))
         } else if config == "-cTimeDeath" {
-            self.time_death = value.parse::<i32>().unwrap();
+            self.time_death = value.parse()?;
             Ok(format!("Set Time Death to {}", self.time_death))
         } else if config == "-cDeathChance" {
-            self.death_chance = value.parse::<i32>().unwrap();
+            self.death_chance = value.parse()?;
             Ok(format!("Set Death Chance to {}", self.death_chance))
         } else if config == "-cDirtChance" {
-            self.dirt_chance = value.parse::<i32>().unwrap();
+            self.dirt_chance = value.parse()?;
             Ok(format!("Set Dirt Chance to {}", self.dirt_chance))
         } else if config == "-cWaterNeeded" {
-            self.water_needed = value.parse::<i32>().unwrap();
+            self.water_needed = value.parse()?;
             Ok(format!("Set Water Needed to {}", self.water_needed))
         } else if config == "-cUnderwaterNeeded" {
-            self.underwater_needed = value.parse::<i32>().unwrap();
+            self.underwater_needed = value.parse()?;
             Ok(format!("Set Underwater Needed to {}", self.underwater_needed))
         } else if config == "-cLandNeeded" {
-            self.land_needed = value.parse::<i32>().unwrap();
+            self.land_needed = value.parse()?;
             Ok(format!("Set Land Needed to {}", self.land_needed))
         } else if config == "-cEnterWaterChance" {
-            self.enter_water_chance = value.parse::<i32>().unwrap();
+            self.enter_water_chance = value.parse()?;
             Ok(format!("Set Enter Water Chance to {}", self.enter_water_chance))
         } else if config == "-cEnterTankChance" {
-            self.enter_tank_chance = value.parse::<i32>().unwrap();
+            self.enter_tank_chance = value.parse()?;
             Ok(format!("Set Enter Tank Chance to {}", self.enter_tank_chance))
         } else if config == "-cEnterLandChance" {
-            self.enter_land_chance = value.parse::<i32>().unwrap();
+            self.enter_land_chance = value.parse()?;
             Ok(format!("Set Enter Land Chance to {}", self.enter_land_chance))
         } else if config == "-cDrinkWaterChance" {
-            self.drink_water_chance = value.parse::<i32>().unwrap();
+            self.drink_water_chance = value.parse()?;
             Ok(format!("Set Drink Water Chance to {}", self.drink_water_chance))
         } else if config == "-cChaseAnimalChance" {
-            self.chase_animal_chance = value.parse::<i32>().unwrap();
+            self.chase_animal_chance = value.parse()?;
             Ok(format!("Set Chase Animal Chance to {}", self.chase_animal_chance))
         } else if config == "-cClimbsCliffs" {
-            self.climbs_cliffs = value.parse::<i32>().unwrap();
+            self.climbs_cliffs = value.parse()?;
             Ok(format!("Set Climbs Cliffs to {}", self.climbs_cliffs))
         } else if config == "-cBashStrength" {
-            self.bash_strength = value.parse::<i32>().unwrap();
+            self.bash_strength = value.parse()?;
             Ok(format!("Set Bash Strength to {}", self.bash_strength))
         } else if config == "-cAttractiveness" {
-            self.attractiveness = value.parse::<i32>().unwrap();
+            self.attractiveness = value.parse()?;
             Ok(format!("Set Attractiveness to {}", self.attractiveness))
         } else if config == "-cKeeperFoodType" {
-            self.keeper_food_type = value.parse::<i32>().unwrap();
+            self.keeper_food_type = value.parse()?;
             Ok(format!("Set Keeper Food Type to {}", self.keeper_food_type))
         } else if config == "-cIsClimber" {
-            self.is_climber = value.parse::<bool>().unwrap();
+            self.is_climber = value.parse()?;
             Ok(format!("Set Is Climber to {}", self.is_climber))
         } else if config == "-cIsJumper" {
-            self.is_jumper = value.parse::<bool>().unwrap();
+            self.is_jumper = value.parse()?;
             Ok(format!("Set Is Jumper to {}", self.is_jumper))
         } else if config == "-cSmallZoodoo" {
-            self.small_zoodoo = value.parse::<bool>().unwrap();
+            self.small_zoodoo = value.parse()?;
             Ok(format!("Set Small Zoodoo to {}", self.small_zoodoo))
         } else if config == "-cDinoZoodoo" {
-            self.dino_zoodoo = value.parse::<bool>().unwrap();
+            self.dino_zoodoo = value.parse()?;
             Ok(format!("Set Dino Zoodoo to {}", self.dino_zoodoo))
         } else if config == "-cGiantZoodoo" {
-            self.giant_zoodoo = value.parse::<bool>().unwrap();
+            self.giant_zoodoo = value.parse()?;
             Ok(format!("Set Giant Zoodoo to {}", self.giant_zoodoo))
         } else if config == "-cIsSpecialAnimal" {
-            self.is_special_animal = value.parse::<bool>().unwrap();
+            self.is_special_animal = value.parse()?;
             Ok(format!("Set Is Special Animal to {}", self.is_special_animal))
         } else if config == "-cNeedShelter" {
-            self.need_shelter = value.parse::<bool>().unwrap();
+            self.need_shelter = value.parse()?;
             Ok(format!("Set Need Shelter to {}", self.need_shelter))
         } else if config == "-cNeedToys" {
-            self.need_toys = value.parse::<bool>().unwrap();
+            self.need_toys = value.parse()?;
             Ok(format!("Set Need Toys to {}", self.need_toys))
         } else if config == "-cBabiesAttack" {
-            self.babies_attack = value.parse::<bool>().unwrap();
+            self.babies_attack = value.parse()?;
             Ok(format!("Set Babies Attack to {}", self.babies_attack))
         } else {
-            Err("Invalid configuration option")
+            Ok(self.ztunit_type.set_config(config, value)?)
         }
     }
 
-    pub fn print_config_integers(&self) -> String {
-    format!("cBoxFootprintX: {}\ncBoxFootprintY: {}\ncBoxFootprintZ: {}\ncFamily: {}\ncGenus: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncBreathThreshold: {}\ncBreathIncrement: {}\ncHungerThreshold: {}\ncHungryHealthChange: {}\ncHungerIncrement: {}\ncFoodUnitValue: {}\ncKeeperFoodUnitsEaten: {}\ncNeededFood: {}\ncNoFoodChange: {}\ncInitialHappiness: {}\ncMaxHits: {}\ncPctHits: {}\ncMaxEnergy: {}\ncMaxDirty: {}\ncMinDirty: {}\ncSickChange: {}\ncOtherAnimalSickChange: {}\ncSickChance: {}\ncSickRandomChance: {}\ncCrowd: {}\ncCrowdHappinessChange: {}\ncZapHappinessChange: {}\ncCaptivity: {}\ncReproductionChance: {}\ncReproductionInterval: {}\ncMatingType: {}\ncOffspring: {}\ncKeeperFrequency: {}\ncNotEnoughKeepersChange: {}\ncSocial: {}\ncHabitatSize: {}\ncNumberAnimalsMin: {}\ncNumberAnimalsMax: {}\ncNumberMinChange: {}\ncNumberMaxChange: {}\ncHabitatPreference: {}\ncBabyBornChange: {}\ncEnergyIncrement: {}\ncEnergyThreshold: {}\ncDirtyIncrement: {}\ncDirtyThreshold: {}\ncSickTime: {}\ncBabyToAdult: {}\ncOtherFood: {}\ncTreePref: {}\ncRockPref: {}\ncSpacePref: {}\ncElevationPref: {}\ncDepthMin: {}\ncDepthMax: {}\ncDepthChange: {}\ncSalinityChange: {}\ncSalinityHealthChange: {}\ncHappyReproduceThreshold: {}\ncBuildingUseChance: {}\ncNoMateChange: {}\ncTimeDeath: {}\ncDeathChance: {}\ncDirtChance: {}\ncWaterNeeded: {}\ncUnderwaterNeeded: {}\ncLandNeeded: {}\ncEnterWaterChance: {}\ncEnterTankChance: {}\ncEnterLandChance: {}\ncDrinkWaterChance: {}\ncChaseAnimalChance: {}\ncClimbsCliffs: {}\ncBashStrength: {}\ncAttractiveness: {}\ncKeeperFoodType: {}\ncIsClimber: {}\ncIsJumper: {}\ncSmallZoodoo: {}\ncDinoZoodoo: {}\ncGiantZoodoo: {}\ncIsSpecialAnimal: {}\ncNeedShelter: {}\ncNeedToys: {}\ncBabiesAttack: {}\n",
+    fn print_config_integers(&self) -> String {
+    format!("{}\ncBoxFootprintX: {}\ncBoxFootprintY: {}\ncBoxFootprintZ: {}\ncFamily: {}\ncGenus: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncBreathThreshold: {}\ncBreathIncrement: {}\ncHungerThreshold: {}\ncHungryHealthChange: {}\ncHungerIncrement: {}\ncFoodUnitValue: {}\ncKeeperFoodUnitsEaten: {}\ncNeededFood: {}\ncNoFoodChange: {}\ncInitialHappiness: {}\ncMaxHits: {}\ncPctHits: {}\ncMaxEnergy: {}\ncMaxDirty: {}\ncMinDirty: {}\ncSickChange: {}\ncOtherAnimalSickChange: {}\ncSickChance: {}\ncSickRandomChance: {}\ncCrowd: {}\ncCrowdHappinessChange: {}\ncZapHappinessChange: {}\ncCaptivity: {}\ncReproductionChance: {}\ncReproductionInterval: {}\ncMatingType: {}\ncOffspring: {}\ncKeeperFrequency: {}\ncNotEnoughKeepersChange: {}\ncSocial: {}\ncHabitatSize: {}\ncNumberAnimalsMin: {}\ncNumberAnimalsMax: {}\ncNumberMinChange: {}\ncNumberMaxChange: {}\ncHabitatPreference: {}\ncBabyBornChange: {}\ncEnergyIncrement: {}\ncEnergyThreshold: {}\ncDirtyIncrement: {}\ncDirtyThreshold: {}\ncSickTime: {}\ncBabyToAdult: {}\ncOtherFood: {}\ncTreePref: {}\ncRockPref: {}\ncSpacePref: {}\ncElevationPref: {}\ncDepthMin: {}\ncDepthMax: {}\ncDepthChange: {}\ncSalinityChange: {}\ncSalinityHealthChange: {}\ncHappyReproduceThreshold: {}\ncBuildingUseChance: {}\ncNoMateChange: {}\ncTimeDeath: {}\ncDeathChance: {}\ncDirtChance: {}\ncWaterNeeded: {}\ncUnderwaterNeeded: {}\ncLandNeeded: {}\ncEnterWaterChance: {}\ncEnterTankChance: {}\ncEnterLandChance: {}\ncDrinkWaterChance: {}\ncChaseAnimalChance: {}\ncClimbsCliffs: {}\ncBashStrength: {}\ncAttractiveness: {}\ncKeeperFoodType: {}\ncIsClimber: {}\ncIsJumper: {}\ncSmallZoodoo: {}\ncDinoZoodoo: {}\ncGiantZoodoo: {}\ncIsSpecialAnimal: {}\ncNeedShelter: {}\ncNeedToys: {}\ncBabiesAttack: {}\n",
+        self.ztunit_type.print_config_integers(),
         self.box_footprint_x,
         self.box_footprint_y,
         self.box_footprint_z,
@@ -2124,6 +2114,18 @@ impl ZTAnimalType {
         self.babies_attack as i32,
         )
     }
+
+    fn print_config_floats(&self) -> String {
+        self.ztunit_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.ztunit_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.ztunit_type.print_config_details()
+    }
 }
 
 impl Deref for ZTAnimalType {
@@ -2151,47 +2153,49 @@ struct ZTStaffType {
     pub weapon_range: i32, // 0x1EC
 }
 
-impl ZTStaffType {
-    pub fn new(address: u32) -> Option<&'static mut ZTStaffType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTStaffType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+impl EntityType for ZTStaffType {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
         if config == "-cWorkCheck" {
-            self.work_check = value.parse::<i32>().unwrap();
+            self.work_check = value.parse()?;
             Ok(format!("Set Work Check to {}", self.work_check))
         } else if config == "-cChaseCheck" {
-            self.chase_check = value.parse::<i32>().unwrap();
+            self.chase_check = value.parse()?;
             Ok(format!("Set Chase Check to {}", self.chase_check))
         } else if config == "-cMonthlyCost" {
-            self.monthly_cost = value.parse::<f32>().unwrap();
+            self.monthly_cost = value.parse()?;
             Ok(format!("Set Monthly Cost to {}", self.monthly_cost))
         } else if config == "-cDutiesTextID" {
-            self.duties_text_id = value.parse::<i32>().unwrap();
+            self.duties_text_id = value.parse()?;
             Ok(format!("Set Duties Text ID to {}", self.duties_text_id))
         } else if config == "-cWeaponRange" {
-            self.weapon_range = value.parse::<i32>().unwrap();
+            self.weapon_range = value.parse()?;
             Ok(format!("Set Weapon Range to {}", self.weapon_range))
         } else {
-            Err("Invalid configuration option")
+            Ok(self.ztunit_type.set_config(config, value)?)
         }
     }
 
-    pub fn print_config_integers(&self) -> String {
-        format!("cWorkCheck: {}\ncChaseCheck: {}\ncMonthlyCost: {}\ncDutiesTextID: {}\ncWeaponRange: {}\n",
+    fn print_config_integers(&self) -> String {
+        format!("{}\ncWorkCheck: {}\ncChaseCheck: {}\ncMonthlyCost: {}\ncDutiesTextID: {}\ncWeaponRange: {}\n",
+        self.ztunit_type.print_config_integers(),
         self.work_check,
         self.chase_check,
         self.monthly_cost,
         self.duties_text_id,
         self.weapon_range,
         )
+    }
+
+    fn print_config_floats(&self) -> String {
+        self.ztunit_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.ztunit_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.ztunit_type.print_config_details()
     }
 }
 
@@ -2215,39 +2219,41 @@ struct ZTMaintType {
     pub clear_invalid_list_interval: i32, // 0x1FC
 }
 
-impl ZTMaintType {
-    pub fn new(address: u32) -> Option<&'static mut ZTMaintType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTMaintType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+impl EntityType for ZTMaintType {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
         if config == "-cCleanTrashRadius" {
-            self.clean_trash_radius = value.parse::<i32>().unwrap();
+            self.clean_trash_radius = value.parse()?;
             Ok(format!("Set Clean Trash Radius to {}", self.clean_trash_radius))
         } else if config == "-cFixFenceModifier" {
-            self.fix_fence_modifier = value.parse::<i32>().unwrap();
+            self.fix_fence_modifier = value.parse()?;
             Ok(format!("Set Fix Fence Modifier to {}", self.fix_fence_modifier))
         } else if config == "-cClearInvalidListInterval" {
-            self.clear_invalid_list_interval = value.parse::<i32>().unwrap();
+            self.clear_invalid_list_interval = value.parse()?;
             Ok(format!("Set Clear Invalid List Interval to {}", self.clear_invalid_list_interval))
         } else {
-            Err("Invalid configuration option")
+            Ok(self.ztstaff_type.set_config(config, value)?)
         }
     }
 
-    pub fn print_config_integers(&self) -> String {
-        format!("cCleanTrashRadius: {}\ncFixFenceModifier: {}\ncClearInvalidListInterval: {}\n",
+    fn print_config_integers(&self) -> String {
+        format!("{}\ncCleanTrashRadius: {}\ncFixFenceModifier: {}\ncClearInvalidListInterval: {}\n",
+                self.ztstaff_type.print_config_integers(),
         self.clean_trash_radius,
         self.fix_fence_modifier,
         self.clear_invalid_list_interval,
         )
+    }
+
+    fn print_config_floats(&self) -> String {
+        self.ztstaff_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.ztstaff_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.ztstaff_type.print_config_details()
     }
 }
 
@@ -2274,31 +2280,34 @@ struct ZTHelicopterType {
     pub loop_sound_atten: i32, // 0x1F8
 }
 
-impl ZTHelicopterType {
-    pub fn new(address: u32) -> Option<&'static mut ZTHelicopterType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTHelicopterType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
+impl EntityType for ZTHelicopterType {
 
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
         if config == "-cLoopSoundAtten" {
-            self.loop_sound_atten = value.parse::<i32>().unwrap();
+            self.loop_sound_atten = value.parse()?;
             Ok(format!("Set Loop Sound Atten to {}", self.loop_sound_atten))
         } else {
-            Err("Invalid configuration option")
+            Ok(self.ztstaff_type.set_config(config, value)?)
         }
     }
 
-    pub fn print_config_integers(&self) -> String {
-        format!("cLoopSoundAtten: {}\n",
+    fn print_config_integers(&self) -> String {
+        format!("{}\ncLoopSoundAtten: {}\n",
+                self.ztstaff_type.print_config_integers(),
         self.loop_sound_atten,
         )
+    }
+
+    fn print_config_floats(&self) -> String {
+        self.ztstaff_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.ztstaff_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.ztstaff_type.print_config_details()
     }
 }
 
@@ -2326,43 +2335,34 @@ struct ZTGuideType {
 }
 
 impl ZTGuideType {
-    pub fn new(address: u32) -> Option<&'static mut ZTGuideType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTGuideType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
 
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
         if config == "-cInformGuestTime" {
-            self.inform_guest_time = value.parse::<i32>().unwrap();
+            self.inform_guest_time = value.parse()?;
             Ok(format!("Set Inform Guest Time to {}", self.inform_guest_time))
         } else if config == "-cTourGuideBonus" {
-            self.tour_guide_bonus = value.parse::<i32>().unwrap();
+            self.tour_guide_bonus = value.parse()?;
             Ok(format!("Set Tour Guide Bonus to {}", self.tour_guide_bonus))
         } else if config == "-cCrowdCheck" {
-            self.crowd_check = value.parse::<i32>().unwrap();
+            self.crowd_check = value.parse()?;
             Ok(format!("Set Crowd Check to {}", self.crowd_check))
         } else if config == "-cCrowdRadius" {
-            self.crowd_radius = value.parse::<i32>().unwrap();
+            self.crowd_radius = value.parse()?;
             Ok(format!("Set Crowd Radius to {}", self.crowd_radius))
         } else if config == "-cFollowChance" {
-            self.follow_chance = value.parse::<i32>().unwrap();
+            self.follow_chance = value.parse()?;
             Ok(format!("Set Follow Chance to {}", self.follow_chance))
         } else if config == "-cMaxGroupSize" {
-            self.max_group_size = value.parse::<i32>().unwrap();
+            self.max_group_size = value.parse()?;
             Ok(format!("Set Max Group Size to {}", self.max_group_size))
         } else {
-            Err("Invalid configuration option")
+            Ok(self.ztstaff_type.set_config(config, value)?)
         }
     }
 
-    pub fn print_config_integers(&self) -> String {
-        format!("cInformGuestTime: {}\ncTourGuideBonus: {}\ncCrowdCheck: {}\ncCrowdRadius: {}\ncFollowChance: {}\ncMaxGroupSize: {}\n",
+    fn print_config_integers(&self) -> String {
+        format!("{}\ncInformGuestTime: {}\ncTourGuideBonus: {}\ncCrowdCheck: {}\ncCrowdRadius: {}\ncFollowChance: {}\ncMaxGroupSize: {}\n",
+                self.ztstaff_type.print_config_integers(),
         self.inform_guest_time,
         self.tour_guide_bonus,
         self.crowd_check,
@@ -2370,6 +2370,18 @@ impl ZTGuideType {
         self.follow_chance,
         self.max_group_size,
         )
+    }
+
+    fn print_config_floats(&self) -> String {
+        self.ztstaff_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.ztstaff_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.ztstaff_type.print_config_details()
     }
 }
 
@@ -2399,17 +2411,6 @@ struct ZTKeeperType {
 }
 
 impl ZTKeeperType {
-    pub fn new(address: u32) -> Option<&'static mut ZTKeeperType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTKeeperType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-
     // TODO: fix sickly_animal_pct, currently crashes when trying to access it
     pub fn get_sickly_animal_pct(&self) -> i32 {
         unsafe {
@@ -2421,38 +2422,41 @@ impl ZTKeeperType {
             }
         }
     }
+}
 
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+impl EntityType for ZTKeeperType {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
         if config == "-cFoodUnitsSecond" {
-            self.food_units_second = value.parse::<i32>().unwrap();
+            self.food_units_second = value.parse()?;
             Ok(format!("Set Food Units Second to {}", self.food_units_second))
         } else if config == "-cCleanTime" {
-            self.clean_time = value.parse::<i32>().unwrap();
+            self.clean_time = value.parse()?;
             Ok(format!("Set Clean Time to {}", self.clean_time))
         } else if config == "-cHealUnitsSecond" {
-            self.heal_units_second = value.parse::<i32>().unwrap();
+            self.heal_units_second = value.parse()?;
             Ok(format!("Set Heal Units Second to {}", self.heal_units_second))
         } else if config == "-cFoodPerTile" {
-            self.food_per_tile = value.parse::<i32>().unwrap();
+            self.food_per_tile = value.parse()?;
             Ok(format!("Set Food Per Tile to {}", self.food_per_tile))
         } else if config == "-cCleanTankPct" {
-            self.clean_tank_pct = value.parse::<i32>().unwrap();
+            self.clean_tank_pct = value.parse()?;
             Ok(format!("Set Clean Tank Pct to {}", self.clean_tank_pct))
         } else if config == "-cCleanTankThreshold" {
-            self.clean_tank_threshold = value.parse::<i32>().unwrap();
+            self.clean_tank_threshold = value.parse()?;
             Ok(format!("Set Clean Tank Threshold to {}", self.clean_tank_threshold))
         }
         // else if config == "-cDirt" {
-        //     self.dirt = value.parse::<u16>().unwrap();
+        //     self.dirt = value.parse()?;
         //     Ok(format!("Set Dirt to {}", self.dirt))
         // }
         else {
-            Err("Invalid configuration option")
+            Ok(self.ztstaff_type.set_config(config, value)?)
         }
     }
 
-    pub fn print_config_integers(&self) -> String {
-        format!("cFoodUnitsSecond: {}\ncCleanTime: {}\ncHealUnitsSecond: {}\ncFoodPerTile: {}\ncCleanTankPct: {}\ncCleanTankThreshold: {}\n", //cDirt: {}\n", //cSicklyAnimalPct: {}\n",
+    fn print_config_integers(&self) -> String {
+        format!("{}\ncFoodUnitsSecond: {}\ncCleanTime: {}\ncHealUnitsSecond: {}\ncFoodPerTile: {}\ncCleanTankPct: {}\ncCleanTankThreshold: {}\n", //cDirt: {}\n", //cSicklyAnimalPct: {}\n",
+            self.ztstaff_type.print_config_integers(),
         self.food_units_second,
         self.clean_time,
         self.heal_units_second,
@@ -2462,6 +2466,18 @@ impl ZTKeeperType {
         // self.dirt,
         //self.get_sickly_animal_pct(),
         )
+    }
+
+    fn print_config_floats(&self) -> String {
+        self.ztstaff_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.ztstaff_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.ztstaff_type.print_config_details()
     }
 }
 
