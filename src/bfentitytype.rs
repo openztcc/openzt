@@ -1676,111 +1676,112 @@ impl Deref for ZTGuestType {
 struct ZTAnimalType {
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
     pad00: [u8; 0x1D8 - 0x188], // ----------------------- padding: 72 bytes
-    box_footprint_x: i32, // 0x1D8
-    box_footprint_y: i32, // 0x1DC
-    box_footprint_z: i32, // 0x1E0
-    family: i32, // 0x1E4
-    genus: i32, // 0x1E8
+    pub box_footprint_x: i32, // 0x1D8
+    pub box_footprint_y: i32, // 0x1DC
+    pub box_footprint_z: i32, // 0x1E0
+    pub family: i32, // 0x1E4
+    pub genus: i32, // 0x1E8
     pad01: [u8; 0x1F0 - 0x1EC], // ----------------------- padding: 4 bytes
-    habitat: i32, // 0x1F0
-    location: i32, // 0x1F4
-    era: i32, // 0x1F8
-    breath_threshold: i32, // 0x1FC
-    breath_increment: i32, // 0x200
+    pub habitat: i32, // 0x1F0
+    pub location: i32, // 0x1F4
+    pub era: i32, // 0x1F8
+    pub breath_threshold: i32, // 0x1FC
+    pub breath_increment: i32, // 0x200
     pad02: [u8; 0x20C - 0x204], // ----------------------- padding: 8 bytes
-    hunger_threshold: i32, // 0x20C
-    hungry_health_change: i32, // 0x210
-    hunger_increment: i32, // 0x214
-    food_unit_value: i32, // 0x218
-    keeper_food_units_eaten: i32, // 0x21C
-    needed_food: i32, // 0x220
-    no_food_change: i32, // 0x224
-    initial_happiness: i32, // 0x228
+    pub hunger_threshold: i32, // 0x20C
+    pub hungry_health_change: i32, // 0x210
+    pub hunger_increment: i32, // 0x214
+    pub food_unit_value: i32, // 0x218
+    pub keeper_food_units_eaten: i32, // 0x21C
+    pub needed_food: i32, // 0x220
+    pub no_food_change: i32, // 0x224
+    pub initial_happiness: i32, // 0x228
     pad04: [u8; 0x234 - 0x22C], // ----------------------- padding: 12 bytes
-    max_hits: i32, // 0x234
-    pad05: [u8; 0x23C - 0x238], // ----------------------- padding: 4 bytes
-    pct_hits: i32, // 0x23C
-    pad06: [u8; 0x248 - 0x240], // ----------------------- padding: 8 bytes
-    max_energy: i32, // 0x248
+    pub max_hits: i32, // 0x234
+    pad004: [u8; 0x23C - 0x238], // ----------------------- padding: 4 bytes
+    pub pct_hits: i32, // 0x23C
+    pad05: [u8; 0x248 - 0x240], // ----------------------- padding: 8 bytes
+    pub max_energy: i32, // 0x248
     pad07: [u8; 0x250 - 0x24C], // ----------------------- padding: 4 bytes
-    max_dirty: i32, // 0x250
-    min_dirty: i32, // 0x254
-    sick_change: i32, // 0x258
-    other_animal_sick_change: i32, // 0x25C
-    sick_chance: i32, // 0x260
-    sick_random_chance: i32, // 0x264
-    crowd: i32, // 0x268
-    crowd_happiness_change: i32, // 0x26C
-    zap_happiness_change: i32, // 0x270
-    captivity: i32, // 0x274
-    reproduction_chance: i32, // 0x278
-    reproduction_interval: i32, // 0x27C
-    mating_type: i32, // 0x280
-    offspring: i32, // 0x284
-    keeper_frequency: i32, // 0x288
-    pad007: [u8; 0x290 - 0x28C], // ----------------------- padding: 4 bytes
-    not_enough_keepers_change: i32, // 0x290
-    social: i32, // 0x294
-    habitat_size: i32, // 0x298
-    number_animals_min: i32, // 0x29C
-    number_animals_max: i32, // 0x2A0
-    pad08: [u8; 0x2AC - 0x2A4], // ----------------------- padding: 8 bytes
-    number_min_change: i32, // 0x2AC
-    number_max_change: i32, // 0x2B0
-    pad09: [u8; 0x2BC - 0x2B4], // ----------------------- padding: 8 bytes
-    habitat_preference: i32, // 0x2BC
-    pad10: [u8; 0x31C - 0x2C0], // ----------------------- padding: 92 bytes
-    baby_born_change: i32, // 0x31C
-    pad11: [u8; 0x320 - 0x320], // ----------------------- padding: 4 bytes
-    energy_increment: i32, // 0x320
-    energy_threshold: i32, // 0x324
-    dirty_increment: i32, // 0x328
-    dirty_threshold: i32, // 0x32C
-    pad12: [u8; 0x330 - 0x330], // ----------------------- padding: 4 bytes
-    sick_time: i32, // 0x330
-    pad13: [u8; 0x344 - 0x334], // ----------------------- padding: 16 bytes
-    baby_to_adult: i32, // 0x344
-    pad14: [u8; 0x348 - 0x348], // ----------------------- padding: 4 bytes
-    other_food: i32, // 0x348
-    tree_pref: i32, // 0x34C
-    rock_pref: i32, // 0x350
-    space_pref: i32, // 0x354
-    elevation_pref: i32, // 0x358
-    depth_min: i32, // 0x35C
-    depth_max: i32, // 0x360
-    depth_change: i32, // 0x364
-    salinity_change: i32, // 0x368
-    salinity_health_change: i32, // 0x36C
-    pad15: [u8; 0x378 - 0x370], // ----------------------- padding: 8 bytes
-    happy_reproduce_threshold: i32, // 0x378
-    pad16: [u8; 0x37C - 0x37C], // ----------------------- padding: 4 bytes
-    building_use_chance: i32, // 0x37C
-    no_mate_change: i32, // 0x380
-    time_death: i32, // 0x384
-    death_chance: i32, // 0x388
-    dirt_chance: i32, // 0x38C
-    water_needed: i32, // 0x390
-    underwater_needed: i32, // 0x394
-    land_needed: i32, // 0x398
-    enter_water_chance: i32, // 0x39C
-    enter_tank_chance: i32, // 0x3A0
-    enter_land_chance: i32, // 0x3A4
-    drink_water_chance: i32, // 0x3A8
-    chase_animal_chance: i32, // 0x3AC
-    climbs_cliffs: i32, // 0x3B0
-    bash_strength: i32, // 0x3B4
-    attractiveness: i32, // 0x3B8
-    pad17: [u8; 0x3C8 - 0x3BC], // ----------------------- padding: 8 bytes
-    keeper_food_type: i32, // 0x3C8
-    is_climber: bool, // 0x3CC
-    is_jumper: bool, // 0x3CD
-    small_zoodoo: bool, // 0x3CE
-    dino_zoodoo: bool, // 0x3CF
-    giant_zoodoo: bool, // 0x3D0
-    is_special_animal: bool, // 0x3D1
-    need_shelter: bool, // 0x3D2
-    need_toys: bool, // 0x3D3
-    babies_attack: bool, // 0x3D4
+    pub max_dirty: i32, // 0x250
+    pub min_dirty: i32, // 0x254
+    pub sick_change: i32, // 0x258
+    pub other_animal_sick_change: i32, // 0x25C
+    pub sick_chance: i32, // 0x260
+    pub sick_random_chance: i32, // 0x264
+    pub crowd: i32, // 0x268
+    pub crowd_happiness_change: i32, // 0x26C
+    pub zap_happiness_change: i32, // 0x270
+    pub captivity: i32, // 0x274
+    pub reproduction_chance: i32, // 0x278
+    pub reproduction_interval: i32, // 0x27C
+    pub mating_type: i32, // 0x280
+    pub offspring: i32, // 0x284
+    pub keeper_frequency: i32, // 0x288
+    pad08: [u8; 0x290 - 0x28C], // ----------------------- padding: 4 bytes
+    pub not_enough_keepers_change: i32, // 0x290
+    pub social: i32, // 0x294
+    pub habitat_size: i32, // 0x298
+    pub number_animals_min: i32, // 0x29C
+    pub number_animals_max: i32, // 0x2A0
+    pad09: [u8; 0x2AC - 0x2A4], // ----------------------- padding: 8 bytes
+    pub number_min_change: i32, // 0x2AC
+    pub number_max_change: i32, // 0x2B0
+    pad10: [u8; 0x2BC - 0x2B4], // ----------------------- padding: 8 bytes
+    pub habitat_preference: i32, // 0x2BC
+    pad11: [u8; 0x31C - 0x2C0], // ----------------------- padding: 92 bytes
+    pub baby_born_change: i32, // 0x31C
+    pad12: [u8; 0x320 - 0x320], // ----------------------- padding: 4 bytes
+    pub energy_increment: i32, // 0x320
+    pub energy_threshold: i32, // 0x324
+    pub dirty_increment: i32, // 0x328
+    pub dirty_threshold: i32, // 0x32C
+    pad13: [u8; 0x330 - 0x330], // ----------------------- padding: 4 bytes
+    pub sick_time: i32, // 0x330
+    pad14: [u8; 0x344 - 0x334], // ----------------------- padding: 16 bytes
+    pub baby_to_adult: i32, // 0x344
+    pad15: [u8; 0x348 - 0x348], // ----------------------- padding: 4 bytes
+    pub other_food: i32, // 0x348
+    pub tree_pref: i32, // 0x34C
+    pub rock_pref: i32, // 0x350
+    pub space_pref: i32, // 0x354
+    pub elevation_pref: i32, // 0x358
+    pub depth_min: i32, // 0x35C
+    pub depth_max: i32, // 0x360
+    pub depth_change: i32, // 0x364
+    pub salinity_change: i32, // 0x368
+    pub salinity_health_change: i32, // 0x36C
+    pad16: [u8; 0x378 - 0x370], // ----------------------- padding: 8 bytes
+    pub happy_reproduce_threshold: i32, // 0x378
+    pad17: [u8; 0x37C - 0x37C], // ----------------------- padding: 4 bytes
+    pub building_use_chance: i32, // 0x37C
+    pub no_mate_change: i32, // 0x380
+    pub time_death: i32, // 0x384
+    pub death_chance: i32, // 0x388
+    pub dirt_chance: i32, // 0x38C
+    pub water_needed: i32, // 0x390
+    pub underwater_needed: i32, // 0x394
+    pub land_needed: i32, // 0x398
+    pub enter_water_chance: i32, // 0x39C
+    pub enter_tank_chance: i32, // 0x3A0
+    pub enter_land_chance: i32, // 0x3A4
+    pub drink_water_chance: i32, // 0x3A8
+    pub chase_animal_chance: i32, // 0x3AC
+    pub climbs_cliffs: i32, // 0x3B0
+    pub bash_strength: i32, // 0x3B4
+    pub attractiveness: i32, // 0x3B8
+    pad18: [u8; 0x3C8 - 0x3BC], // ----------------------- padding: 8 bytes
+    pub keeper_food_type: i32, // 0x3C8
+    pub is_climber: bool, // 0x3CC
+    pub is_jumper: bool, // 0x3CD
+    pub small_zoodoo: bool, // 0x3CE
+    pub dino_zoodoo: bool, // 0x3CF
+    pub giant_zoodoo: bool, // 0x3D0
+    pub is_special_animal: bool, // 0x3D1
+    pub need_shelter: bool, // 0x3D2
+    pub need_toys: bool, // 0x3D3
+    pub babies_attack: bool, // 0x3D4
+
 }
 
 impl ZTAnimalType {
@@ -2040,13 +2041,13 @@ impl ZTAnimalType {
             self.is_jumper = value.parse::<bool>().unwrap();
             Ok(format!("Set Is Jumper to {}", self.is_jumper))
         } else if config == "-cSmallZoodoo" {
-            self.small_zoodoo = value.parse::<i32>().unwrap();
+            self.small_zoodoo = value.parse::<bool>().unwrap();
             Ok(format!("Set Small Zoodoo to {}", self.small_zoodoo))
         } else if config == "-cDinoZoodoo" {
-            self.dino_zoodoo = value.parse::<i32>().unwrap();
+            self.dino_zoodoo = value.parse::<bool>().unwrap();
             Ok(format!("Set Dino Zoodoo to {}", self.dino_zoodoo))
         } else if config == "-cGiantZoodoo" {
-            self.giant_zoodoo = value.parse::<i32>().unwrap();
+            self.giant_zoodoo = value.parse::<bool>().unwrap();
             Ok(format!("Set Giant Zoodoo to {}", self.giant_zoodoo))
         } else if config == "-cIsSpecialAnimal" {
             self.is_special_animal = value.parse::<bool>().unwrap();
@@ -2066,9 +2067,7 @@ impl ZTAnimalType {
     }
 
     pub fn print_config_integers(&self) -> String {
-    format!(
-        "Box Footprint X: {}\nBox Footprint Y: {}\nBox Footprint Z: {}\nFamily: {}\nGenus: {}\nHabitat: {}\nLocation: {}\nEra: {}\nBreath Threshold: {}\nBreath Increment: {}\nHunger Threshold: {}\nHungry Health Change: {}\nHunger Increment: {}\nFood Unit Value: {}\nKeeper Food Units Eaten: {}\nNeeded Food: {}\nNo Food Change: {}\nInitial Happiness: {}\nMax Hits: {}\nPct Hits: {}\nMax Energy: {}\nMax Dirty: {}\nMin Dirty: {}\nSick Change: {}\nOther Animal Sick Change: {}\nSick Chance: {}\nSick Random Chance: {}\nCrowd: {}\nCrowd Happiness Change: {}\nZap Happiness Change: {}\nCaptivity: {}\nReproduction Chance: {}\nReproduction Interval: {}\nMating Type: {}\nOffspring: {}\nKeeper Frequency: {}\nNot Enough Keepers Change: {}\nSocial: {}\nHabitat Size: {}\nNumber Animals Min: {}\nNumber Animals Max: {}\nNumber Min Change: {}\nNumber Max Change: {}\nHabitat Preference: {}\nBaby Born Change: {}\nEnergy Increment: {}\nEnergy Threshold: {}\nDirty Increment: {}\nDirty Threshold: {}\nSick Time: {}\nBaby To Adult: {}\nOther Food: {}\nTree Pref: {}\nRock Pref: {}\nSpace Pref: {}\nElevation Pref: {}\nDepth Min: {}\nDepth Max: {}\nDepth Change: {}\nSalinity Change: {}\nSalinity Health Change: {}\nHappy Reproduce Threshold: {}\nBuilding Use Chance: {}\nNo Mate Change: {}\nTime Death: {}\nDeath Chance: {}\nDirt Chance: {}\nWater Needed: {}\nUnderwater Needed: {}\nLand Needed: {}\nEnter Water Chance: {}\nEnter Tank Chance: {}\nEnter Land Chance: {}\nDrink Water Chance: {}\nChase Animal Chance: {}\nClimbs Cliffs: {}\nBash Strength: {}\nAttractiveness: {}\nKeeper Food Type: {}\nIs Climber: {}\nIs Jumper: {}\nSmall Zoodoo: {}\nDino Zoodoo: {}\nGiant Zoodoo: {}\nIs Special Animal: {}\
-        Need Shelter: {}\nNeed Toys: {}\nBabies Attack: {}\n",
+    format!("cBoxFootprintX: {}\ncBoxFootprintY: {}\ncBoxFootprintZ: {}\ncFamily: {}\ncGenus: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncBreathThreshold: {}\ncBreathIncrement: {}\ncHungerThreshold: {}\ncHungryHealthChange: {}\ncHungerIncrement: {}\ncFoodUnitValue: {}\ncKeeperFoodUnitsEaten: {}\ncNeededFood: {}\ncNoFoodChange: {}\ncInitialHappiness: {}\ncMaxHits: {}\ncPctHits: {}\ncMaxEnergy: {}\ncMaxDirty: {}\ncMinDirty: {}\ncSickChange: {}\ncOtherAnimalSickChange: {}\ncSickChance: {}\ncSickRandomChance: {}\ncCrowd: {}\ncCrowdHappinessChange: {}\ncZapHappinessChange: {}\ncCaptivity: {}\ncReproductionChance: {}\ncReproductionInterval: {}\ncMatingType: {}\ncOffspring: {}\ncKeeperFrequency: {}\ncNotEnoughKeepersChange: {}\ncSocial: {}\ncHabitatSize: {}\ncNumberAnimalsMin: {}\ncNumberAnimalsMax: {}\ncNumberMinChange: {}\ncNumberMaxChange: {}\ncHabitatPreference: {}\ncBabyBornChange: {}\ncEnergyIncrement: {}\ncEnergyThreshold: {}\ncDirtyIncrement: {}\ncDirtyThreshold: {}\ncSickTime: {}\ncBabyToAdult: {}\ncOtherFood: {}\ncTreePref: {}\ncRockPref: {}\ncSpacePref: {}\ncElevationPref: {}\ncDepthMin: {}\ncDepthMax: {}\ncDepthChange: {}\ncSalinityChange: {}\ncSalinityHealthChange: {}\ncHappyReproduceThreshold: {}\ncBuildingUseChance: {}\ncNoMateChange: {}\ncTimeDeath: {}\ncDeathChance: {}\ncDirtChance: {}\ncWaterNeeded: {}\ncUnderwaterNeeded: {}\ncLandNeeded: {}\ncEnterWaterChance: {}\ncEnterTankChance: {}\ncEnterLandChance: {}\ncDrinkWaterChance: {}\ncChaseAnimalChance: {}\ncClimbsCliffs: {}\ncBashStrength: {}\ncAttractiveness: {}\ncKeeperFoodType: {}\ncIsClimber: {}\ncIsJumper: {}\ncSmallZoodoo: {}\ncDinoZoodoo: {}\ncGiantZoodoo: {}\ncIsSpecialAnimal: {}\ncNeedShelter: {}\ncNeedToys: {}\ncBabiesAttack: {}\n",
         self.box_footprint_x,
         self.box_footprint_y,
         self.box_footprint_z,
@@ -2136,9 +2135,9 @@ impl ZTAnimalType {
         self.time_death,
         self.death_chance,
         self.dirt_chance,
-        self.water_needed,
-        self.underwater_needed,
-        self.land_needed,
+        self.water_needed as i32,
+        self.underwater_needed as i32,
+        self.land_needed as i32,
         self.enter_water_chance,
         self.enter_tank_chance,
         self.enter_land_chance,
@@ -2148,15 +2147,15 @@ impl ZTAnimalType {
         self.bash_strength,
         self.attractiveness,
         self.keeper_food_type,
-        self.is_climber,
-        self.is_jumper,
-        self.small_zoodoo,
-        self.dino_zoodoo,
-        self.giant_zoodoo,
-        self.is_special_animal,
-        self.need_shelter,
-        self.need_toys,
-        self.babies_attack
+        self.is_climber as i32,
+        self.is_jumper as i32,
+        self.small_zoodoo as i32,
+        self.dino_zoodoo as i32,
+        self.giant_zoodoo as i32,
+        self.is_special_animal as i32,
+        self.need_shelter as i32,
+        self.need_toys as i32,
+        self.babies_attack as i32,
         )
     }
 }
