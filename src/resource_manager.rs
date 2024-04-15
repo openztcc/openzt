@@ -292,12 +292,36 @@ pub fn add_txt_file_to_map_with_path_override(entry: &Path, file: &mut ZipFile, 
     let intermediate_string = String::from_utf8_lossy(&buffer).to_string();
 
     let file_size = intermediate_string.len();
-    let file_contents = CString::new(intermediate_string).unwrap();
+    let file_contents = match CString::new(intermediate_string) {
+        Ok(c_string) => c_string,
+        Err(e) => {
+            error!(
+                "Error converting file contents to CString: {} {} -> {}",
+                entry.display(),
+                file.name(),
+                e
+            );
+            return;
+        }
+    };
+
+    let ztfile = match ZTFile::new_text(path.clone(), file_size as u32, file_contents) {
+        Ok(ztfile) => ztfile,
+        Err(e) => {
+            error!(
+                "Error creating ZTFile from text: {} {} -> {}",
+                entry.display(),
+                file.name(),
+                e
+            );
+            return;
+        }
+    };
 
     add_ztfile(
         entry,
-        path.clone(),
-        ZTFile::new_text(path, file_size as u32, file_contents).unwrap(),
+        path,
+        ztfile,
     );
 }
 
@@ -341,62 +365,91 @@ static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> =
 static RESOURCE_PTR_PTR_SET: Lazy<Mutex<HashSet<u32>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 pub fn add_ptr_ptr(ptr_ptr: u32) {
-    RESOURCE_PTR_PTR_SET.lock().unwrap().insert(ptr_ptr);
+    let Ok(mut binding) = RESOURCE_PTR_PTR_SET.lock() else {
+        error!("Failed to lock resource ptr ptr set; returning from add_ptr_ptr for {}", ptr_ptr);
+        return;
+    };
+    binding.insert(ptr_ptr);
 }
 
 pub fn check_ptr_ptr(ptr_ptr: u32) -> bool {
-    RESOURCE_PTR_PTR_SET.lock().unwrap().contains(&ptr_ptr)
+    let Ok(binding) = RESOURCE_PTR_PTR_SET.lock() else {
+        error!("Failed to lock resource ptr ptr set; returning false from check_ptr_ptr for {}", ptr_ptr);
+        return false;
+    };
+    binding.contains(&ptr_ptr)
 }
 
 pub fn check_file(file_name: &str) -> bool {
-    RESOURCE_STRING_TO_PTR_MAP
-        .lock()
-        .unwrap()
-        .contains_key(&file_name.to_lowercase())
+    let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
+        error!("Failed to lock resource string to ptr map; returning false from check_file for {}", file_name);
+        return false;
+    };
+    binding.contains_key(&file_name.to_lowercase())
 }
 
 pub fn get_file_ptr(file_name: &str) -> Option<u32> {
-    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+    let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
+        error!("Failed to lock resource string to ptr map; returning None from get_file_ptr for {}", file_name);
+        return None;
+    };
     binding.get(&file_name.to_lowercase()).copied()
 }
 
 fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
-    let mut ztd_path = path.to_str().unwrap().to_string();
+    let Some(ztd_path) = path.to_str() else {
+        error!("Failed to convert path to string: {}", path.display());
+        return;
+    };
+    let mut ztd_path = ztd_path.to_string();
     ztd_path = ztd_path.replace("./", "zip::./").replace('\\', "/");
     let lowercase_filename = file_name.to_lowercase();
+
+    let Ok(mut binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
+        error!("Failed to lock resource string to ptr map; returning from add_ztfile for {}", file_name);
+        return;
+    };
+
+    let bf_zip_name_ptr = match CString::new(ztd_path.clone()) {
+        Ok(c_string) => c_string.into_raw() as u32,
+        Err(e) => {
+            error!("Error converting zip name to CString: {} -> {}", ztd_path, e);
+            return;
+        }
+    };
+    let bf_resource_name_ptr  = match CString::new(lowercase_filename.clone()) {
+        Ok(c_string) => c_string.into_raw() as u32,
+        Err(e) => {
+            error!("Error converting resource name to CString: {} -> {}", lowercase_filename, e);
+            return;
+        }
+    };
+
     match ztfile {
         ZTFile::Text(data, _, length) => {
             let ptr = data.into_raw() as u32;
             let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
                 num_refs: 100, // We set this very high to prevent the game from unloading the resource
-                bf_zip_name_ptr: CString::new(ztd_path).unwrap().into_raw() as u32,
-                bf_resource_name_ptr: CString::new(lowercase_filename.clone()).unwrap().into_raw()
-                    as u32,
+                bf_zip_name_ptr,
+                bf_resource_name_ptr,
                 data_ptr: ptr,
                 content_size: length,
             }));
 
-            RESOURCE_STRING_TO_PTR_MAP
-                .lock()
-                .unwrap()
-                .insert(file_name.clone(), resource_ptr as u32);
+            binding.insert(file_name.clone(), resource_ptr as u32);
         }
         ZTFile::Graphics(data, _, length) => {
             let ptr = data.as_ptr() as u32;
             std::mem::forget(data);
             let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
                 num_refs: 100, // We set this very high to prevent the game from unloading the resource
-                bf_zip_name_ptr: CString::new(ztd_path).unwrap().into_raw() as u32,
-                bf_resource_name_ptr: CString::new(lowercase_filename.clone()).unwrap().into_raw()
-                    as u32,
+                bf_zip_name_ptr,
+                bf_resource_name_ptr,
                 data_ptr: ptr,
                 content_size: length,
             }));
 
-            RESOURCE_STRING_TO_PTR_MAP
-                .lock()
-                .unwrap()
-                .insert(lowercase_filename.clone(), resource_ptr as u32);
+            binding.insert(lowercase_filename.clone(), resource_ptr as u32);
         }
     }
 }
@@ -424,10 +477,10 @@ where
 {
     modify_ztfile(file_name, |file: &mut BFResourcePtr| {
         let c_string = unsafe { CString::from_raw(file.data_ptr as *mut i8) };
-        let c_string_as_string = c_string.to_str().unwrap().to_string();
+        let c_string_as_string = c_string.to_string_lossy().to_string();
         let mut cfg = Ini::new_cs();
         cfg.set_comment_symbols(&[';', '#', ':']);
-        if let Err(err) = cfg.read(c_string_as_string.clone()) {
+        if let Err(err) = cfg.read(c_string_as_string) {
             error!("Error reading ini: {}", err);
             return;
         };
@@ -440,7 +493,10 @@ where
         let new_string = cfg.pretty_writes(&write_options);
         file.content_size = new_string.len() as u32;
 
-        let new_c_string = CString::new(new_string).unwrap();
+        let Ok(new_c_string) = CString::new(new_string) else {
+            error!("Error converting ini to CString after modifying {} writing unchanged version", file_name);
+            return;
+        };
         file.data_ptr = new_c_string.into_raw() as u32;
     })
 }
@@ -649,8 +705,10 @@ fn command_get_bf_resource_mgr(_args: Vec<&str>) -> Result<String, CommandError>
 pub fn init() {
     add_to_command_register("list_resources".to_owned(), command_list_resources);
     add_to_command_register("get_bfresourcemgr".to_owned(), command_get_bf_resource_mgr);
-    unsafe { zoo_resource_mgr::init_detours().unwrap() };
-    add_handler(Handler::new(None, None, add_file_to_maps).unwrap());
+    if unsafe { zoo_resource_mgr::init_detours() }.is_err() {
+        error!("Failed to init resource_mgr detours");
+    };
+    add_handler(Handler::new(None, None, add_file_to_maps));
 }
 
 #[hook_module("zoo.exe")]
@@ -704,7 +762,11 @@ pub mod zoo_resource_mgr {
         let ini_path = get_ini_path();
         let mut zoo_ini = Ini::new();
         zoo_ini.set_comment_symbols(&['#']);
-        zoo_ini.load(ini_path).unwrap();
+        if let Err(e) = zoo_ini.load(ini_path) {
+            info!("Failed to load zoo.ini: {}", e);
+            return return_value;
+        
+        };
         if let Some(paths) = zoo_ini.get("resource", "path") {
             // TODO: Readd this when more expansions can be added, expand to add subdirs of mods to ZT path variable
             // let path_vec = paths.split(';').map(|s| s.to_owned()).collect::<Vec<String>>();
@@ -737,12 +799,12 @@ impl Handler {
         matcher_prefix: Option<String>,
         matcher_suffix: Option<String>,
         handler: HandlerFunction,
-    ) -> Result<Self, &'static str> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             matcher_prefix,
             matcher_suffix,
             handler,
-        })
+        }
     }
 
     fn handle(&self, entry: &Path, file: &mut ZipFile) {
@@ -770,7 +832,13 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
         .follow_links(true)
         .max_depth(if recursive { 0 } else { 1 });
     for entry in walker {
-        let entry = entry.unwrap();
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                error!("Error walking directory: {}", e);
+                continue;
+            }
+        };
         if entry
             .file_name()
             .to_str()
@@ -793,13 +861,42 @@ fn load_resources(paths: Vec<String>) {
 }
 
 fn handle_ztd(resource: &PathBuf) {
-    let mut buf_reader = BufReader::new(File::open(resource).unwrap());
-    let mut zip = zip::ZipArchive::new(&mut buf_reader).unwrap();
+    let file = match File::open(resource) {
+        Ok(file) => file,
+        Err(e) => {
+            error!("Error opening file: {}", e);
+            return;
+        }
+    };
+
+    let mut buf_reader = BufReader::new(file);
+
+    let mut zip = match zip::ZipArchive::new(&mut buf_reader) {
+        Ok(zip) => zip,
+        Err(e) => {
+            error!("Error reading zip: {}", e);
+            return;
+        }
+    };
+
     for i in 0..zip.len() {
-        let data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
+        let data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
+            Ok(data_mutex) => data_mutex,
+            Err(e) => {
+                error!("Error locking resource handler array: {}", e);
+                return;
+            }
+        
+        };
         for handler in data_mutex.iter() {
             // ZipFile doesn't provide a .seek() method to set the cursor to the start of the file, so we create new ZipFile for each handler
-            let mut file = zip.by_index(i).unwrap();
+            let mut file = match zip.by_index(i) {
+                Ok(file) => file,
+                Err(e) => {
+                    error!("Error reading zip file: {}", e);
+                    continue;
+                }
+            };
             if file.is_dir() {
                 continue;
             }
@@ -811,10 +908,22 @@ fn handle_ztd(resource: &PathBuf) {
 static RESOURCE_HANDLER_ARRAY: Lazy<Mutex<Vec<Handler>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 pub fn add_handler(handler: Handler) {
-    let mut data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
+    let mut data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
+        Ok(data_mutex) => data_mutex,
+        Err(e) => {
+            error!("Error locking resource handler array: {}", e);
+            return;
+        }
+    };
     data_mutex.push(handler);
 }
 
 fn get_handlers() -> Vec<Handler> {
-    RESOURCE_HANDLER_ARRAY.lock().unwrap().clone()
+    match RESOURCE_HANDLER_ARRAY.lock() {
+        Ok(binding) => binding.clone(),
+        Err(e) => {
+            error!("Error locking resource handler array: {}", e);
+            Vec::new()
+        }
+    }
 }

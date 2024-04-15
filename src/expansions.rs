@@ -149,13 +149,26 @@ static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
-    let mut data_mutex = MEMBER_SETS.lock().unwrap();
+    let mut data_mutex = match MEMBER_SETS.lock() {
+        Ok(mutex) => mutex,
+        Err(poisoned) => {
+            error!("Error locking member set mutex: {:?}", poisoned);
+            return;
+        },
+    };
+
     let set = data_mutex.entry(member).or_default();
     set.insert(entity_name);
 }
 
 pub fn is_member(entity_name: &str, member: &str) -> bool {
-    let data_mutex = MEMBER_SETS.lock().unwrap();
+    let data_mutex = match MEMBER_SETS.lock() {
+        Ok(mutex) => mutex,
+        Err(poisoned) => {
+            error!("Error locking member set mutex: {:?}", poisoned);
+            return false;
+        },
+    };
     match data_mutex.get(member) {
         Some(set) => set.contains(entity_name),
         None => false,
@@ -163,7 +176,13 @@ pub fn is_member(entity_name: &str, member: &str) -> bool {
 }
 
 pub fn get_members(member: &str) -> Option<HashSet<String>> {
-    let data_mutex = MEMBER_SETS.lock().unwrap();
+    let data_mutex = match MEMBER_SETS.lock() {
+        Ok(mutex) => mutex,
+        Err(poisoned) => {
+            error!("Error locking member set mutex: {:?}", poisoned);
+            return None;
+        },
+    };
     data_mutex.get(member).cloned()
 }
 
@@ -178,7 +197,12 @@ fn get_cc_expansion_name(subdir: &str) -> String {
 }
 
 fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
-    let data_mutex = MEMBER_SETS.lock().unwrap();
+    let data_mutex = match MEMBER_SETS.lock() {
+        Ok(mutex) => mutex,
+        Err(poisoned) => {
+            return Err(Into::into(format!("Error locking member set mutex: {}", poisoned)));
+        },
+    };
     let mut result = String::new();
 
     for (set_name, members) in data_mutex.iter() {
@@ -197,7 +221,12 @@ fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> Result<(), String> {
-    let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
+    let mut data_mutex = match EXPANSION_ARRAY.lock() {
+        Ok(mutex) => mutex,
+        Err(poisoned) => {
+            return Err(format!("Error locking expansion array mutex: {} cannot add expansion {}", poisoned, expansion.name_string()));
+        },
+    };
     if data_mutex.len() >= MAX_EXPANSION_SIZE {
         return Err("Max expansion size reached".to_string());
     }
@@ -213,19 +242,32 @@ fn add_expansion(expansion: Expansion, save_to_memory: bool) -> Result<(), Strin
 }
 
 fn get_expansion(expansion_id: u32) -> Option<Expansion> {
-    let data_mutex = EXPANSION_ARRAY.lock().unwrap();
+    let data_mutex = match EXPANSION_ARRAY.lock() {
+        Ok(mutex) => mutex,
+        Err(poisoned) => {
+            error!("Error locking expansion array mutex: {:?}, could not get expansion by id: {}", poisoned, expansion_id);
+            return None;
+        },
+    };
     data_mutex
         .iter()
         .find(|expansion| expansion.expansion_id == expansion_id)
         .cloned()
 }
 
-fn expansion_number() -> usize {
-    EXPANSION_ARRAY.lock().unwrap().len()
-}
+// fn expansion_number() -> usize {
+//     EXPANSION_ARRAY.lock().unwrap().len()
+// }
 
 fn save_mutex() {
-    inner_save_mutex(EXPANSION_ARRAY.lock().unwrap());
+    let data_mutex = match EXPANSION_ARRAY.lock() {
+        Ok(mutex) => mutex,
+        Err(poisoned) => {
+            error!("Error locking expansion array mutex: {:?}, not saved", poisoned);
+            return;
+        },
+    };
+    inner_save_mutex(data_mutex)
 }
 
 fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
@@ -246,7 +288,13 @@ fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
 }
 
 fn get_expansions() -> Vec<Expansion> {
-    EXPANSION_ARRAY.lock().unwrap().clone()
+    match EXPANSION_ARRAY.lock() {
+        Ok(mutex) => mutex.clone(),
+        Err(poisoned) => {
+            error!("Error locking expansion array mutex: {:?}", poisoned);
+            Vec::new()
+        },
+    }
 }
 
 #[derive(Debug)]
@@ -302,9 +350,16 @@ fn read_expansions_from_memory() -> Vec<Expansion> {
     expansions
 }
 
-fn read_current_expansion() -> Expansion {
+fn read_current_expansion() -> Option<Expansion> {
     let current_expansion_id = get_from_memory(EXPANSION_CURRENT);
-    get_expansion(current_expansion_id).unwrap()
+    match get_expansion(current_expansion_id) {
+        Some(expansion) => Some(expansion),
+        None => {
+            info!("Current expansion not found");
+            None
+        },
+
+    }
 }
 
 fn save_current_expansion(expansion_id: u32) {
@@ -347,7 +402,10 @@ fn command_get_expansions(_args: Vec<&str>) -> Result<String, CommandError> {
 }
 
 fn command_get_current_expansion(_args: Vec<&str>) -> Result<String, CommandError> {
-    Ok(read_current_expansion().to_string())
+    match read_current_expansion() {
+        Some(expansion) => Ok(expansion.to_string()),
+        None => Ok("No current expansion".to_string()),
+    }
 }
 
 #[hook_module("zoo.exe")]
@@ -363,7 +421,9 @@ pub mod custom_expansion {
         let result =
             unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
 
-        let current_expansion = read_current_expansion();
+        let Some(current_expansion) = read_current_expansion() else {
+            return 0;
+        };
 
         let entity = read_zt_entity_type_from_memory(bf_entity);
 
@@ -377,6 +437,7 @@ pub mod custom_expansion {
                 false => 0,
             };
 
+        // TODO: Put this log behind OpenZT debug flag
         if result != reimplemented_result {
             info!(
                 "Filtering mismatch {} {} ({:#x} vs {:#x})",
@@ -427,7 +488,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     );
 
     if let Err(err) = modify_ztfile_as_ini(EXPANSION_RESOURCE_LYT, |cfg| {
-        let old_y = cfg.get_parse::<i32>("list", "dy").unwrap().unwrap();
+        let old_y = cfg.get_parse::<i32>("list", "dy").unwrap_or(Some(90)).unwrap_or(90);
         let new_y = old_y + (number_of_additional_expansions * 30);
         cfg.set("list", "dy", Some(new_y.to_string()));
         cfg.set(
@@ -442,9 +503,9 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     if let Err(err) = modify_ztfile_as_ini(
         &(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_ANI),
         |cfg| {
-            let old_y0 = cfg.get_parse::<i32>("animation", "y0").unwrap().unwrap();
+            let old_y0 = cfg.get_parse::<i32>("animation", "y0").unwrap_or(Some(-34)).unwrap_or(-34);
             let new_y0 = old_y0 - (number_of_additional_expansions * 10);
-            let old_y1 = cfg.get_parse::<i32>("animation", "y1").unwrap().unwrap();
+            let old_y1 = cfg.get_parse::<i32>("animation", "y1").unwrap_or(Some(34)).unwrap_or(34);
             let new_y1 = old_y1 + (number_of_additional_expansions * 10);
             cfg.set("animation", "y0", Some(new_y0.to_string()));
             cfg.set("animation", "y1", Some(new_y1.to_string()));
@@ -456,7 +517,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
     info!("Check");
-    match modify_ztfile_as_animation(
+    let animation_result = modify_ztfile_as_animation(
         &(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_ANIMATION),
         |animation| {
             animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
@@ -467,9 +528,9 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
                 EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_PAL,
             );
         },
-    ) {
-        Ok(_) => (),
-        Err(e) => info!("Error resizing expansion dropdown animation: {}", e),
+    );
+    if let Err(e) = animation_result {
+        info!("Error resizing expansion dropdown animation: {}", e);
     }
 }
 
@@ -822,20 +883,20 @@ pub fn init() {
             Some("xpac".to_string()),
             Some("cfg".to_string()),
             handle_expansion_config,
-        )
-        .unwrap(),
+        ),
     );
-    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing).unwrap());
-    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing).unwrap());
-    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing).unwrap());
-    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing).unwrap());
+    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing));
+    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing));
+    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing));
+    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing));
     add_handler(
         Handler::new(
             Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()),
             None,
             handle_expansion_dropdown,
-        )
-        .unwrap(),
+        ),
     );
-    unsafe { custom_expansion::init_detours().unwrap() };
+    if unsafe { custom_expansion::init_detours() }.is_err() {
+        error!("Error initialising custom expansion detours");
+    };
 }
