@@ -185,7 +185,7 @@ pub fn command_list_commands(_args: Vec<&str>) -> Result<String, CommandError> {
         }
         Err(err) => {
             info!("Error getting command list: {}", err);
-            Err("Error getting command list").map_err(Into::into)
+            Err(Into::into("Error getting command list"))
         }
     }
 }

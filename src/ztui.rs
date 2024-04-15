@@ -105,7 +105,7 @@ fn command_get_selected_entity(_args: Vec<&str>) -> Result<String, CommandError>
     let get_selected_entity_fn: fn() -> u32 = unsafe { std::mem::transmute(0x00410f84) };
     let entity_address = get_selected_entity_fn();
     if entity_address == 0 {
-        return Err("No entity selected").map_err(Into::into);
+        return Err(Into::into("No entity selected"));
     }
     let entity = read_zt_entity_from_memory(entity_address);
     Ok(format!("{:#?}", entity))
@@ -113,14 +113,14 @@ fn command_get_selected_entity(_args: Vec<&str>) -> Result<String, CommandError>
 
 fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 1 {
-        return Err("Expected 1 argument").map_err(Into::into);
+        return Err(Into::into("Expected 1 argument"));
     }
     let address = args[0].parse::<u32>().unwrap();
     let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 =
         unsafe { std::mem::transmute(0x0040157d) };
     let ui_element_addr = get_element_fn(BFUIMGR_PTR, address);
     if ui_element_addr == 0 {
-        return Err("No element found").map_err(Into::into);
+        return Err(Into::into("No element found"));
     }
     let element: UIElement = get_from_memory(ui_element_addr);
     info!("{:#x} {:#x}", address, ui_element_addr);

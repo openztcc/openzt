@@ -229,7 +229,7 @@ pub fn save_debug_settings(settings: DebugSettings) {
 
 pub fn command_set_setting(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 2 {
-        return Err("Invalid number of arguments").map_err(Into::into);
+        return Err(Into::into("Invalid number of arguments"));
     }
     let setting = args[0].to_string();
     let value = args[1].to_string();
@@ -290,7 +290,7 @@ fn handle_u32_setting(setting: &str, value: String) -> String {
 
 pub fn command_get_setting(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 1 {
-        return Err("Invalid number of arguments").map_err(Into::into);
+        return Err(Into::into("Invalid number of arguments"));
     }
     let setting = args[0].to_string();
     Ok(get_setting(setting))
@@ -347,7 +347,8 @@ fn handle_get_u32_setting(setting: &str) -> String {
 
 pub fn command_show_settings(args: Vec<&str>) -> Result<String, CommandError> {
     if !args.is_empty() {
-        return Err("Invalid number of arguments").map_err(Into::into);
+        return Err(Into::into("Invalid number of arguments"));
+        
     }
     Ok(show_settings())
 }
