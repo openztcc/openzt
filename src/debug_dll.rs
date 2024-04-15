@@ -1,4 +1,4 @@
-use std::{path::PathBuf, ptr};
+use std::{path::PathBuf, ptr, mem::transmute};
 
 use tracing::{debug, info};
 #[cfg(target_os = "windows")]
@@ -76,14 +76,9 @@ pub fn debug_logger(message: &str) {
     info!(message);
 }
 
-pub fn map_from_memory<T>(address: u32) -> Option<&'static mut T> {
+pub fn map_from_memory<T>(address: u32) -> &'static mut T {
     unsafe {
-        let ptr = get_from_memory::<*mut T>(address);
-        if !ptr.is_null() {
-            Some(&mut *ptr)
-        } else {
-            None
-        }
+        transmute::<u32, &mut T>(address)
     }
 }
 

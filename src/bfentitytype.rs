@@ -30,7 +30,8 @@ pub trait EntityType {
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
 pub struct BFEntityType {
-    pad1: [u8; 0x038],                // ----------------------- padding: 56 bytes
+    vtable: u32,                      // 0x000
+    pad1: [u8; 0x034],                // ----------------------- padding: 52 bytes
     pub ncolors: u32,                 // 0x038
     pad2: [u8; 0x050 - 0x03C],        // ----------------------- padding: 20 bytes
     pub icon_zoom: bool,              // 0x050
@@ -1751,7 +1752,7 @@ struct ZTAnimalType {
 }
 
 impl EntityType for ZTAnimalType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
         if config == "-cBoxFootprintX" {
             self.box_footprint_x = value.parse()?;
             Ok(format!("Set Box Footprint X to {}", self.box_footprint_x))
@@ -2154,7 +2155,7 @@ struct ZTStaffType {
 }
 
 impl EntityType for ZTStaffType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
         if config == "-cWorkCheck" {
             self.work_check = value.parse()?;
             Ok(format!("Set Work Check to {}", self.work_check))
@@ -2220,7 +2221,7 @@ struct ZTMaintType {
 }
 
 impl EntityType for ZTMaintType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
         if config == "-cCleanTrashRadius" {
             self.clean_trash_radius = value.parse()?;
             Ok(format!("Set Clean Trash Radius to {}", self.clean_trash_radius))
@@ -2282,7 +2283,7 @@ struct ZTHelicopterType {
 
 impl EntityType for ZTHelicopterType {
 
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
         if config == "-cLoopSoundAtten" {
             self.loop_sound_atten = value.parse()?;
             Ok(format!("Set Loop Sound Atten to {}", self.loop_sound_atten))
@@ -2334,9 +2335,9 @@ struct ZTGuideType {
     pub max_group_size: i32, // 0x208
 }
 
-impl ZTGuideType {
+impl EntityType for ZTGuideType {
 
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
         if config == "-cInformGuestTime" {
             self.inform_guest_time = value.parse()?;
             Ok(format!("Set Inform Guest Time to {}", self.inform_guest_time))
@@ -2425,7 +2426,7 @@ impl ZTKeeperType {
 }
 
 impl EntityType for ZTKeeperType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, String> {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
         if config == "-cFoodUnitsSecond" {
             self.food_units_second = value.parse()?;
             Ok(format!("Set Food Units Second to {}", self.food_units_second))
@@ -2495,9 +2496,7 @@ fn command_sel_type(args: Vec<&str>) -> Result<String, CommandError> {
     //     return Err(CommandError::new("Failed to create entity type".to_string()));
     // }; // create a copied instance of the entity type
 
-    let Ok(mut entity_type) = get_bfentitytype(entity_type_address.clone()) else {
-        return Err(CommandError::new("Failed to create entity type".to_string()));
-    };
+    let entity_type = map_bfentitytype(entity_type_address)?;
 
     if args.is_empty() {
         Ok(entity_type.print_config_details())
@@ -2523,14 +2522,15 @@ fn print_info_image_name(entity_type: &BFEntityType, config: &mut String) {
     }
 }
 
-fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> {
-    // let entity: Box<&mut dyn EntityType> = match ZTEntityTypeClass::from(address) { // create a copied instance of the entity type
-    let entity: Box<dyn EntityType> = match ZTEntityTypeClass::from(address) { // create a copied instance of the entity type
-        ZTEntityTypeClass::Animal => Box::new(get_from_memory::<ZTUnitType>(address)),
+// This returns a dynamic trait object, which lets us call the methods of the entity type without knowing the exact type
+fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> { // create a copied instance of the entity type
+    let entity_type_vtable: u32 = get_from_memory(address);
+    let entity: Box<dyn EntityType> = match ZTEntityTypeClass::from(entity_type_vtable) {
+        ZTEntityTypeClass::Animal => Box::new(get_from_memory::<ZTAnimalType>(address)),
         ZTEntityTypeClass::Ambient => Box::new(get_from_memory::<ZTUnitType>(address)),
         ZTEntityTypeClass::Guest => Box::new(get_from_memory::<ZTGuestType>(address)),
         ZTEntityTypeClass::Fences => Box::new(get_from_memory::<ZTFenceType>(address)),
-        ZTEntityTypeClass::TourGuide => Box::new(get_from_memory::<ZTUnitType>(address)),
+        ZTEntityTypeClass::TourGuide => Box::new(get_from_memory::<ZTGuideType>(address)),
         ZTEntityTypeClass::Building => Box::new(get_from_memory::<ZTBuildingType>(address)),
         ZTEntityTypeClass::Scenery => Box::new(get_from_memory::<ZTSceneryType>(address)),
         ZTEntityTypeClass::Food => Box::new(get_from_memory::<ZTFoodType>(address)),
@@ -2538,9 +2538,34 @@ fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> {
         ZTEntityTypeClass::Path => Box::new(get_from_memory::<ZTPathType>(address)),
         ZTEntityTypeClass::Rubble => Box::new(get_from_memory::<ZTRubbleType>(address)),
         ZTEntityTypeClass::TankWall => Box::new(get_from_memory::<ZTTankWallType>(address)),
-        ZTEntityTypeClass::Keeper => Box::new(get_from_memory::<ZTUnitType>(address)),
-        ZTEntityTypeClass::MaintenanceWorker => Box::new(get_from_memory::<ZTUnitType>(address)),
-        ZTEntityTypeClass::Drt => Box::new(get_from_memory::<ZTUnitType>(address)),
+        ZTEntityTypeClass::Keeper => Box::new(get_from_memory::<ZTKeeperType>(address)),
+        ZTEntityTypeClass::MaintenanceWorker => Box::new(get_from_memory::<ZTMaintType>(address)),
+        ZTEntityTypeClass::Drt => Box::new(get_from_memory::<ZTHelicopterType>(address)),
+        ZTEntityTypeClass::Unknown => return Err("Unknown entity type".to_string()),
+    };
+    Ok(entity)
+}
+
+fn map_bfentitytype(address: u32) -> Result<Box<&'static mut dyn EntityType>, String> { // create a copied instance of the entity type
+    info!("Mapping entity type at address {:#x}", address);
+    let entity_type_vtable: u32 = get_from_memory(address);
+    info!("Entity type vtable: {:#x}", entity_type_vtable);
+    let entity: Box<&mut dyn EntityType> = match ZTEntityTypeClass::from(entity_type_vtable) {
+        ZTEntityTypeClass::Animal => Box::new(map_from_memory::<ZTAnimalType>(address)),
+        ZTEntityTypeClass::Ambient => Box::new(map_from_memory::<ZTUnitType>(address)),
+        ZTEntityTypeClass::Guest => Box::new(map_from_memory::<ZTGuestType>(address)),
+        ZTEntityTypeClass::Fences => Box::new(map_from_memory::<ZTFenceType>(address)),
+        ZTEntityTypeClass::TourGuide => Box::new(map_from_memory::<ZTGuideType>(address)),
+        ZTEntityTypeClass::Building => Box::new(map_from_memory::<ZTBuildingType>(address)),
+        ZTEntityTypeClass::Scenery => Box::new(map_from_memory::<ZTSceneryType>(address)),
+        ZTEntityTypeClass::Food => Box::new(map_from_memory::<ZTFoodType>(address)),
+        ZTEntityTypeClass::TankFilter => Box::new(map_from_memory::<ZTTankFilterType>(address)),
+        ZTEntityTypeClass::Path => Box::new(map_from_memory::<ZTPathType>(address)),
+        ZTEntityTypeClass::Rubble => Box::new(map_from_memory::<ZTRubbleType>(address)),
+        ZTEntityTypeClass::TankWall => Box::new(map_from_memory::<ZTTankWallType>(address)),
+        ZTEntityTypeClass::Keeper => Box::new(map_from_memory::<ZTKeeperType>(address)),
+        ZTEntityTypeClass::MaintenanceWorker => Box::new(map_from_memory::<ZTMaintType>(address)),
+        ZTEntityTypeClass::Drt => Box::new(map_from_memory::<ZTHelicopterType>(address)),
         ZTEntityTypeClass::Unknown => return Err("Unknown entity type".to_string()),
     };
     Ok(entity)

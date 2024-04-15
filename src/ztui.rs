@@ -245,7 +245,7 @@ pub fn get_selected_entity_type_address() -> u32 {
         return 0;
     }
 
-    selected_entity + 0x128
+    get_from_memory(selected_entity + 0x128)
 }
 
 #[derive(Debug)]

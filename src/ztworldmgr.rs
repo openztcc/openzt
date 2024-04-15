@@ -311,7 +311,7 @@ fn get_entity_type_by_id(id: u32) -> u32 {
     while i > 0 {
         let entity_type_ptr = entity_type_array_start + i * 0x4;
         info!("Checking entity type at {:#x}", entity_type_ptr);
-        let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr).unwrap();
+        let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr);
         info!("Entity type name id: {}", entity_type.name_id);
         if entity_type.name_id == id {
             info!(
@@ -334,12 +334,12 @@ fn command_make_sel(args: Vec<&str>) -> Result<String, CommandError> {
     if args.is_empty() {
         Err(Into::into("Usage: make_sel <id>"))
     } else {
-        let id = args[0].parse::<u32>().unwrap();
+        let id = args[0].parse::<u32>()?;
         let entity_type_ptr = get_entity_type_by_id(id);
         if entity_type_ptr == 0 {
             return Err(Into::into("Entity type not found"));
         }
-        let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr).unwrap();
+        let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr);
         if entity_type.selectable {
             return Ok(format!(
                 "Entity type {} is already selectable",
