@@ -7,7 +7,7 @@ use tracing::info;
 use crate::{
     console::{add_to_command_register, CommandError},
     debug_dll::{get_from_memory, get_string_from_memory, map_from_memory},
-    ztui::get_selected_entity_type_address, ztworldmgr::{ZTEntityType, ZTEntityTypeClass},
+    ztui::get_selected_entity_type_address, ztworldmgr::ZTEntityTypeClass,
 };
 
 pub trait EntityType {
