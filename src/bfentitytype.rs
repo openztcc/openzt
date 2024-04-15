@@ -10,7 +10,7 @@ use crate::{
     add_to_command_register,
     debug_dll::{get_from_memory, get_string_from_memory},
     ztui::get_selected_entity_type,
-    ztworldmgr::determine_entity_type,
+    ztworldmgr::determine_entity_type
 };
 
 #[derive(Debug, Getters, Setters)]
@@ -1218,7 +1218,7 @@ impl Deref for BFUnitType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTUnitType {
+pub struct ZTUnitType {
     pub bfunit_type: BFUnitType, // bytes: 0x11C - 0x100 = 0x1C = 28 bytes
     pad0: [u8; 0x12C - 0x11C], // ----------------------- padding: 16 bytes
     pub purchase_cost: f32,      // 0x12C
@@ -1325,7 +1325,7 @@ impl ZTUnitType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTGuestType {
+pub struct ZTGuestType {
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
     pad00: [u8; 0x1B4 - 0x188], // ----------------------- padding: 44 bytes
     pub hunger_check: i32,       // 0x1B4
@@ -1673,7 +1673,7 @@ impl Deref for ZTGuestType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTAnimalType {
+pub struct ZTAnimalType {
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
     pad00: [u8; 0x1D8 - 0x188], // ----------------------- padding: 72 bytes
     pub box_footprint_x: i32, // 0x1D8
@@ -2172,7 +2172,7 @@ impl Deref for ZTAnimalType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTStaffType {
+pub struct ZTStaffType {
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
     pad01: [u8; 0x1B4 - 0x188], // ----------------------- padding: 44 bytes
     pub work_check: i32, // 0x1B4
@@ -2241,7 +2241,7 @@ impl Deref for ZTStaffType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTMaintType {
+pub struct ZTMaintType {
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
     pub clean_trash_radius: i32, // 0x1F4
@@ -2300,7 +2300,7 @@ impl Deref for ZTMaintType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTHelicopterType {
+pub struct ZTHelicopterType {
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
     // pub loop_sound_name: i32, // 0x1F4 TODO: implement string ptr as function getter
@@ -2348,7 +2348,7 @@ impl Deref for ZTHelicopterType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTGuideType {
+pub struct ZTGuideType {
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
     pub inform_guest_time: i32, // 0x1F4
@@ -2419,7 +2419,7 @@ impl Deref for ZTGuideType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTKeeperType {
+pub struct ZTKeeperType {
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
     pub food_units_second: i32, // 0x1F4
@@ -2496,6 +2496,101 @@ impl ZTKeeperType {
         // self.dirt,
         //self.get_sickly_animal_pct(),
         )
+    }
+}
+
+// ------------ BFOverlayType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+pub struct BFOverlayType {
+    pub bfentity_type: BFEntityType, // bytes: 0x100 - 0x0 = 0x100 = 256 bytes
+}
+
+impl BFOverlayType {
+    pub fn new(address: u32) -> Option<&'static mut BFOverlayType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut BFOverlayType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+impl Deref for BFOverlayType {
+    type Target = BFEntityType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bfentity_type
+    }
+}
+
+// ------------ ZTAmbientType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+pub struct ZTAmbientType {
+    pub bfoverlay_type: BFOverlayType, // bytes: 0x100 - 0x0 = 0x100 = 256 bytes
+    pub name_id: i32, // 0x100
+    pub help_id: i32, // 0x104
+    pub speed: i32, // 0x108
+    pub frequency: i32, // 0x10C
+    pub sound_loop: bool, // 0x110
+    // pub sound_name: i32, // 0x111 TODO: implement string ptr with ZTString
+}
+
+impl ZTAmbientType {
+    pub fn new(address: u32) -> Option<&'static mut ZTAmbientType> {
+        unsafe {
+            let ptr = get_from_memory::<*mut ZTAmbientType>(address);
+            if !ptr.is_null() {
+                Some(&mut *ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
+        if config == "-cNameID" {
+            self.name_id = value.parse::<i32>().unwrap();
+            Ok(format!("Set Name ID to {}", self.name_id))
+        } else if config == "-cHelpID" {
+            self.help_id = value.parse::<i32>().unwrap();
+            Ok(format!("Set Help ID to {}", self.help_id))
+        } else if config == "-cSpeed" {
+            self.speed = value.parse::<i32>().unwrap();
+            Ok(format!("Set Speed to {}", self.speed))
+        } else if config == "-cFrequency" {
+            self.frequency = value.parse::<i32>().unwrap();
+            Ok(format!("Set Frequency to {}", self.frequency))
+        } else if config == "-cSoundLoop" {
+            self.sound_loop = value.parse::<bool>().unwrap();
+            Ok(format!("Set Sound Loop to {}", self.sound_loop))
+        } else {
+            Err("Invalid configuration option")
+        }
+    }
+
+    pub fn print_config_integers(&self) -> String {
+        format!("cNameID: {}\ncHelpID: {}\ncSpeed: {}\ncFrequency: {}\ncSoundLoop: {}\n",
+        self.name_id,
+        self.help_id,
+        self.speed,
+        self.frequency,
+        self.sound_loop as i32,
+        )
+    }
+}
+
+impl Deref for ZTAmbientType {
+    type Target = BFOverlayType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bfoverlay_type
     }
 }
 
