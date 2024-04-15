@@ -131,44 +131,57 @@ fn call_command(command_name: String, args: Vec<&str>) -> Result<String, Command
 }
 
 pub fn call_next_command() {
-    let command = get_from_command_queue();
-    if command.is_none() {
+    let Some(command) = get_from_command_queue() else {
         return;
-    } else {
-        info!("Calling next command {}", command.as_ref().unwrap());
-    }
+    };
 
-    let command = command.unwrap();
-    let mut command = command.split_whitespace();
-    let command_name = command.next().unwrap().to_string();
-    let args: Vec<&str> = command.collect();
+    info!("Calling next command {}", command.clone());
 
-    match call_command(command_name, args) {
+    let mut command_args = command.split_whitespace();
+    let Some(command_name) = command_args.next() else {
+        error!("Failed to get command name from command {}", command.clone());
+        return;
+    };
+    let args: Vec<&str> = command_args.collect();
+
+    let Ok(mut result_mutex) = COMMAND_RESULTS.lock() else {
+        error!("Failed to lock command results mutex when calling next command {}", command_name);
+        return;
+    };
+
+    match call_command(command_name.to_string(), args) {
         Ok(result) => {
-            let mut data_mutex = COMMAND_RESULTS.lock().unwrap();
-            data_mutex.push(result);
+            result_mutex.push(result);
         }
         Err(err) => {
             let result = err.to_string();
-            let mut data_mutex = COMMAND_RESULTS.lock().unwrap();
-            data_mutex.push(result);
+            result_mutex.push(result);
         }
     }
 }
 
 pub fn get_next_result() -> Option<String> {
-    let mut data_mutex = COMMAND_RESULTS.lock().unwrap();
+    let Ok(mut data_mutex) = COMMAND_RESULTS.lock() else {
+        error!("Failed to lock command results mutex when getting next result");
+        return None;
+    };
     data_mutex.pop()
 }
 
 fn add_to_command_queue(command: String) {
     info!("Adding command {} to queue", command);
-    let mut data_mutex = COMMAND_QUEUE.lock().unwrap();
+    let Ok(mut data_mutex) = COMMAND_QUEUE.lock() else {
+        error!("Failed to lock command queue mutex when adding command {} to queue", command);
+        return;
+    };
     data_mutex.push(command);
 }
 
 pub fn get_from_command_queue() -> Option<String> {
-    let mut data_mutex = COMMAND_QUEUE.lock().unwrap();
+    let Ok(mut data_mutex) = COMMAND_QUEUE.lock() else {
+        error!("Failed to lock command queue mutex when getting command from queue");
+        return None;
+    };
     data_mutex.pop()
 }
 
@@ -207,9 +220,7 @@ fn handle_client(mut stream: TcpStream) {
                 info!("Received: {}", received_string);
 
                 loop {
-                    let result = get_next_result();
-                    if result.is_some() {
-                        let result = result.unwrap();
+                    if let Some(result) = get_next_result() {
                         if let Err(err) = stream.write_all(result.as_bytes()) {
                             info!("Error sending data: {}", err);
                         }

@@ -128,11 +128,16 @@ pub fn log_debug_ini_memory_values() {
 
 pub fn log_exe_location_memory_value() {
     let exe_location: String = get_string_from_memory(EXE_LOCATION_ADDRESS);
+    let Ok(rust_exe_location) = std::env::current_exe() else {
+        debug_logger("Error getting rust exe location");
+        return;
+    };
+    let Some(rust_exe_location) = rust_exe_location.to_str() else {
+        debug_logger("Error parsing rust exe location path");
+        return;
+    };
     debug_logger(&format!("exe location from memory: {}", exe_location));
-    debug_logger(&format!(
-        "exe location from rust: {}",
-        std::env::current_exe().unwrap().to_str().unwrap()
-    ));
+    debug_logger(&format!("exe location from rust: {}", rust_exe_location));
 }
 
 pub fn get_string_from_memory_bounded(start: u32, end: u32, buffer_end: u32) -> String {

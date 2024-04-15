@@ -77,7 +77,7 @@ impl ZTGameMgr {
 // prints the SYSTEMTIME struct in memory in a human-readable format
 // usage: get_date
 pub fn command_get_date_str(_args: Vec<&str>) -> Result<String, CommandError> {
-    let ztgamemgr = ZTGameMgr::instance().unwrap();
+    let ztgamemgr = ZTGameMgr::instance().ok_or("Failed to get ZTGameMgr instance")?;
     let date = ztgamemgr.date.clone();
     info!("Date: {:#?}", date);
 
@@ -89,16 +89,16 @@ pub fn command_get_date_str(_args: Vec<&str>) -> Result<String, CommandError> {
 
 // adds cash to the player's account
 // usage: add_cash <amount>
-pub fn command_add_cash(_args: Vec<&str>) -> Result<String, CommandError> {
-    let ztgamemgr = ZTGameMgr::instance().unwrap();
-    ztgamemgr.cash += _args[0].parse::<f32>().unwrap();
-    Ok(format!("Added ${}", _args[0]))
+pub fn command_add_cash(args: Vec<&str>) -> Result<String, CommandError> {
+    let ztgamemgr = ZTGameMgr::instance().ok_or("Failed to get ZTGameMgr instance")?;
+    ztgamemgr.cash += args[0].parse::<f32>()?;
+    Ok(format!("Added ${}", args[0]))
 }
 
 // enables or disables dev mode
 // usage: enable_dev_mode <true/false>
-pub fn command_enable_dev_mode(_args: Vec<&str>) -> Result<String, CommandError> {
-    let enable = _args[0].parse::<bool>().unwrap();
+pub fn command_enable_dev_mode(args: Vec<&str>) -> Result<String, CommandError> {
+    let enable = args[0].parse()?;
     ZTGameMgr::enable_dev_mode(enable);
     Ok(format!("Dev mode enabled: {}", enable))
 }
@@ -106,7 +106,7 @@ pub fn command_enable_dev_mode(_args: Vec<&str>) -> Result<String, CommandError>
 // prints various stats about the zoo
 // usage: zoostats
 pub fn command_zoostats(_args: Vec<&str>) -> Result<String, CommandError> {
-    let ztgamemgr = ZTGameMgr::instance().unwrap();
+    let ztgamemgr = ZTGameMgr::instance().ok_or("Failed to get ZTGameMgr instance")?;
     Ok(format!("\nBudget: {}\nAnimals: {}\nSpecies: {}\nTired Guests: {}\nHungry Guests: {}\nThirsty Guests: {}\nGuests Need Restroom: {}\nNum Guests: {}\nZoo Admission Cost: ${}", ztgamemgr.cash, ztgamemgr.num_animals, ztgamemgr.num_species, ztgamemgr.num_tired_guests, ztgamemgr.num_hungry_guests, ztgamemgr.num_thirst_guests, ztgamemgr.num_guests_restroom_need, ztgamemgr.num_guests, ztgamemgr.zoo_admission_cost))
 }
 

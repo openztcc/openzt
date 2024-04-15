@@ -6,7 +6,7 @@ use std::{net::TcpStream, sync::Mutex};
 
 use bf_configparser::ini::Ini;
 use retour_utils::hook_module;
-use tracing::{info, Level};
+use tracing::{info, error, Level};
 
 mod bfregistry;
 
@@ -61,15 +61,19 @@ mod load_ini;
 
 #[no_mangle]
 pub fn dll_first_load() {
-    let stream = TcpStream::connect("127.0.0.1:1492").unwrap();
+    let Ok(stream) = TcpStream::connect("127.0.0.1:1492") else {
+        info!("Failed to connect to log stream");
+        return;
+    };
 
     let subscriber = tracing_subscriber::fmt()
         .with_writer(Mutex::new(stream))
         .with_max_level(Level::INFO)
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .unwrap_or_else(|error| panic!("Failed to init tracing: {error}"));
+    if tracing::subscriber::set_global_default(subscriber).is_err() {
+        info!("Failed to set global default subscriber, logging may not function");
+    }
 
     info!("openzt.dll Loaded");
 }
@@ -169,7 +173,9 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             unsafe {
                 if cfg!(feature = "ini") {
                     info!("Feature 'ini' enabled");
-                    zoo_ini::init_detours().unwrap();
+                    if zoo_ini::init_detours().is_err() {
+                        error!("Failed to initialize ini detours");
+                    };
                     add_to_command_register("list_settings".to_owned(), command_show_settings);
                     add_to_command_register("get_setting".to_owned(), command_get_setting);
                     add_to_command_register("set_setting".to_owned(), command_set_setting);
@@ -178,15 +184,21 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                     info!("Feature 'bf_registry' enabled");
                     use crate::bfregistry::command_list_registry;
 
-                    zoo_bf_registry::init_detours().unwrap();
+                    if zoo_bf_registry::init_detours().is_err() {
+                        error!("Failed to initialize bf_registry detours");
+                    };
                     add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
                 }
 
-                bf_version_info::init_detours().unwrap();
+                if bf_version_info::init_detours().is_err() {
+                    error!("Failed to initialize bf_version_info detours");
+                }
 
                 if cfg!(feature = "zoo_logging") {
                     info!("Feature 'zoo_logging' enabled");
-                    zoo_logging::init_detours().unwrap();
+                    if zoo_logging::init_detours().is_err() {
+                        error!("Failed to initialize zoo_logging detours");
+                    }
                 }
                 if cfg!(feature = "ztui") {
                     info!("Feature 'ztui' enabled");

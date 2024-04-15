@@ -115,7 +115,7 @@ fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 1 {
         return Err(Into::into("Expected 1 argument"));
     }
-    let address = args[0].parse::<u32>().unwrap();
+    let address = args[0].parse()?;
     let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 =
         unsafe { std::mem::transmute(0x0040157d) };
     let ui_element_addr = get_element_fn(BFUIMGR_PTR, address);

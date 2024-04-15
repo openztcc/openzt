@@ -612,9 +612,16 @@ fn add_expansion_with_string_value(
     save_to_memory: bool,
 ) {
     let name_len = name.len();
-    let name_string_start_ptr = CString::new(name).unwrap().into_raw() as u32;
+    let Ok(name_string_c_string) = CString::new(name.clone()) else {
+        error!("Error creating CString from name: {}", name);
+        return;
+    };
+    let name_string_start_ptr = name_string_c_string.into_raw() as u32;
     let name_string_end_ptr = name_string_start_ptr + name_len as u32 + 1;
-    let name_id = add_string_to_registry(string_value);
+    let Ok(name_id) = add_string_to_registry(string_value.clone()) else {
+        error!("Error adding string to registry: {}, whilst adding expansion: {}", string_value, name);
+        return;
+    };
     if let Err(err) = add_expansion(
         Expansion {
             expansion_id,

@@ -64,6 +64,7 @@ impl EndianWrite for bool {
     }
 }
 
+//TODO: These should all return Result<T, Error> instead of panicking via unwrap(), errors can then be handling in the calling functions
 pub fn read_le_primitive<'a, T, TArray>(bytes: &'a [u8], index: &mut usize) -> T
 where
     T: EndianRead<TArray>,
