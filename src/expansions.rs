@@ -23,7 +23,7 @@ use crate::{
         add_handler, add_raw_bytes_to_map_with_path_override,
         add_txt_file_to_map_with_path_override, modify_ztfile_as_animation, modify_ztfile_as_ini,
         Handler,
-    }, string_registry::add_string_to_registry, ztui::{get_random_sex, get_selected_sex, BuyTab}, ztworldmgr::{ZTEntityType, ZTEntityTypeClass}
+    }, string_registry::add_string_to_registry, ztui::{get_random_sex, get_selected_sex, BuyTab, Sex}, ztworldmgr::{ZTEntityType, ZTEntityTypeClass}
 };
 
 static OFFICIAL_FILESET: Lazy<HashSet<&str>> = Lazy::new(|| {
@@ -520,10 +520,13 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     let animation_result = modify_ztfile_as_animation(
         &(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_ANIMATION),
         |animation| {
-            animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
             for _ in 0..number_of_additional_expansions {
-                animation.duplicate_pixel_rows(0, 10, 31).unwrap();
+                if let Err(e) = animation.duplicate_pixel_rows(0, 10, 31) {
+                    info!("Error duplicating pixel rows when modifying animation: {}", e);
+                    return;
+                }
             }
+            animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
             animation.set_pallette_filename(
                 EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_PAL,
             );
@@ -613,7 +616,7 @@ fn filter_entity_type(
                 return false;
             }
             if (matches!(entity.zt_sub_type().as_str(), "m" | "f")
-                && entity.zt_sub_type() != &get_random_sex().unwrap().to_string())
+                && entity.zt_sub_type() != &get_random_sex().unwrap_or(Sex::Male).to_string())
             {
                 return false;
             }
@@ -650,7 +653,13 @@ fn filter_entity_type(
 fn add_expansion_with_string_id(id: u32, name: String, string_id: u32, save_to_memory: bool) {
     // TODO: get len first to avoid needing to clone?
     let name_len = name.len();
-    let name_ptr = CString::new(name).unwrap().into_raw() as u32;
+    let name_ptr = match CString::new(name.clone()) {
+        Ok(name_string_c_string) => name_string_c_string.into_raw() as u32,
+        Err(e) => {
+            error!("Error creating CString from name {}, expansion not added: {}", name, e);
+            return;
+        },
+    };
     let name_ptr_end = name_ptr + name_len as u32 + 1;
     if let Err(err) = add_expansion(
         Expansion {
@@ -739,6 +748,7 @@ static FILE_NAME_OVERRIDES: Lazy<HashMap<String, String>> = Lazy::new(|| {
     .collect()
 });
 
+// TODO: Remove use of anyhow here
 fn parse_member_config(path: &Path, file: &mut ZipFile) -> anyhow::Result<()> {
     let mut buffer = vec![0; file.size() as usize];
     if let Err(error) = file.read(&mut buffer[..]) {
@@ -751,9 +761,9 @@ fn parse_member_config(path: &Path, file: &mut ZipFile) -> anyhow::Result<()> {
     member_cfg.set_comment_symbols(&[';', '#', ':']);
     member_cfg.read(string_buffer).map_err(anyhow::Error::msg)?;
 
-    let filepath = match FILE_NAME_OVERRIDES.contains_key(file.name()) {
-        true => FILE_NAME_OVERRIDES.get(file.name()).unwrap().to_string(),
-        false => file.name().to_ascii_lowercase(),
+    let filepath = match FILE_NAME_OVERRIDES.get(file.name()) {
+        Some(override_name) => override_name.to_string(),
+        None => file.name().to_ascii_lowercase(),
     };
 
     let filename = Path::new(&filepath)
@@ -807,6 +817,7 @@ fn is_cc(path: &Path) -> bool {
     }
 }
 
+// TODO: Remove use of anyhow here
 fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
     let mut string_buffer = String::with_capacity(file.size() as usize);
     file.read_to_string(&mut string_buffer)?;
@@ -826,7 +837,13 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
         .get("expansion", "name")
         .context("No name found in expansion config")?
         .to_ascii_lowercase();
-    let name_ptr = CString::new(name.clone()).unwrap().into_raw() as u32;
+    let name_ptr = match CString::new(name.clone()) {
+        Ok(name_string_c_string) => name_string_c_string.into_raw() as u32,
+        Err(e) => {
+            error!("Error creating CString from name: {} -> {}", name, e);
+            return Ok(());
+        }
+    };
     let listid: u32 = expansion_cfg
         .get_parse("expansion", "listid")
         .map_err(anyhow::Error::msg)?
@@ -849,7 +866,20 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
 }
 
 fn handle_expansion_dropdown(entry: &Path, file: &mut ZipFile) {
-    let file_name = file.enclosed_name().unwrap().file_name().unwrap();
+    let enclosed_name = match file.enclosed_name() {
+        Some(name) => name,
+        None => {
+            error!("Error getting enclosed name for file");
+            return;
+        },
+    };
+    let file_name = match enclosed_name.file_name() {
+        Some(name) => name,
+        None => {
+            error!("Error getting file name for enclosed name");
+            return;
+        },
+    };
     let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
     let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
         error!("Error converting file path to string");
