@@ -2805,6 +2805,28 @@ pub struct BFOverlayType {
     pub bfentity_type: BFEntityType, // bytes: 0x100 - 0x0 = 0x100 = 256 bytes
 }
 
+impl EntityType for BFOverlayType {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        self.bfentity_type.set_config(config, value)
+    }
+
+    fn print_config_integers(&self) -> String {
+        self.bfentity_type.print_config_integers()
+    }
+
+    fn print_config_floats(&self) -> String {
+        self.bfentity_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.bfentity_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.bfentity_type.print_config_details()
+    }
+}
+
 impl Deref for BFOverlayType {
     type Target = BFEntityType;
 

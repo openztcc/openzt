@@ -228,7 +228,8 @@ pub fn get_entity_type_by_id(id: u32) -> u32 {
 
     i -= 1;
 
-    // define the types we are interested in (full impl soon)
+    // TODO: Currently this function only works with Scenery types. We need to generalize it to work with all entity types.
+    // This section defines three sets of entity types each with distinct cName ID offsets.
     // let scenery_types: HashSet<&str> = ["Fences", "Path", "Rubble", "TankWall", "TankFilter", "Scenery", "Building"].iter().cloned().collect();
     // let unit_types: HashSet<&str> = ["Animal", "Guest", "Keeper", "MaintenanceWorker", "DRT", "TourGuide"].iter().cloned().collect();
     // let overlay_types: HashSet<&str> = ["Ambient"].iter().cloned().collect();
