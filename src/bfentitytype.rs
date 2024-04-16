@@ -2805,19 +2805,6 @@ pub struct BFOverlayType {
     pub bfentity_type: BFEntityType, // bytes: 0x100 - 0x0 = 0x100 = 256 bytes
 }
 
-impl BFOverlayType {
-    pub fn new(address: u32) -> Option<&'static mut BFOverlayType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut BFOverlayType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
-            }
-        }
-    }
-}
-
 impl Deref for BFOverlayType {
     type Target = BFEntityType;
 
@@ -2840,47 +2827,54 @@ pub struct ZTAmbientType {
     // pub sound_name: i32, // 0x111 TODO: implement string ptr with ZTString
 }
 
-impl ZTAmbientType {
-    pub fn new(address: u32) -> Option<&'static mut ZTAmbientType> {
-        unsafe {
-            let ptr = get_from_memory::<*mut ZTAmbientType>(address);
-            if !ptr.is_null() {
-                Some(&mut *ptr)
-            } else {
-                None
+impl EntityType for ZTAmbientType {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        match config {
+            "-cNameID" => {
+                self.name_id = value.parse()?;
+                Ok(format!("Set Name ID to {}", self.name_id))
             }
+            "-cHelpID" => {
+                self.help_id = value.parse()?;
+                Ok(format!("Set Help ID to {}", self.help_id))
+            }
+            "-cSpeed" => {
+                self.speed = value.parse()?;
+                Ok(format!("Set Speed to {}", self.speed))
+            }
+            "-cFrequency" => {
+                self.frequency = value.parse()?;
+                Ok(format!("Set Frequency to {}", self.frequency))
+            }
+            "-cSoundLoop" => {
+                self.sound_loop = value.parse()?;
+                Ok(format!("Set Sound Loop to {}", self.sound_loop))
+            }
+            _ => Ok(self.bfoverlay_type.set_config(config, value)?),
         }
     }
 
-    pub fn set_config(&mut self, config: &str, value: &str) -> Result<String, &'static str> {
-        if config == "-cNameID" {
-            self.name_id = value.parse::<i32>().unwrap();
-            Ok(format!("Set Name ID to {}", self.name_id))
-        } else if config == "-cHelpID" {
-            self.help_id = value.parse::<i32>().unwrap();
-            Ok(format!("Set Help ID to {}", self.help_id))
-        } else if config == "-cSpeed" {
-            self.speed = value.parse::<i32>().unwrap();
-            Ok(format!("Set Speed to {}", self.speed))
-        } else if config == "-cFrequency" {
-            self.frequency = value.parse::<i32>().unwrap();
-            Ok(format!("Set Frequency to {}", self.frequency))
-        } else if config == "-cSoundLoop" {
-            self.sound_loop = value.parse::<bool>().unwrap();
-            Ok(format!("Set Sound Loop to {}", self.sound_loop))
-        } else {
-            Err("Invalid configuration option")
-        }
-    }
-
-    pub fn print_config_integers(&self) -> String {
-        format!("cNameID: {}\ncHelpID: {}\ncSpeed: {}\ncFrequency: {}\ncSoundLoop: {}\n",
+    fn print_config_integers(&self) -> String {
+        format!("{}\ncNameID: {}\ncHelpID: {}\ncSpeed: {}\ncFrequency: {}\ncSoundLoop: {}\n",
+        self.bfoverlay_type.print_config_integers(),
         self.name_id,
         self.help_id,
         self.speed,
         self.frequency,
         self.sound_loop as i32,
         )
+    }
+
+    fn print_config_floats(&self) -> String {
+        self.bfoverlay_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.bfoverlay_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.bfoverlay_type.print_config_details()
     }
 }
 
