@@ -4,7 +4,7 @@ use tracing::info;
 
 use crate::{
     common::ZTString,
-    console::add_to_command_register,
+    console::{add_to_command_register, CommandError},
     debug_dll::{get_from_memory, get_string_from_memory_bounded},
     ztworldmgr::read_zt_entity_from_memory,
 };
@@ -101,26 +101,26 @@ pub fn init() {
     add_to_command_register("get_element".to_owned(), command_get_element);
 }
 
-fn command_get_selected_entity(_args: Vec<&str>) -> Result<String, &'static str> {
-    let get_selected_entity_fn: fn() -> u32 = unsafe { std::mem::transmute(0x00410f84) }; //TODO: Move type to variable declaration rather than turbofish
+fn command_get_selected_entity(_args: Vec<&str>) -> Result<String, CommandError> {
+    let get_selected_entity_fn: fn() -> u32 = unsafe { std::mem::transmute(0x00410f84) };
     let entity_address = get_selected_entity_fn();
     if entity_address == 0 {
-        return Ok("No entity selected".to_string());
+        return Err(Into::into("No entity selected"));
     }
     let entity = read_zt_entity_from_memory(entity_address);
     Ok(format!("{:#?}", entity))
 }
 
-fn command_get_element(args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 1 {
-        return Err("Expected 1 argument");
+        return Err(Into::into("Expected 1 argument"));
     }
-    let address = args[0].parse::<u32>().unwrap();
+    let address = args[0].parse()?;
     let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 =
         unsafe { std::mem::transmute(0x0040157d) };
     let ui_element_addr = get_element_fn(BFUIMGR_PTR, address);
     if ui_element_addr == 0 {
-        return Err("No element found");
+        return Err(Into::into("No element found"));
     }
     let element: UIElement = get_from_memory(ui_element_addr);
     info!("{:#x} {:#x}", address, ui_element_addr);
@@ -239,13 +239,13 @@ pub fn get_selected_entity() -> u32 {
 }
 
 // returns the address of the selected entity type
-pub fn get_selected_entity_type() -> u32 {
+pub fn get_selected_entity_type_address() -> u32 {
     let selected_entity = get_selected_entity();
     if selected_entity == 0 {
         return 0;
     }
 
-    selected_entity + 0x128
+    get_from_memory(selected_entity + 0x128)
 }
 
 #[derive(Debug)]

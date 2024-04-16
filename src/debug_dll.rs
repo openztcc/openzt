@@ -1,4 +1,4 @@
-use std::{path::PathBuf, ptr};
+use std::{path::PathBuf, ptr, mem::transmute};
 
 use tracing::{debug, info};
 #[cfg(target_os = "windows")]
@@ -6,6 +6,7 @@ use winapi::um::memoryapi::VirtualProtect;
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::PAGE_EXECUTE_READWRITE;
 
+use crate::console::CommandError;
 use crate::load_ini::DebugSettings;
 
 const SEND_DEBUGGER_ADDRESS: u32 = 0x00643e44;
@@ -75,6 +76,12 @@ pub fn debug_logger(message: &str) {
     info!(message);
 }
 
+pub fn map_from_memory<T>(address: u32) -> &'static mut T {
+    unsafe {
+        transmute::<u32, &mut T>(address)
+    }
+}
+
 pub fn get_from_memory<T>(address: u32) -> T {
     unsafe { ptr::read(address as *const T) }
 }
@@ -121,11 +128,16 @@ pub fn log_debug_ini_memory_values() {
 
 pub fn log_exe_location_memory_value() {
     let exe_location: String = get_string_from_memory(EXE_LOCATION_ADDRESS);
+    let Ok(rust_exe_location) = std::env::current_exe() else {
+        debug_logger("Error getting rust exe location");
+        return;
+    };
+    let Some(rust_exe_location) = rust_exe_location.to_str() else {
+        debug_logger("Error parsing rust exe location path");
+        return;
+    };
     debug_logger(&format!("exe location from memory: {}", exe_location));
-    debug_logger(&format!(
-        "exe location from rust: {}",
-        std::env::current_exe().unwrap().to_str().unwrap()
-    ));
+    debug_logger(&format!("exe location from rust: {}", rust_exe_location));
 }
 
 pub fn get_string_from_memory_bounded(start: u32, end: u32, buffer_end: u32) -> String {
@@ -220,9 +232,9 @@ pub fn save_debug_settings(settings: DebugSettings) {
     save_to_memory::<u32>(LOG_CUTOFF_ADDRESS, settings.log_cutoff as u32);
 }
 
-pub fn command_set_setting(args: Vec<&str>) -> Result<String, &'static str> {
+pub fn command_set_setting(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 2 {
-        return Err("Invalid number of arguments");
+        return Err(Into::into("Invalid number of arguments"));
     }
     let setting = args[0].to_string();
     let value = args[1].to_string();
@@ -281,9 +293,9 @@ fn handle_u32_setting(setting: &str, value: String) -> String {
     }
 }
 
-pub fn command_get_setting(args: Vec<&str>) -> Result<String, &'static str> {
+pub fn command_get_setting(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 1 {
-        return Err("Invalid number of arguments");
+        return Err(Into::into("Invalid number of arguments"));
     }
     let setting = args[0].to_string();
     Ok(get_setting(setting))
@@ -338,9 +350,10 @@ fn handle_get_u32_setting(setting: &str) -> String {
     format!("{}: {}", setting, value)
 }
 
-pub fn command_show_settings(args: Vec<&str>) -> Result<String, &'static str> {
+pub fn command_show_settings(args: Vec<&str>) -> Result<String, CommandError> {
     if !args.is_empty() {
-        return Err("Invalid number of arguments");
+        return Err(Into::into("Invalid number of arguments"));
+        
     }
     Ok(show_settings())
 }

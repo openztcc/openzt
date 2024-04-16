@@ -5,13 +5,15 @@ use tracing::info;
 
 use crate::debug_dll::get_from_memory;
 
+use crate::console::CommandError;
+
 static BF_REGISTRY: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
-pub fn command_list_registry(_args: Vec<&str>) -> Result<String, &'static str> {
-    list_registry()
+pub fn command_list_registry(_args: Vec<&str>) -> Result<String, CommandError> {
+    Ok(list_registry()?)
 }
 
-pub fn list_registry() -> Result<String, &'static str> {
+pub fn list_registry() -> Result<String, String> {
     let data_mutex = BF_REGISTRY.lock().unwrap();
     let mut string_array = Vec::new();
     for (key, value) in data_mutex.iter() {
