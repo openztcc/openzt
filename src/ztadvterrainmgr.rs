@@ -5,6 +5,7 @@ use tracing::info;
 use crate::{
     add_to_command_register,
     debug_dll::{get_from_memory, get_string_from_memory},
+    console::CommandError,
 };
 
 const GLOBAL_ZTADVTERRAINMGR_ADDRESS: u32 = 0x00638058;
@@ -95,7 +96,7 @@ fn read_bfterraintypeinfo_from_memory(address: u32) -> BFTerrainTypeInfo {
     get_from_memory(address)
 }
 
-fn command_get_bfterraintypeinfo(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_bfterraintypeinfo(_args: Vec<&str>) -> Result<String, CommandError> {
     let ztadvterrainmgr = read_ztadvterrainmgr_from_memory();
     info!(
         "Found {} BFTerrainTypeInfo",

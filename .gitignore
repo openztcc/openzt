@@ -1,3 +1,4 @@
 /target
 /zt_files
 ._target
+/libs/*/target

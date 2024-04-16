@@ -8,20 +8,25 @@ const STRING_REGISTRY_ID_OFFSET: u32 = 100_000;
 
 static STRING_REGISTRY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
-pub fn add_string_to_registry(string_val: String) -> u32 {
-    let mut data_mutex = STRING_REGISTRY.lock().unwrap();
+pub fn add_string_to_registry(string_val: String) -> Result<u32, &'static str> {
+    let Ok(mut data_mutex) = STRING_REGISTRY.lock() else {
+        info!("Failed to lock string registry mutex");
+        return Err("Failed to lock string registry mutex");
+    };
     data_mutex.push(string_val);
     info!(
         "Added string to registry: {}",
         data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1
     );
-    data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1
+    Ok(data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1)
 }
 
 pub fn get_string_from_registry(string_id: u32) -> Result<String, &'static str> {
     info!("Getting string from registry: {}", string_id);
     let string = {
-        let data_mutex = STRING_REGISTRY.lock().unwrap();
+        let Ok(data_mutex) = STRING_REGISTRY.lock() else {
+            return Err("Failed to lock string registry mutex");
+        };
         data_mutex
             .get((string_id - STRING_REGISTRY_ID_OFFSET) as usize)
             .cloned()
@@ -58,5 +63,7 @@ pub mod zoo_string {
 }
 
 pub fn init() {
-    unsafe { zoo_string::init_detours().unwrap() };
+    if unsafe { zoo_string::init_detours() }.is_err() {
+        info!("Failed to initialize string_registry detours");
+    }
 }
