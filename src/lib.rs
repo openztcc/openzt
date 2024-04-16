@@ -38,6 +38,8 @@ mod bfentitytype;
 
 mod ztgamemgr;
 
+mod version;
+
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{
     DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH,
@@ -116,31 +118,6 @@ mod zoo_bf_registry {
 }
 
 #[hook_module("zoo.exe")]
-mod bf_version_info {
-    use crate::debug_dll::{
-        get_from_memory, get_string_from_memory, save_string_to_memory, save_to_memory,
-    };
-
-    #[hook(unsafe extern "cdecl" BFVersionInfo_GetVersionStringHook, offset = 0x000bdfd4)]
-    fn bf_version_info_get_version_string_hook(param_1: u32, param_2: u32, param_3: u32) -> u32 {
-        let return_value =
-            unsafe { BFVersionInfo_GetVersionStringHook.call(param_1, param_2, param_3) };
-        let version_string = get_string_from_memory(get_from_memory::<u32>(param_2));
-        let version_length = version_string.len();
-        let full_openzt_version_string = format!(" OpenZT: {}", env!("CARGO_PKG_VERSION"));
-        save_string_to_memory(
-            get_from_memory::<u32>(param_2) + version_length as u32,
-            &full_openzt_version_string,
-        );
-        save_to_memory(
-            param_3,
-            (version_length + full_openzt_version_string.len() + 2) as u32,
-        );
-        return_value
-    }
-}
-
-#[hook_module("zoo.exe")]
 mod zoo_logging {
     use crate::{capture_ztlog::log_from_zt, debug_dll::get_string_from_memory};
 
@@ -170,58 +147,53 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 module, reason, _reserved
             );
 
-            unsafe {
-                if cfg!(feature = "ini") {
-                    info!("Feature 'ini' enabled");
-                    if zoo_ini::init_detours().is_err() {
-                        error!("Failed to initialize ini detours");
-                    };
-                    add_to_command_register("list_settings".to_owned(), command_show_settings);
-                    add_to_command_register("get_setting".to_owned(), command_get_setting);
-                    add_to_command_register("set_setting".to_owned(), command_set_setting);
-                }
-                if cfg!(feature = "bf_registry") {
-                    info!("Feature 'bf_registry' enabled");
-                    use crate::bfregistry::command_list_registry;
+            // Initialize stable modules
+            resource_manager::init();
+            expansions::init();
+            string_registry::init();
+            bugfix::init();
+            version::init();
 
-                    if zoo_bf_registry::init_detours().is_err() {
-                        error!("Failed to initialize bf_registry detours");
-                    };
-                    add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
-                }
+            if cfg!(feature = "ini") {
+                info!("Feature 'ini' enabled");
+                if unsafe { zoo_ini::init_detours() }.is_err() {
+                    error!("Failed to initialize ini detours");
+                };
+                add_to_command_register("list_settings".to_owned(), command_show_settings);
+                add_to_command_register("get_setting".to_owned(), command_get_setting);
+                add_to_command_register("set_setting".to_owned(), command_set_setting);
+            }
+            if cfg!(feature = "bf_registry") {
+                info!("Feature 'bf_registry' enabled");
+                use crate::bfregistry::command_list_registry;
 
-                if bf_version_info::init_detours().is_err() {
-                    error!("Failed to initialize bf_version_info detours");
-                }
+                if unsafe { zoo_bf_registry::init_detours() }.is_err() {
+                    error!("Failed to initialize bf_registry detours");
+                };
+                add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
+            }
 
-                if cfg!(feature = "zoo_logging") {
-                    info!("Feature 'zoo_logging' enabled");
-                    if zoo_logging::init_detours().is_err() {
-                        error!("Failed to initialize zoo_logging detours");
-                    }
-                }
-                if cfg!(feature = "ztui") {
-                    info!("Feature 'ztui' enabled");
-                    ztui::init();
+            if cfg!(feature = "zoo_logging") {
+                info!("Feature 'zoo_logging' enabled");
+                if unsafe { zoo_logging::init_detours() }.is_err() {
+                    error!("Failed to initialize zoo_logging detours");
                 }
             }
+
+            if cfg!(feature = "ztui") {
+                info!("Feature 'ztui' enabled");
+                ztui::init();
+            }
+
             if cfg!(feature = "console") {
                 info!("Feature 'console' enabled");
                 zoo_console::init();
-            }
-
-            if cfg!(feature = "bugfix") {
-                info!("Feature 'bugfix' enabled");
-                bugfix::init();
             }
 
             if cfg!(feature = "experimental") {
                 info!("Feature 'experimental' enabled");
                 ztadvterrainmgr::init();
                 ztworldmgr::init();
-                resource_manager::init();
-                expansions::init();
-                string_registry::init();
                 bfentitytype::init();
                 ztgamemgr::init();
             }

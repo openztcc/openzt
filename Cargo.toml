@@ -37,12 +37,11 @@ name = "test"
 path = "src/debug.rs"
 
 [features]
-default = ["bf_registry", "console", "ini", "ztui", "bugfix", "experimental"]
-release = ["bf_registry", "ini", "ztui", "bugfix"]
+default = ["bf_registry", "console", "ini", "ztui", "experimental"]
+release = []
 console = []
 ini = []
 bf_registry = []
 zoo_logging = []
 ztui = []
-bugfix = []
 experimental = []
