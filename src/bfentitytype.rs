@@ -15,8 +15,18 @@ use crate::{
     ztworldmgr,
 };
 
-pub trait EntityType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError>;
+pub trait EntityType: FieldAccessorAsStringTrait {
+    // allows setting the configuration of the entity type
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        if !self.is_field(config) {
+            return Err(CommandError::new(format!("Invalid field name: {}", config)));
+        
+        }
+        match self.set_field(config, value) {
+            Ok(_) => Ok(format!("Set {} to {}", config, value)),
+            Err(err) => Err(CommandError::new(format!("Failed to set {}: {}", config, err))),
+        }
+    }
     fn print_config_integers(&self) -> String;
     fn print_config_floats(&self) -> String;
     fn print_config_strings(&self) -> String;
@@ -106,118 +116,6 @@ impl BFEntityType {
 }
 
 impl EntityType for BFEntityType {
-    // allows setting the configuration of the entity type
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cIconZoom" => {
-                self.icon_zoom = value.parse()?;
-                Ok(format!("Set cIconZoom to {}", self.icon_zoom))
-            }
-            "-cExpansionID" => {
-                self.expansion_id = value.parse()?;
-                Ok(format!("Set cExpansionID to {}", self.expansion_id))
-            }
-            "-cMovable" => {
-                self.movable = value.parse()?;
-                Ok(format!("Set cMovable to {}", self.movable))
-            }
-            "-cWalkable" => {
-                self.walkable = value.parse()?;
-                Ok(format!("Set cWalkable to {}", self.walkable))
-            }
-            "-cWalkableByTall" => {
-                self.walkable_by_tall = value.parse()?;
-                Ok(format!("Set cWalkableByTall to {}", self.walkable_by_tall))
-            }
-            "-cRubbleable" => {
-                self.rubbleable = value.parse()?;
-                Ok(format!("Set cRubbleable to {}", self.rubbleable))
-            }
-            "-cUseNumbersInName" => {
-                self.use_numbers_in_name = value.parse()?;
-                Ok(format!("Set cUseNumbersInName to {}", self.use_numbers_in_name))
-            }
-            "-cUsesRealShadows" => {
-                self.uses_real_shadows = value.parse()?;
-                Ok(format!("Set cUsesRealShadows to {}", self.uses_real_shadows))
-            }
-            "-cHasShadowImages" => {
-                self.has_shadow_images = value.parse()?;
-                Ok(format!("Set cHasShadowImages to {}", self.has_shadow_images))
-            }
-            "-cForceShadowBlack" => {
-                self.force_shadow_black = value.parse()?;
-                Ok(format!("Set cForceShadowBlack to {}", self.force_shadow_black))
-            }
-            "-cDrawsLate" => {
-                self.draws_late = value.parse()?;
-                Ok(format!("Set cDrawsLate to {}", self.draws_late))
-            }
-            "-cHeight" => {
-                self.height = value.parse()?;
-                Ok(format!("Set cHeight to {}", self.height))
-            }
-            "-cDepth" => {
-                self.depth = value.parse()?;
-                Ok(format!("Set cDepth to {}", self.depth))
-            }
-            "-cHasUnderwaterSection" => {
-                self.has_underwater_section = value.parse()?;
-                Ok(format!("Set cHasUnderwaterSection to {}", self.has_underwater_section))
-            }
-            "-cIsTransient" => {
-                self.is_transient = value.parse()?;
-                Ok(format!("Set cIsTransient to {}", self.is_transient))
-            }
-            "-cUsesPlacementCube" => {
-                self.uses_placement_cube = value.parse()?;
-                Ok(format!("Set cUsesPlacementCube to {}", self.uses_placement_cube))
-            }
-            "-cShow" => {
-                self.show = value.parse()?;
-                Ok(format!("Set cShow to {}", self.show))
-            }
-            "-cHitThreshold" => {
-                self.hit_threshold = value.parse()?;
-                Ok(format!("Set cHitThreshold to {}", self.hit_threshold))
-            }
-            "-cAvoidEdges" => {
-                self.avoid_edges = value.parse()?;
-                Ok(format!("Set cAvoidEdges to {}", self.avoid_edges))
-            }
-            "-cFootprintX" => {
-                self.footprintx = value.parse()?;
-                Ok(format!("Set cFootprintX to {}", self.footprintx))
-            }
-            "-cFootprintY" => {
-                self.footprinty = value.parse()?;
-                Ok(format!("Set cFootprintY to {}", self.footprinty))
-            }
-            "-cFootprintZ" => {
-                self.footprintz = value.parse()?;
-                Ok(format!("Set cFootprintZ to {}", self.footprintz))
-            }
-            "-cPlacementFootprintX" => {
-                self.placement_footprintx = value.parse()?;
-                Ok(format!("Set cPlacementFootprintX to {}", self.placement_footprintx))
-            }
-            "-cPlacementFootprintY" => {
-                self.placement_footprinty = value.parse()?;
-                Ok(format!("Set cPlacementFootprintY to {}", self.placement_footprinty))
-            }
-            "-cPlacementFootprintZ" => {
-                self.placement_footprintz = value.parse()?;
-                Ok(format!("Set cPlacementFootprintZ to {}", self.placement_footprintz))
-            }
-            "-cAvailableAtStartup" => {
-                self.available_at_startup = value.parse()?;
-                Ok(format!("Set cAvailableAtStartup to {}", self.available_at_startup))
-            }
-            _ => Err(CommandError::new(format!("Invalid configuration option: {}", config))),
-        }
-    }
-
-    //  prints the [Configuration/Integers] section of the configuration
     fn print_config_integers(&self) -> String {
         format!("cIconZoom: {}\ncExpansionID: {}\ncMovable: {}\ncWalkable: {}\ncWalkableByTall: {}\ncRubbleable: {}\ncUseNumbersInName: {}\ncUsesRealShadows: {}\ncHasShadowImages: {}\ncForceShadowBlack: {}\ncDrawsLate: {}\ncHeight: {}\ncDepth: {}\ncHasUnderwaterSection: {}\ncIsTransient: {}\ncUsesPlacementCube: {}\ncShow: {}\ncHitThreshold: {}\ncAvoidEdges: {}\ncFootprintX: {}\ncFootprintY: {}\ncFootprintZ: {}\ncPlacementFootprintX: {}\ncPlacementFootprintY: {}\ncPlacementFootprintZ: {}\ncAvailableAtStartup: {}\n",
                 self.icon_zoom as u32,
@@ -316,120 +214,6 @@ impl ZTSceneryType {
 }
 
 impl EntityType for ZTSceneryType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cPurchaseCost" => {
-                self.purchase_cost = value.parse()?;
-                Ok(format!("Set Purchase Cost to {}", self.purchase_cost))
-            }
-            "-cNameID" => {
-                self.name_id = value.parse()?;
-                Ok(format!("Set Name ID to {}", self.name_id))
-            }
-            "-cHelpID" => {
-                self.help_id = value.parse()?;
-                Ok(format!("Set Help ID to {}", self.help_id))
-            }
-            "-cHabitat" => {
-                self.habitat = value.parse()?;
-                Ok(format!("Set Habitat to {}", self.habitat))
-            }
-            "-cLocation" => {
-                self.location = value.parse()?;
-                Ok(format!("Set Location to {}", self.location))
-            }
-            "-cEra" => {
-                self.era = value.parse()?;
-                Ok(format!("Set Era to {}", self.era))
-            }
-            "-cMaxFoodUnits" => {
-                self.max_food_units = value.parse()?;
-                Ok(format!("Set Max Food Units to {}", self.max_food_units))
-            }
-            "-cStink" => {
-                self.stink = value.parse()?;
-                Ok(format!("Set Stink to {}", self.stink))
-            }
-            "-cEstheticWeight" => {
-                self.esthetic_weight = value.parse()?;
-                Ok(format!("Set Esthetic Weight to {}", self.esthetic_weight))
-            }
-            "-cSelectable" => {
-                self.selectable = value.parse()?;
-                Ok(format!("Set Selectable to {}", self.selectable))
-            }
-            "-cDeletable" => {
-                self.deletable = value.parse()?;
-                Ok(format!("Set Deletable to {}", self.deletable))
-            }
-            "-cFoliage" => {
-                self.foliage = value.parse()?;
-                Ok(format!("Set Foliage to {}", self.foliage))
-            }
-            "-cAutoRotate" => {
-                self.auto_rotate = value.parse()?;
-                Ok(format!("Set Auto Rotate to {}", self.auto_rotate))
-            }
-            "-cLand" => {
-                self.land = value.parse()?;
-                Ok(format!("Set Land to {}", self.land))
-            }
-            "-cSwims" => {
-                self.swims = value.parse()?;
-                Ok(format!("Set Swims to {}", self.swims))
-            }
-            "-cUnderwater" => {
-                self.underwater = value.parse()?;
-                Ok(format!("Set Underwater to {}", self.underwater))
-            }
-            "-cSurface" => {
-                self.surface = value.parse()?;
-                Ok(format!("Set Surface to {}", self.surface))
-            }
-            "-cSubmerge" => {
-                self.submerge = value.parse()?;
-                Ok(format!("Set Submerge to {}", self.submerge))
-            }
-            "-cOnlySwims" => {
-                self.only_swims = value.parse()?;
-                Ok(format!("Set Only Swims to {}", self.only_swims))
-            }
-            "-cNeedsConfirm" => {
-                self.needs_confirm = value.parse()?;
-                Ok(format!("Set Needs Confirm to {}", self.needs_confirm))
-            }
-            "-cGawkOnlyFromFront" => {
-                self.gawk_only_from_front = value.parse()?;
-                Ok(format!("Set Gawk Only From Front to {}", self.gawk_only_from_front))
-            }
-            "-cDeadOnLand" => {
-                self.dead_on_land = value.parse()?;
-                Ok(format!("Set Dead On Land to {}", self.dead_on_land))
-            }
-            "-cDeadOnFlatWater" => {
-                self.dead_on_flat_water = value.parse()?;
-                Ok(format!("Set Dead On Flat Water to {}", self.dead_on_flat_water))
-            }
-            "-cDeadUnderwater" => {
-                self.dead_underwater = value.parse()?;
-                Ok(format!("Set Dead Underwater to {}", self.dead_underwater))
-            }
-            "-cUsesTreeRubble" => {
-                self.uses_tree_rubble = value.parse()?;
-                Ok(format!("Set Uses Tree Rubble to {}", self.uses_tree_rubble))
-            }
-            "-cForcesSceneryRubble" => {
-                self.forces_scenery_rubble = value.parse()?;
-                Ok(format!("Set Forces Scenery Rubble to {}", self.forces_scenery_rubble))
-            }
-            "-cBlocksLOS" => {
-                self.blocks_los = value.parse()?;
-                Ok(format!("Set Blocks LOS to {}", self.blocks_los))
-            }
-            _ => Ok(self.bfentitytype.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncPurchaseCost: {}\ncNameID: {}\ncHelpID: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncMaxFoodUnits: {}\ncStink: {}\ncEstheticWeight: {}\ncSelectable: {}\ncDeletable: {}\ncFoliage: {}\ncAutoRotate: {}\ncLand: {}\ncSwims: {}\ncUnderwater: {}\ncSurface: {}\ncSubmerge: {}\ncOnlySwims: {}\ncNeedsConfirm: {}\ncGawkOnlyFromFront: {}\ncDeadOnLand: {}\ncDeadOnFlatWater: {}\ncDeadUnderwater: {}\ncUsesTreeRubble: {}\ncForcesSceneryRubble: {}\ncBlocksLOS: {}\n",
                 self.bfentitytype.print_config_integers(),
@@ -528,144 +312,6 @@ struct ZTBuildingType {
 }
 
 impl EntityType for ZTBuildingType {
-    // sets the configuration of the building type in the console
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cCapacity" => {
-                self.i_capacity = value.parse()?;
-                Ok(format!("Set Capacity to {}", self.i_capacity))
-            }
-            "-cToySatisfaction" => {
-                self.toy_satisfaction = value.parse()?;
-                Ok(format!("Set Toy Satisfaction to {}", self.toy_satisfaction))
-            }
-            "-cTimeInside" => {
-                self.time_inside = value.parse()?;
-                Ok(format!("Set Time Inside to {}", self.time_inside))
-            }
-            "-cDefaultCost" => {
-                self.default_cost = value.parse()?;
-                Ok(format!("Set Default Cost to {}", self.default_cost))
-            }
-            "-cLowCost" => {
-                self.low_cost = value.parse()?;
-                Ok(format!("Set Low Cost to {}", self.low_cost))
-            }
-            "-cMedCost" => {
-                self.med_cost = value.parse()?;
-                Ok(format!("Set Med Cost to {}", self.med_cost))
-            }
-            "-cHighCost" => {
-                self.high_cost = value.parse()?;
-                Ok(format!("Set High Cost to {}", self.high_cost))
-            }
-            "-cPriceFactor" => {
-                self.price_factor = value.parse()?;
-                Ok(format!("Set Price Factor to {}", self.price_factor))
-            }
-            "-cUpkeep" => {
-                self.upkeep = value.parse()?;
-                Ok(format!("Set Upkeep to {}", self.upkeep))
-            }
-            "-cHideUser" => {
-                self.hide_user = value.parse()?;
-                Ok(format!("Set Hide User to {}", self.hide_user))
-            }
-            "-cSetLetterFacing" => {
-                self.set_letter_facing = value.parse()?;
-                Ok(format!("Set Set Letter Facing to {}", self.set_letter_facing))
-            }
-            "-cDrawUser" => {
-                self.draw_user = value.parse()?;
-                Ok(format!("Set Draw User to {}", self.draw_user))
-            }
-            "-cHideCostChange" => {
-                self.hide_cost_change = value.parse()?;
-                Ok(format!("Set Hide Cost Change to {}", self.hide_cost_change))
-            }
-            "-cHideCommerceInfo" => {
-                self.hide_commerce_info = value.parse()?;
-                Ok(format!("Set Hide Commerce Info to {}", self.hide_commerce_info))
-            }
-            "-cHideRegularInfo" => {
-                self.hide_regular_info = value.parse()?;
-                Ok(format!("Set Hide Regular Info to {}", self.hide_regular_info))
-            }
-            "-cHoldsOntoUser" => {
-                self.holds_onto_user = value.parse()?;
-                Ok(format!("Set Holds Onto User to {}", self.holds_onto_user))
-            }
-            "-cUserTracker" => {
-                self.user_tracker = value.parse()?;
-                Ok(format!("Set User Tracker to {}", self.user_tracker))
-            }
-            "-cIdler" => {
-                self.idler = value.parse()?;
-                Ok(format!("Set Idler to {}", self.idler))
-            }
-            "-cExhibitViewer" => {
-                self.exhibit_viewer = value.parse()?;
-                Ok(format!("Set Exhibit Viewer to {}", self.exhibit_viewer))
-            }
-            "-cAlternatePanelTitle" => {
-                self.alternate_panel_title = value.parse()?;
-                Ok(format!("Set Alternate Panel Title to {}", self.alternate_panel_title))
-            }
-            "-cDirectEntrance" => {
-                self.direct_entrance = value.parse()?;
-                Ok(format!("Set Direct Entrance to {}", self.direct_entrance))
-            }
-            "-cHideBuilding" => {
-                self.hide_building = value.parse()?;
-                Ok(format!("Set Hide Building to {}", self.hide_building))
-            }
-            "-cUserStaysOutside" => {
-                self.user_stays_outside = value.parse()?;
-                Ok(format!("Set User Stays Outside to {}", self.user_stays_outside))
-            }
-            "-cUserTeleportsInside" => {
-                self.user_teleports_inside = value.parse()?;
-                Ok(format!("Set User Teleports Inside to {}", self.user_teleports_inside))
-            }
-            "-cUserUsesExit" => {
-                self.user_uses_exit = value.parse()?;
-                Ok(format!("Set User Uses Exit to {}", self.user_uses_exit))
-            }
-            "-cUserUsesEntranceAsEmergencyExit" => {
-                self.user_uses_entrance_as_emergency_exit = value.parse()?;
-                Ok(format!(
-                    "Set User Uses Entrance As Emergency Exit to {}",
-                    self.user_uses_entrance_as_emergency_exit
-                ))
-            }
-            "-cAdultChange" => {
-                self.adult_change = value.parse()?;
-                Ok(format!("Set Adult Change to {}", self.adult_change))
-            }
-            "-cChildChange" => {
-                self.child_change = value.parse()?;
-                Ok(format!("Set Child Change to {}", self.child_change))
-            }
-            "-cHungerChange" => {
-                self.hunger_change = value.parse()?;
-                Ok(format!("Set Hunger Change to {}", self.hunger_change))
-            }
-            "-cThirstChange" => {
-                self.thirst_change = value.parse()?;
-                Ok(format!("Set Thirst Change to {}", self.thirst_change))
-            }
-            "-cBathroomChange" => {
-                self.bathroom_change = value.parse()?;
-                Ok(format!("Set Bathroom Change to {}", self.bathroom_change))
-            }
-            "-cEnergyChange" => {
-                self.energy_change = value.parse()?;
-                Ok(format!("Set Energy Change to {}", self.energy_change))
-            }
-            _ => Ok(self.ztscenerytype.set_config(config, value)?),
-        }
-    }
-
     // print [Configuration/Floats] section of the configuration
     fn print_config_floats(&self) -> String {
         format!("{}\n\n[Configuration/Floats]\n\ncDefaultCost: {:.2}\ncLowCost: {:.2}\ncMedCost: {:.2}\ncHighCost: {:.2}\ncPriceFactor: {:.2}\ncUpkeep: {:.2}\n",
@@ -765,60 +411,6 @@ impl ZTFenceType {
 }
 
 impl EntityType for ZTFenceType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cStrength" => {
-                self.strength = value.parse()?;
-                Ok(format!("Set Strength to {}", self.strength))
-            }
-            "-cLife" => {
-                self.life = value.parse()?;
-                Ok(format!("Set Life to {}", self.life))
-            }
-            "-cDecayedLife" => {
-                self.decayed_life = value.parse()?;
-                Ok(format!("Set Decayed Life to {}", self.decayed_life))
-            }
-            "-cDecayedDelta" => {
-                self.decayed_delta = value.parse()?;
-                Ok(format!("Set Decayed Delta to {}", self.decayed_delta))
-            }
-            "-cBreakSoundAtten" => {
-                self.break_sound_atten = value.parse()?;
-                Ok(format!("Set Break Sound Atten to {}", self.break_sound_atten))
-            }
-            "-cOpenSoundAtten" => {
-                self.open_sound_atten = value.parse()?;
-                Ok(format!("Set Open Sound Atten to {}", self.open_sound_atten))
-            }
-            "-cSeeThrough" => {
-                self.see_through = value.parse()?;
-                Ok(format!("Set See Through to {}", self.see_through))
-            }
-            "-cIsJumpable" => {
-                self.is_jumpable = value.parse()?;
-                Ok(format!("Set Is Jumpable to {}", self.is_jumpable))
-            }
-            "-cIsClimbable" => {
-                self.is_climbable = value.parse()?;
-                Ok(format!("Set Is Climbable to {}", self.is_climbable))
-            }
-            "-cIndestructible" => {
-                self.indestructible = value.parse()?;
-                Ok(format!("Set Indestructible to {}", self.indestructible))
-            }
-            "-cIsElectrified" => {
-                self.is_electrified = value.parse()?;
-                Ok(format!("Set Is Electrified to {}", self.is_electrified))
-            }
-            "-cNoDrawWater" => {
-                self.no_draw_water = value.parse()?;
-                Ok(format!("Set No Draw Water to {}", self.no_draw_water))
-            }
-            _ => Ok(self.ztscenerytype.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncStrength: {}\ncLife: {}\ncDecayedLife: {}\ncDecayedDelta: {}\ncBreakSoundAtten: {}\ncOpenSoundAtten: {}\ncSeeThrough: {}\ncIsJumpable: {}\ncIsClimbable: {}\ncIndestructible: {}\ncIsElectrified: {}\ncNoDrawWater: {}\n", // cBreakSound: {}\ncOpenSound: {}\n",
                 self.ztscenerytype.print_config_integers(),
@@ -894,28 +486,6 @@ impl ZTTankWallType {
 }
 
 impl EntityType for ZTTankWallType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        // if config == "-cPortalOpenSound" {
-        //     self.portal_open_sound = value.parse()?;
-        //     Ok(format!("Set Portal Open Sound to {}", self.portal_open_sound))
-        // }
-        // else if config == "-cPortalCloseSound" {
-        //     self.portal_close_sound = value.parse()?;
-        //     Ok(format!("Set Portal Close Sound to {}", self.portal_close_sound))
-        // }
-        match config {
-            "-cPortalOpenSoundAtten" => {
-                self.portal_open_sound_atten = value.parse()?;
-                Ok(format!("Set Portal Open Sound Atten to {}", self.portal_open_sound_atten))
-            }
-            "-cPortalCloseSoundAtten" => {
-                self.portal_close_sound_atten = value.parse()?;
-                Ok(format!("Set Portal Close Sound Atten to {}", self.portal_close_sound_atten))
-            }
-            _ => Ok(self.ztfencetype.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         self.ztfencetype.print_config_integers()
     }
@@ -952,16 +522,6 @@ pub struct ZTFoodType {
 }
 
 impl EntityType for ZTFoodType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cKeeperFoodType" => {
-                self.keeper_food_type = value.parse()?;
-                Ok(format!("Set Keeper Food Type to {}", self.keeper_food_type))
-            }
-            _ => Ok(self.ztscenerytype.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!(
             "{}\ncKeeperFoodType: {}\n",
@@ -1024,51 +584,6 @@ impl ZTTankFilterType {
 }
 
 impl EntityType for ZTTankFilterType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cStartingHealth" => {
-                self.starting_health = value.parse()?;
-                Ok(format!("Set Starting Health to {}", self.starting_health))
-            }
-            "-cDecayedHealth" => {
-                self.decayed_health = value.parse()?;
-                Ok(format!("Set Decayed Health to {}", self.decayed_health))
-            }
-            "-cDecayTime" => {
-                self.decay_time = value.parse()?;
-                Ok(format!("Set Decay Time to {}", self.decay_time))
-            }
-            "-cFilterDelay" => {
-                self.filter_delay = value.parse()?;
-                Ok(format!("Set Filter Delay to {}", self.filter_delay))
-            }
-            "-cFilterUpkeep" => {
-                self.filter_upkeep = value.parse()?;
-                Ok(format!("Set Filter Upkeep to {}", self.filter_upkeep))
-            }
-            "-cFilterCleanAmount" => {
-                self.filter_clean_amount = value.parse()?;
-                Ok(format!("Set Filter Clean Amount to {}", self.filter_clean_amount))
-            }
-            "-cFilterDecayedCleanAmount" => {
-                self.filter_decayed_clean_amount = value.parse()?;
-                Ok(format!(
-                    "Set Filter Decayed Clean Amount to {}",
-                    self.filter_decayed_clean_amount
-                ))
-            }
-            "-cHealthyAtten" => {
-                self.healthy_atten = value.parse()?;
-                Ok(format!("Set Healthy Atten to {}", self.healthy_atten))
-            }
-            "-cDecayedAtten" => {
-                self.decayed_atten = value.parse()?;
-                Ok(format!("Set Decayed Atten to {}", self.decayed_atten))
-            }
-            _ => Ok(self.ztscenerytype.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncStartingHealth: {}\ncDecayedHealth: {}\ncDecayTime: {}\ncFilterDelay: {}\ncFilterUpkeep: {}\ncFilterCleanAmount: {}\ncFilterDecayedCleanAmount: {}\ncHealthyAtten: {}\ncDecayedAtten: {}\ncHealthySound: {}\ncDecayedSound: {}\n",
                 self.ztscenerytype.print_config_integers(),
@@ -1125,16 +640,6 @@ pub struct ZTPathType {
 }
 
 impl EntityType for ZTPathType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cMaterial" => {
-                self.material = value.parse()?;
-                Ok(format!("Set Material to {}", self.material))
-            }
-            _ => Ok(self.ztscenerytype.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncMaterial: {}\n", self.ztscenerytype.print_config_integers(), self.material,)
     }
@@ -1181,20 +686,6 @@ impl ZTRubbleType {
 }
 
 impl EntityType for ZTRubbleType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        // if config == "-cExplosionSound" {
-        //     self.explosion_sound = value.parse::<String>()?;
-        //     Ok(format!("Set Explosion Sound to {}", self.explosion_sound))
-        // }
-        match config {
-            "-cExplosionSoundAtten" => {
-                self.explosion_sound_atten = value.parse()?;
-                Ok(format!("Set Explosion Sound Atten to {}", self.explosion_sound_atten))
-            }
-            _ => Ok(self.ztscenerytype.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!(
             "{}\ncExplosionSound: {}\ncExplosionSoundAtten: {}\n",
@@ -1243,44 +734,6 @@ pub struct BFUnitType {
 }
 
 impl EntityType for BFUnitType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cSlowRate" => {
-                self.slow_rate = value.parse()?;
-                Ok(format!("Set Slow Rate to {}", self.slow_rate))
-            }
-            "-cMediumRate" => {
-                self.medium_rate = value.parse()?;
-                Ok(format!("Set Medium Rate to {}", self.medium_rate))
-            }
-            "-cFastRate" => {
-                self.fast_rate = value.parse()?;
-                Ok(format!("Set Fast Rate to {}", self.fast_rate))
-            }
-            "-cSlowAnimSpeed" => {
-                self.slow_anim_speed = value.parse()?;
-                Ok(format!("Set Slow Anim Speed to {}", self.slow_anim_speed))
-            }
-            "-cMediumAnimSpeed" => {
-                self.medium_anim_speed = value.parse()?;
-                Ok(format!("Set Medium Anim Speed to {}", self.medium_anim_speed))
-            }
-            "-cFastAnimSpeed" => {
-                self.fast_anim_speed = value.parse()?;
-                Ok(format!("Set Fast Anim Speed to {}", self.fast_anim_speed))
-            }
-            "-cMinHeight" => {
-                self.min_height = value.parse()?;
-                Ok(format!("Set Min Height to {}", self.min_height))
-            }
-            "-cMaxHeight" => {
-                self.max_height = value.parse()?;
-                Ok(format!("Set Max Height to {}", self.max_height))
-            }
-            _ => Ok(self.bfentitytype.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncSlowRate: {}\ncMediumRate: {}\ncFastRate: {}\ncSlowAnimSpeed: {}\ncMediumAnimSpeed: {}\ncFastAnimSpeed: {}\ncMinHeight: {}\ncMaxHeight: {}\n",
                 self.bfentitytype.print_config_integers(),
@@ -1350,64 +803,6 @@ impl ZTUnitType {
 }
 
 impl EntityType for ZTUnitType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cPurchaseCost" => {
-                self.purchase_cost = value.parse()?;
-                Ok(format!("Set Purchase Cost to {}", self.purchase_cost))
-            }
-            "-cNameID" => {
-                self.name_id = value.parse()?;
-                Ok(format!("Set Name ID to {}", self.name_id))
-            }
-            "-cHelpID" => {
-                self.help_id = value.parse()?;
-                Ok(format!("Set Help ID to {}", self.help_id))
-            }
-            "-cMapFootprint" => {
-                self.map_footprint = value.parse()?;
-                Ok(format!("Set Map Footprint to {}", self.map_footprint))
-            }
-            "-cSlowAnimSpeedWater" => {
-                self.slow_anim_speed_water = value.parse()?;
-                Ok(format!("Set Slow Anim Speed Water to {}", self.slow_anim_speed_water))
-            }
-            "-cMediumAnimSpeedWater" => {
-                self.medium_anim_speed_water = value.parse()?;
-                Ok(format!("Set Medium Anim Speed Water to {}", self.medium_anim_speed_water))
-            }
-            "-cFastAnimSpeedWater" => {
-                self.fast_anim_speed_water = value.parse()?;
-                Ok(format!("Set Fast Anim Speed Water to {}", self.fast_anim_speed_water))
-            }
-            "-cSwims" => {
-                self.swims = value.parse()?;
-                Ok(format!("Set Swims to {}", self.swims))
-            }
-            "-cSurface" => {
-                self.surface = value.parse()?;
-                Ok(format!("Set Surface to {}", self.surface))
-            }
-            "-cUnderwater" => {
-                self.underwater = value.parse()?;
-                Ok(format!("Set Underwater to {}", self.underwater))
-            }
-            "-cOnlyUnderwater" => {
-                self.only_underwater = value.parse()?;
-                Ok(format!("Set Only Underwater to {}", self.only_underwater))
-            }
-            "-cSkipTrickHappiness" => {
-                self.skip_trick_happiness = value.parse()?;
-                Ok(format!("Set Skip Trick Happiness to {}", self.skip_trick_happiness))
-            }
-            "-cSkipTrickChance" => {
-                self.skip_trick_chance = value.parse()?;
-                Ok(format!("Set Skip Trick Chance to {}", self.skip_trick_chance))
-            }
-            _ => Ok(self.bfunit_type.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncPurchaseCost: {}\ncNameID: {}\ncHelpID: {}\ncMapFootprint: {}\ncSlowAnimSpeedWater: {}\ncMediumAnimSpeedWater: {}\ncFastAnimSpeedWater: {}\ncSwims: {}\ncSurface: {}\ncUnderwater: {}\ncOnlyUnderwater: {}\ncSkipTrickHappiness: {}\ncSkipTrickChance: {}\n",
                 self.bfunit_type.print_config_integers(),
@@ -1515,262 +910,6 @@ pub struct ZTGuestType {
 }
 
 impl EntityType for ZTGuestType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cHungerCheck" => {
-                self.hunger_check = value.parse()?;
-                Ok(format!("Set Hunger Check to {}", self.hunger_check))
-            }
-            "-cThirstyCheck" => {
-                self.thirsty_check = value.parse()?;
-                Ok(format!("Set Thirsty Check to {}", self.thirsty_check))
-            }
-            "-cBathroomCheck" => {
-                self.bathroom_check = value.parse()?;
-                Ok(format!("Set Bathroom Check to {}", self.bathroom_check))
-            }
-            "-cLeaveZooCheck" => {
-                self.leave_zoo_check = value.parse()?;
-                Ok(format!("Set Leave Zoo Check to {}", self.leave_zoo_check))
-            }
-            "-cBuySouvenirCheck" => {
-                self.buy_souvenir_check = value.parse()?;
-                Ok(format!("Set Buy Souvenir Check to {}", self.buy_souvenir_check))
-            }
-            "-cEnergyCheck" => {
-                self.energy_check = value.parse()?;
-                Ok(format!("Set Energy Check to {}", self.energy_check))
-            }
-            "-cChaseCheck" => {
-                self.chase_check = value.parse()?;
-                Ok(format!("Set Chase Check to {}", self.chase_check))
-            }
-            "-cTrashCheck" => {
-                self.trash_check = value.parse()?;
-                Ok(format!("Set Trash Check to {}", self.trash_check))
-            }
-            "-cLikeAnimalsCheck" => {
-                self.like_animals_check = value.parse()?;
-                Ok(format!("Set Like Animals Check to {}", self.like_animals_check))
-            }
-            "-cViewingAreaCheck" => {
-                self.viewing_area_check = value.parse()?;
-                Ok(format!("Set Viewing Area Check to {}", self.viewing_area_check))
-            }
-            "-cEnvironmentEffectCheck" => {
-                self.environment_effect_check = value.parse()?;
-                Ok(format!("Set Environment Effect Check to {}", self.environment_effect_check))
-            }
-            "-cSawAnimalReset" => {
-                self.saw_animal_reset = value.parse()?;
-                Ok(format!("Set Saw Animal Reset to {}", self.saw_animal_reset))
-            }
-            "-cInitialHappiness" => {
-                self.initial_happiness = value.parse()?;
-                Ok(format!("Set Initial Happiness to {}", self.initial_happiness))
-            }
-            "-cMaxEnergy" => {
-                self.max_energy = value.parse()?;
-                Ok(format!("Set Max Energy to {}", self.max_energy))
-            }
-            "-cEnergyIncrement" => {
-                self.energy_increment = value.parse()?;
-                Ok(format!("Set Energy Increment to {}", self.energy_increment))
-            }
-            "-cEnergyThreshold" => {
-                self.energy_threshold = value.parse()?;
-                Ok(format!("Set Energy Threshold to {}", self.energy_threshold))
-            }
-            "-cAngryEnergyChange" => {
-                self.angry_energy_change = value.parse()?;
-                Ok(format!("Set Angry Energy Change to {}", self.angry_energy_change))
-            }
-            "-cHungerIncrement" => {
-                self.hunger_increment = value.parse()?;
-                Ok(format!("Set Hunger Increment to {}", self.hunger_increment))
-            }
-            "-cHungerThreshold" => {
-                self.hunger_threshold = value.parse()?;
-                Ok(format!("Set Hunger Threshold to {}", self.hunger_threshold))
-            }
-            "-cAngryFoodChange" => {
-                self.angry_food_change = value.parse()?;
-                Ok(format!("Set Angry Food Change to {}", self.angry_food_change))
-            }
-            "-cPreferredFoodChange" => {
-                self.preferred_food_change = value.parse()?;
-                Ok(format!("Set Preferred Food Change to {}", self.preferred_food_change))
-            }
-            "-cThirstIncrement" => {
-                self.thirst_increment = value.parse()?;
-                Ok(format!("Set Thirst Increment to {}", self.thirst_increment))
-            }
-            "-cThirstThreshold" => {
-                self.thirst_threshold = value.parse()?;
-                Ok(format!("Set Thirst Threshold to {}", self.thirst_threshold))
-            }
-            "-cAngryThirstChange" => {
-                self.angry_thirst_change = value.parse()?;
-                Ok(format!("Set Angry Thirst Change to {}", self.angry_thirst_change))
-            }
-            "-cBathroomIncrement" => {
-                self.bathroom_increment = value.parse()?;
-                Ok(format!("Set Bathroom Increment to {}", self.bathroom_increment))
-            }
-            "-cBathroomThreshold" => {
-                self.bathroom_threshold = value.parse()?;
-                Ok(format!("Set Bathroom Threshold to {}", self.bathroom_threshold))
-            }
-            "-cAngryBathroomChange" => {
-                self.angry_bathroom_change = value.parse()?;
-                Ok(format!("Set Angry Bathroom Change to {}", self.angry_bathroom_change))
-            }
-            "-cPriceHappy1Change" => {
-                self.price_happy1_change = value.parse()?;
-                Ok(format!("Set Price Happy1 Change to {}", self.price_happy1_change))
-            }
-            "-cPriceAngry1Change" => {
-                self.price_angry1_change = value.parse()?;
-                Ok(format!("Set Price Angry1 Change to {}", self.price_angry1_change))
-            }
-            "-cLeaveChanceLow" => {
-                self.leave_chance_low = value.parse()?;
-                Ok(format!("Set Leave Chance Low to {}", self.leave_chance_low))
-            }
-            "-cLeaveChanceMed" => {
-                self.leave_chance_med = value.parse()?;
-                Ok(format!("Set Leave Chance Med to {}", self.leave_chance_med))
-            }
-            "-cLeaveChanceHigh" => {
-                self.leave_chance_high = value.parse()?;
-                Ok(format!("Set Leave Chance High to {}", self.leave_chance_high))
-            }
-            "-cLeaveChanceDone" => {
-                self.leave_chance_done = value.parse()?;
-                Ok(format!("Set Leave Chance Done to {}", self.leave_chance_done))
-            }
-            "-cBuySouvenirChanceMed" => {
-                self.buy_souvenir_chance_med = value.parse()?;
-                Ok(format!("Set Buy Souvenir Chance Med to {}", self.buy_souvenir_chance_med))
-            }
-            "-cBuySouvenirChanceHigh" => {
-                self.buy_souvenir_chance_high = value.parse()?;
-                Ok(format!("Set Buy Souvenir Chance High to {}", self.buy_souvenir_chance_high))
-            }
-            "-cAngryTrashChange" => {
-                self.angry_trash_change = value.parse()?;
-                Ok(format!("Set Angry Trash Change to {}", self.angry_trash_change))
-            }
-            "-cTrashInTileThreshold" => {
-                self.trash_in_tile_threshold = value.parse()?;
-                Ok(format!("Set Trash In Tile Threshold to {}", self.trash_in_tile_threshold))
-            }
-            "-cVandalizedObjectsInTileThreshold" => {
-                self.vandalized_objects_in_tile_threshold = value.parse()?;
-                Ok(format!(
-                    "Set Vandalized Objects In Tile Threshold to {}",
-                    self.vandalized_objects_in_tile_threshold
-                ))
-            }
-            "-cAnimalInRowChange" => {
-                self.animal_in_row_change = value.parse()?;
-                Ok(format!("Set Animal In Row Change to {}", self.animal_in_row_change))
-            }
-            "-cDifferentSpeciesChange" => {
-                self.different_species_change = value.parse()?;
-                Ok(format!("Set Different Species Change to {}", self.different_species_change))
-            }
-            "-cDifferentSpeciesThreshold" => {
-                self.different_species_threshold = value.parse()?;
-                Ok(format!(
-                    "Set Different Species Threshold to {}",
-                    self.different_species_threshold
-                ))
-            }
-            "-cSickAnimalChange" => {
-                self.sick_animal_change = value.parse()?;
-                Ok(format!("Set Sick Animal Change to {}", self.sick_animal_change))
-            }
-            "-cCrowdedViewingThreshold" => {
-                self.crowded_viewing_threshold = value.parse()?;
-                Ok(format!("Set Crowded Viewing Threshold to {}", self.crowded_viewing_threshold))
-            }
-            "-cCrowdedViewingChange" => {
-                self.crowded_viewing_change = value.parse()?;
-                Ok(format!("Set Crowded Viewing Change to {}", self.crowded_viewing_change))
-            }
-            "-cPreferredAnimalChange" => {
-                self.preferred_animal_change = value.parse()?;
-                Ok(format!("Set Preferred Animal Change to {}", self.preferred_animal_change))
-            }
-            "-cHappyAnimalChange1" => {
-                self.happy_animal_change1 = value.parse()?;
-                Ok(format!("Set Happy Animal Change1 to {}", self.happy_animal_change1))
-            }
-            "-cHappyAnimalChange2" => {
-                self.happy_animal_change2 = value.parse()?;
-                Ok(format!("Set Happy Animal Change2 to {}", self.happy_animal_change2))
-            }
-            "-cAngryAnimalChange1" => {
-                self.angry_animal_change1 = value.parse()?;
-                Ok(format!("Set Angry Animal Change1 to {}", self.angry_animal_change1))
-            }
-            "-cAngryAnimalChange2" => {
-                self.angry_animal_change2 = value.parse()?;
-                Ok(format!("Set Angry Animal Change2 to {}", self.angry_animal_change2))
-            }
-            "-cAngryAnimalChange3" => {
-                self.angry_animal_change3 = value.parse()?;
-                Ok(format!("Set Angry Animal Change3 to {}", self.angry_animal_change3))
-            }
-            "-cEscapedAnimalChange" => {
-                self.escaped_animal_change = value.parse()?;
-                Ok(format!("Set Escaped Animal Change to {}", self.escaped_animal_change))
-            }
-            "-cObjectEstheticThreshold" => {
-                self.object_esthetic_threshold = value.parse()?;
-                Ok(format!("Set Object Esthetic Threshold to {}", self.object_esthetic_threshold))
-            }
-            "-cHappyEstheticChange" => {
-                self.happy_esthetic_change = value.parse()?;
-                Ok(format!("Set Happy Esthetic Change to {}", self.happy_esthetic_change))
-            }
-            "-cStandAndEatChange" => {
-                self.stand_and_eat_change = value.parse()?;
-                Ok(format!("Set Stand And Eat Change to {}", self.stand_and_eat_change))
-            }
-            "-cStinkThreshold" => {
-                self.stink_threshold = value.parse()?;
-                Ok(format!("Set Stink Threshold to {}", self.stink_threshold))
-            }
-            "-cSickChance" => {
-                self.sick_chance = value.parse()?;
-                Ok(format!("Set Sick Chance to {}", self.sick_chance))
-            }
-            "-cSickChange" => {
-                self.sick_change = value.parse()?;
-                Ok(format!("Set Sick Change to {}", self.sick_change))
-            }
-            "-cMimicChance" => {
-                self.mimic_chance = value.parse()?;
-                Ok(format!("Set Mimic Chance to {}", self.mimic_chance))
-            }
-            "-cTestFenceChance" => {
-                self.test_fence_chance = value.parse()?;
-                Ok(format!("Set Test Fence Chance to {}", self.test_fence_chance))
-            }
-            "-cZapHappinessHit" => {
-                self.zap_happiness_hit = value.parse()?;
-                Ok(format!("Set Zap Happiness Hit to {}", self.zap_happiness_hit))
-            }
-            "-cTapWallChance" => {
-                self.tap_wall_chance = value.parse()?;
-                Ok(format!("Set Tap Wall Chance to {}", self.tap_wall_chance))
-            }
-            _ => Ok(self.ztunit_type.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncHungerCheck: {}\ncThirstyCheck: {}\ncBathroomCheck: {}\ncLeaveZooCheck: {}\ncBuySouvenirCheck: {}\ncEnergyCheck: {}\ncChaseCheck: {}\ncTrashCheck: {}\ncLikeAnimalsCheck: {}\ncViewingAreaCheck: {}\ncEnvironmentEffectCheck: {}\ncSawAnimalReset: {}\ncInitialHappiness: {}\ncMaxEnergy: {}\ncEnergyIncrement: {}\ncEnergyThreshold: {}\ncAngryEnergyChange: {}\ncHungerIncrement: {}\ncHungerThreshold: {}\ncAngryFoodChange: {}\ncPreferredFoodChange: {}\ncThirstIncrement: {}\ncThirstThreshold: {}\ncAngryThirstChange: {}\ncBathroomIncrement: {}\ncBathroomThreshold: {}\ncAngryBathroomChange: {}\ncPriceHappy1Change: {}\ncPriceAngry1Change: {}\ncLeaveChanceLow: {}\ncLeaveChanceMed: {}\ncLeaveChanceHigh: {}\ncLeaveChanceDone: {}\ncBuySouvenirChanceMed: {}\ncBuySouvenirChanceHigh: {}\ncAngryTrashChange: {}\ncTrashInTileThreshold: {}\ncVandalizedObjectsInTileThreshold: {}\ncAnimalInRowChange: {}\ncDifferentSpeciesChange: {}\ncDifferentSpeciesThreshold: {}\ncSickAnimalChange: {}\ncCrowdedViewingThreshold: {}\ncCrowdedViewingChange: {}\ncPreferredAnimalChange: {}\ncHappyAnimalChange1: {}\ncHappyAnimalChange2: {}\ncAngryAnimalChange1: {}\ncAngryAnimalChange2: {}\ncAngryAnimalChange3: {}\ncEscapedAnimalChange: {}\ncObjectEstheticThreshold: {}\ncHappyEstheticChange: {}\ncStandAndEatChange: {}\ncStinkThreshold: {}\ncSickChance: {}\ncSickChange: {}\ncMimicChance: {}\ncTestFenceChance: {}\ncZapHappinessHit: {}\ncTapWallChance: {}\n",
         self.ztunit_type.print_config_integers(),
@@ -1974,364 +1113,6 @@ pub struct ZTAnimalType {
 }
 
 impl EntityType for ZTAnimalType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cBoxFootprintX" => {
-                self.box_footprint_x = value.parse()?;
-                Ok(format!("Set Box Footprint X to {}", self.box_footprint_x))
-            }
-            "-cBoxFootprintY" => {
-                self.box_footprint_y = value.parse()?;
-                Ok(format!("Set Box Footprint Y to {}", self.box_footprint_y))
-            }
-            "-cBoxFootprintZ" => {
-                self.box_footprint_z = value.parse()?;
-                Ok(format!("Set Box Footprint Z to {}", self.box_footprint_z))
-            }
-            "-cFamily" => {
-                self.family = value.parse()?;
-                Ok(format!("Set Family to {}", self.family))
-            }
-            "-cGenus" => {
-                self.genus = value.parse()?;
-                Ok(format!("Set Genus to {}", self.genus))
-            }
-            "-cHabitat" => {
-                self.habitat = value.parse()?;
-                Ok(format!("Set Habitat to {}", self.habitat))
-            }
-            "-cLocation" => {
-                self.location = value.parse()?;
-                Ok(format!("Set Location to {}", self.location))
-            }
-            "-cEra" => {
-                self.era = value.parse()?;
-                Ok(format!("Set Era to {}", self.era))
-            }
-            "-cBreathThreshold" => {
-                self.breath_threshold = value.parse()?;
-                Ok(format!("Set Breath Threshold to {}", self.breath_threshold))
-            }
-            "-cBreathIncrement" => {
-                self.breath_increment = value.parse()?;
-                Ok(format!("Set Breath Increment to {}", self.breath_increment))
-            }
-            "-cHungerThreshold" => {
-                self.hunger_threshold = value.parse()?;
-                Ok(format!("Set Hunger Threshold to {}", self.hunger_threshold))
-            }
-            "-cHungryHealthChange" => {
-                self.hungry_health_change = value.parse()?;
-                Ok(format!("Set Hungry Health Change to {}", self.hungry_health_change))
-            }
-            "-cHungerIncrement" => {
-                self.hunger_increment = value.parse()?;
-                Ok(format!("Set Hunger Increment to {}", self.hunger_increment))
-            }
-            "-cFoodUnitValue" => {
-                self.food_unit_value = value.parse()?;
-                Ok(format!("Set Food Unit Value to {}", self.food_unit_value))
-            }
-            "-cKeeperFoodUnitsEaten" => {
-                self.keeper_food_units_eaten = value.parse()?;
-                Ok(format!("Set Keeper Food Units Eaten to {}", self.keeper_food_units_eaten))
-            }
-            "-cNeededFood" => {
-                self.needed_food = value.parse()?;
-                Ok(format!("Set Needed Food to {}", self.needed_food))
-            }
-            "-cNoFoodChange" => {
-                self.no_food_change = value.parse()?;
-                Ok(format!("Set No Food Change to {}", self.no_food_change))
-            }
-            "-cInitialHappiness" => {
-                self.initial_happiness = value.parse()?;
-                Ok(format!("Set Initial Happiness to {}", self.initial_happiness))
-            }
-            "-cMaxHits" => {
-                self.max_hits = value.parse()?;
-                Ok(format!("Set Max Hits to {}", self.max_hits))
-            }
-            "-cPctHits" => {
-                self.pct_hits = value.parse()?;
-                Ok(format!("Set Pct Hits to {}", self.pct_hits))
-            }
-            "-cMaxEnergy" => {
-                self.max_energy = value.parse()?;
-                Ok(format!("Set Max Energy to {}", self.max_energy))
-            }
-            "-cMaxDirty" => {
-                self.max_dirty = value.parse()?;
-                Ok(format!("Set Max Dirty to {}", self.max_dirty))
-            }
-            "-cMinDirty" => {
-                self.min_dirty = value.parse()?;
-                Ok(format!("Set Min Dirty to {}", self.min_dirty))
-            }
-            "-cSickChange" => {
-                self.sick_change = value.parse()?;
-                Ok(format!("Set Sick Change to {}", self.sick_change))
-            }
-            "-cOtherAnimalSickChange" => {
-                self.other_animal_sick_change = value.parse()?;
-                Ok(format!("Set Other Animal Sick Change to {}", self.other_animal_sick_change))
-            }
-            "-cSickChance" => {
-                self.sick_chance = value.parse()?;
-                Ok(format!("Set Sick Chance to {}", self.sick_chance))
-            }
-            "-cSickRandomChance" => {
-                self.sick_random_chance = value.parse()?;
-                Ok(format!("Set Sick Random Chance to {}", self.sick_random_chance))
-            }
-            "-cCrowd" => {
-                self.crowd = value.parse()?;
-                Ok(format!("Set Crowd to {}", self.crowd))
-            }
-            "-cCrowdHappinessChange" => {
-                self.crowd_happiness_change = value.parse()?;
-                Ok(format!("Set Crowd Happiness Change to {}", self.crowd_happiness_change))
-            }
-            "-cZapHappinessChange" => {
-                self.zap_happiness_change = value.parse()?;
-                Ok(format!("Set Zap Happiness Change to {}", self.zap_happiness_change))
-            }
-            "-cCaptivity" => {
-                self.captivity = value.parse()?;
-                Ok(format!("Set Captivity to {}", self.captivity))
-            }
-            "-cReproductionChance" => {
-                self.reproduction_chance = value.parse()?;
-                Ok(format!("Set Reproduction Chance to {}", self.reproduction_chance))
-            }
-            "-cReproductionInterval" => {
-                self.reproduction_interval = value.parse()?;
-                Ok(format!("Set Reproduction Interval to {}", self.reproduction_interval))
-            }
-            "-cMatingType" => {
-                self.mating_type = value.parse()?;
-                Ok(format!("Set Mating Type to {}", self.mating_type))
-            }
-            "-cOffspring" => {
-                self.offspring = value.parse()?;
-                Ok(format!("Set Offspring to {}", self.offspring))
-            }
-            "-cKeeperFrequency" => {
-                self.keeper_frequency = value.parse()?;
-                Ok(format!("Set Keeper Frequency to {}", self.keeper_frequency))
-            }
-            "-cNotEnoughKeepersChange" => {
-                self.not_enough_keepers_change = value.parse()?;
-                Ok(format!("Set Not Enough Keepers Change to {}", self.not_enough_keepers_change))
-            }
-            "-cSocial" => {
-                self.social = value.parse()?;
-                Ok(format!("Set Social to {}", self.social))
-            }
-            "-cHabitatSize" => {
-                self.habitat_size = value.parse()?;
-                Ok(format!("Set Habitat Size to {}", self.habitat_size))
-            }
-            "-cNumberAnimalsMin" => {
-                self.number_animals_min = value.parse()?;
-                Ok(format!("Set Number Animals Min to {}", self.number_animals_min))
-            }
-            "-cNumberAnimalsMax" => {
-                self.number_animals_max = value.parse()?;
-                Ok(format!("Set Number Animals Max to {}", self.number_animals_max))
-            }
-            "-cNumberMinChange" => {
-                self.number_min_change = value.parse()?;
-                Ok(format!("Set Number Min Change to {}", self.number_min_change))
-            }
-            "-cNumberMaxChange" => {
-                self.number_max_change = value.parse()?;
-                Ok(format!("Set Number Max Change to {}", self.number_max_change))
-            }
-            "-cHabitatPreference" => {
-                self.habitat_preference = value.parse()?;
-                Ok(format!("Set Habitat Preference to {}", self.habitat_preference))
-            }
-            "-cBabyBornChange" => {
-                self.baby_born_change = value.parse()?;
-                Ok(format!("Set Baby Born Change to {}", self.baby_born_change))
-            }
-            "-cEnergyIncrement" => {
-                self.energy_increment = value.parse()?;
-                Ok(format!("Set Energy Increment to {}", self.energy_increment))
-            }
-            "-cEnergyThreshold" => {
-                self.energy_threshold = value.parse()?;
-                Ok(format!("Set Energy Threshold to {}", self.energy_threshold))
-            }
-            "-cDirtyIncrement" => {
-                self.dirty_increment = value.parse()?;
-                Ok(format!("Set Dirty Increment to {}", self.dirty_increment))
-            }
-            "-cDirtyThreshold" => {
-                self.dirty_threshold = value.parse()?;
-                Ok(format!("Set Dirty Threshold to {}", self.dirty_threshold))
-            }
-            "-cSickTime" => {
-                self.sick_time = value.parse()?;
-                Ok(format!("Set Sick Time to {}", self.sick_time))
-            }
-            "-cBabyToAdult" => {
-                self.baby_to_adult = value.parse()?;
-                Ok(format!("Set Baby To Adult to {}", self.baby_to_adult))
-            }
-            "-cOtherFood" => {
-                self.other_food = value.parse()?;
-                Ok(format!("Set Other Food to {}", self.other_food))
-            }
-            "-cTreePref" => {
-                self.tree_pref = value.parse()?;
-                Ok(format!("Set Tree Pref to {}", self.tree_pref))
-            }
-            "-cRockPref" => {
-                self.rock_pref = value.parse()?;
-                Ok(format!("Set Rock Pref to {}", self.rock_pref))
-            }
-            "-cSpacePref" => {
-                self.space_pref = value.parse()?;
-                Ok(format!("Set Space Pref to {}", self.space_pref))
-            }
-            "-cElevationPref" => {
-                self.elevation_pref = value.parse()?;
-                Ok(format!("Set Elevation Pref to {}", self.elevation_pref))
-            }
-            "-cDepthMin" => {
-                self.depth_min = value.parse()?;
-                Ok(format!("Set Depth Min to {}", self.depth_min))
-            }
-            "-cDepthMax" => {
-                self.depth_max = value.parse()?;
-                Ok(format!("Set Depth Max to {}", self.depth_max))
-            }
-            "-cDepthChange" => {
-                self.depth_change = value.parse()?;
-                Ok(format!("Set Depth Change to {}", self.depth_change))
-            }
-            "-cSalinityChange" => {
-                self.salinity_change = value.parse()?;
-                Ok(format!("Set Salinity Change to {}", self.salinity_change))
-            }
-            "-cSalinityHealthChange" => {
-                self.salinity_health_change = value.parse()?;
-                Ok(format!("Set Salinity Health Change to {}", self.salinity_health_change))
-            }
-            "-cHappyReproduceThreshold" => {
-                self.happy_reproduce_threshold = value.parse()?;
-                Ok(format!("Set Happy Reproduce Threshold to {}", self.happy_reproduce_threshold))
-            }
-            "-cBuildingUseChance" => {
-                self.building_use_chance = value.parse()?;
-                Ok(format!("Set Building Use Chance to {}", self.building_use_chance))
-            }
-            "-cNoMateChange" => {
-                self.no_mate_change = value.parse()?;
-                Ok(format!("Set No Mate Change to {}", self.no_mate_change))
-            }
-            "-cTimeDeath" => {
-                self.time_death = value.parse()?;
-                Ok(format!("Set Time Death to {}", self.time_death))
-            }
-            "-cDeathChance" => {
-                self.death_chance = value.parse()?;
-                Ok(format!("Set Death Chance to {}", self.death_chance))
-            }
-            "-cDirtChance" => {
-                self.dirt_chance = value.parse()?;
-                Ok(format!("Set Dirt Chance to {}", self.dirt_chance))
-            }
-            "-cWaterNeeded" => {
-                self.water_needed = value.parse()?;
-                Ok(format!("Set Water Needed to {}", self.water_needed))
-            }
-            "-cUnderwaterNeeded" => {
-                self.underwater_needed = value.parse()?;
-                Ok(format!("Set Underwater Needed to {}", self.underwater_needed))
-            }
-            "-cLandNeeded" => {
-                self.land_needed = value.parse()?;
-                Ok(format!("Set Land Needed to {}", self.land_needed))
-            }
-            "-cEnterWaterChance" => {
-                self.enter_water_chance = value.parse()?;
-                Ok(format!("Set Enter Water Chance to {}", self.enter_water_chance))
-            }
-            "-cEnterTankChance" => {
-                self.enter_tank_chance = value.parse()?;
-                Ok(format!("Set Enter Tank Chance to {}", self.enter_tank_chance))
-            }
-            "-cEnterLandChance" => {
-                self.enter_land_chance = value.parse()?;
-                Ok(format!("Set Enter Land Chance to {}", self.enter_land_chance))
-            }
-            "-cDrinkWaterChance" => {
-                self.drink_water_chance = value.parse()?;
-                Ok(format!("Set Drink Water Chance to {}", self.drink_water_chance))
-            }
-            "-cChaseAnimalChance" => {
-                self.chase_animal_chance = value.parse()?;
-                Ok(format!("Set Chase Animal Chance to {}", self.chase_animal_chance))
-            }
-            "-cClimbsCliffs" => {
-                self.climbs_cliffs = value.parse()?;
-                Ok(format!("Set Climbs Cliffs to {}", self.climbs_cliffs))
-            }
-            "-cBashStrength" => {
-                self.bash_strength = value.parse()?;
-                Ok(format!("Set Bash Strength to {}", self.bash_strength))
-            }
-            "-cAttractiveness" => {
-                self.attractiveness = value.parse()?;
-                Ok(format!("Set Attractiveness to {}", self.attractiveness))
-            }
-            "-cKeeperFoodType" => {
-                self.keeper_food_type = value.parse()?;
-                Ok(format!("Set Keeper Food Type to {}", self.keeper_food_type))
-            }
-            "-cIsClimber" => {
-                self.is_climber = value.parse()?;
-                Ok(format!("Set Is Climber to {}", self.is_climber))
-            }
-            "-cIsJumper" => {
-                self.is_jumper = value.parse()?;
-                Ok(format!("Set Is Jumper to {}", self.is_jumper))
-            }
-            "-cSmallZoodoo" => {
-                self.small_zoodoo = value.parse()?;
-                Ok(format!("Set Small Zoodoo to {}", self.small_zoodoo))
-            }
-            "-cDinoZoodoo" => {
-                self.dino_zoodoo = value.parse()?;
-                Ok(format!("Set Dino Zoodoo to {}", self.dino_zoodoo))
-            }
-            "-cGiantZoodoo" => {
-                self.giant_zoodoo = value.parse()?;
-                Ok(format!("Set Giant Zoodoo to {}", self.giant_zoodoo))
-            }
-            "-cIsSpecialAnimal" => {
-                self.is_special_animal = value.parse()?;
-                Ok(format!("Set Is Special Animal to {}", self.is_special_animal))
-            }
-            "-cNeedShelter" => {
-                self.need_shelter = value.parse()?;
-                Ok(format!("Set Need Shelter to {}", self.need_shelter))
-            }
-            "-cNeedToys" => {
-                self.need_toys = value.parse()?;
-                Ok(format!("Set Need Toys to {}", self.need_toys))
-            }
-            "-cBabiesAttack" => {
-                self.babies_attack = value.parse()?;
-                Ok(format!("Set Babies Attack to {}", self.babies_attack))
-            }
-            _ => Ok(self.ztunit_type.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncBoxFootprintX: {}\ncBoxFootprintY: {}\ncBoxFootprintZ: {}\ncFamily: {}\ncGenus: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncBreathThreshold: {}\ncBreathIncrement: {}\ncHungerThreshold: {}\ncHungryHealthChange: {}\ncHungerIncrement: {}\ncFoodUnitValue: {}\ncKeeperFoodUnitsEaten: {}\ncNeededFood: {}\ncNoFoodChange: {}\ncInitialHappiness: {}\ncMaxHits: {}\ncPctHits: {}\ncMaxEnergy: {}\ncMaxDirty: {}\ncMinDirty: {}\ncSickChange: {}\ncOtherAnimalSickChange: {}\ncSickChance: {}\ncSickRandomChance: {}\ncCrowd: {}\ncCrowdHappinessChange: {}\ncZapHappinessChange: {}\ncCaptivity: {}\ncReproductionChance: {}\ncReproductionInterval: {}\ncMatingType: {}\ncOffspring: {}\ncKeeperFrequency: {}\ncNotEnoughKeepersChange: {}\ncSocial: {}\ncHabitatSize: {}\ncNumberAnimalsMin: {}\ncNumberAnimalsMax: {}\ncNumberMinChange: {}\ncNumberMaxChange: {}\ncHabitatPreference: {}\ncBabyBornChange: {}\ncEnergyIncrement: {}\ncEnergyThreshold: {}\ncDirtyIncrement: {}\ncDirtyThreshold: {}\ncSickTime: {}\ncBabyToAdult: {}\ncOtherFood: {}\ncTreePref: {}\ncRockPref: {}\ncSpacePref: {}\ncElevationPref: {}\ncDepthMin: {}\ncDepthMax: {}\ncDepthChange: {}\ncSalinityChange: {}\ncSalinityHealthChange: {}\ncHappyReproduceThreshold: {}\ncBuildingUseChance: {}\ncNoMateChange: {}\ncTimeDeath: {}\ncDeathChance: {}\ncDirtChance: {}\ncWaterNeeded: {}\ncUnderwaterNeeded: {}\ncLandNeeded: {}\ncEnterWaterChance: {}\ncEnterTankChance: {}\ncEnterLandChance: {}\ncDrinkWaterChance: {}\ncChaseAnimalChance: {}\ncClimbsCliffs: {}\ncBashStrength: {}\ncAttractiveness: {}\ncKeeperFoodType: {}\ncIsClimber: {}\ncIsJumper: {}\ncSmallZoodoo: {}\ncDinoZoodoo: {}\ncGiantZoodoo: {}\ncIsSpecialAnimal: {}\ncNeedShelter: {}\ncNeedToys: {}\ncBabiesAttack: {}\n",
         self.ztunit_type.print_config_integers(),
@@ -2466,32 +1247,6 @@ pub struct ZTStaffType {
 }
 
 impl EntityType for ZTStaffType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cWorkCheck" => {
-                self.work_check = value.parse()?;
-                Ok(format!("Set Work Check to {}", self.work_check))
-            }
-            "-cChaseCheck" => {
-                self.chase_check = value.parse()?;
-                Ok(format!("Set Chase Check to {}", self.chase_check))
-            }
-            "-cMonthlyCost" => {
-                self.monthly_cost = value.parse()?;
-                Ok(format!("Set Monthly Cost to {}", self.monthly_cost))
-            }
-            "-cDutiesTextID" => {
-                self.duties_text_id = value.parse()?;
-                Ok(format!("Set Duties Text ID to {}", self.duties_text_id))
-            }
-            "-cWeaponRange" => {
-                self.weapon_range = value.parse()?;
-                Ok(format!("Set Weapon Range to {}", self.weapon_range))
-            }
-            _ => Ok(self.ztunit_type.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncWorkCheck: {}\ncChaseCheck: {}\ncMonthlyCost: {}\ncDutiesTextID: {}\ncWeaponRange: {}\n",
         self.ztunit_type.print_config_integers(),
@@ -2538,27 +1293,6 @@ pub struct ZTMaintType {
 }
 
 impl EntityType for ZTMaintType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cCleanTrashRadius" => {
-                self.clean_trash_radius = value.parse()?;
-                Ok(format!("Set Clean Trash Radius to {}", self.clean_trash_radius))
-            }
-            "-cFixFenceModifier" => {
-                self.fix_fence_modifier = value.parse()?;
-                Ok(format!("Set Fix Fence Modifier to {}", self.fix_fence_modifier))
-            }
-            "-cClearInvalidListInterval" => {
-                self.clear_invalid_list_interval = value.parse()?;
-                Ok(format!(
-                    "Set Clear Invalid List Interval to {}",
-                    self.clear_invalid_list_interval
-                ))
-            }
-            _ => Ok(self.ztstaff_type.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!(
             "{}\ncCleanTrashRadius: {}\ncFixFenceModifier: {}\ncClearInvalidListInterval: {}\n",
@@ -2607,16 +1341,6 @@ pub struct ZTHelicopterType {
 }
 
 impl EntityType for ZTHelicopterType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cLoopSoundAtten" => {
-                self.loop_sound_atten = value.parse()?;
-                Ok(format!("Set Loop Sound Atten to {}", self.loop_sound_atten))
-            }
-            _ => Ok(self.ztstaff_type.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!(
             "{}\ncLoopSoundAtten: {}\n",
@@ -2663,36 +1387,6 @@ pub struct ZTGuideType {
 }
 
 impl EntityType for ZTGuideType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cInformGuestTime" => {
-                self.inform_guest_time = value.parse()?;
-                Ok(format!("Set Inform Guest Time to {}", self.inform_guest_time))
-            }
-            "-cTourGuideBonus" => {
-                self.tour_guide_bonus = value.parse()?;
-                Ok(format!("Set Tour Guide Bonus to {}", self.tour_guide_bonus))
-            }
-            "-cCrowdCheck" => {
-                self.crowd_check = value.parse()?;
-                Ok(format!("Set Crowd Check to {}", self.crowd_check))
-            }
-            "-cCrowdRadius" => {
-                self.crowd_radius = value.parse()?;
-                Ok(format!("Set Crowd Radius to {}", self.crowd_radius))
-            }
-            "-cFollowChance" => {
-                self.follow_chance = value.parse()?;
-                Ok(format!("Set Follow Chance to {}", self.follow_chance))
-            }
-            "-cMaxGroupSize" => {
-                self.max_group_size = value.parse()?;
-                Ok(format!("Set Max Group Size to {}", self.max_group_size))
-            }
-            _ => Ok(self.ztstaff_type.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncInformGuestTime: {}\ncTourGuideBonus: {}\ncCrowdCheck: {}\ncCrowdRadius: {}\ncFollowChance: {}\ncMaxGroupSize: {}\n",
                 self.ztstaff_type.print_config_integers(),
@@ -2759,40 +1453,6 @@ impl ZTKeeperType {
 }
 
 impl EntityType for ZTKeeperType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cFoodUnitsSecond" => {
-                self.food_units_second = value.parse()?;
-                Ok(format!("Set Food Units Second to {}", self.food_units_second))
-            }
-            "-cCleanTime" => {
-                self.clean_time = value.parse()?;
-                Ok(format!("Set Clean Time to {}", self.clean_time))
-            }
-            "-cHealUnitsSecond" => {
-                self.heal_units_second = value.parse()?;
-                Ok(format!("Set Heal Units Second to {}", self.heal_units_second))
-            }
-            "-cFoodPerTile" => {
-                self.food_per_tile = value.parse()?;
-                Ok(format!("Set Food Per Tile to {}", self.food_per_tile))
-            }
-            "-cCleanTankPct" => {
-                self.clean_tank_pct = value.parse()?;
-                Ok(format!("Set Clean Tank Pct to {}", self.clean_tank_pct))
-            }
-            "-cCleanTankThreshold" => {
-                self.clean_tank_threshold = value.parse()?;
-                Ok(format!("Set Clean Tank Threshold to {}", self.clean_tank_threshold))
-            }
-            // else if config == "-cDirt" {
-            //     self.dirt = value.parse()?;
-            //     Ok(format!("Set Dirt to {}", self.dirt))
-            // }
-            _ => Ok(self.ztstaff_type.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncFoodUnitsSecond: {}\ncCleanTime: {}\ncHealUnitsSecond: {}\ncFoodPerTile: {}\ncCleanTankPct: {}\ncCleanTankThreshold: {}\n", //cDirt: {}\n", //cSicklyAnimalPct: {}\n",
             self.ztstaff_type.print_config_integers(),
@@ -2822,17 +1482,14 @@ impl EntityType for ZTKeeperType {
 
 // ------------ BFOverlayType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct BFOverlayType {
+    #[deref_field]
     pub bfentity_type: BFEntityType, // bytes: 0x100 - 0x0 = 0x100 = 256 bytes
 }
 
 impl EntityType for BFOverlayType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        self.bfentity_type.set_config(config, value)
-    }
-
     fn print_config_integers(&self) -> String {
         self.bfentity_type.print_config_integers()
     }
@@ -2860,9 +1517,10 @@ impl Deref for BFOverlayType {
 
 // ------------ ZTAmbientType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTAmbientType {
+    #[deref_field]
     pub bfoverlay_type: BFOverlayType, // bytes: 0x100 - 0x0 = 0x100 = 256 bytes
     pub name_id: i32, // 0x100
     pub help_id: i32, // 0x104
@@ -2873,32 +1531,6 @@ pub struct ZTAmbientType {
 }
 
 impl EntityType for ZTAmbientType {
-    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
-        match config {
-            "-cNameID" => {
-                self.name_id = value.parse()?;
-                Ok(format!("Set Name ID to {}", self.name_id))
-            }
-            "-cHelpID" => {
-                self.help_id = value.parse()?;
-                Ok(format!("Set Help ID to {}", self.help_id))
-            }
-            "-cSpeed" => {
-                self.speed = value.parse()?;
-                Ok(format!("Set Speed to {}", self.speed))
-            }
-            "-cFrequency" => {
-                self.frequency = value.parse()?;
-                Ok(format!("Set Frequency to {}", self.frequency))
-            }
-            "-cSoundLoop" => {
-                self.sound_loop = value.parse()?;
-                Ok(format!("Set Sound Loop to {}", self.sound_loop))
-            }
-            _ => Ok(self.bfoverlay_type.set_config(config, value)?),
-        }
-    }
-
     fn print_config_integers(&self) -> String {
         format!("{}\ncNameID: {}\ncHelpID: {}\ncSpeed: {}\ncFrequency: {}\ncSoundLoop: {}\n",
         self.bfoverlay_type.print_config_integers(),
