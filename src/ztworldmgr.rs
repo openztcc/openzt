@@ -4,9 +4,7 @@ use getset::Getters;
 use num_enum::FromPrimitive;
 use tracing::info;
 
-use crate::{
-    add_to_command_register, bfentitytype::ZTSceneryType, console::CommandError, debug_dll::{get_from_memory, get_string_from_memory, map_from_memory}, expansions::is_member
-};
+use crate::{add_to_command_register, bfentitytype::{read_zt_entity_type_from_memory, ZTEntityType, ZTSceneryType}, bfentitytype, console::CommandError, debug_dll::{get_from_memory, get_string_from_memory, map_from_memory}, expansions::is_member};
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 
@@ -47,63 +45,6 @@ impl ZTEntity {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
-#[repr(u32)]
-pub enum ZTEntityTypeClass {
-    Animal = 0x630268,
-    Ambient = 0x62e1e8,
-    Guest = 0x62e330,
-    Fences = 0x63034c,
-    TourGuide = 0x62e8ac,
-    Building = 0x6307e4,
-    Scenery = 0x6303f4,
-    Food = 0x630544,
-    TankFilter = 0x630694,
-    Path = 0x63049c,
-    Rubble = 0x63073c,
-    TankWall = 0x6305ec,
-    Keeper = 0x62e7d8,
-    MaintenanceWorker = 0x62e704,
-    Drt = 0x62e980,
-    #[num_enum(default)]
-    Unknown = 0x0,
-}
-
-#[derive(Debug, Getters)]
-#[get = "pub"]
-pub struct ZTEntityType {
-    ptr: u32,
-    class_string: u32,
-    class: ZTEntityTypeClass,
-    zt_type: String,
-    zt_sub_type: String,
-    bf_config_file_ptr: u32,
-}
-
-impl ZTEntityType {
-    pub fn is_member(&self, member: String) -> bool {
-        match self.class {
-            ZTEntityTypeClass::Animal
-            | ZTEntityTypeClass::Guest
-            | ZTEntityTypeClass::Fences
-            | ZTEntityTypeClass::TourGuide
-            | ZTEntityTypeClass::TankFilter
-            | ZTEntityTypeClass::TankWall
-            | ZTEntityTypeClass::Keeper
-            | ZTEntityTypeClass::MaintenanceWorker
-            | ZTEntityTypeClass::Drt => is_member(&self.zt_type, &member),
-            ZTEntityTypeClass::Building
-            | ZTEntityTypeClass::Scenery
-            | ZTEntityTypeClass::Food
-            | ZTEntityTypeClass::Path
-            | ZTEntityTypeClass::Rubble
-            | ZTEntityTypeClass::Ambient => is_member(&self.zt_sub_type, &member),
-
-            ZTEntityTypeClass::Unknown => false,
-        }
-    }
-}
-
 #[derive(Debug)]
 #[repr(C)]
 struct ZTWorldMgr {
@@ -124,7 +65,6 @@ pub fn init() {
         "get_types_summary".to_owned(),
         command_zt_world_mgr_types_summary,
     );
-    add_to_command_register("make_sel".to_owned(), command_make_sel);
 }
 
 pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
@@ -134,20 +74,6 @@ pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
         class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr)),
         type_class: read_zt_entity_type_from_memory(get_from_memory::<u32>(inner_class_ptr)),
         name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
-    }
-}
-
-pub fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZTEntityType {
-    let class_string = get_from_memory::<u32>(zt_entity_type_ptr);
-    let class = ZTEntityTypeClass::from(class_string);
-
-    ZTEntityType {
-        ptr: zt_entity_type_ptr,
-        class_string,
-        class,
-        zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
-        zt_sub_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0xa4)),
-        bf_config_file_ptr: get_from_memory::<u32>(zt_entity_type_ptr + 0x80),
     }
 }
 
@@ -251,12 +177,6 @@ impl fmt::Display for ZTEntity {
     }
 }
 
-impl fmt::Display for ZTEntityType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Class String: {:#x}, Class: {:?}, ZT Type: {}, ZT Sub Type: {}, ptr {:#x}, config_file_ptr {:#x}", self.class_string, self.class, self.zt_type, self.zt_sub_type, self.ptr, self.bf_config_file_ptr)
-    }
-}
-
 impl fmt::Display for ZTWorldMgr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let num_entities = (self.entity_array_end - self.entity_array_start) / 0x4;
@@ -297,7 +217,7 @@ fn get_zt_world_mgr_types(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntityType> {
     entity_types
 }
 
-fn get_entity_type_by_id(id: u32) -> u32 {
+pub fn get_entity_type_by_id(id: u32) -> u32 {
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let entity_type_array_start = zt_world_mgr.entity_type_array_start;
     let entity_type_array_end = zt_world_mgr.entity_type_array_end;
@@ -329,52 +249,3 @@ fn get_entity_type_by_id(id: u32) -> u32 {
     }
     0
 }
-
-fn command_make_sel(args: Vec<&str>) -> Result<String, CommandError> {
-    if args.is_empty() {
-        Err(Into::into("Usage: make_sel <id>"))
-    } else {
-        let id = args[0].parse::<u32>()?;
-        let entity_type_ptr = get_entity_type_by_id(id);
-        if entity_type_ptr == 0 {
-            return Err(Into::into("Entity type not found"));
-        }
-        let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr);
-        if entity_type.selectable {
-            return Ok(format!(
-                "Entity type {} is already selectable",
-                entity_type.bfentitytype.get_type_name()
-            ));
-        }
-        entity_type.selectable = true;
-        Ok(format!(
-            "Entity type {} is now selectable",
-            entity_type.bfentitytype.get_type_name()
-        ))
-    }
-}
-
-// pub fn determine_entity_type(address: u32) -> String {
-//     let entity_type_address = get_from_memory::<u32>(address);
-//     let vtable_ptr = get_from_memory::<u32>(entity_type_address);
-
-//     match vtable_ptr {
-//         0x630268 => "Animal",
-//         0x62e1e8 => "Ambient",
-//         0x62e330 => "Guest",
-//         0x63034c => "Fences",
-//         0x62e8ac => "TourGuide",
-//         0x6307e4 => "Building",
-//         0x6303f4 => "Scenery",
-//         0x630544 => "Food",
-//         0x630694 => "TankFilter",
-//         0x63049c => "Path",
-//         0x63073c => "Rubble",
-//         0x6305ec => "TankWall",
-//         0x62e7d8 => "Keeper",
-//         0x62e704 => "MaintenanceWorker",
-//         0x62e980 => "DRT",
-//         _ => "Unknown",
-//     }
-//     .to_string()
-// }

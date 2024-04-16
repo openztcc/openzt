@@ -3,13 +3,11 @@ use std::ops::Deref;
 
 use getset::{Getters, Setters};
 use tracing::info;
+use num_enum::FromPrimitive;
+use std::fmt;
 
-use crate::{
-    console::{add_to_command_register, CommandError},
-    debug_dll::{get_from_memory, get_string_from_memory, map_from_memory},
-    ztui::get_selected_entity_type_address,
-    ztworldmgr::ZTEntityTypeClass,
-};
+use crate::{bfentitytype, console::{add_to_command_register, CommandError}, debug_dll::{get_from_memory, get_string_from_memory, map_from_memory}, ztui::get_selected_entity_type_address, ztworldmgr};
+use crate::expansions::is_member;
 
 pub trait EntityType {
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError>;
@@ -2803,17 +2801,11 @@ impl EntityType for ZTKeeperType {
 
 fn command_sel_type(args: Vec<&str>) -> Result<String, CommandError> {
     let entity_type_address = get_selected_entity_type_address();
-    // let entity_type_address = get_selected_entity_type(); // grab the address of the selected entity type
-    // let entity_type_print = get_from_memory::<u32>(entity_type_address); // convert the address to a u32 ptr for printing
     if entity_type_address == 0 {
         return Err(CommandError::new("No entity selected".to_string()));
     }
 
-    // let Some(entity_type) = BFEntityType::new(entity_type_address) else {
-    //     return Err(CommandError::new("Failed to create entity type".to_string()));
-    // }; // create a copied instance of the entity type
-
-    let entity_type = map_bfentitytype(entity_type_address)?;
+    let mut entity_type = map_bfentitytype(entity_type_address)?;
 
     if args.is_empty() {
         Ok(entity_type.print_config_details())
@@ -2897,4 +2889,106 @@ fn map_bfentitytype(address: u32) -> Result<Box<&'static mut dyn EntityType>, St
 // initializes the custom command
 pub fn init() {
     add_to_command_register("sel_type".to_string(), command_sel_type);
+    add_to_command_register("make_sel".to_owned(), command_make_sel);
+}
+
+#[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
+#[repr(u32)]
+pub enum ZTEntityTypeClass {
+    Animal = 0x630268,
+    Ambient = 0x62e1e8,
+    Guest = 0x62e330,
+    Fences = 0x63034c,
+    TourGuide = 0x62e8ac,
+    Building = 0x6307e4,
+    Scenery = 0x6303f4,
+    Food = 0x630544,
+    TankFilter = 0x630694,
+    Path = 0x63049c,
+    Rubble = 0x63073c,
+    TankWall = 0x6305ec,
+    Keeper = 0x62e7d8,
+    MaintenanceWorker = 0x62e704,
+    Drt = 0x62e980,
+    #[num_enum(default)]
+    Unknown = 0x0,
+}
+
+#[derive(Debug, Getters)]
+#[get = "pub"]
+pub struct ZTEntityType {
+    pub ptr: u32,
+    pub class_string: u32,
+    pub class: ZTEntityTypeClass,
+    pub zt_type: String,
+    pub zt_sub_type: String,
+    pub bf_config_file_ptr: u32,
+}
+
+impl ZTEntityType {
+    pub fn is_member(&self, member: String) -> bool {
+        match self.class {
+            ZTEntityTypeClass::Animal
+            | ZTEntityTypeClass::Guest
+            | ZTEntityTypeClass::Fences
+            | ZTEntityTypeClass::TourGuide
+            | ZTEntityTypeClass::TankFilter
+            | ZTEntityTypeClass::TankWall
+            | ZTEntityTypeClass::Keeper
+            | ZTEntityTypeClass::MaintenanceWorker
+            | ZTEntityTypeClass::Drt => is_member(&self.zt_type, &member),
+            ZTEntityTypeClass::Building
+            | ZTEntityTypeClass::Scenery
+            | ZTEntityTypeClass::Food
+            | ZTEntityTypeClass::Path
+            | ZTEntityTypeClass::Rubble
+            | ZTEntityTypeClass::Ambient => is_member(&self.zt_sub_type, &member),
+
+            ZTEntityTypeClass::Unknown => false,
+        }
+    }
+}
+
+pub fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZTEntityType {
+    let class_string = get_from_memory::<u32>(zt_entity_type_ptr);
+    let class = ZTEntityTypeClass::from(class_string);
+
+    ZTEntityType {
+        ptr: zt_entity_type_ptr,
+        class_string,
+        class,
+        zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
+        zt_sub_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0xa4)),
+        bf_config_file_ptr: get_from_memory::<u32>(zt_entity_type_ptr + 0x80),
+    }
+}
+
+impl fmt::Display for ZTEntityType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Class String: {:#x}, Class: {:?}, ZT Type: {}, ZT Sub Type: {}, ptr {:#x}, config_file_ptr {:#x}", self.class_string, self.class, self.zt_type, self.zt_sub_type, self.ptr, self.bf_config_file_ptr)
+    }
+}
+
+pub fn command_make_sel(args: Vec<&str>) -> Result<String, CommandError> {
+    if args.is_empty() {
+        Err(Into::into("Usage: make_sel <id>"))
+    } else {
+        let id = args[0].parse::<u32>()?;
+        let entity_type_ptr = ztworldmgr::get_entity_type_by_id(id);
+        if entity_type_ptr == 0 {
+            return Err(Into::into("Entity type not found"));
+        }
+        let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr);
+        if entity_type.selectable {
+            return Ok(format!(
+                "Entity type {} is already selectable",
+                entity_type.bfentitytype.get_type_name()
+            ));
+        }
+        entity_type.selectable = true;
+        Ok(format!(
+            "Entity type {} is now selectable",
+            entity_type.bfentitytype.get_type_name()
+        ))
+    }
 }

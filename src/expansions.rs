@@ -21,10 +21,11 @@ use crate::{
         get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory,
     }, resource_manager::{
         add_handler, add_raw_bytes_to_map_with_path_override,
-        add_txt_file_to_map_with_path_override, modify_ztfile_as_animation, modify_ztfile_as_ini,
-        Handler,
-    }, string_registry::add_string_to_registry, ztui::{get_random_sex, get_selected_sex, BuyTab, Sex}, ztworldmgr::{ZTEntityType, ZTEntityTypeClass}
+        add_txt_file_to_map_with_path_override, Handler, modify_ztfile_as_animation,
+        modify_ztfile_as_ini,
+    }, string_registry::add_string_to_registry, ztui::{BuyTab, get_random_sex, get_selected_sex, Sex}
 };
+use crate::bfentitytype::{ZTEntityType, ZTEntityTypeClass};
 
 static OFFICIAL_FILESET: Lazy<HashSet<&str>> = Lazy::new(|| {
     hashset! {"animals8.ztd",
@@ -413,7 +414,8 @@ pub mod custom_expansion {
     use tracing::info;
 
     use super::{initialise_expansions, read_current_expansion};
-    use crate::{ztui::get_current_buy_tab, ztworldmgr::read_zt_entity_type_from_memory};
+    use crate::ztui::get_current_buy_tab;
+    use crate::bfentitytype::read_zt_entity_type_from_memory;
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
