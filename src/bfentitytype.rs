@@ -4,6 +4,8 @@ use std::{fmt, ops::Deref};
 use getset::{Getters, Setters};
 use num_enum::FromPrimitive;
 use tracing::info;
+use field_accessor_as_string::FieldAccessorAsString;
+use field_accessor_as_string_trait::FieldAccessorAsStringTrait;
 
 use crate::{
     console::{add_to_command_register, CommandError},
@@ -30,7 +32,7 @@ pub trait EntityType {
     }
 }
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct BFEntityType {
     vtable: u32,                      // 0x000
@@ -268,9 +270,10 @@ impl EntityType for BFEntityType {
 
 // ------------ ZTSceneryType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTSceneryType {
+    #[deref_field]
     pub bfentitytype: BFEntityType, // bytes: 0x100 - 0x000 = 0x100 = 256 bytes
     pub purchase_cost: f32,         // 0x100
     pub name_id: u32,               // 0x104
@@ -481,9 +484,10 @@ impl Deref for ZTSceneryType {
 }
 
 // ------------ ZTBuildingType, Implementation, and Related Functions ------------ //
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTBuildingType {
+    #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x16C = 364 bytes
     pad0: [u8; 0x16C - 0x168],        // -------------------------- padding: 4 bytes
     pub i_capacity: i32,              // 0x16C
@@ -726,9 +730,10 @@ impl Deref for ZTBuildingType {
 
 // ------------ ZTFenceType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTFenceType {
+    #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     pub strength: i32,                // 0x168
     pub life: i32,                    // 0x16C
@@ -856,9 +861,10 @@ impl Deref for ZTFenceType {
 
 // ------------ ZTTankWallType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTTankWallType {
+    #[deref_field]
     pub ztfencetype: ZTFenceType, // bytes: 0x19C - 0x168 = 0x34 = 52 bytes
     // pub portal_open_sound: u32, // 0x19C
     // pub portal_close_sound: u32, // 0x1A0
@@ -936,9 +942,10 @@ impl Deref for ZTTankWallType {
 
 // ------------ ZTFoodType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTFoodType {
+    #[deref_field]
     pub ztscenerytype: ZTSceneryType,
     // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     pub keeper_food_type: u32, // 0x168
@@ -985,9 +992,10 @@ impl Deref for ZTFoodType {
 
 // ------------ ZTTankeFilterType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTTankFilterType {
+    #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     pub starting_health: i32,         // 0x168
     pub decayed_health: i32,          // 0x16C
@@ -1106,9 +1114,10 @@ impl Deref for ZTTankFilterType {
 
 // ------------ ZTPathType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTPathType {
+    #[deref_field]
     ztscenerytype: ZTSceneryType,
     // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     pub material: u32, // 0x168
@@ -1152,9 +1161,10 @@ impl Deref for ZTPathType {
 
 // ------------ ZTRubbleType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTRubbleType {
+    #[deref_field]
     ztscenerytype: ZTSceneryType,
     // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
     // explosion_sound: String, // 0x168
@@ -1216,9 +1226,10 @@ impl Deref for ZTRubbleType {
 
 // ------------ BFUnitType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct BFUnitType {
+    #[deref_field]
     bfentitytype: BFEntityType, // bytes: 0x100 - 0x000 = 0x100 = 256 bytes
     pub slow_rate: u32,         // 0x100
     pub medium_rate: u32,       // 0x104
@@ -1306,9 +1317,10 @@ impl Deref for BFUnitType {
 
 // ------------ ZTUnitType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTUnitType {
+    #[deref_field]
     pub bfunit_type: BFUnitType,    // bytes: 0x11C - 0x100 = 0x1C = 28 bytes
     pad0: [u8; 0x12C - 0x11C],      // ----------------------- padding: 16 bytes
     pub purchase_cost: f32,         // 0x12C
@@ -1430,9 +1442,10 @@ impl EntityType for ZTUnitType {
 
 // ------------ ZTGuestType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTGuestType {
+    #[deref_field]
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
     pad00: [u8; 0x1B4 - 0x188],  // ----------------------- padding: 44 bytes
     pub hunger_check: i32,       // 0x1B4
@@ -1847,9 +1860,10 @@ impl Deref for ZTGuestType {
 
 // ------------ ZTAnimalType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTAnimalType {
+    #[deref_field]
     pub ztunit_type: ZTUnitType,   // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
     pad00: [u8; 0x1D8 - 0x188],    // ----------------------- padding: 72 bytes
     pub box_footprint_x: i32,      // 0x1D8
@@ -2435,9 +2449,10 @@ impl Deref for ZTAnimalType {
 
 // ------------ ZTStaffType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTStaffType {
+    #[deref_field]
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
     pad01: [u8; 0x1B4 - 0x188],  // ----------------------- padding: 44 bytes
     pub work_check: i32,         // 0x1B4
@@ -2511,9 +2526,10 @@ impl Deref for ZTStaffType {
 
 // ------------ ZTMaintType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTMaintType {
+    #[deref_field]
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
     pub clean_trash_radius: i32,   // 0x1F4
@@ -2579,9 +2595,10 @@ impl Deref for ZTMaintType {
 // TODO: DRT staff are not selectable in-game, so this struct needs a bit more testing to ensure it works as expected.
 // For now, assumptions are that the offets are correct and the struct is implemented correctly.
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTHelicopterType {
+    #[deref_field]
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
     // pub loop_sound_name: i32, // 0x1F4 TODO: implement string ptr as function getter
@@ -2631,9 +2648,10 @@ impl Deref for ZTHelicopterType {
 
 // ------------ ZTGuideType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTGuideType {
+    #[deref_field]
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
     pub inform_guest_time: i32,    // 0x1F4
@@ -2710,9 +2728,10 @@ impl Deref for ZTGuideType {
 
 // ------------ ZTKeeperType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters)]
+#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 struct ZTKeeperType {
+    #[deref_field]
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
     pub food_units_second: i32,    // 0x1F4
