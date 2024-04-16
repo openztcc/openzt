@@ -1626,27 +1626,27 @@ fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> {
     Ok(entity)
 }
 
-fn map_bfentitytype(address: u32) -> Result<Box<&'static mut dyn EntityType>, String> {
+fn map_bfentitytype(address: u32) -> Result<&'static mut dyn EntityType, String> {
     // create a copied instance of the entity type
     info!("Mapping entity type at address {:#x}", address);
     let entity_type_vtable: u32 = get_from_memory(address);
     info!("Entity type vtable: {:#x}", entity_type_vtable);
-    let entity: Box<&mut dyn EntityType> = match ZTEntityTypeClass::from(entity_type_vtable) {
-        ZTEntityTypeClass::Animal => Box::new(map_from_memory::<ZTAnimalType>(address)),
-        ZTEntityTypeClass::Ambient => Box::new(map_from_memory::<ZTUnitType>(address)),
-        ZTEntityTypeClass::Guest => Box::new(map_from_memory::<ZTGuestType>(address)),
-        ZTEntityTypeClass::Fences => Box::new(map_from_memory::<ZTFenceType>(address)),
-        ZTEntityTypeClass::TourGuide => Box::new(map_from_memory::<ZTGuideType>(address)),
-        ZTEntityTypeClass::Building => Box::new(map_from_memory::<ZTBuildingType>(address)),
-        ZTEntityTypeClass::Scenery => Box::new(map_from_memory::<ZTSceneryType>(address)),
-        ZTEntityTypeClass::Food => Box::new(map_from_memory::<ZTFoodType>(address)),
-        ZTEntityTypeClass::TankFilter => Box::new(map_from_memory::<ZTTankFilterType>(address)),
-        ZTEntityTypeClass::Path => Box::new(map_from_memory::<ZTPathType>(address)),
-        ZTEntityTypeClass::Rubble => Box::new(map_from_memory::<ZTRubbleType>(address)),
-        ZTEntityTypeClass::TankWall => Box::new(map_from_memory::<ZTTankWallType>(address)),
-        ZTEntityTypeClass::Keeper => Box::new(map_from_memory::<ZTKeeperType>(address)),
-        ZTEntityTypeClass::MaintenanceWorker => Box::new(map_from_memory::<ZTMaintType>(address)),
-        ZTEntityTypeClass::Drt => Box::new(map_from_memory::<ZTHelicopterType>(address)),
+    let entity: &mut dyn EntityType = match ZTEntityTypeClass::from(entity_type_vtable) {
+        ZTEntityTypeClass::Animal => map_from_memory::<ZTAnimalType>(address),
+        ZTEntityTypeClass::Ambient => map_from_memory::<ZTUnitType>(address),
+        ZTEntityTypeClass::Guest => map_from_memory::<ZTGuestType>(address),
+        ZTEntityTypeClass::Fences => map_from_memory::<ZTFenceType>(address),
+        ZTEntityTypeClass::TourGuide => map_from_memory::<ZTGuideType>(address),
+        ZTEntityTypeClass::Building => map_from_memory::<ZTBuildingType>(address),
+        ZTEntityTypeClass::Scenery => map_from_memory::<ZTSceneryType>(address),
+        ZTEntityTypeClass::Food => map_from_memory::<ZTFoodType>(address),
+        ZTEntityTypeClass::TankFilter => map_from_memory::<ZTTankFilterType>(address),
+        ZTEntityTypeClass::Path => map_from_memory::<ZTPathType>(address),
+        ZTEntityTypeClass::Rubble => map_from_memory::<ZTRubbleType>(address),
+        ZTEntityTypeClass::TankWall => map_from_memory::<ZTTankWallType>(address),
+        ZTEntityTypeClass::Keeper => map_from_memory::<ZTKeeperType>(address),
+        ZTEntityTypeClass::MaintenanceWorker => map_from_memory::<ZTMaintType>(address),
+        ZTEntityTypeClass::Drt => map_from_memory::<ZTHelicopterType>(address),
         ZTEntityTypeClass::Unknown => return Err("Unknown entity type".to_string()),
     };
     Ok(entity)
