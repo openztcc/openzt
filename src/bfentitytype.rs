@@ -1,13 +1,17 @@
 // ------------ BFEntityType, Implementation, and Related Functions ------------ //
-use std::ops::Deref;
+use std::{fmt, ops::Deref};
 
 use getset::{Getters, Setters};
-use tracing::info;
 use num_enum::FromPrimitive;
-use std::fmt;
+use tracing::info;
 
-use crate::{bfentitytype, console::{add_to_command_register, CommandError}, debug_dll::{get_from_memory, get_string_from_memory, map_from_memory}, ztui::get_selected_entity_type_address, ztworldmgr};
-use crate::expansions::is_member;
+use crate::{
+    console::{add_to_command_register, CommandError},
+    debug_dll::{get_from_memory, get_string_from_memory, map_from_memory},
+    expansions::is_member,
+    ztui::get_selected_entity_type_address,
+    ztworldmgr,
+};
 
 pub trait EntityType {
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError>;
@@ -2805,7 +2809,7 @@ fn command_sel_type(args: Vec<&str>) -> Result<String, CommandError> {
         return Err(CommandError::new("No entity selected".to_string()));
     }
 
-    let mut entity_type = map_bfentitytype(entity_type_address)?;
+    let entity_type = map_bfentitytype(entity_type_address)?;
 
     if args.is_empty() {
         Ok(entity_type.print_config_details())
@@ -2986,9 +2990,6 @@ pub fn command_make_sel(args: Vec<&str>) -> Result<String, CommandError> {
             ));
         }
         entity_type.selectable = true;
-        Ok(format!(
-            "Entity type {} is now selectable",
-            entity_type.bfentitytype.get_type_name()
-        ))
+        Ok(format!("Entity type {} is now selectable", entity_type.bfentitytype.get_type_name()))
     }
 }

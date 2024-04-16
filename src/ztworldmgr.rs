@@ -4,7 +4,12 @@ use getset::Getters;
 use num_enum::FromPrimitive;
 use tracing::info;
 
-use crate::{add_to_command_register, bfentitytype::{read_zt_entity_type_from_memory, ZTEntityType, ZTSceneryType}, bfentitytype, console::CommandError, debug_dll::{get_from_memory, get_string_from_memory, map_from_memory}, expansions::is_member};
+use crate::{
+    add_to_command_register, bfentitytype,
+    bfentitytype::{read_zt_entity_type_from_memory, ZTEntityType, ZTSceneryType},
+    console::CommandError,
+    debug_dll::{get_from_memory, get_string_from_memory, map_from_memory},
+};
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 
@@ -55,16 +60,10 @@ struct ZTWorldMgr {
 }
 
 pub fn init() {
-    add_to_command_register(
-        "list_entities".to_owned(),
-        command_get_zt_world_mgr_entities,
-    );
+    add_to_command_register("list_entities".to_owned(), command_get_zt_world_mgr_entities);
     add_to_command_register("list_types".to_owned(), command_get_zt_world_mgr_types);
     add_to_command_register("get_zt_world_mgr".to_owned(), command_get_zt_world_mgr);
-    add_to_command_register(
-        "get_types_summary".to_owned(),
-        command_zt_world_mgr_types_summary,
-    );
+    add_to_command_register("get_types_summary".to_owned(), command_zt_world_mgr_types_summary);
 }
 
 pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
@@ -151,12 +150,7 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, Comman
                 total,
                 string_array.join("\n")
             ));
-            info!(
-                "{:?}: ({})\n{}",
-                current_class,
-                total,
-                string_array.join("\n")
-            );
+            info!("{:?}: ({})\n{}", current_class, total, string_array.join("\n"));
             subtype = HashMap::new();
             current_class = zt_type.class.clone();
         }
@@ -206,10 +200,7 @@ fn get_zt_world_mgr_types(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntityType> {
     let mut entity_types: Vec<ZTEntityType> = Vec::new();
     let mut i = entity_type_array_start;
     while i < entity_type_array_end {
-        info!(
-            "Reading entity at {:#x}; end {:#x}",
-            i, entity_type_array_end
-        );
+        info!("Reading entity at {:#x}; end {:#x}", i, entity_type_array_end);
         let zt_entity_type = read_zt_entity_type_from_memory(get_from_memory::<u32>(i));
         entity_types.push(zt_entity_type);
         i += 0x4;
@@ -234,16 +225,10 @@ pub fn get_entity_type_by_id(id: u32) -> u32 {
         let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr);
         info!("Entity type name id: {}", entity_type.name_id);
         if entity_type.name_id == id {
-            info!(
-                "Found entity type {}",
-                entity_type.bfentitytype.get_type_name()
-            );
+            info!("Found entity type {}", entity_type.bfentitytype.get_type_name());
             return entity_type_ptr;
         } else {
-            info!(
-                "Entity type {} does not match",
-                entity_type.bfentitytype.get_type_name()
-            );
+            info!("Entity type {} does not match", entity_type.bfentitytype.get_type_name());
             i -= 1;
         }
     }
