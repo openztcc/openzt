@@ -49,11 +49,8 @@ pub fn set_fields(input: TokenStream) -> TokenStream {
                 field_names.push(field_name);
                 field_types.push(field_type);
             },
-            _ => continue,
+            _ => (),
         }
-
-        field_names.push(field_name);
-        field_types.push(field_type);
     }
 
     let expanded = quote! {
