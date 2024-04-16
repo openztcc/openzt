@@ -1304,14 +1304,14 @@ impl Deref for BFUnitType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTUnitType {
-    pub bfunit_type: BFUnitType,    // bytes: 0x11C - 0x100 = 0x1C = 28 bytes
-    pad0: [u8; 0x12C - 0x11C],      // ----------------------- padding: 16 bytes
-    pub purchase_cost: f32,         // 0x12C
-    pub name_id: i32,               // 0x130
-    pub help_id: i32,               // 0x134
-    pad1: [u8; 0x150 - 0x138],      // ----------------------- padding: 24 bytes
-    pub map_footprint: i32,         // 0x150
+pub struct ZTUnitType {
+    pub bfunit_type: BFUnitType, // bytes: 0x11C - 0x100 = 0x1C = 28 bytes
+    pad0: [u8; 0x12C - 0x11C], // ----------------------- padding: 16 bytes
+    pub purchase_cost: f32,      // 0x12C
+    pub name_id: i32,            // 0x130
+    pub help_id: i32,            // 0x134
+    pad1: [u8; 0x150 - 0x138],  // ----------------------- padding: 24 bytes
+    pub map_footprint: i32,      // 0x150
     pub slow_anim_speed_water: u16, // 0x154
     pub medium_anim_speed_water: u16, // 0x156
     pub fast_anim_speed_water: u16, // 0x158
@@ -1428,7 +1428,7 @@ impl EntityType for ZTUnitType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTGuestType {
+pub struct ZTGuestType {
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
     pad00: [u8; 0x1B4 - 0x188],  // ----------------------- padding: 44 bytes
     pub hunger_check: i32,       // 0x1B4
@@ -1845,22 +1845,22 @@ impl Deref for ZTGuestType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTAnimalType {
-    pub ztunit_type: ZTUnitType,   // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
-    pad00: [u8; 0x1D8 - 0x188],    // ----------------------- padding: 72 bytes
-    pub box_footprint_x: i32,      // 0x1D8
-    pub box_footprint_y: i32,      // 0x1DC
-    pub box_footprint_z: i32,      // 0x1E0
-    pub family: i32,               // 0x1E4
-    pub genus: i32,                // 0x1E8
-    pad01: [u8; 0x1F0 - 0x1EC],    // ----------------------- padding: 4 bytes
-    pub habitat: i32,              // 0x1F0
-    pub location: i32,             // 0x1F4
-    pub era: i32,                  // 0x1F8
-    pub breath_threshold: i32,     // 0x1FC
-    pub breath_increment: i32,     // 0x200
-    pad02: [u8; 0x20C - 0x204],    // ----------------------- padding: 8 bytes
-    pub hunger_threshold: i32,     // 0x20C
+pub struct ZTAnimalType {
+    pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
+    pad00: [u8; 0x1D8 - 0x188], // ----------------------- padding: 72 bytes
+    pub box_footprint_x: i32, // 0x1D8
+    pub box_footprint_y: i32, // 0x1DC
+    pub box_footprint_z: i32, // 0x1E0
+    pub family: i32, // 0x1E4
+    pub genus: i32, // 0x1E8
+    pad01: [u8; 0x1F0 - 0x1EC], // ----------------------- padding: 4 bytes
+    pub habitat: i32, // 0x1F0
+    pub location: i32, // 0x1F4
+    pub era: i32, // 0x1F8
+    pub breath_threshold: i32, // 0x1FC
+    pub breath_increment: i32, // 0x200
+    pad02: [u8; 0x20C - 0x204], // ----------------------- padding: 8 bytes
+    pub hunger_threshold: i32, // 0x20C
     pub hungry_health_change: i32, // 0x210
     pub hunger_increment: i32,     // 0x214
     pub food_unit_value: i32,      // 0x218
@@ -2433,7 +2433,7 @@ impl Deref for ZTAnimalType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTStaffType {
+pub struct ZTStaffType {
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
     pad01: [u8; 0x1B4 - 0x188],  // ----------------------- padding: 44 bytes
     pub work_check: i32,         // 0x1B4
@@ -2509,7 +2509,7 @@ impl Deref for ZTStaffType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTMaintType {
+pub struct ZTMaintType {
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
     pub clean_trash_radius: i32,   // 0x1F4
@@ -2577,7 +2577,7 @@ impl Deref for ZTMaintType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTHelicopterType {
+pub struct ZTHelicopterType {
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
     // pub loop_sound_name: i32, // 0x1F4 TODO: implement string ptr as function getter
@@ -2629,7 +2629,7 @@ impl Deref for ZTHelicopterType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTGuideType {
+pub struct ZTGuideType {
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
     pub inform_guest_time: i32,    // 0x1F4
@@ -2708,7 +2708,7 @@ impl Deref for ZTGuideType {
 
 #[derive(Debug, Getters, Setters)]
 #[repr(C)]
-struct ZTKeeperType {
+pub struct ZTKeeperType {
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
     pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
     pub food_units_second: i32,    // 0x1F4
@@ -2794,6 +2794,117 @@ impl EntityType for ZTKeeperType {
 
     fn print_config_details(&self) -> String {
         self.ztstaff_type.print_config_details()
+    }
+}
+
+// ------------ BFOverlayType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+pub struct BFOverlayType {
+    pub bfentity_type: BFEntityType, // bytes: 0x100 - 0x0 = 0x100 = 256 bytes
+}
+
+impl EntityType for BFOverlayType {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        self.bfentity_type.set_config(config, value)
+    }
+
+    fn print_config_integers(&self) -> String {
+        self.bfentity_type.print_config_integers()
+    }
+
+    fn print_config_floats(&self) -> String {
+        self.bfentity_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.bfentity_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.bfentity_type.print_config_details()
+    }
+}
+
+impl Deref for BFOverlayType {
+    type Target = BFEntityType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bfentity_type
+    }
+}
+
+// ------------ ZTAmbientType, Implementation, and Related Functions ------------ //
+
+#[derive(Debug, Getters, Setters)]
+#[repr(C)]
+pub struct ZTAmbientType {
+    pub bfoverlay_type: BFOverlayType, // bytes: 0x100 - 0x0 = 0x100 = 256 bytes
+    pub name_id: i32, // 0x100
+    pub help_id: i32, // 0x104
+    pub speed: i32, // 0x108
+    pub frequency: i32, // 0x10C
+    pub sound_loop: bool, // 0x110
+    // pub sound_name: i32, // 0x111 TODO: implement string ptr with ZTString
+}
+
+impl EntityType for ZTAmbientType {
+    fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
+        match config {
+            "-cNameID" => {
+                self.name_id = value.parse()?;
+                Ok(format!("Set Name ID to {}", self.name_id))
+            }
+            "-cHelpID" => {
+                self.help_id = value.parse()?;
+                Ok(format!("Set Help ID to {}", self.help_id))
+            }
+            "-cSpeed" => {
+                self.speed = value.parse()?;
+                Ok(format!("Set Speed to {}", self.speed))
+            }
+            "-cFrequency" => {
+                self.frequency = value.parse()?;
+                Ok(format!("Set Frequency to {}", self.frequency))
+            }
+            "-cSoundLoop" => {
+                self.sound_loop = value.parse()?;
+                Ok(format!("Set Sound Loop to {}", self.sound_loop))
+            }
+            _ => Ok(self.bfoverlay_type.set_config(config, value)?),
+        }
+    }
+
+    fn print_config_integers(&self) -> String {
+        format!("{}\ncNameID: {}\ncHelpID: {}\ncSpeed: {}\ncFrequency: {}\ncSoundLoop: {}\n",
+        self.bfoverlay_type.print_config_integers(),
+        self.name_id,
+        self.help_id,
+        self.speed,
+        self.frequency,
+        self.sound_loop as i32,
+        )
+    }
+
+    fn print_config_floats(&self) -> String {
+        self.bfoverlay_type.print_config_floats()
+    }
+
+    fn print_config_strings(&self) -> String {
+        self.bfoverlay_type.print_config_strings()
+    }
+
+    fn print_config_details(&self) -> String {
+        self.bfoverlay_type.print_config_details()
+    }
+}
+
+impl Deref for ZTAmbientType {
+    type Target = BFOverlayType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bfoverlay_type
     }
 }
 
