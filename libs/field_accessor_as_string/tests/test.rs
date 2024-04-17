@@ -14,13 +14,29 @@ mod tests {
         field3: i32,
     }
 
-
     #[derive(Default, FieldAccessorAsString)]
     struct MyChildStruct {
         #[deref_field]
         my_struct: MyStruct,
         child_field1: String,
         child_field2: i32,
+    }
+
+    #[derive(Default, FieldAccessorAsString)]
+    struct AllTypes {
+        string: String,
+        i64: i64,
+        u64: u64,
+        f64: f64,
+        i32: i32,
+        u32: u32,
+        f32: f32,
+        i16: i16,
+        u16: u16,
+        i8: i8,
+        u8: u8,
+        bool: bool,
+        array: [u8; 2],
     }
 
     impl Deref for MyChildStruct {
@@ -30,7 +46,6 @@ mod tests {
             &self.my_struct
         }
     }
-
 
     #[test]
     fn test_set_fields() {
@@ -140,5 +155,24 @@ mod tests {
         assert!(my_child_struct.is_field("field2"));
         assert!(!my_child_struct.is_field("field3"));
         assert!(!my_child_struct.is_field("nonexistent_field"));
+    }
+
+    #[test]
+    fn test_all_types() {
+        let all_types = AllTypes::default();
+
+        assert!(all_types.is_field("string"));
+        assert!(all_types.is_field("i64"));
+        assert!(all_types.is_field("u64"));
+        assert!(all_types.is_field("f64"));
+        assert!(all_types.is_field("i32"));
+        assert!(all_types.is_field("u32"));
+        assert!(all_types.is_field("f32"));
+        assert!(all_types.is_field("i16"));
+        assert!(all_types.is_field("u16"));
+        assert!(all_types.is_field("i8"));
+        assert!(all_types.is_field("u8"));
+        assert!(all_types.is_field("bool"));
+        assert!(!all_types.is_field("array"));
     }
 }

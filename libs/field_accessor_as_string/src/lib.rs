@@ -40,8 +40,17 @@ pub fn set_fields(input: TokenStream) -> TokenStream {
         let field_name = field.ident.as_ref().expect("Expected field name");
         let field_type = &field.ty;
 
-        field_names.push(field_name);
-        field_types.push(field_type);
+        let syn::Type::Path(field_type_path) = &field.ty else {
+            continue;
+        };
+
+        match field_type_path.path.segments.last().unwrap().ident.to_string().as_str() {
+            "String" | "i64" | "u64" | "f64" | "i32" | "u32" | "f32" | "i16" | "u16" | "i8" | "u8" | "bool" => {
+                field_names.push(field_name);
+                field_types.push(field_type);
+            },
+            _ => (),
+        }
     }
 
     let expanded = quote! {
