@@ -1,0 +1,8 @@
+name="my fun mod"
+description="a mod full of fun"
+authors=["Finn"]
+mod_id="finn.my_fun_mod"
+version="1.0.0"
+dependencies=[
+    {mod_id="finn.my_other_mod", name="my other mod", min_version="1.0.0", optional=false, ordering="before"}
+]

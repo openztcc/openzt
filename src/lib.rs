@@ -196,6 +196,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 ztworldmgr::init();
                 bfentitytype::init();
                 ztgamemgr::init();
+                unsafe { zoo_misc::init_detours() };
             }
         }
         DLL_PROCESS_DETACH => {
@@ -338,4 +339,36 @@ fn get_ini_path() -> String {
     let mut base_path = debug_dll::get_base_path();
     base_path.push("zoo.ini");
     base_path.to_str().unwrap().to_string()
+}
+
+#[hook_module("zoo.exe")]
+mod zoo_misc {
+    use tracing::info;
+
+    use crate::debug_dll::get_string_from_memory;
+
+    #[hook(unsafe extern "thiscall" UIControl_useAnimation, offset = 0x0000b1f89)]
+    fn ui_control_use_animation(this_ptr: u32, param_1: u32, param_2: bool) {
+        info!("UIControl::useAnimation {:#x} {:#x} {}", this_ptr, param_1, param_2);
+        unsafe { UIControl_useAnimation.call(this_ptr, param_1, param_2) }
+    }
+
+    #[hook(unsafe extern "thiscall" UIControl_setAnimation, offset = 0x0000b1aa0)]
+    fn ui_control_set_animation(this_ptr: u32, param_1: u32, param_2: bool) {
+        if param_1 == 0 {
+            info!("UIControl::setAnimation {:#x} {:#x} {}", this_ptr, param_1, param_2);
+        } else {
+            let param_1_string = get_string_from_memory(param_1);
+            info!("UIControl::setAnimation {:#x} {:#x} ({}) {}", this_ptr, param_1, param_1_string, param_2);
+        }
+        unsafe { UIControl_setAnimation.call(this_ptr, param_1, param_2) }
+    }
+
+    #[hook(unsafe extern "cdecl" ZTUI_general_getInfoImageName, offset = 0x0000f85d2)]
+    fn ui_general_get_info_image_name(param_1: u32) -> u32 {
+        let result = unsafe { ZTUI_general_getInfoImageName.call(param_1) };
+        let result_string = get_string_from_memory(result);
+        info!("ZTUI::general_getInfoImageName {:#x} ({})", param_1, result_string);
+        result
+    }
 }
