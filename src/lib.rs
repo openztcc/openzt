@@ -40,6 +40,8 @@ mod ztgamemgr;
 
 mod version;
 
+mod mods;
+
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::{
     DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH,

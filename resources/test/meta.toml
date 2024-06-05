@@ -3,6 +3,7 @@ description="a mod full of fun"
 authors=["Finn"]
 mod_id="finn.my_fun_mod"
 version="1.0.0"
+link="https://mywebsite.com/myfunmod"
 dependencies=[
-    {mod_id="finn.my_other_mod", name="my other mod", min_version="1.0.0", optional=false, ordering="before"}
+    {mod_id="finn.my_other_mod", name="my other mod", min_version="1.1.2", optional=true, ordering="before"}
 ]
