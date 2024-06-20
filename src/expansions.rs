@@ -20,7 +20,7 @@ use crate::{
     add_to_command_register, console::CommandError, debug_dll::{
         get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory,
     }, resource_manager::{
-        add_handler, add_raw_bytes_to_map_with_path_override,
+        add_handler, ModType, add_raw_bytes_to_map_with_path_override,
         add_txt_file_to_map_with_path_override, Handler, modify_ztfile_as_animation,
         modify_ztfile_as_ini,
     }, string_registry::add_string_to_registry, ztui::{BuyTab, get_random_sex, get_selected_sex, Sex}
@@ -915,17 +915,19 @@ pub fn init() {
             Some("xpac".to_string()),
             Some("cfg".to_string()),
             handle_expansion_config,
+            ModType::Legacy,
         ),
     );
-    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing));
-    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing));
-    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing));
-    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing));
+    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing, ModType::Legacy));
+    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing, ModType::Legacy));
+    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing, ModType::Legacy));
+    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, ModType::Legacy));
     add_handler(
         Handler::new(
             Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()),
             None,
             handle_expansion_dropdown,
+            ModType::Legacy,
         ),
     );
     if unsafe { custom_expansion::init_detours() }.is_err() {

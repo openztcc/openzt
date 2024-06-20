@@ -1,14 +1,8 @@
 use core::slice;
 use std::{
-    collections::{HashMap, HashSet},
-    ffi::CString,
-    fmt,
-    fs::File,
-    io,
-    io::{BufReader, Read},
-    path::{Path, PathBuf},
-    sync::Mutex,
+    collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, iter::Zip, path::{Path, PathBuf}, sync::Mutex
 };
+
 
 use bf_configparser::ini::{Ini, WriteOptions};
 use once_cell::sync::Lazy;
@@ -19,9 +13,9 @@ use zip::read::ZipFile;
 
 use crate::{
     animation::Animation,
-    console::add_to_command_register,
+    console::{add_to_command_register, CommandError},
     debug_dll::{get_from_memory, get_string_from_memory, save_to_memory},
-    console::CommandError,
+    mods,
 };
 
 const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
@@ -29,7 +23,7 @@ const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
 #[derive(Debug, Clone)]
 pub enum ZTFile {
     Text(CString, ZTFileType, u32),
-    Graphics(Box<[u8]>, ZTFileType, u32),
+    RawBytes(Box<[u8]>, ZTFileType, u32),
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +38,7 @@ pub enum ZTFileType {
     Ucb,
     Ini,
     Txt,
+    Toml,
     Animation,
     Palette,
     TGA,
@@ -113,7 +108,7 @@ impl From<BFResourcePtr> for ZTFile {
                 ZTFileType::Txt,
                 file_size,
             ),
-            "tga" => ZTFile::Graphics(
+            "tga" => ZTFile::RawBytes(
                 unsafe {
                     Box::from_raw(slice::from_raw_parts_mut(
                         data as *mut _,
@@ -123,7 +118,7 @@ impl From<BFResourcePtr> for ZTFile {
                 ZTFileType::TGA,
                 file_size,
             ),
-            "pal" => ZTFile::Graphics(
+            "pal" => ZTFile::RawBytes(
                 unsafe {
                     Box::from_raw(slice::from_raw_parts_mut(
                         data as *mut _,
@@ -133,7 +128,7 @@ impl From<BFResourcePtr> for ZTFile {
                 ZTFileType::Palette,
                 file_size,
             ),
-            "wav" => ZTFile::Graphics(
+            "wav" => ZTFile::RawBytes(
                 unsafe {
                     Box::from_raw(slice::from_raw_parts_mut(
                         data as *mut _,
@@ -143,7 +138,7 @@ impl From<BFResourcePtr> for ZTFile {
                 ZTFileType::Wav,
                 file_size,
             ),
-            "lle" => ZTFile::Graphics(
+            "lle" => ZTFile::RawBytes(
                 unsafe {
                     Box::from_raw(slice::from_raw_parts_mut(
                         data as *mut _,
@@ -153,7 +148,7 @@ impl From<BFResourcePtr> for ZTFile {
                 ZTFileType::Lle,
                 file_size,
             ),
-            "bmp" => ZTFile::Graphics(
+            "bmp" => ZTFile::RawBytes(
                 unsafe {
                     Box::from_raw(slice::from_raw_parts_mut(
                         data as *mut _,
@@ -163,7 +158,7 @@ impl From<BFResourcePtr> for ZTFile {
                 ZTFileType::Bmp,
                 file_size,
             ),
-            _ => ZTFile::Graphics(
+            _ => ZTFile::RawBytes(
                 unsafe {
                     Box::from_raw(slice::from_raw_parts_mut(
                         data as *mut _,
@@ -199,6 +194,7 @@ impl ZTFile {
             "ani" => Ok(ZTFile::Text(data, ZTFileType::Ani, file_size)),
             "ini" => Ok(ZTFile::Text(data, ZTFileType::Ini, file_size)),
             "txt" => Ok(ZTFile::Text(data, ZTFileType::Txt, file_size)),
+            "toml" => Ok(ZTFile::Text(data, ZTFileType::Toml, file_size)),
             _ => Err("Invalid file type"),
         }
     }
@@ -210,12 +206,12 @@ impl ZTFile {
             .to_str()
             .unwrap_or_default();
         match file_extension {
-            "tga" => ZTFile::Graphics(data, ZTFileType::TGA, file_size),
-            "pal" => ZTFile::Graphics(data, ZTFileType::Palette, file_size),
-            "wav" => ZTFile::Graphics(data, ZTFileType::Wav, file_size),
-            "lle" => ZTFile::Graphics(data, ZTFileType::Lle, file_size),
-            "bmp" => ZTFile::Graphics(data, ZTFileType::Bmp, file_size),
-            _ => ZTFile::Graphics(data, ZTFileType::Animation, file_size),
+            "tga" => ZTFile::RawBytes(data, ZTFileType::TGA, file_size),
+            "pal" => ZTFile::RawBytes(data, ZTFileType::Palette, file_size),
+            "wav" => ZTFile::RawBytes(data, ZTFileType::Wav, file_size),
+            "lle" => ZTFile::RawBytes(data, ZTFileType::Lle, file_size),
+            "bmp" => ZTFile::RawBytes(data, ZTFileType::Bmp, file_size),
+            _ => ZTFile::RawBytes(data, ZTFileType::Animation, file_size),
         }
     }
 }
@@ -250,6 +246,11 @@ pub trait FromZipFile<T> {
 //     }
 // }
 
+// fn load_open_zt_mod(entry: &Path, file: &mut ZipFile) {
+//     info!("Loading OpenZT mod: {} file: {}", file.name(), entry.display());
+//     // add_to_openzt_mod_buffer(entry, file.clone());
+// }
+
 fn add_file_to_maps(entry: &Path, file: &mut ZipFile) {
     let lowercase_file_name = file.name().to_lowercase();
     if check_file(&lowercase_file_name) {
@@ -265,8 +266,7 @@ fn add_file_to_maps(entry: &Path, file: &mut ZipFile) {
         .unwrap_or_default();
     if matches!(
         file_extension,
-        "ai" | "ani" | "cfg" | "lyt" | "scn" | "uca" | "ucs" | "ucb"
-    ) {
+        "ai" | "ani" | "cfg" | "lyt" | "scn" | "uca" | "ucs" | "ucb") {
         // | "ini" | "txt") {
         add_txt_file_to_map(entry, file);
         // } else if matches!(file_extension, "tga" | "pal" | "wav" | "lle" | "bmp" | "") {
@@ -359,6 +359,51 @@ pub fn add_raw_bytes_file_to_map(entry: &Path, file: &mut ZipFile) {
     add_raw_bytes_to_map_with_path_override(entry, file, file_name)
 }
 
+// TODO: Add temp mod structure which holds resources based on full zip path. Once fully loaded, we can move to main resource map with the mod_id as a prefix
+// 
+
+// ModZipPath -> FilePath -> FilePtr
+// TODO: This should be local to the 'handle_ztd' function
+// static OPENZT_MOD_BUFFER_MAP: Lazy<Mutex<HashMap<String, HashMap<String, ZipFile>>>> = // What to do here
+//     Lazy::new(|| Mutex::new(HashMap::new()));
+
+// fn clear_openzt_mod_buffer() {
+//     let Ok(mut binding) = OPENZT_MOD_BUFFER_MAP.lock() else {
+//         error!("Failed to lock openzt mod buffer map; returning from delete_openzt_mod_buffer for {}", mod_id);
+//         return;
+//     };
+//     binding.clear();
+// }
+
+// // TODO: Check this actually works
+// fn add_to_openzt_mod_buffer(file_path: &Path, file: ZipFile) {
+//     let mod_zip_path = file_path.to_str().unwrap_or(default).to_string();
+//     if mod_zip_path == "" {
+//         error!("Unable to read mod zip path: {}", file_path.display());
+//         return;
+//     }
+//     let Ok(mut binding) = OPENZT_MOD_BUFFER_MAP.lock() else {
+//         error!("Failed to lock openzt mod buffer map; returning from add_to_openzt_mod_buffer for {}", mod_zip_path);
+//         return;
+//     };
+//     if binding.entry(mod_zip_path.clone()).or_insert(HashMap::new()).insert(file.name().to_string(), file).is_some() {
+//         error!("File already exists in openzt mod buffer: {}", file.name());
+//     }
+// }
+
+// fn list_openzt_mod_buffer() {
+//     let Ok(binding) = OPENZT_MOD_BUFFER_MAP.lock() else {
+//         error!("Failed to lock openzt mod buffer map; returning from list_openzt_mod_buffer");
+//         return;
+//     };
+//     for (mod_zip_path, files) in binding.iter() {
+//         info!("Mod: {}", mod_zip_path);
+//         for (file_path, _) in files.iter() {
+//             info!("File: {}", file_path);
+//         }
+//     }
+// }
+// Contains a mapping of file_paths to BFResourcePtrs
 static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -394,6 +439,14 @@ pub fn get_file_ptr(file_name: &str) -> Option<u32> {
         return None;
     };
     binding.get(&file_name.to_lowercase()).copied()
+}
+
+fn get_num_resources() -> usize {
+    let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
+        error!("Failed to lock resource string to ptr map; returning 0 from get_num_resources");
+        return 0;
+    };
+    binding.len()
 }
 
 fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
@@ -438,7 +491,7 @@ fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
 
             binding.insert(file_name.clone(), resource_ptr as u32);
         }
-        ZTFile::Graphics(data, _, length) => {
+        ZTFile::RawBytes(data, _, length) => {
             let ptr = data.as_ptr() as u32;
             std::mem::forget(data);
             let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
@@ -708,7 +761,9 @@ pub fn init() {
     if unsafe { zoo_resource_mgr::init_detours() }.is_err() {
         error!("Failed to init resource_mgr detours");
     };
-    add_handler(Handler::new(None, None, add_file_to_maps));
+    add_handler(Handler::new(None, None, add_file_to_maps, ModType::Legacy));
+    // add_handler(Handler::new(None, None, load_open_zt_mod, ModType::OpenZT))
+    // TODO: Add OpenZT mod handler
 }
 
 #[hook_module("zoo.exe")]
@@ -758,7 +813,15 @@ pub mod zoo_resource_mgr {
     #[hook(unsafe extern "thiscall" BFResourceMgr_constructor, offset = 0x0012903f)]
     fn zoo_bf_resource_mgr_constructor(this_ptr: u32) -> u32 {
         info!("BFResourceMgr::constructor({:X})", this_ptr);
+
+        use std::time::Instant;
+        let now = Instant::now();
+    
         let return_value = unsafe { BFResourceMgr_constructor.call(this_ptr) };
+
+        let elapsed = now.elapsed();
+        info!("Vanilla loading took {:.2?}", elapsed);
+
         let ini_path = get_ini_path();
         let mut zoo_ini = Ini::new();
         zoo_ini.set_comment_symbols(&['#']);
@@ -790,6 +853,13 @@ pub struct Handler {
     matcher_prefix: Option<String>,
     matcher_suffix: Option<String>,
     handler: HandlerFunction,
+    mod_type: ModType,
+}
+
+#[derive(Clone)]
+pub enum ModType {
+    Legacy,
+    OpenZT,
 }
 
 pub type HandlerFunction = fn(&Path, &mut ZipFile) -> ();
@@ -799,11 +869,13 @@ impl Handler {
         matcher_prefix: Option<String>,
         matcher_suffix: Option<String>,
         handler: HandlerFunction,
+        mod_type: ModType,
     ) -> Self {
         Self {
             matcher_prefix,
             matcher_suffix,
             handler,
+            mod_type,
         }
     }
 
@@ -819,10 +891,27 @@ impl Handler {
                 return;
             }
         }
+
+        match self.mod_type {
+            ModType::Legacy => {
+                if file_name.ends_with(".zip") {
+                    return;
+                }
+            }
+            ModType::OpenZT => {
+                if entry.to_str().unwrap_or_default().to_lowercase().ends_with(".ztd") {
+                    return;
+                } else {
+                    info!("Loading OpenZT mod: {} file: {}", file_name, entry.display());
+                }
+            }
+        }
+
         (self.handler)(entry, file);
     }
 }
 
+// Note: We are excluding ztat* files until we need to override anything inside them
 fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     let mut resources = Vec::new();
     if !dir.is_dir() {
@@ -839,12 +928,11 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
                 continue;
             }
         };
-        if entry
-            .file_name()
-            .to_str()
-            .map(|s| s.to_lowercase().ends_with(".ztd") && !s.starts_with("ztat")) // Exlcuding ztatb*.ztd files until relevant
-            .unwrap_or(false)
-        {
+        let Some(filename) = entry.file_name().to_str() else {
+            error!("Error getting filename: {:?}", entry);
+            continue;
+        };
+        if filename.to_lowercase().ends_with(".ztd") && !filename.starts_with("ztat") || filename.to_lowercase().ends_with(".zip") {
             resources.push(entry.path().to_path_buf());
         }
     }
@@ -852,12 +940,106 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
 }
 
 fn load_resources(paths: Vec<String>) {
+    use std::time::Instant;
+    let now = Instant::now();
+
     paths.iter().for_each(|path| {
         let resources = get_ztd_resources(Path::new(path), false);
         resources.iter().for_each(|resource| {
-            handle_ztd(resource);
+            let file_name = resource.to_str().unwrap_or_default().to_lowercase();
+            if file_name.ends_with(".ztd") {
+                handle_ztd(resource);
+            } else if file_name.ends_with(".zip") {
+                handle_ztd2(resource);
+            }
+            // handle_ztd(resource);
         });
     });
+    
+    let elapsed = now.elapsed();
+    info!("Loaded {} mods in: {:.2?}", get_num_resources(), elapsed);
+    // list_openzt_mod_buffer();
+}
+
+// Handler V2, supporting OpenZT and legacy mods
+// TODO: Benchmark reading all files initially vs reading them as needed (hypothesis: reading all at once is faster, given we likely need to read all the files eventually anyway)
+fn handle_ztd2(resource: &PathBuf) {
+    let file = match File::open(resource) {
+        Ok(file) => file,
+        Err(e) => {
+            error!("Error opening file: {}", e);
+            return;
+        }
+    };
+
+    let mut buf_reader = BufReader::new(file);
+
+    let mut zip = match zip::ZipArchive::new(&mut buf_reader) {
+        Ok(zip) => zip,
+        Err(e) => {
+            error!("Error reading zip: {}", e);
+            return;
+        }
+    };
+
+    let mut openzt_mod = false;
+
+    let mut zipfile_map: HashMap<String, ZipFile> = HashMap::new();
+    for i in 0..zip.len() {
+        let mut file = match zip.by_index(i) {
+            Ok(file) => file,
+            Err(e) => {
+                error!("Error reading zip file: {}", e);
+                continue;
+            }
+        };
+        if file.is_dir() {
+            continue;
+        }
+        let file_name = file.name().to_string();
+        if file_name == "meta.toml" {
+            openzt_mod = true;
+        }
+        zipfile_map.insert(file_name, file);
+    }
+
+    // if zipfile_map.contains_key("meta.toml") {
+    if openzt_mod {
+        load_open_zt_mod(zipfile_map);
+    } //TODO: Legacy mods
+ 
+}
+
+fn load_open_zt_mod(mut file_map: HashMap<String,ZipFile>) {
+    let Some(meta_zip_file) = file_map.get_mut("meta.toml") else {
+        error!("Error reading meta.toml from OpenZT mod");
+        return;
+    };
+    // let Ok(meta): mods::Meta = toml::from_str(&read_zipfile_to_string(meta_zip_file)) else {
+    let Ok(meta) = toml::from_str::<mods::Meta>(&read_zipfile_to_string(meta_zip_file)) else {
+        error!("Error parsing meta.toml from OpenZT mod");
+        return;
+    };
+
+    // TODO: Figure out why this doesn't work
+    // info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
+}
+
+fn read_zipfile_to_string(file: &mut ZipFile) -> String {
+    let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
+    match file.read_exact(&mut buffer) {
+        Ok(bytes_read) => bytes_read,
+        Err(e) => {
+            error!(
+                "Error reading file: {} -> {}",
+                file.name(),
+                e
+            );
+            return "".to_string();
+        }
+    };
+
+    String::from_utf8_lossy(&buffer).to_string()
 }
 
 fn handle_ztd(resource: &PathBuf) {
@@ -878,17 +1060,16 @@ fn handle_ztd(resource: &PathBuf) {
             return;
         }
     };
-
-    for i in 0..zip.len() {
-        let data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
-            Ok(data_mutex) => data_mutex,
-            Err(e) => {
-                error!("Error locking resource handler array: {}", e);
-                return;
-            }
-        
-        };
-        for handler in data_mutex.iter() {
+    let data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
+        Ok(data_mutex) => data_mutex,
+        Err(e) => {
+            error!("Error locking resource handler array: {}", e);
+            return;
+        }
+    
+    };
+    for handler in data_mutex.iter() {
+        for i in 0..zip.len() {
             // ZipFile doesn't provide a .seek() method to set the cursor to the start of the file, so we create new ZipFile for each handler
             let mut file = match zip.by_index(i) {
                 Ok(file) => file,

@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde::de::{self, Deserializer, Visitor};
 
+use getset::Getters;
 use std::fmt;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -34,8 +35,9 @@ impl From<std::num::ParseIntError> for ParseError {
 }
 
 
-#[derive(Deserialize)]
-struct Meta {
+#[derive(Deserialize, Debug, Getters)]
+#[getset(get_copy = "pub")]
+pub struct Meta {
     name: String,
     description: String,
     authors: Vec<String>,
@@ -46,8 +48,9 @@ struct Meta {
     dependencies: Vec<Dependencies>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
-struct Version {
+#[derive(Debug, PartialEq, Clone, Getters)]
+#[getset(get_copy = "pub")]
+pub struct Version {
     major: u32,
     minor: u32,
     patch: u32,
@@ -126,13 +129,13 @@ fn default_as_false() -> bool {
     false
 }
 
-#[derive(Deserialize, Clone)]
-struct Dependencies {
+#[derive(Deserialize, Clone, Debug, Getters)]
+#[getset(get_copy = "pub")]
+pub struct Dependencies {
     mod_id: String,
     name: String,
     #[serde(deserialize_with = "deserialize_version_option")]
     min_version: Option<Version>,
-    // min_version: Option<String>,
     #[serde(default = "default_as_false")]
     optional: bool,
     #[serde(default)]
@@ -141,22 +144,24 @@ struct Dependencies {
 
 #[derive(Deserialize, Default, PartialEq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
-enum Ordering {
+pub enum Ordering {
     Before,
     After,
     #[default]
     None,
 }
 
-#[derive(Deserialize)]
-struct ModDefinition {
+#[derive(Deserialize, Debug, Getters)]
+#[getset(get_copy = "pub")]
+pub struct ModDefinition {
     habitats: Option<HashMap<String, IconDefinition>>,
     locations: Option<HashMap<String, IconDefinition>>,
 }
 
 
-#[derive(Deserialize)]
-struct IconDefinition {
+#[derive(Deserialize, Debug, Getters)]
+#[getset(get_copy = "pub")]
+pub struct IconDefinition {
     name: String,
     icon_path: String,
     icon_palette_path: String,
@@ -166,16 +171,7 @@ struct IconDefinition {
 
 #[cfg(test)]
 mod mod_loading_tests {
-    use std::path::PathBuf;
-
     use crate::mods::Version;
-
-    // TODO: Make a general test package
-    fn get_test_dir() -> PathBuf {
-        let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        d.push("resources/test");
-        d
-    }
 
     #[test]
     fn test_parse_meta() {

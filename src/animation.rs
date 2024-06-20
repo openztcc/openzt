@@ -229,12 +229,6 @@ mod parsing_tests {
 
     use super::Animation;
 
-    fn get_test_dir() -> PathBuf {
-        let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        d.push("resources/test");
-        d
-    }
-
     #[test]
     fn test_parse_simple_anim_no_header() {
         let animation = Animation::parse(include_bytes!("../resources/test/N-noheader"));
