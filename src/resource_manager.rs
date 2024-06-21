@@ -984,7 +984,7 @@ fn handle_ztd2(resource: &PathBuf) {
 
     let mut openzt_mod = false;
 
-    let mut zipfile_map: HashMap<String, ZipFile> = HashMap::new();
+    let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
     for i in 0..zip.len() {
         let mut file = match zip.by_index(i) {
             Ok(file) => file,
@@ -1000,47 +1000,70 @@ fn handle_ztd2(resource: &PathBuf) {
         if file_name == "meta.toml" {
             openzt_mod = true;
         }
-        zipfile_map.insert(file_name, file);
+
+        let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
+        match file.read_exact(&mut file_buffer) {
+            Ok(bytes_read) => bytes_read,
+            Err(e) => {
+                error!(
+                    "Error reading file: {} -> {}",
+                    file.name(),
+                    e
+                );
+                continue;
+            }
+        };
+
+        file_map.insert(file_name, file_buffer);
     }
 
     // if zipfile_map.contains_key("meta.toml") {
     if openzt_mod {
-        load_open_zt_mod(zipfile_map);
+        load_open_zt_mod(file_map);
     } //TODO: Legacy mods
  
 }
 
-fn load_open_zt_mod(mut file_map: HashMap<String,ZipFile>) {
-    let Some(meta_zip_file) = file_map.get_mut("meta.toml") else {
+fn load_open_zt_mod(mut file_map: HashMap<String,Box<[u8]>>) {
+    let Some(meta_file) = file_map.get_mut("meta.toml") else {
         error!("Error reading meta.toml from OpenZT mod");
         return;
     };
-    // let Ok(meta): mods::Meta = toml::from_str(&read_zipfile_to_string(meta_zip_file)) else {
-    let Ok(meta) = toml::from_str::<mods::Meta>(&read_zipfile_to_string(meta_zip_file)) else {
+
+    let intermediate_string = String::from_utf8_lossy(&meta_file).to_string();
+
+    let Ok(meta) = toml::from_str::<mods::Meta>(&intermediate_string) else {
         error!("Error parsing meta.toml from OpenZT mod");
         return;
     };
 
+    info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
+
+    // let Ok(meta): mods::Meta = toml::from_str(&read_zipfile_to_string(meta_zip_file)) else {
+    // let Ok(meta) = toml::from_str::<mods::Meta>(&read_zipfile_to_string(meta_zip_file)) else {
+    //     error!("Error parsing meta.toml from OpenZT mod");
+    //     return;
+    // };
+
     // TODO: Figure out why this doesn't work
-    // info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
 }
 
-fn read_zipfile_to_string(file: &mut ZipFile) -> String {
-    let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
-    match file.read_exact(&mut buffer) {
-        Ok(bytes_read) => bytes_read,
-        Err(e) => {
-            error!(
-                "Error reading file: {} -> {}",
-                file.name(),
-                e
-            );
-            return "".to_string();
-        }
-    };
+// fn read_zipfile_to_string(file: &mut ZipFile) -> String {
+//     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
+//     match file.read_exact(&mut buffer) {
+//         Ok(bytes_read) => bytes_read,
+//         Err(e) => {
+//             error!(
+//                 "Error reading file: {} -> {}",
+//                 file.name(),
+//                 e
+//             );
+//             return "".to_string();
+//         }
+//     };
 
-    String::from_utf8_lossy(&buffer).to_string()
-}
+//     String::from_utf8_lossy(&buffer).to_string()
+// }
 
 fn handle_ztd(resource: &PathBuf) {
     let file = match File::open(resource) {

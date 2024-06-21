@@ -36,7 +36,7 @@ impl From<std::num::ParseIntError> for ParseError {
 
 
 #[derive(Deserialize, Debug, Getters)]
-#[getset(get_copy = "pub")]
+#[get = "pub"]
 pub struct Meta {
     name: String,
     description: String,
@@ -49,7 +49,7 @@ pub struct Meta {
 }
 
 #[derive(Debug, PartialEq, Clone, Getters)]
-#[getset(get_copy = "pub")]
+#[get = "pub"]
 pub struct Version {
     major: u32,
     minor: u32,
@@ -130,7 +130,7 @@ fn default_as_false() -> bool {
 }
 
 #[derive(Deserialize, Clone, Debug, Getters)]
-#[getset(get_copy = "pub")]
+#[get = "pub"]
 pub struct Dependencies {
     mod_id: String,
     name: String,
@@ -152,7 +152,7 @@ pub enum Ordering {
 }
 
 #[derive(Deserialize, Debug, Getters)]
-#[getset(get_copy = "pub")]
+#[get = "pub"]
 pub struct ModDefinition {
     habitats: Option<HashMap<String, IconDefinition>>,
     locations: Option<HashMap<String, IconDefinition>>,
@@ -160,7 +160,7 @@ pub struct ModDefinition {
 
 
 #[derive(Deserialize, Debug, Getters)]
-#[getset(get_copy = "pub")]
+#[get = "pub"]
 pub struct IconDefinition {
     name: String,
     icon_path: String,
