@@ -158,6 +158,19 @@ pub struct ModDefinition {
     locations: Option<HashMap<String, IconDefinition>>,
 }
 
+impl ModDefinition {
+    pub fn len(&self) -> usize {
+        let mut len = 0;
+        if let Some(habitats) = &self.habitats {
+            len += habitats.len();
+        }
+        if let Some(locations) = &self.locations {
+            len += locations.len();
+        }
+        len
+    }
+}
+
 
 #[derive(Deserialize, Debug, Getters)]
 #[get = "pub"]

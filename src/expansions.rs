@@ -529,7 +529,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
                 }
             }
             animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
-            animation.set_pallette_filename(
+            animation.set_palette_filename(
                 EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_PAL,
             );
         },

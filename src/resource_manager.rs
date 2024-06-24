@@ -1,4 +1,5 @@
 use core::slice;
+use core::fmt::Display;
 use std::{
     collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, iter::Zip, path::{Path, PathBuf}, sync::Mutex
 };
@@ -403,6 +404,7 @@ pub fn add_raw_bytes_file_to_map(entry: &Path, file: &mut ZipFile) {
 //         }
 //     }
 // }
+
 // Contains a mapping of file_paths to BFResourcePtrs
 static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -447,6 +449,18 @@ fn get_num_resources() -> usize {
         return 0;
     };
     binding.len()
+}
+
+fn command_list_resource_strings(_args: Vec<&str>) -> Result<String, CommandError> {
+    let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
+        error!("Failed to lock resource string to ptr map; returning from command_list_resource_strings");
+        return Err(CommandError::new("Failed to lock resource string to ptr map".to_string()));
+    };
+    let mut result_string = String::new();
+    for (resource_string, _) in binding.iter() {
+        result_string.push_str(&format!("{}\n", resource_string));
+    }
+    Ok(result_string)
 }
 
 fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
@@ -761,6 +775,7 @@ pub fn init() {
     if unsafe { zoo_resource_mgr::init_detours() }.is_err() {
         error!("Failed to init resource_mgr detours");
     };
+    add_to_command_register("list_resource_strings".to_string(), command_list_resource_strings);
     add_handler(Handler::new(None, None, add_file_to_maps, ModType::Legacy));
     // add_handler(Handler::new(None, None, load_open_zt_mod, ModType::OpenZT))
     // TODO: Add OpenZT mod handler
@@ -831,7 +846,7 @@ pub mod zoo_resource_mgr {
         
         };
         if let Some(paths) = zoo_ini.get("resource", "path") {
-            // TODO: Readd this when more expansions can be added, expand to add subdirs of mods to ZT path variable
+            // TODO: Re-add this when more expansions can be added, expand to add subdirs of mods to ZT path variable
             // let path_vec = paths.split(';').map(|s| s.to_owned()).collect::<Vec<String>>();
             // if !path_vec.clone().into_iter().any(|s| s.trim() == "./mods") {
             //     info!("Adding mods directory to BFResourceMgr");
@@ -844,6 +859,13 @@ pub mod zoo_resource_mgr {
             load_resources(paths.split(';').map(|s| s.to_owned()).collect());
             info!("Resources loaded");
         }
+        return_value
+    }
+
+    #[hook(unsafe extern "cdecl" ZTUI_general_getInfoImageName, offset = 0x000f85d2)]
+    fn zoo_ui_general_get_info_image_name(param_1: u32) -> u32 {
+        let return_value = unsafe { ZTUI_general_getInfoImageName.call(param_1) };
+        info!("ZTUI_general_getInfoImageName({}) -> {:X} {}", param_1, return_value, get_string_from_memory(return_value));
         return_value
     }
 }
@@ -1037,32 +1059,182 @@ fn load_open_zt_mod(mut file_map: HashMap<String,Box<[u8]>>) {
         return;
     };
 
+    let mut mod_id = meta.mod_id().to_string();
+
     info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
 
-    // let Ok(meta): mods::Meta = toml::from_str(&read_zipfile_to_string(meta_zip_file)) else {
-    // let Ok(meta) = toml::from_str::<mods::Meta>(&read_zipfile_to_string(meta_zip_file)) else {
-    //     error!("Error parsing meta.toml from OpenZT mod");
-    //     return;
-    // };
+    for file in file_map.keys() {
+        if file.starts_with("/defs/") {
+            load_defs(&mod_id, &mut file_map, &file);
+        }
+    }
 
-    // TODO: Figure out why this doesn't work
 }
 
-// fn read_zipfile_to_string(file: &mut ZipFile) -> String {
-//     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
-//     match file.read_exact(&mut buffer) {
-//         Ok(bytes_read) => bytes_read,
-//         Err(e) => {
-//             error!(
-//                 "Error reading file: {} -> {}",
-//                 file.name(),
-//                 e
-//             );
-//             return "".to_string();
-//         }
+static LOCATIONS_ARRAY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static HABITATS_ARRAY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static MOD_ID_SET: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+const MIN_HABITAT_ID: u32 = 9414;
+const MAX_HABITAT_ID: u32 = 9600;
+const MIN_LOCATION_ID: u32 = 9634;
+const MAX_LOCATION_ID: u32 = 9800;
+
+fn add_location(location: String) {
+    let Ok(mut binding) = LOCATIONS_ARRAY.lock() else {
+        error!("Failed to lock locations array; returning from add_location for {}", location);
+        return;
+    };
+    binding.push(location);
+}
+
+fn add_habitat(habitat: String) {
+    let Ok(mut binding) = HABITATS_ARRAY.lock() else {
+        error!("Failed to lock habitats array; returning from add_habitat for {}", habitat);
+        return;
+    };
+    binding.push(habitat);
+}
+
+enum ResourceType {
+    Location,
+    Habitat
+}
+
+impl Display for ResourceType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ResourceType::Location => write!(f, "location"),
+            ResourceType::Habitat => write!(f, "habitat"),
+        }
+    }
+
+}
+
+enum ZTResourceType {
+    Animation,
+    Ani,
+    Palette
+}
+
+impl Display for ZTResourceType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ZTResourceType::Animation => write!(f, "animation"),
+            ZTResourceType::Palette => write!(f, "palette"),
+            ZTResourceType::Ani => write!(f, "ani"),
+        }
+    }
+}
+
+
+fn load_defs(mod_id: &String, mut file_map: &mut HashMap<String, Box<[u8]>>, def_file_name: &String) {
+    info!("Loading defs from {} {}", mod_id, def_file_name);
+    let Some(defs_file) = file_map.get_mut(def_file_name) else {
+        error!("Error reading defs.toml from OpenZT mod");
+        return;
+    };
+
+    let intermediate_string = String::from_utf8_lossy(&defs_file).to_string();
+    info!("Intermediate string: {}", intermediate_string);
+
+    let Ok(defs) = toml::from_str::<mods::ModDefinition>(&intermediate_string) else {
+        error!("Error parsing defs.toml from OpenZT mod");
+        return;
+    };
+
+    info!("Loading defs: {}", defs.len());
+
+    // Habitats
+    if let Some(habitats) = defs.habitats() {
+        let mut habitats_binding = match HABITATS_ARRAY.lock() {
+            Ok(habitats_locations) => habitats_locations,
+            Err(e) => {
+                error!("Error locking habitats locations array: {}", e);
+                return;
+            }
+        };
+        for (habitat_name, habitat_def) in habitats.iter() {
+            let base_resource_id = openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
+            // Get icon file ptr, log error and continue if not found
+            let Some(icon_file) = file_map.get(habitat_def.icon_path()) else {
+                error!("Error loading openzt mod {}, cannot find file {} for habitat {}", mod_id, habitat_def.icon_path(), habitat_name);
+                continue;
+            };
+            let Some(icon_file_palette) = file_map.get(habitat_def.icon_palette_path()) else {
+                error!("Error loading openzt mod {}, cannot find file {} for habitat {}", mod_id, habitat_def.icon_palette_path(), habitat_name);
+                continue;
+            };
+
+            let mut animation = Animation::parse(icon_file);
+            animation.set_palette_filename(habitat_def.icon_palette_path().clone());
+            let (new_animation_bytes, length) = animation.write();
+            let new_icon_file = new_animation_bytes.into_boxed_slice();
+
+            let mut ani_cfg = Ini::new_cs();
+            ani_cfg.set_comment_symbols(&[';', '#', ':']);
+            if let Err(err) = ani_cfg.read(include_str!("../resources/include/infoimg-habitat.ani").to_string()) {
+                error!("Error reading ini: {}", err);
+                continue;
+            };
+
+            ani_cfg.set("Animation", "dir0", Some(openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Animation)));
+
+            let mut write_options = WriteOptions::default();
+            write_options.space_around_delimiters = true;
+            write_options.blank_lines_between_sections = 1;
+            let new_string = ani_cfg.pretty_writes(&write_options);
+            let file_size = new_string.len() as u32;
+            let file_name = openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Ani);
+
+            let Ok(new_c_string) = CString::new(new_string) else {
+                error!("Error loading openzt mod {} when converting .ani to CString after modifying {}", mod_id, file_name);
+                continue;
+            };
+
+            let Ok(ztfile) = ZTFile::new_text(file_name.clone(), file_size, new_c_string) else {
+                error!("Error loading openzt mod {} when creating ZTFile for .ani after modifying {}", mod_id, file_name);
+                continue;
+            };
+            add_ztfile(Path::new("zip::./openzt.ztd"), file_name, ztfile)
+
+            // add_txt_file_to_map_with_path_override(entry, file, path)
+            
+            // add_raw_bytes_to_map_with_path_override(entry, file, path)
+
+
+
+        }
+        // habitats_locations.extend(habitats.iter().map(|h| h.location().to_string()));
+    };
+
+    // Locations
+}
+
+
+
+fn openzt_base_resource_id(mod_id: &String, resource_type: ResourceType, resource_name: &String) -> String {
+    let resource_type_name = resource_type.to_string();
+    format!("{}.{}.{}", mod_id, resource_type_name, resource_name)
+}
+
+fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTResourceType) -> String {
+    format!("{}.{}", base_resource_id, file_type.to_string())
+}
+
+// fn load_habitats(mod_id: String, mut file_map: HashMap<String, Box<[u8]>>) {
+//     let Some(habitat_file) = file_map.get_mut("habitats.toml") else {
+//         error!("Error reading habitats.toml from OpenZT mod");
+//         return;
 //     };
 
-//     String::from_utf8_lossy(&buffer).to_string()
+//     let intermediate_string = String::from_utf8_lossy(&habitat_file).to_string();
+
+//     let Ok(habitats) = toml::from_str::<mods::Habitats>(&intermediate_string) else {
+//         error!("Error parsing habitats.toml from OpenZT mod");
+//         return;
+//     };
+
+//     info!("Loading habitats: {}", habitats.len());
 // }
 
 fn handle_ztd(resource: &PathBuf) {

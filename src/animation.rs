@@ -7,8 +7,8 @@ use crate::parsing::{read_le_primitive, read_string, write_le_primitive, write_s
 pub struct Animation {
     pub header: Option<Header>,
     pub animation_speed: u32,
-    pub pallette_filename_length: u32,
-    pub pallette_filename: String,
+    pub palette_filename_length: u32,
+    pub palette_filename: String,
     pub num_frames: u32,
     pub frames: Vec<Frame>,
 }
@@ -88,8 +88,8 @@ impl Animation {
             _ => maybe_header,
         };
 
-        let pallette_filename_length = read_le_primitive(data, &mut index);
-        let pallette_filename = read_string(data, &mut index, pallette_filename_length as usize);
+        let palette_filename_length = read_le_primitive(data, &mut index);
+        let palette_filename = read_string(data, &mut index, palette_filename_length as usize);
         let num_frames = read_le_primitive(data, &mut index);
         let mut frames = Vec::new();
         for _ in 0..num_frames + {
@@ -141,8 +141,8 @@ impl Animation {
         Animation {
             header,
             animation_speed,
-            pallette_filename_length,
-            pallette_filename,
+            palette_filename_length,
+            palette_filename,
             num_frames,
             frames,
         }
@@ -157,7 +157,7 @@ impl Animation {
             write_le_primitive(&mut bytes, header.extra_frame, &mut accumulator);
         }
         write_le_primitive(&mut bytes, self.animation_speed, &mut accumulator);
-        write_string(&mut bytes, &self.pallette_filename, &mut accumulator);
+        write_string(&mut bytes, &self.palette_filename, &mut accumulator);
         write_le_primitive(&mut bytes, self.num_frames, &mut accumulator);
 
         for frame in self.frames {
@@ -216,9 +216,9 @@ impl Animation {
         Ok(self)
     }
 
-    pub fn set_pallette_filename(&mut self, pallette_filename: String) {
-        self.pallette_filename = pallette_filename;
-        self.pallette_filename_length = self.pallette_filename.len() as u32 + 1;
+    pub fn set_palette_filename(&mut self, palette_filename: String) {
+        self.palette_filename = palette_filename;
+        self.palette_filename_length = self.palette_filename.len() as u32 + 1;
     }
 }
 
@@ -234,7 +234,7 @@ mod parsing_tests {
         let animation = Animation::parse(include_bytes!("../resources/test/N-noheader"));
         assert!(animation.header.is_none());
         assert_eq!(
-            animation.pallette_filename,
+            animation.palette_filename,
             "ui/sharedui/listbk/ltb.pal".to_string()
         );
         assert_eq!(animation.num_frames, 1);
@@ -247,7 +247,7 @@ mod parsing_tests {
         assert!(animation.header.is_some());
         assert!(!animation.header.unwrap().extra_frame);
         assert_eq!(
-            animation.pallette_filename,
+            animation.palette_filename,
             "ANIMALS/01BFCC32/ICMEIOLA/ICMEIOLA.PAL".to_string()
         );
         assert_eq!(animation.num_frames, 1);
@@ -281,10 +281,10 @@ mod parsing_tests {
             animation.frames[0].pixel_height + 1,
             animation_to_modify.frames[0].pixel_height
         );
-        animation_to_modify.set_pallette_filename(animation.pallette_filename.clone());
+        animation_to_modify.set_palette_filename(animation.palette_filename.clone());
         assert_eq!(
-            animation.pallette_filename_length,
-            animation_to_modify.pallette_filename_length
+            animation.palette_filename_length,
+            animation_to_modify.palette_filename_length
         );
         let (animation_bytes, _) = animation_to_modify.write();
         let animation_2 = Animation::parse(&animation_bytes[..]);
@@ -292,10 +292,10 @@ mod parsing_tests {
             animation.frames[0].pixel_height + 1,
             animation_2.frames[0].pixel_height
         );
-        assert_eq!(animation.pallette_filename, animation_2.pallette_filename);
+        assert_eq!(animation.palette_filename, animation_2.palette_filename);
         assert_eq!(
-            animation.pallette_filename_length,
-            animation_2.pallette_filename_length
+            animation.palette_filename_length,
+            animation_2.palette_filename_length
         );
     }
 }
