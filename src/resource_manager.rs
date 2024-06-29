@@ -1127,7 +1127,7 @@ fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_nam
                 error!("Error loading icon definition for habitat: {}", habitat_name);
                 continue;
             };
-            add_location_or_habitat(habitat_name, &icon_name);
+            add_location_or_habitat(habitat_def.name(), &icon_name);
         }
     };
 
@@ -1142,7 +1142,7 @@ fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_nam
                 error!("Error loading icon definition for location: {}", location_name);
                 continue;
             };
-            add_location_or_habitat(location_name, &icon_name);
+            add_location_or_habitat(location_def.name(), &icon_name);
         }
     };
 }
@@ -1174,8 +1174,7 @@ fn load_icon_definition(
 
     let mut animation = Animation::parse(icon_file);
     animation.set_palette_filename(icon_definition.icon_palette_path().clone());
-    let (new_animation_bytes, length) = animation.write();
-    let icon_size = new_animation_bytes.len() as u32;
+    let (new_animation_bytes, icon_size) = animation.write();
     let new_icon_file = new_animation_bytes.into_boxed_slice();
 
     let mut ani_cfg = Ini::new_cs();
@@ -1220,7 +1219,7 @@ fn load_icon_definition(
     let animation_file_name =
         openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Animation);
     let animation_ztfile =
-        ZTFile::new_raw_bytes(animation_file_name.clone(), icon_size, new_icon_file);
+        ZTFile::new_raw_bytes(animation_file_name.clone(), icon_size as u32, new_icon_file);
 
     add_ztfile(Path::new("zip::./openzt.ztd"), animation_file_name.clone(), animation_ztfile);
 

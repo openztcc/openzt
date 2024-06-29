@@ -17,8 +17,8 @@ pub fn add_string_to_registry(string_val: String) -> Result<u32, &'static str> {
         info!("Failed to lock string registry mutex");
         return Err("Failed to lock string registry mutex");
     };
+    info!("Added string to registry: {} -> {}", string_val.clone(), data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET);
     data_mutex.push(string_val);
-    info!("Added string to registry: {}", data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1);
     Ok(data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1)
 }
 
