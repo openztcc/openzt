@@ -233,10 +233,7 @@ mod parsing_tests {
     fn test_parse_simple_anim_no_header() {
         let animation = Animation::parse(include_bytes!("../resources/test/N-noheader"));
         assert!(animation.header.is_none());
-        assert_eq!(
-            animation.palette_filename,
-            "ui/sharedui/listbk/ltb.pal".to_string()
-        );
+        assert_eq!(animation.palette_filename, "ui/sharedui/listbk/ltb.pal".to_string());
         assert_eq!(animation.num_frames, 1);
         assert_eq!(animation.frames.len(), 1);
     }
@@ -266,10 +263,7 @@ mod parsing_tests {
     #[test]
     fn test_calc_byte_size() {
         let animation = Animation::parse(include_bytes!("../resources/test/N"));
-        assert_eq!(
-            animation.frames[0].num_bytes,
-            animation.frames[0].calc_byte_size() as u32
-        );
+        assert_eq!(animation.frames[0].num_bytes, animation.frames[0].calc_byte_size() as u32);
     }
 
     #[test]
@@ -282,20 +276,11 @@ mod parsing_tests {
             animation_to_modify.frames[0].pixel_height
         );
         animation_to_modify.set_palette_filename(animation.palette_filename.clone());
-        assert_eq!(
-            animation.palette_filename_length,
-            animation_to_modify.palette_filename_length
-        );
+        assert_eq!(animation.palette_filename_length, animation_to_modify.palette_filename_length);
         let (animation_bytes, _) = animation_to_modify.write();
         let animation_2 = Animation::parse(&animation_bytes[..]);
-        assert_eq!(
-            animation.frames[0].pixel_height + 1,
-            animation_2.frames[0].pixel_height
-        );
+        assert_eq!(animation.frames[0].pixel_height + 1, animation_2.frames[0].pixel_height);
         assert_eq!(animation.palette_filename, animation_2.palette_filename);
-        assert_eq!(
-            animation.palette_filename_length,
-            animation_2.palette_filename_length
-        );
+        assert_eq!(animation.palette_filename_length, animation_2.palette_filename_length);
     }
 }

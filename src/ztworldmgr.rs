@@ -224,7 +224,7 @@ pub fn get_entity_type_by_id(id: u32) -> u32 {
     // let scenery_types: HashSet<&str> = ["Fences", "Path", "Rubble", "TankWall", "TankFilter", "Scenery", "Building"].iter().cloned().collect();
     // let unit_types: HashSet<&str> = ["Animal", "Guest", "Keeper", "MaintenanceWorker", "DRT", "TourGuide"].iter().cloned().collect();
     // let overlay_types: HashSet<&str> = ["Ambient"].iter().cloned().collect();
-    
+
     while i > 0 {
         let entity_type_ptr = entity_type_array_start + i * 0x4;
         info!("Checking entity type at {:#x}", entity_type_ptr);

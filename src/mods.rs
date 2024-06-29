@@ -1,11 +1,10 @@
-use serde::Deserialize;
-use serde::de::{self, Deserializer, Visitor};
+use std::{collections::HashMap, error::Error, fmt, str::FromStr};
 
 use getset::Getters;
-use std::fmt;
-use std::collections::HashMap;
-use std::str::FromStr;
-use std::error::Error;
+use serde::{
+    de::{self, Deserializer, Visitor},
+    Deserialize,
+};
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -34,7 +33,6 @@ impl From<std::num::ParseIntError> for ParseError {
     }
 }
 
-
 #[derive(Deserialize, Debug, Getters)]
 #[get = "pub"]
 pub struct Meta {
@@ -62,7 +60,9 @@ impl FromStr for Version {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split('.').collect();
         if parts.len() != 3 {
-            return Err(ParseError::new(format!("Invalid version string: {} (expected 'x.y.z' e.g '1.0.0')", s)));
+            return Err(ParseError::new(
+                format!("Invalid version string: {} (expected 'x.y.z' e.g '1.0.0')", s)
+            ));
         }
 
         Ok(Version {
@@ -124,7 +124,6 @@ where
     deserializer.deserialize_str(OptionVersionVisitor)
 }
 
-
 fn default_as_false() -> bool {
     false
 }
@@ -171,7 +170,6 @@ impl ModDefinition {
     }
 }
 
-
 #[derive(Deserialize, Debug, Getters)]
 #[get = "pub"]
 pub struct IconDefinition {
@@ -179,8 +177,6 @@ pub struct IconDefinition {
     icon_path: String,
     icon_palette_path: String,
 }
-
-
 
 #[cfg(test)]
 mod mod_loading_tests {
@@ -204,7 +200,6 @@ mod mod_loading_tests {
         assert_eq!(dep.min_version.unwrap(), Version{major: 1, minor: 1, patch: 2});
         assert!(dep.optional);
         assert_eq!(dep.ordering, super::Ordering::Before);
-
     }
 
     fn check_moon_location(location: &super::IconDefinition) {

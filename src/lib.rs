@@ -6,7 +6,7 @@ use std::{net::TcpStream, sync::Mutex};
 
 use bf_configparser::ini::Ini;
 use retour_utils::hook_module;
-use tracing::{info, error, Level};
+use tracing::{error, info, Level};
 
 mod bfregistry;
 
@@ -144,10 +144,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
             dll_first_load();
-            info!(
-                "DllMain: DLL_PROCESS_ATTACH: {}, {} {}",
-                module, reason, _reserved
-            );
+            info!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved);
 
             // Initialize stable modules
             resource_manager::init();
@@ -198,26 +195,17 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 ztworldmgr::init();
                 bfentitytype::init();
                 ztgamemgr::init();
-                unsafe { zoo_misc::init_detours() };
+                // unsafe { zoo_misc::init_detours() };
             }
         }
         DLL_PROCESS_DETACH => {
-            info!(
-                "DllMain: DLL_PROCESS_DETACH: {}, {} {}",
-                module, reason, _reserved
-            );
+            info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);
         }
         DLL_THREAD_ATTACH => {
-            info!(
-                "DllMain: DLL_THREAD_ATTACH: {}, {} {}",
-                module, reason, _reserved
-            );
+            info!("DllMain: DLL_THREAD_ATTACH: {}, {} {}", module, reason, _reserved);
         }
         DLL_THREAD_DETACH => {
-            info!(
-                "DllMain: DLL_THREAD_DETACH: {}, {} {}",
-                module, reason, _reserved
-            );
+            info!("DllMain: DLL_THREAD_DETACH: {}, {} {}", module, reason, _reserved);
         }
         _ => {
             info!("DllMain: Unknown: {}, {} {}", module, reason, _reserved);
@@ -262,10 +250,7 @@ pub fn patch_load_debug_ini_call() {
 
 #[no_mangle]
 extern "C" fn patch_load_int_from_ini_call() {
-    debug_dll::debug_logger(&format!(
-        "load_int_from_ini {:p}",
-        load_int_from_ini as *const ()
-    ));
+    debug_dll::debug_logger(&format!("load_int_from_ini {:p}", load_int_from_ini as *const ()));
     debug_dll::patch_calls(
         debug_dll::LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET.to_vec(),
         load_int_from_ini as u32,
@@ -275,10 +260,7 @@ extern "C" fn patch_load_int_from_ini_call() {
 
 #[no_mangle]
 extern "C" fn patch_load_value_from_ini_call() {
-    debug_dll::debug_logger(&format!(
-        "load_value_from_ini {:p}",
-        load_value_from_ini as *const ()
-    ));
+    debug_dll::debug_logger(&format!("load_value_from_ini {:p}", load_value_from_ini as *const ()));
     debug_dll::patch_calls(
         debug_dll::LOAD_VALUE_FROM_INI_ADDRESS_ARRAY.to_vec(),
         load_value_from_ini as u32,
@@ -361,16 +343,19 @@ mod zoo_misc {
             info!("UIControl::setAnimation {:#x} {:#x} {}", this_ptr, param_1, param_2);
         } else {
             let param_1_string = get_string_from_memory(param_1);
-            info!("UIControl::setAnimation {:#x} {:#x} ({}) {}", this_ptr, param_1, param_1_string, param_2);
+            info!(
+                "UIControl::setAnimation {:#x} {:#x} ({}) {}",
+                this_ptr, param_1, param_1_string, param_2
+            );
         }
         unsafe { UIControl_setAnimation.call(this_ptr, param_1, param_2) }
     }
 
-    #[hook(unsafe extern "cdecl" ZTUI_general_getInfoImageName, offset = 0x0000f85d2)]
-    fn ui_general_get_info_image_name(param_1: u32) -> u32 {
-        let result = unsafe { ZTUI_general_getInfoImageName.call(param_1) };
-        let result_string = get_string_from_memory(result);
-        info!("ZTUI::general_getInfoImageName {:#x} ({})", param_1, result_string);
-        result
-    }
+    // #[hook(unsafe extern "cdecl" ZTUI_general_getInfoImageName, offset = 0x0000f85d2)]
+    // fn ui_general_get_info_image_name(param_1: u32) -> u32 {
+    //     let result = unsafe { ZTUI_general_getInfoImageName.call(param_1) };
+    //     let result_string = get_string_from_memory(result);
+    //     info!("ZTUI::general_getInfoImageName {:#x} ({})", param_1, result_string);
+    //     result
+    // }
 }

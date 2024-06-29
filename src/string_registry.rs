@@ -18,10 +18,7 @@ pub fn add_string_to_registry(string_val: String) -> Result<u32, &'static str> {
         return Err("Failed to lock string registry mutex");
     };
     data_mutex.push(string_val);
-    info!(
-        "Added string to registry: {}",
-        data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1
-    );
+    info!("Added string to registry: {}", data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1);
     Ok(data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1)
 }
 
@@ -56,7 +53,6 @@ fn command_get_string(args: Vec<&str>) -> Result<String, CommandError> {
         Ok(format!("OpenZT: {}", string))
     } else {
         info!("String not in registry, calling ZT");
-        // Err(CommandError::new("String not found"))
         let buffer = &mut [0u8; 200];
         let length = bfapp_load_string(GLOBAL_BFAPP, string_id, buffer.as_mut_ptr() as u32);
         if length == 0 {
@@ -94,30 +90,30 @@ pub mod zoo_string {
         unsafe { BFApp_loadString.call(this_ptr, string_id, string_buffer) }
     }
 
-    // 0x410d48
-    #[hook(unsafe extern "thiscall" BFWorldMgr_unknown, offset = 0x00010d48)]
-    fn bf_world_mgr_unknown(this_ptr: u32, base_user_id: u32) -> u32 {
-        let return_value = unsafe { BFWorldMgr_unknown.call(this_ptr, base_user_id) };
-        info!("BFWorldMgr::unknown {:#x} {} -> {:#x}", this_ptr, base_user_id, return_value);
-        return_value
-    }
-    // 0x5fe27a
-    // undefined __cdecl BFEntityType::getUserDataIndex(uint param_1)
-    #[hook(unsafe extern "cdecl" BFEntityType_getUserDataIndex, offset = 0x0001fe27a)]
-    fn bf_entity_type_get_user_data_index(param_1: u32) -> u8 {
-        let return_value = unsafe { BFEntityType_getUserDataIndex.call(param_1) };
-        info!("BFEntityType::getUserDataIndex {} -> {}", param_1, return_value);
-        return_value
-    }
+    // #[hook(unsafe extern "thiscall" BFWorldMgr_unknown, offset = 0x00010d48)]
+    // fn bf_world_mgr_unknown(this_ptr: u32, base_user_id: u32) -> u32 {
+    //     let return_value = unsafe { BFWorldMgr_unknown.call(this_ptr, base_user_id) };
+    //     info!("BFWorldMgr::unknown {:#x} {} -> {:#x}", this_ptr, base_user_id, return_value);
+    //     return_value
+    // }
 
-    // 0x5fe1ea
-    //int * __thiscall BFEntityType::getUserData(void *this,ph_BFUserEntityTypeData::EUserDataIndex param_1,int param_2)
-    #[hook(unsafe extern "thiscall" BFEntityType_getUserData, offset = 0x0001fe1ea)]
-    fn bf_entity_type_get_user_data(this_ptr: u32, user_data_index: u32, param_2: u32) -> u32 {
-        let return_value = unsafe { BFEntityType_getUserData.call(this_ptr, user_data_index, param_2) };
-        info!("BFEntityType::getUserData {:#x} {} {} -> {:#x}", this_ptr, user_data_index, param_2, return_value);
-        return_value
-    }
+    // #[hook(unsafe extern "cdecl" BFEntityType_getUserDataIndex, offset = 0x0001fe27a)]
+    // fn bf_entity_type_get_user_data_index(param_1: u32) -> u8 {
+    //     let return_value = unsafe { BFEntityType_getUserDataIndex.call(param_1) };
+    //     info!("BFEntityType::getUserDataIndex {} -> {}", param_1, return_value);
+    //     return_value
+    // }
+
+    // #[hook(unsafe extern "thiscall" BFEntityType_getUserData, offset = 0x0001fe1ea)]
+    // fn bf_entity_type_get_user_data(this_ptr: u32, user_data_index: u32, param_2: u32) -> u32 {
+    //     let return_value =
+    //         unsafe { BFEntityType_getUserData.call(this_ptr, user_data_index, param_2) };
+    //     info!(
+    //         "BFEntityType::getUserData {:#x} {} {} -> {:#x}",
+    //         this_ptr, user_data_index, param_2, return_value
+    //     );
+    //     return_value
+    // }
 }
 
 pub fn init() {
