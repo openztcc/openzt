@@ -208,37 +208,6 @@ pub trait FromZipFile<T> {
     fn from_zip_file(file: &mut ZipFile) -> io::Result<T>;
 }
 
-// impl FromZipFile<String> for String {
-//     fn from_zip_file(file: &mut ZipFile) -> io::Result<String> {
-//         let mut buffer = vec![0; file.size() as usize];
-//         file.read(&mut buffer[..])?;
-//         Ok(String::from_utf8_lossy(&buffer[..]).to_string())
-//     }
-// }
-
-// impl FromZipFile<Vec<u8>> for Vec<u8> {
-//     fn from_zip_file(file: &mut ZipFile) -> io::Result<Self> {
-//         let mut buffer = vec![0; file.size() as usize];
-//         file.read(&mut buffer[..])?;
-//         Ok(buffer)
-//     }
-// }
-
-// impl FromZipFile<CString> for CString {
-//     fn from_zip_file(file: &mut ZipFile) -> io::Result<Self> {
-//         let mut buffer = vec![0; file.size() as usize];
-//         file.read(&mut buffer[..])?;
-//         Ok(CString::new(
-//             String::from_utf8_lossy(&buffer[..]).to_string(),
-//         )?)
-//     }
-// }
-
-// fn load_open_zt_mod(entry: &Path, file: &mut ZipFile) {
-//     info!("Loading OpenZT mod: {} file: {}", file.name(), entry.display());
-//     // add_to_openzt_mod_buffer(entry, file.clone());
-// }
-
 fn add_file_to_maps(entry: &Path, file: &mut ZipFile) {
     let lowercase_file_name = file.name().to_lowercase();
     if check_file(&lowercase_file_name) {
@@ -321,51 +290,6 @@ pub fn add_raw_bytes_file_to_map(entry: &Path, file: &mut ZipFile) {
     let file_name = file.name().to_string().to_lowercase();
     add_raw_bytes_to_map_with_path_override(entry, file, file_name)
 }
-
-// TODO: Add temp mod structure which holds resources based on full zip path. Once fully loaded, we can move to main resource map with the mod_id as a prefix
-//
-
-// ModZipPath -> FilePath -> FilePtr
-// TODO: This should be local to the 'handle_ztd' function
-// static OPENZT_MOD_BUFFER_MAP: Lazy<Mutex<HashMap<String, HashMap<String, ZipFile>>>> = // What to do here
-//     Lazy::new(|| Mutex::new(HashMap::new()));
-
-// fn clear_openzt_mod_buffer() {
-//     let Ok(mut binding) = OPENZT_MOD_BUFFER_MAP.lock() else {
-//         error!("Failed to lock openzt mod buffer map; returning from delete_openzt_mod_buffer for {}", mod_id);
-//         return;
-//     };
-//     binding.clear();
-// }
-
-// // TODO: Check this actually works
-// fn add_to_openzt_mod_buffer(file_path: &Path, file: ZipFile) {
-//     let mod_zip_path = file_path.to_str().unwrap_or(default).to_string();
-//     if mod_zip_path == "" {
-//         error!("Unable to read mod zip path: {}", file_path.display());
-//         return;
-//     }
-//     let Ok(mut binding) = OPENZT_MOD_BUFFER_MAP.lock() else {
-//         error!("Failed to lock openzt mod buffer map; returning from add_to_openzt_mod_buffer for {}", mod_zip_path);
-//         return;
-//     };
-//     if binding.entry(mod_zip_path.clone()).or_insert(HashMap::new()).insert(file.name().to_string(), file).is_some() {
-//         error!("File already exists in openzt mod buffer: {}", file.name());
-//     }
-// }
-
-// fn list_openzt_mod_buffer() {
-//     let Ok(binding) = OPENZT_MOD_BUFFER_MAP.lock() else {
-//         error!("Failed to lock openzt mod buffer map; returning from list_openzt_mod_buffer");
-//         return;
-//     };
-//     for (mod_zip_path, files) in binding.iter() {
-//         info!("Mod: {}", mod_zip_path);
-//         for (file_path, _) in files.iter() {
-//             info!("File: {}", file_path);
-//         }
-//     }
-// }
 
 // Contains a mapping of file_paths to BFResourcePtrs
 static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> =
