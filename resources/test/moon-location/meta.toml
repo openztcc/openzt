@@ -1,0 +1,9 @@
+name="moon"
+description="moon location"
+authors=["Finn"]
+mod_id="finn.moon"
+version="1.0.0"
+link="https://openzt.org/"
+dependencies=[
+    {mod_id="finn.my_other_mod", name="my other mod", min_version="1.0.0", optional=true, ordering="before"}
+]

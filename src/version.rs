@@ -1,7 +1,6 @@
 use retour_utils::hook_module;
 use tracing::error;
 
-
 pub fn init() {
     if unsafe { bf_version_info::init_detours() }.is_err() {
         error!("Failed to initialize bf_version_info detours");
@@ -25,10 +24,7 @@ mod bf_version_info {
             get_from_memory::<u32>(param_2) + version_length as u32,
             &full_openzt_version_string,
         );
-        save_to_memory(
-            param_3,
-            (version_length + full_openzt_version_string.len() + 2) as u32,
-        );
+        save_to_memory(param_3, (version_length + full_openzt_version_string.len() + 2) as u32);
         return_value
     }
 }

@@ -41,19 +41,11 @@ fn load_debug_settings_from_ini(
 
     let debug_header = "Debug";
 
-    debug_settings.log_cutoff = load_int_with_default(
-        &zoo_ini,
-        debug_header,
-        "LogCutoff",
-        debug_settings.log_cutoff,
-    );
+    debug_settings.log_cutoff =
+        load_int_with_default(&zoo_ini, debug_header, "LogCutoff", debug_settings.log_cutoff);
 
-    debug_settings.send_log_file = load_int_with_default(
-        &zoo_ini,
-        debug_header,
-        "SendLogfile",
-        debug_settings.send_log_file,
-    );
+    debug_settings.send_log_file =
+        load_int_with_default(&zoo_ini, debug_header, "SendLogfile", debug_settings.send_log_file);
 
     debug_settings.send_message_box = load_int_with_default(
         &zoo_ini,
@@ -62,26 +54,14 @@ fn load_debug_settings_from_ini(
         debug_settings.send_message_box,
     );
 
-    debug_settings.send_debugger = load_int_with_default(
-        &zoo_ini,
-        debug_header,
-        "sendDebugger",
-        debug_settings.send_debugger,
-    );
+    debug_settings.send_debugger =
+        load_int_with_default(&zoo_ini, debug_header, "sendDebugger", debug_settings.send_debugger);
 
-    debug_settings.delta_log_0 = load_int_with_default(
-        &zoo_ini,
-        debug_header,
-        "deltaLog0",
-        debug_settings.delta_log_0,
-    );
+    debug_settings.delta_log_0 =
+        load_int_with_default(&zoo_ini, debug_header, "deltaLog0", debug_settings.delta_log_0);
 
-    debug_settings.delta_log_1 = load_int_with_default(
-        &zoo_ini,
-        debug_header,
-        "deltaLog1",
-        debug_settings.delta_log_1,
-    );
+    debug_settings.delta_log_1 =
+        load_int_with_default(&zoo_ini, debug_header, "deltaLog1", debug_settings.delta_log_1);
 
     debug_settings
 }

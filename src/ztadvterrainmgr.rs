@@ -4,8 +4,8 @@ use tracing::info;
 
 use crate::{
     add_to_command_register,
-    debug_dll::{get_from_memory, get_string_from_memory},
     console::CommandError,
+    debug_dll::{get_from_memory, get_string_from_memory},
 };
 
 const GLOBAL_ZTADVTERRAINMGR_ADDRESS: u32 = 0x00638058;
@@ -37,9 +37,8 @@ impl From<ZTAdvTerrainMgr_raw> for ZTAdvTerrainMgr {
         let mut bf_terrain_type_info_array = Vec::new();
         let mut current_bf_terrain_type_info_address = raw.bf_terrain_type_info_array_start;
         while current_bf_terrain_type_info_address < raw.bf_terrain_type_info_array_end {
-            bf_terrain_type_info_array.push(read_bfterraintypeinfo_from_memory(
-                current_bf_terrain_type_info_address,
-            ));
+            bf_terrain_type_info_array
+                .push(read_bfterraintypeinfo_from_memory(current_bf_terrain_type_info_address));
             current_bf_terrain_type_info_address += BFTERRAINTYPEINFO_SIZE as u32;
         }
         ZTAdvTerrainMgr {
@@ -98,10 +97,7 @@ fn read_bfterraintypeinfo_from_memory(address: u32) -> BFTerrainTypeInfo {
 
 fn command_get_bfterraintypeinfo(_args: Vec<&str>) -> Result<String, CommandError> {
     let ztadvterrainmgr = read_ztadvterrainmgr_from_memory();
-    info!(
-        "Found {} BFTerrainTypeInfo",
-        ztadvterrainmgr.bf_terrain_type_info_array.len()
-    );
+    info!("Found {} BFTerrainTypeInfo", ztadvterrainmgr.bf_terrain_type_info_array.len());
     let mut string_array = Vec::new();
     for bfterraintypeinfo in ztadvterrainmgr.bf_terrain_type_info_array {
         string_array.push(bfterraintypeinfo.to_string());
@@ -110,8 +106,5 @@ fn command_get_bfterraintypeinfo(_args: Vec<&str>) -> Result<String, CommandErro
 }
 
 pub fn init() {
-    add_to_command_register(
-        "list_bfterraintypeinfo".to_string(),
-        command_get_bfterraintypeinfo,
-    );
+    add_to_command_register("list_bfterraintypeinfo".to_string(), command_get_bfterraintypeinfo);
 }

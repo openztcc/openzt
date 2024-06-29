@@ -94,10 +94,7 @@ impl fmt::Display for Sex {
 const RANDOM_SEX_STRING_PTR: u32 = 0x0063e420;
 
 pub fn init() {
-    add_to_command_register(
-        "get_selected_entity".to_owned(),
-        command_get_selected_entity,
-    );
+    add_to_command_register("get_selected_entity".to_owned(), command_get_selected_entity);
     add_to_command_register("get_element".to_owned(), command_get_element);
 }
 

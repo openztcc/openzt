@@ -1,4 +1,4 @@
-use std::{path::PathBuf, ptr, mem::transmute};
+use std::{mem::transmute, path::PathBuf, ptr};
 
 use tracing::{debug, info};
 #[cfg(target_os = "windows")]
@@ -6,8 +6,7 @@ use winapi::um::memoryapi::VirtualProtect;
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::PAGE_EXECUTE_READWRITE;
 
-use crate::console::CommandError;
-use crate::load_ini::DebugSettings;
+use crate::{console::CommandError, load_ini::DebugSettings};
 
 const SEND_DEBUGGER_ADDRESS: u32 = 0x00643e44;
 const SEND_LOG_FILE_ADDRESS: u32 = 0x00643e48;
@@ -77,9 +76,7 @@ pub fn debug_logger(message: &str) {
 }
 
 pub fn map_from_memory<T>(address: u32) -> &'static mut T {
-    unsafe {
-        transmute::<u32, &mut T>(address)
-    }
+    unsafe { transmute::<u32, &mut T>(address) }
 }
 
 pub fn get_from_memory<T>(address: u32) -> T {
@@ -169,10 +166,7 @@ pub fn get_string_from_memory(address: u32) -> String {
 }
 
 pub fn save_string_to_memory(address: u32, string: &str) {
-    debug_logger(&format!(
-        "encoding string at address: {:p}",
-        address as *const ()
-    ));
+    debug_logger(&format!("encoding string at address: {:p}", address as *const ()));
     let mut char_address = address;
     for c in string.chars() {
         save_to_memory::<u8>(char_address, c as u8);
@@ -211,12 +205,7 @@ pub fn patch_call(address: u32, new_address: u32) {
         #[cfg(target_os = "windows")]
         {
             let mut old_protect: u32 = 0;
-            VirtualProtect(
-                address as *mut _,
-                5,
-                PAGE_EXECUTE_READWRITE,
-                &mut old_protect,
-            );
+            VirtualProtect(address as *mut _, 5, PAGE_EXECUTE_READWRITE, &mut old_protect);
             ptr::write((address + 1) as *mut _, address_offset);
             VirtualProtect(address as *mut _, 5, old_protect, &mut old_protect);
         }
@@ -353,7 +342,6 @@ fn handle_get_u32_setting(setting: &str) -> String {
 pub fn command_show_settings(args: Vec<&str>) -> Result<String, CommandError> {
     if !args.is_empty() {
         return Err(Into::into("Invalid number of arguments"));
-        
     }
     Ok(show_settings())
 }
@@ -432,12 +420,7 @@ pub fn patch_nop(address: u32) {
         #[cfg(target_os = "windows")]
         {
             let mut old_protect: u32 = 0;
-            VirtualProtect(
-                address as *mut _,
-                1,
-                PAGE_EXECUTE_READWRITE,
-                &mut old_protect,
-            );
+            VirtualProtect(address as *mut _, 1, PAGE_EXECUTE_READWRITE, &mut old_protect);
             ptr::write(address as *mut _, 0x90u8);
             VirtualProtect(address as *mut _, 1, old_protect, &mut old_protect);
         }
