@@ -335,7 +335,11 @@ pub fn get_file_ptr(file_name: &str) -> Option<u32> {
         );
         return None;
     };
-    binding.get(&file_name.to_lowercase()).copied()
+    let return_value = binding.get(&file_name.to_lowercase()).copied();
+    if file_name.starts_with("openzt") || file_name.starts_with("ui/infoimg") {
+        info!("Getting file ptr for: {}", file_name);
+    }
+    return_value
 }
 
 fn get_num_resources() -> usize {
@@ -705,7 +709,7 @@ pub mod zoo_resource_mgr {
     use bf_configparser::ini::Ini; //TODO: Replace with custom ini parser
     use tracing::info;
 
-    use super::{check_file, get_file_ptr, load_resources, BFResourcePtr};
+    use super::{check_file, get_file_ptr, load_resources, BFResourcePtr, get_location_or_habitat_by_id};
     use crate::debug_dll::{get_ini_path, get_string_from_memory, save_to_memory};
 
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
@@ -781,11 +785,14 @@ pub mod zoo_resource_mgr {
     }
 
     #[hook(unsafe extern "cdecl" ZTUI_general_getInfoImageName, offset = 0x000f85d2)]
-    fn zoo_ui_general_get_info_image_name(param_1: u32) -> u32 {
-        let return_value = unsafe { ZTUI_general_getInfoImageName.call(param_1) };
+    fn zoo_ui_general_get_info_image_name(id: u32) -> u32 {
+        let return_value = match get_location_or_habitat_by_id(id) {
+            Some(resource_ptr) => resource_ptr,
+            None => unsafe { ZTUI_general_getInfoImageName.call(id) },
+        };
         info!(
             "ZTUI_general_getInfoImageName({}) -> {:X} {}",
-            param_1,
+            id,
             return_value,
             get_string_from_memory(return_value)
         );
@@ -1004,10 +1011,13 @@ fn load_open_zt_mod(file_map: HashMap<String, Box<[u8]>>) {
 
 // Map between the id ZT uses to reference locations/habitats and the string ptr of the animation (icon) resource
 static LOCATIONS_HABITATS_RESOURCE_MAP: Lazy<Mutex<HashMap<u32, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
 // Map between the animation (icon resource) and the id ZT uses to reference location/habitats, this is used to lookup the id needed to add the habitat/location to an animal
 static LOCATIONS_HABITATS_ID_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
 // Used to ensure mod_ids don't clash, a mod will not load if an id is already in this map
 static MOD_ID_SET: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
 // const MIN_HABITAT_ID: u32 = 9414;
 // const MAX_HABITAT_ID: u32 = 9600;
 // const MIN_LOCATION_ID: u32 = 9634;
@@ -1122,12 +1132,12 @@ fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_nam
             let base_resource_id =
                 openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
             let Ok(icon_name) =
-                load_icon_definition(base_resource_id, habitat_def, file_map, mod_id)
+                load_icon_definition(&base_resource_id, habitat_def, file_map, mod_id)
             else {
                 error!("Error loading icon definition for habitat: {}", habitat_name);
                 continue;
             };
-            add_location_or_habitat(habitat_def.name(), &icon_name);
+            add_location_or_habitat(habitat_def.name(), &base_resource_id);
         }
     };
 
@@ -1137,18 +1147,18 @@ fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_nam
             let base_resource_id =
                 openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
             let Ok(icon_name) =
-                load_icon_definition(base_resource_id, location_def, file_map, mod_id)
+                load_icon_definition(&base_resource_id, location_def, file_map, mod_id)
             else {
                 error!("Error loading icon definition for location: {}", location_name);
                 continue;
             };
-            add_location_or_habitat(location_def.name(), &icon_name);
+            add_location_or_habitat(location_def.name(), &base_resource_id);
         }
     };
 }
 
 fn load_icon_definition(
-    base_resource_id: String,
+    base_resource_id: &String,
     icon_definition: &mods::IconDefinition,
     file_map: &HashMap<String, Box<[u8]>>,
     mod_id: &String,

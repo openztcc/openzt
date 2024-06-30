@@ -195,7 +195,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 ztworldmgr::init();
                 bfentitytype::init();
                 ztgamemgr::init();
-                // unsafe { zoo_misc::init_detours() };
+                unsafe { zoo_misc::init_detours() };
             }
         }
         DLL_PROCESS_DETACH => {
@@ -343,19 +343,40 @@ mod zoo_misc {
             info!("UIControl::setAnimation {:#x} {:#x} {}", this_ptr, param_1, param_2);
         } else {
             let param_1_string = get_string_from_memory(param_1);
-            info!(
-                "UIControl::setAnimation {:#x} {:#x} ({}) {}",
-                this_ptr, param_1, param_1_string, param_2
-            );
+            if param_1_string.starts_with("openzt") || param_1_string.starts_with("ui/infoimg") {
+                info!(
+                    "UIControl::setAnimation {:#x} {:#x} ({}) {}",
+                    this_ptr, param_1, param_1_string, param_2
+                );
+            }
         }
         unsafe { UIControl_setAnimation.call(this_ptr, param_1, param_2) }
     }
+    
+    // 0x0000176ce
+    #[hook(unsafe extern "cdecl" UIControl_UILoadAnimation, offset = 0x0000176ce)]
+    fn ui_control_ui_load_animation(param_1: u32, param_2: u32, param_3: u32) -> u8 {
+        let param_3_string = get_string_from_memory(param_3);
+        let return_value = unsafe { UIControl_UILoadAnimation.call(param_1, param_2, param_3) };
+         if param_3_string.starts_with("openzt") || param_3_string.starts_with("ui/infoimg") {
+            info!(
+                "UIControl::UILoadAnimation {:#x} {:#x} {:#x} ({}) -> {}",
+                param_1, param_2, param_3, param_3_string, return_value
+            );
+        }
+        return_value
+    }
 
-    // #[hook(unsafe extern "cdecl" ZTUI_general_getInfoImageName, offset = 0x0000f85d2)]
-    // fn ui_general_get_info_image_name(param_1: u32) -> u32 {
-    //     let result = unsafe { ZTUI_general_getInfoImageName.call(param_1) };
-    //     let result_string = get_string_from_memory(result);
-    //     info!("ZTUI::general_getInfoImageName {:#x} ({})", param_1, result_string);
-    //     result
-    // }
+    #[hook(unsafe extern "thiscall" BFAnimCache_findAnim, offset = 0x000001fdd)]
+    fn bf_anim_cache_find_anim(this_ptr: u32, param_1: u32, param_2: u32) -> u32 {
+        let param_1_string = get_string_from_memory(param_1);
+        let return_value = unsafe { BFAnimCache_findAnim.call(this_ptr, param_1, param_2) };
+        if param_1_string.starts_with("openzt") || param_1_string.starts_with("ui/infoimg") {
+            info!(
+                "BFAnimCache::findAnim {:#x} ({}) {:#x} -> {:#x}",
+                this_ptr, param_1_string, param_2, return_value
+            );
+        }
+        return_value
+    }
 }
