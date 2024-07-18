@@ -1,5 +1,6 @@
 [animation]
-dir0 = resource_name
+dir0 = openzt_resource
+dir1 = resource_name
 animation = animation
 x0 = -21
 y0 = -15

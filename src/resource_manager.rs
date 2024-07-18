@@ -350,13 +350,19 @@ fn get_num_resources() -> usize {
     binding.len()
 }
 
-fn command_list_resource_strings(_args: Vec<&str>) -> Result<String, CommandError> {
+fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError> {
+    if args.len() > 1 {
+        return Err(CommandError::new("Too many arguments".to_string()));
+    }
     let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
         error!("Failed to lock resource string to ptr map; returning from command_list_resource_strings");
         return Err(CommandError::new("Failed to lock resource string to ptr map".to_string()));
     };
     let mut result_string = String::new();
     for (resource_string, _) in binding.iter() {
+        if args.len() == 1 && !resource_string.starts_with(args[0]) {
+            continue;
+        }
         result_string.push_str(&format!("{}\n", resource_string));
     }
     Ok(result_string)
@@ -707,31 +713,71 @@ pub fn init() {
 #[hook_module("zoo.exe")]
 pub mod zoo_resource_mgr {
     use bf_configparser::ini::Ini; //TODO: Replace with custom ini parser
-    use tracing::info;
+    use tracing::{info, span};
 
     use super::{check_file, get_file_ptr, load_resources, BFResourcePtr, get_location_or_habitat_by_id};
     use crate::debug_dll::{get_ini_path, get_string_from_memory, save_to_memory};
 
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
     fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> u8 {
+        let string = get_string_from_memory(file_name);
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+            info!("BFResource::attempt({:#x}, {})", this_ptr, string);
+        }
+
         if bf_resource_inner(this_ptr, file_name) {
+
+            if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+                info!("BFResource::attempt -> 1");
+            }
             return 1;
         }
-        unsafe { BFResource_attempt.call(this_ptr, file_name) }
+        let return_value = unsafe { BFResource_attempt.call(this_ptr, file_name) };
+
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+            info!("BFResource::attempt -> {}", return_value);
+        }
+        return_value
     }
 
     //47f4
     #[hook(unsafe extern "thiscall" BFResource_prepare, offset = 0x000047f4)]
     fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32) -> u8 {
+        let string = get_string_from_memory(file_name);
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+            info!(
+                "BFResource::prepare({:#x}, {})",
+                this_ptr,
+                get_string_from_memory(file_name),
+            );
+        }
         if bf_resource_inner(this_ptr, file_name) {
+            if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+                info!("BFResource::prepare -> 1");
+            }
             return 1;
         }
 
-        unsafe { BFResource_prepare.call(this_ptr, file_name) }
+        let return_value = unsafe { BFResource_prepare.call(this_ptr, file_name) };
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+            info!("BFResource::prepare -> {}", return_value);
+        }
+        return_value
     }
 
     fn bf_resource_inner(this_ptr: u32, file_name: u32) -> bool {
-        let file_name_string = get_string_from_memory(file_name).to_lowercase();
+        let mut file_name_string = get_string_from_memory(file_name).to_lowercase();
+        if file_name_string.starts_with("openzt_resource") {
+            match parse_openzt_resource_string(file_name_string.clone()) {
+                Ok(resource_name) => {
+                    file_name_string = resource_name;
+                }
+                Err(e) => {
+                    info!("Failed to parse openzt resource string: {} {}", file_name_string, e);
+                    return false;
+                }
+            }
+        }
         if check_file(&file_name_string)
             && let Some(ptr) = get_file_ptr(&file_name_string)
         {
@@ -746,6 +792,16 @@ pub mod zoo_resource_mgr {
         } else {
             false
         }
+    }
+
+    fn parse_openzt_resource_string(file_name: String) -> Result<String, &'static str> {
+        if file_name.starts_with("openzt_resource") {
+            let mut split = file_name.split('/').collect::<Vec<&str>>();
+            if split.len() == 2 || split.len() == 3 {
+                return Ok(split[1].to_owned());
+            }
+        }
+        Err("Invalid openzt resource string")
     }
 
     #[hook(unsafe extern "thiscall" BFResourceMgr_constructor, offset = 0x0012903f)]
@@ -786,18 +842,125 @@ pub mod zoo_resource_mgr {
 
     #[hook(unsafe extern "cdecl" ZTUI_general_getInfoImageName, offset = 0x000f85d2)]
     fn zoo_ui_general_get_info_image_name(id: u32) -> u32 {
+        info!(
+            "ZTUI_general_getInfoImageName({})",
+            id,
+        );
         let return_value = match get_location_or_habitat_by_id(id) {
             Some(resource_ptr) => resource_ptr,
             None => unsafe { ZTUI_general_getInfoImageName.call(id) },
         };
         info!(
-            "ZTUI_general_getInfoImageName({}) -> {:X} {}",
-            id,
+            "ZTUI_general_getInfoImageName -> {:X} {}",
             return_value,
             get_string_from_memory(return_value)
         );
         return_value
     }
+
+    // 406a22 uint __thiscall GXLLEAnimSet::attempt(void *this,char *param_1)
+    #[hook(unsafe extern "thiscall" GXLLEAnimSet_attempt, offset = 0x000006a22)]
+    fn zoo_gxlleanimset_attempt(this_ptr: u32, param_1: u32) -> u8 {
+        let string = get_string_from_memory(param_1);
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+            info!(
+                "GXLLEAnimSet::attempt({:#x}, {})",
+                this_ptr,
+                string,
+            );
+        }
+        let return_value = unsafe { GXLLEAnimSet_attempt.call(this_ptr, param_1) };
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+            info!(
+                "GXLLEAnimSet::attempt -> {}",
+                return_value
+            );
+        }
+        
+        return_value
+    }
+
+    // 0040b967 bool __thiscall GXLLEAnimSet::attempt(void *this,BFConfigFile *param_1,char *param_2)
+    #[hook(unsafe extern "thiscall" GXLLEAnimSet_attempt_bfconfigfile, offset = 0x0000b967)]
+    fn zoo_gxlleanimset_attempt_bfconfigfile(this_ptr: u32, param_1: u32, param_2: u32) -> u8 {
+        info!(
+            "GXLLEAnimSet::attempt2({:#x}, {:#x}, {})",
+            this_ptr,
+            param_1,
+            get_string_from_memory(param_2),
+        );
+        let return_value = unsafe { GXLLEAnimSet_attempt_bfconfigfile.call(this_ptr, param_1, param_2) };
+        info!(
+            "GXLLEAnimSet::attempt2 -> {}",
+            return_value
+        );
+        return_value
+    }
+
+
+    // 00411e21 bool __thiscall GXLLEAnim::attempt(void *this,char *param_1)
+    #[hook(unsafe extern "thiscall" GXLLEAnim_attempt, offset = 0x000011e21)]
+    fn zoo_gxlleanim_attempt(this_ptr: u32, param_1: u32) -> u8 {
+        let string = get_string_from_memory(param_1);
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+        info!(
+            "GXLLEAnim::attempt({:#x}, {})",
+            this_ptr,
+            string
+        );
+    }
+        let return_value = unsafe { GXLLEAnim_attempt.call(this_ptr, param_1) };
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+        info!(
+            "GXLLEAnim::attempt -> {}",
+            return_value
+        );
+    }
+        return_value
+    }
+
+    // 0040bbc1 bool __thiscall OOAnalyzer::GXLLEAnim::prepare(GXLLEAnim *this,char *param_1)
+    #[hook(unsafe extern "thiscall" OOAnalyzer_GXLLEAnim_prepare, offset = 0x0000bbc1)]
+    fn zoo_ooanalyzer_gxlleanim_prepare(this_ptr: u32, param_1: u32) -> u8 {
+        let string = get_string_from_memory(param_1);
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+        info!(
+            "OOAnalyzer::GXLLEAnim::prepare({:#x}, {})",
+            this_ptr,
+            string
+        );
+    }
+        let return_value = unsafe { OOAnalyzer_GXLLEAnim_prepare.call(this_ptr, param_1) };
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+        info!(
+            "OOAnalyzer::GXLLEAnim::prepare -> {}",
+            return_value
+        );
+    }
+        return_value
+    }
+
+    // 00409ac0 bool __thiscall BFConfigFile::attempt(void *this,char *param_1)
+    #[hook(unsafe extern "thiscall" BFConfigFile_attempt, offset = 0x00009ac0)]
+    fn zoo_bfconfigfile_attempt(this_ptr: u32, param_1: u32) -> u8 {
+        let string = get_string_from_memory(param_1);
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+        info!(
+            "BFConfigFile::attempt({:#x}, {})",
+            this_ptr,
+            string,
+        );
+    }
+        let return_value = unsafe { BFConfigFile_attempt.call(this_ptr, param_1) };
+        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
+        info!(
+            "BFConfigFile::attempt -> {}",
+            return_value
+        );
+    }
+        return_value
+    }
+
 }
 
 #[derive(Clone)]
@@ -1132,7 +1295,7 @@ fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_nam
             let base_resource_id =
                 openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
             let Ok(icon_name) =
-                load_icon_definition(&base_resource_id, habitat_def, file_map, mod_id)
+                load_icon_definition(&base_resource_id, habitat_def, file_map, mod_id, include_str!("../resources/include/infoimg-habitat.ani").to_string())
             else {
                 error!("Error loading icon definition for habitat: {}", habitat_name);
                 continue;
@@ -1147,7 +1310,7 @@ fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_nam
             let base_resource_id =
                 openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
             let Ok(icon_name) =
-                load_icon_definition(&base_resource_id, location_def, file_map, mod_id)
+                load_icon_definition(&base_resource_id, location_def, file_map, mod_id, include_str!("../resources/include/infoimg-location.ani").to_string())
             else {
                 error!("Error loading icon definition for location: {}", location_name);
                 continue;
@@ -1162,6 +1325,7 @@ fn load_icon_definition(
     icon_definition: &mods::IconDefinition,
     file_map: &HashMap<String, Box<[u8]>>,
     mod_id: &String,
+    base_config: String,
 ) -> Result<String, ()> {
     let Some(icon_file) = file_map.get(icon_definition.icon_path()) else {
         error!(
@@ -1190,22 +1354,27 @@ fn load_icon_definition(
     let mut ani_cfg = Ini::new_cs();
     ani_cfg.set_comment_symbols(&[';', '#', ':']);
     if let Err(err) =
-        ani_cfg.read(include_str!("../resources/include/infoimg-habitat.ani").to_string())
+        ani_cfg.read(base_config)
     {
         error!("Error reading ini: {}", err);
         return Err(());
     };
 
-    ani_cfg.set(
-        "Animation",
-        "dir0",
+    if ani_cfg.set(
+        "animation",
+        "dir1",
         Some(openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Animation)),
-    );
+    ) == None
+    {
+        error!("Error setting dir1 for ani");
+        return Err(());
+    }
 
     let mut write_options = WriteOptions::default();
     write_options.space_around_delimiters = true;
     write_options.blank_lines_between_sections = 1;
     let new_string = ani_cfg.pretty_writes(&write_options);
+    info!("New ani: \n{}", new_string);
     let file_size = new_string.len() as u32;
     let file_name = openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Ani);
 
