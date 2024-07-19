@@ -195,7 +195,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 ztworldmgr::init();
                 bfentitytype::init();
                 ztgamemgr::init();
-                unsafe { zoo_misc::init_detours() };
+                // unsafe { zoo_misc::init_detours() };
             }
         }
         DLL_PROCESS_DETACH => {
@@ -333,50 +333,54 @@ mod zoo_misc {
 
     #[hook(unsafe extern "thiscall" UIControl_useAnimation, offset = 0x0000b1f89)]
     fn ui_control_use_animation(this_ptr: u32, param_1: u32, param_2: bool) {
-        info!("UIControl::useAnimation {:#x} {:#x} {}", this_ptr, param_1, param_2);
         unsafe { UIControl_useAnimation.call(this_ptr, param_1, param_2) }
     }
 
     #[hook(unsafe extern "thiscall" UIControl_setAnimation, offset = 0x0000b1aa0)]
     fn ui_control_set_animation(this_ptr: u32, param_1: u32, param_2: bool) {
-        if param_1 == 0 {
-            info!("UIControl::setAnimation {:#x} {:#x} {}", this_ptr, param_1, param_2);
-        } else {
-            let param_1_string = get_string_from_memory(param_1);
-            if param_1_string.starts_with("openzt") || param_1_string.starts_with("ui/infoimg") {
-                info!(
-                    "UIControl::setAnimation {:#x} {:#x} ({}) {}",
-                    this_ptr, param_1, param_1_string, param_2
-                );
-            }
-        }
+        // if param_1 == 0 {
+        //     info!("UIControl::setAnimation {:#x} {:#x} {}", this_ptr, param_1, param_2);
+        // } else {
+        //     let param_1_string = get_string_from_memory(param_1);
+        //     if param_1_string.starts_with("openzt") || param_1_string.starts_with("ui/infoimg") {
+        //         info!(
+        //             "UIControl::setAnimation {:#x} {:#x} ({}) {}",
+        //             this_ptr, param_1, param_1_string, param_2
+        //         );
+        //     }
+        // }
         unsafe { UIControl_setAnimation.call(this_ptr, param_1, param_2) }
     }
     
     // 0x0000176ce
     #[hook(unsafe extern "cdecl" UIControl_UILoadAnimation, offset = 0x0000176ce)]
     fn ui_control_ui_load_animation(param_1: u32, param_2: u32, param_3: u32) -> u8 {
-        let param_3_string = get_string_from_memory(param_3);
-        let return_value = unsafe { UIControl_UILoadAnimation.call(param_1, param_2, param_3) };
-         if param_3_string.starts_with("openzt") || param_3_string.starts_with("ui/infoimg") {
-            info!(
-                "UIControl::UILoadAnimation {:#x} {:#x} {:#x} ({}) -> {}",
-                param_1, param_2, param_3, param_3_string, return_value
-            );
-        }
-        return_value
+        unsafe { UIControl_UILoadAnimation.call(param_1, param_2, param_3) }
     }
 
     #[hook(unsafe extern "thiscall" BFAnimCache_findAnim, offset = 0x000001fdd)]
     fn bf_anim_cache_find_anim(this_ptr: u32, param_1: u32, param_2: u32) -> u32 {
-        let param_1_string = get_string_from_memory(param_1);
-        let return_value = unsafe { BFAnimCache_findAnim.call(this_ptr, param_1, param_2) };
-        if param_1_string.starts_with("openzt") || param_1_string.starts_with("ui/infoimg") {
-            info!(
-                "BFAnimCache::findAnim {:#x} ({}) {:#x} -> {:#x}",
-                this_ptr, param_1_string, param_2, return_value
-            );
-        }
-        return_value
+        unsafe { BFAnimCache_findAnim.call(this_ptr, param_1, param_2) }
+    }
+
+    #[hook(unsafe extern "thiscall" GXLLEAnimSet_attempt_bfconfigfile, offset = 0x0000b967)]
+    fn zoo_gxlleanimset_attempt_bfconfigfile(this_ptr: u32, param_1: u32, param_2: u32) -> u8 {
+        unsafe { GXLLEAnimSet_attempt_bfconfigfile.call(this_ptr, param_1, param_2) }
+    }
+
+
+    #[hook(unsafe extern "thiscall" GXLLEAnim_attempt, offset = 0x000011e21)]
+    fn zoo_gxlleanim_attempt(this_ptr: u32, param_1: u32) -> u8 {
+        unsafe { GXLLEAnim_attempt.call(this_ptr, param_1) }
+    }
+
+    #[hook(unsafe extern "thiscall" OOAnalyzer_GXLLEAnim_prepare, offset = 0x0000bbc1)]
+    fn zoo_ooanalyzer_gxlleanim_prepare(this_ptr: u32, param_1: u32) -> u8 {
+        unsafe { OOAnalyzer_GXLLEAnim_prepare.call(this_ptr, param_1) }
+    }
+
+    #[hook(unsafe extern "thiscall" BFConfigFile_attempt, offset = 0x00009ac0)]
+    fn zoo_bfconfigfile_attempt(this_ptr: u32, param_1: u32) -> u8 {
+        unsafe { BFConfigFile_attempt.call(this_ptr, param_1) }
     }
 }

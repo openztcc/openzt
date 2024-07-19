@@ -21,7 +21,7 @@ use crate::{
     console::{add_to_command_register, CommandError},
     debug_dll::{get_from_memory, get_string_from_memory, save_to_memory},
     mods,
-    string_registry::add_string_to_registry,
+    string_registry::{add_string_to_registry, get_string_from_registry},
 };
 
 const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
@@ -705,6 +705,8 @@ pub fn init() {
         "list_openzt_resource_strings".to_string(),
         command_list_openzt_resource_strings,
     );
+    add_to_command_register("list_openzt_mods".to_string(), command_list_openzt_mod_ids);
+    add_to_command_register("list_openzt_locations_habitats".to_string(), command_list_openzt_locations_habitats);
     add_handler(Handler::new(None, None, add_file_to_maps, ModType::Legacy));
     // add_handler(Handler::new(None, None, load_open_zt_mod, ModType::OpenZT))
     // TODO: Add OpenZT mod handler
@@ -712,7 +714,7 @@ pub fn init() {
 
 #[hook_module("zoo.exe")]
 pub mod zoo_resource_mgr {
-    use bf_configparser::ini::Ini; //TODO: Replace with custom ini parser
+    use bf_configparser::ini::Ini;
     use tracing::{info, span};
 
     use super::{check_file, get_file_ptr, load_resources, BFResourcePtr, get_location_or_habitat_by_id};
@@ -720,48 +722,22 @@ pub mod zoo_resource_mgr {
 
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
     fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> u8 {
-        let string = get_string_from_memory(file_name);
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-            info!("BFResource::attempt({:#x}, {})", this_ptr, string);
-        }
 
         if bf_resource_inner(this_ptr, file_name) {
-
-            if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-                info!("BFResource::attempt -> 1");
-            }
             return 1;
         }
-        let return_value = unsafe { BFResource_attempt.call(this_ptr, file_name) };
-
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-            info!("BFResource::attempt -> {}", return_value);
-        }
-        return_value
+        unsafe { BFResource_attempt.call(this_ptr, file_name) }
     }
 
     //47f4
     #[hook(unsafe extern "thiscall" BFResource_prepare, offset = 0x000047f4)]
     fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32) -> u8 {
         let string = get_string_from_memory(file_name);
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-            info!(
-                "BFResource::prepare({:#x}, {})",
-                this_ptr,
-                get_string_from_memory(file_name),
-            );
-        }
         if bf_resource_inner(this_ptr, file_name) {
-            if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-                info!("BFResource::prepare -> 1");
-            }
             return 1;
         }
 
         let return_value = unsafe { BFResource_prepare.call(this_ptr, file_name) };
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-            info!("BFResource::prepare -> {}", return_value);
-        }
         return_value
     }
 
@@ -824,15 +800,6 @@ pub mod zoo_resource_mgr {
             return return_value;
         };
         if let Some(paths) = zoo_ini.get("resource", "path") {
-            // TODO: Re-add this when more expansions can be added, expand to add subdirs of mods to ZT path variable
-            // let path_vec = paths.split(';').map(|s| s.to_owned()).collect::<Vec<String>>();
-            // if !path_vec.clone().into_iter().any(|s| s.trim() == "./mods") {
-            //     info!("Adding mods directory to BFResourceMgr");
-            //     let add_path: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0052870b) };
-            //     if let Ok(mods_path) = CString::new("./mods") {
-            //         add_path(this_ptr, mods_path.as_ptr() as u32);
-            //     }
-            // }
             info!("Loading resources from: {}", paths);
             load_resources(paths.split(';').map(|s| s.to_owned()).collect());
             info!("Resources loaded");
@@ -842,125 +809,12 @@ pub mod zoo_resource_mgr {
 
     #[hook(unsafe extern "cdecl" ZTUI_general_getInfoImageName, offset = 0x000f85d2)]
     fn zoo_ui_general_get_info_image_name(id: u32) -> u32 {
-        info!(
-            "ZTUI_general_getInfoImageName({})",
-            id,
-        );
         let return_value = match get_location_or_habitat_by_id(id) {
             Some(resource_ptr) => resource_ptr,
             None => unsafe { ZTUI_general_getInfoImageName.call(id) },
         };
-        info!(
-            "ZTUI_general_getInfoImageName -> {:X} {}",
-            return_value,
-            get_string_from_memory(return_value)
-        );
         return_value
     }
-
-    // 406a22 uint __thiscall GXLLEAnimSet::attempt(void *this,char *param_1)
-    #[hook(unsafe extern "thiscall" GXLLEAnimSet_attempt, offset = 0x000006a22)]
-    fn zoo_gxlleanimset_attempt(this_ptr: u32, param_1: u32) -> u8 {
-        let string = get_string_from_memory(param_1);
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-            info!(
-                "GXLLEAnimSet::attempt({:#x}, {})",
-                this_ptr,
-                string,
-            );
-        }
-        let return_value = unsafe { GXLLEAnimSet_attempt.call(this_ptr, param_1) };
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-            info!(
-                "GXLLEAnimSet::attempt -> {}",
-                return_value
-            );
-        }
-        
-        return_value
-    }
-
-    // 0040b967 bool __thiscall GXLLEAnimSet::attempt(void *this,BFConfigFile *param_1,char *param_2)
-    #[hook(unsafe extern "thiscall" GXLLEAnimSet_attempt_bfconfigfile, offset = 0x0000b967)]
-    fn zoo_gxlleanimset_attempt_bfconfigfile(this_ptr: u32, param_1: u32, param_2: u32) -> u8 {
-        info!(
-            "GXLLEAnimSet::attempt2({:#x}, {:#x}, {})",
-            this_ptr,
-            param_1,
-            get_string_from_memory(param_2),
-        );
-        let return_value = unsafe { GXLLEAnimSet_attempt_bfconfigfile.call(this_ptr, param_1, param_2) };
-        info!(
-            "GXLLEAnimSet::attempt2 -> {}",
-            return_value
-        );
-        return_value
-    }
-
-
-    // 00411e21 bool __thiscall GXLLEAnim::attempt(void *this,char *param_1)
-    #[hook(unsafe extern "thiscall" GXLLEAnim_attempt, offset = 0x000011e21)]
-    fn zoo_gxlleanim_attempt(this_ptr: u32, param_1: u32) -> u8 {
-        let string = get_string_from_memory(param_1);
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-        info!(
-            "GXLLEAnim::attempt({:#x}, {})",
-            this_ptr,
-            string
-        );
-    }
-        let return_value = unsafe { GXLLEAnim_attempt.call(this_ptr, param_1) };
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-        info!(
-            "GXLLEAnim::attempt -> {}",
-            return_value
-        );
-    }
-        return_value
-    }
-
-    // 0040bbc1 bool __thiscall OOAnalyzer::GXLLEAnim::prepare(GXLLEAnim *this,char *param_1)
-    #[hook(unsafe extern "thiscall" OOAnalyzer_GXLLEAnim_prepare, offset = 0x0000bbc1)]
-    fn zoo_ooanalyzer_gxlleanim_prepare(this_ptr: u32, param_1: u32) -> u8 {
-        let string = get_string_from_memory(param_1);
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-        info!(
-            "OOAnalyzer::GXLLEAnim::prepare({:#x}, {})",
-            this_ptr,
-            string
-        );
-    }
-        let return_value = unsafe { OOAnalyzer_GXLLEAnim_prepare.call(this_ptr, param_1) };
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-        info!(
-            "OOAnalyzer::GXLLEAnim::prepare -> {}",
-            return_value
-        );
-    }
-        return_value
-    }
-
-    // 00409ac0 bool __thiscall BFConfigFile::attempt(void *this,char *param_1)
-    #[hook(unsafe extern "thiscall" BFConfigFile_attempt, offset = 0x00009ac0)]
-    fn zoo_bfconfigfile_attempt(this_ptr: u32, param_1: u32) -> u8 {
-        let string = get_string_from_memory(param_1);
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-        info!(
-            "BFConfigFile::attempt({:#x}, {})",
-            this_ptr,
-            string,
-        );
-    }
-        let return_value = unsafe { BFConfigFile_attempt.call(this_ptr, param_1) };
-        if string.starts_with("openzt") || string.starts_with("ui/infoimg") {
-        info!(
-            "BFConfigFile::attempt -> {}",
-            return_value
-        );
-    }
-        return_value
-    }
-
 }
 
 #[derive(Clone)]
@@ -1185,6 +1039,32 @@ static MOD_ID_SET: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSe
 // const MAX_HABITAT_ID: u32 = 9600;
 // const MIN_LOCATION_ID: u32 = 9634;
 // const MAX_LOCATION_ID: u32 = 9800;
+
+
+fn command_list_openzt_mod_ids(_args: Vec<&str>) -> Result<String, CommandError> {
+    let Ok(binding) = MOD_ID_SET.lock() else {
+        error!("Failed to lock mod id set; returning from command_list_openzt_mod_ids");
+        return Err(CommandError::new("Failed to lock mod id set".to_string()));
+    };
+    let mut result_string = String::new();
+    for mod_id in binding.iter() {
+        result_string.push_str(&format!("{}\n", mod_id));
+    }
+    Ok(result_string)
+}
+
+fn command_list_openzt_locations_habitats(_args: Vec<&str>) -> Result<String, CommandError> {
+    let Ok(binding) = LOCATIONS_HABITATS_RESOURCE_MAP.lock() else {
+        error!("Failed to lock locations/habitats map; returning from command_list_openzt_habitats");
+        return Err(CommandError::new("Failed to lock locations/habitats map".to_string()));
+    };
+    let mut result_string = String::new();
+    for (id, _) in binding.iter() {
+        let name = get_string_from_registry(*id).unwrap_or("<error>".to_string());
+        result_string.push_str(&format!("{} {}\n", id, name));
+    }
+    Ok(result_string)
+}
 
 // TODO: Return result from here
 fn add_location_or_habitat(name: &String, icon_resource_id: &String) {
