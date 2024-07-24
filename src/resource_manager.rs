@@ -868,16 +868,16 @@ impl Handler {
                 }
             }
             ModType::OpenZT => {
-                if entry
-                    .to_str()
-                    .unwrap_or_default()
-                    .to_lowercase()
-                    .ends_with(".ztd")
-                {
-                    return;
-                } else {
+                // if entry
+                //     .to_str()
+                //     .unwrap_or_default()
+                //     .to_lowercase()
+                //     .ends_with(".ztd")
+                // {
+                //     return;
+                // } else {
                     info!("Loading OpenZT mod: {} file: {}", file_name, entry.display());
-                }
+                // }
             }
         }
 
@@ -906,9 +906,9 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
             error!("Error getting filename: {:?}", entry);
             continue;
         };
-        if filename.to_lowercase().ends_with(".ztd") && !filename.starts_with("ztat")
-            || filename.to_lowercase().ends_with(".zip")
-        {
+        if filename.to_lowercase().ends_with(".ztd") && !filename.starts_with("ztat") {
+            // || filename.to_lowercase().ends_with(".zip")
+        // {
             resources.push(entry.path().to_path_buf());
         }
     }
@@ -919,16 +919,19 @@ fn load_resources(paths: Vec<String>) {
     use std::time::Instant;
     let now = Instant::now();
 
-    paths.iter().for_each(|path| {
+    paths.iter().rev().for_each(|path| {
         let resources = get_ztd_resources(Path::new(path), false);
         resources.iter().for_each(|resource| {
+            info!("Loading resource: {}", resource.display());
             let file_name = resource.to_str().unwrap_or_default().to_lowercase();
+            // if file_name.ends_with(".ztd") {
+            //     handle_ztd(resource);
+            // } else if file_name.ends_with(".zip") {
+            //     handle_ztd2(resource);
+            // }
             if file_name.ends_with(".ztd") {
-                handle_ztd(resource);
-            } else if file_name.ends_with(".zip") {
                 handle_ztd2(resource);
             }
-            // handle_ztd(resource);
         });
     });
 
@@ -938,7 +941,6 @@ fn load_resources(paths: Vec<String>) {
 }
 
 // Handler V2, supporting OpenZT and legacy mods
-// TODO: Benchmark reading all files initially vs reading them as needed (hypothesis: reading all at once is faster, given we likely need to read all the files eventually anyway)
 fn handle_ztd2(resource: &PathBuf) {
     let file = match File::open(resource) {
         Ok(file) => file,
@@ -989,30 +991,69 @@ fn handle_ztd2(resource: &PathBuf) {
         file_map.insert(file_name, file_buffer);
     }
 
-    // if zipfile_map.contains_key("meta.toml") {
     if openzt_mod {
-        load_open_zt_mod(file_map);
-    } //TODO: Legacy mods
+        file_map = load_open_zt_mod(file_map);
+    }
+
+    load_legacy_mod(file_map);
 }
 
-fn load_open_zt_mod(file_map: HashMap<String, Box<[u8]>>) {
+fn load_legacy_mod(file_map: HashMap<String, Box<[u8]>>) {
+    let keys = file_map.keys().clone();
+    for file in keys {
+        if file == "meta.toml" || file.starts_with("defs/") || file.starts_with("resources/") {
+            continue;
+        }
+        
+        let data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
+            Ok(data_mutex) => data_mutex,
+            Err(e) => {
+                error!("Error locking resource handler array: {}", e);
+                return;
+            }
+        };
+        // for handler in data_mutex.iter() {
+        //     for i in 0..zip.len() {
+        //         // ZipFile doesn't provide a .seek() method to set the cursor to the start of the file, so we create new ZipFile for each handler
+        //         let mut file = match zip.by_index(i) {
+        //             Ok(file) => file,
+        //             Err(e) => {
+        //                 error!("Error reading zip file: {}", e);
+        //                 continue;
+        //             }
+        //         };
+        //         if file.is_dir() {
+        //             continue;
+        //         }
+        //         handler.handle(resource, &mut file);
+        //     }
+        // }
+
+        // info!("Loading file: {}", file);
+        // if file.starts_with("defs/") {
+        //     load_def(file_map, file);
+        // }
+    }
+}
+
+fn load_open_zt_mod(file_map: HashMap<String, Box<[u8]>>) -> HashMap<String, Box<[u8]>> {
     let Some(meta_file) = file_map.get("meta.toml") else {
         error!("Error reading meta.toml from OpenZT mod");
-        return;
+        return file_map;
     };
 
     let intermediate_string = String::from_utf8_lossy(&meta_file).to_string();
 
     let Ok(meta) = toml::from_str::<mods::Meta>(&intermediate_string) else {
         error!("Error parsing meta.toml from OpenZT mod");
-        return;
+        return file_map;
     };
 
     let mod_id = meta.mod_id().to_string();
 
     if !add_new_mod_id(&mod_id) {
         error!("Mod already loaded: {}", mod_id);
-        return;
+        return file_map;
     }
 
     info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
@@ -1024,6 +1065,7 @@ fn load_open_zt_mod(file_map: HashMap<String, Box<[u8]>>) {
             load_def(&mod_id, &file_map, &file);
         }
     }
+    file_map
 }
 
 // Map between the id ZT uses to reference locations/habitats and the string ptr of the animation (icon) resource
@@ -1180,7 +1222,7 @@ fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_nam
                 error!("Error loading icon definition for habitat: {}", habitat_name);
                 continue;
             };
-            add_location_or_habitat(habitat_def.name(), &base_resource_id);
+            add_location_or_habitat(&habitat_def.name(), &base_resource_id);
         }
     };
 
@@ -1195,7 +1237,7 @@ fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_nam
                 error!("Error loading icon definition for location: {}", location_name);
                 continue;
             };
-            add_location_or_habitat(location_def.name(), &base_resource_id);
+            add_location_or_habitat(&location_def.name(), &base_resource_id);
         }
     };
 }
