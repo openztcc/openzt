@@ -819,6 +819,27 @@ impl Handler {
                 return;
             }
         }
+
+        match self.mod_type {
+            ModType::Legacy => {
+                if file_name.ends_with(".zip") {
+                    return;
+                }
+            }
+            ModType::OpenZT => {
+                // if entry
+                //     .to_str()
+                //     .unwrap_or_default()
+                //     .to_lowercase()
+                //     .ends_with(".ztd")
+                // {
+                //     return;
+                // } else {
+                    info!("Loading OpenZT mod: {} file: {}", file_name, entry.display());
+                // }
+            }
+        }
+
         (self.handler)(entry, file);
     }
 }
@@ -839,12 +860,13 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
                 continue;
             }
         };
-        if entry
-            .file_name()
-            .to_str()
-            .map(|s| s.to_lowercase().ends_with(".ztd") && !s.starts_with("ztat")) // Exlcuding ztatb*.ztd files until relevant
-            .unwrap_or(false)
-        {
+        let Some(filename) = entry.file_name().to_str() else {
+            error!("Error getting filename: {:?}", entry);
+            continue;
+        };
+        if filename.to_lowercase().ends_with(".ztd") && !filename.starts_with("ztat") {
+            // || filename.to_lowercase().ends_with(".zip")
+        // {
             resources.push(entry.path().to_path_buf());
         }
     }
@@ -852,12 +874,437 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
 }
 
 fn load_resources(paths: Vec<String>) {
-    paths.iter().for_each(|path| {
+    use std::time::Instant;
+    let now = Instant::now();
+
+    paths.iter().rev().for_each(|path| {
         let resources = get_ztd_resources(Path::new(path), false);
         resources.iter().for_each(|resource| {
-            handle_ztd(resource);
+            info!("Loading resource: {}", resource.display());
+            let file_name = resource.to_str().unwrap_or_default().to_lowercase();
+            // if file_name.ends_with(".ztd") {
+            //     handle_ztd(resource);
+            // } else if file_name.ends_with(".zip") {
+            //     handle_ztd2(resource);
+            // }
+            if file_name.ends_with(".ztd") {
+                handle_ztd2(resource);
+            }
         });
     });
+
+    let elapsed = now.elapsed();
+    info!("Loaded {} mods in: {:.2?}", get_num_resources(), elapsed);
+    // list_openzt_mod_buffer();
+}
+
+// Handler V2, supporting OpenZT and legacy mods
+fn handle_ztd2(resource: &PathBuf) {
+    let file = match File::open(resource) {
+        Ok(file) => file,
+        Err(e) => {
+            error!("Error opening file: {}", e);
+            return;
+        }
+    };
+
+    let mut buf_reader = BufReader::new(file);
+
+    let mut zip = match zip::ZipArchive::new(&mut buf_reader) {
+        Ok(zip) => zip,
+        Err(e) => {
+            error!("Error reading zip: {}", e);
+            return;
+        }
+    };
+
+    let mut openzt_mod = false;
+
+    let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
+    for i in 0..zip.len() {
+        let mut file = match zip.by_index(i) {
+            Ok(file) => file,
+            Err(e) => {
+                error!("Error reading zip file: {}", e);
+                continue;
+            }
+        };
+        if file.is_dir() {
+            continue;
+        }
+        let file_name = file.name().to_string();
+        if file_name == "meta.toml" {
+            openzt_mod = true;
+        }
+
+        let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
+        match file.read_exact(&mut file_buffer) {
+            Ok(bytes_read) => bytes_read,
+            Err(e) => {
+                error!("Error reading file: {} -> {}", file.name(), e);
+                continue;
+            }
+        };
+
+        file_map.insert(file_name, file_buffer);
+    }
+
+    if openzt_mod {
+        file_map = load_open_zt_mod(file_map);
+    }
+
+    load_legacy_mod(file_map);
+}
+
+fn load_legacy_mod(file_map: HashMap<String, Box<[u8]>>) {
+    let keys = file_map.keys().clone();
+    for file in keys {
+        if file == "meta.toml" || file.starts_with("defs/") || file.starts_with("resources/") {
+            continue;
+        }
+        
+        let data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
+            Ok(data_mutex) => data_mutex,
+            Err(e) => {
+                error!("Error locking resource handler array: {}", e);
+                return;
+            }
+        };
+        // for handler in data_mutex.iter() {
+        //     for i in 0..zip.len() {
+        //         // ZipFile doesn't provide a .seek() method to set the cursor to the start of the file, so we create new ZipFile for each handler
+        //         let mut file = match zip.by_index(i) {
+        //             Ok(file) => file,
+        //             Err(e) => {
+        //                 error!("Error reading zip file: {}", e);
+        //                 continue;
+        //             }
+        //         };
+        //         if file.is_dir() {
+        //             continue;
+        //         }
+        //         handler.handle(resource, &mut file);
+        //     }
+        // }
+
+        // info!("Loading file: {}", file);
+        // if file.starts_with("defs/") {
+        //     load_def(file_map, file);
+        // }
+    }
+}
+
+fn load_open_zt_mod(file_map: HashMap<String, Box<[u8]>>) -> HashMap<String, Box<[u8]>> {
+    let Some(meta_file) = file_map.get("meta.toml") else {
+        error!("Error reading meta.toml from OpenZT mod");
+        return file_map;
+    };
+
+    let intermediate_string = String::from_utf8_lossy(&meta_file).to_string();
+
+    let Ok(meta) = toml::from_str::<mods::Meta>(&intermediate_string) else {
+        error!("Error parsing meta.toml from OpenZT mod");
+        return file_map;
+    };
+
+    let mod_id = meta.mod_id().to_string();
+
+    if !add_new_mod_id(&mod_id) {
+        error!("Mod already loaded: {}", mod_id);
+        return file_map;
+    }
+
+    info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
+
+    let keys = file_map.keys().clone();
+    for file in keys {
+        info!("Loading file: {}", file);
+        if file.starts_with("defs/") {
+            load_def(&mod_id, &file_map, &file);
+        }
+    }
+    file_map
+}
+
+// Map between the id ZT uses to reference locations/habitats and the string ptr of the animation (icon) resource
+static LOCATIONS_HABITATS_RESOURCE_MAP: Lazy<Mutex<HashMap<u32, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+// Map between the animation (icon resource) and the id ZT uses to reference location/habitats, this is used to lookup the id needed to add the habitat/location to an animal
+static LOCATIONS_HABITATS_ID_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+// Used to ensure mod_ids don't clash, a mod will not load if an id is already in this map
+static MOD_ID_SET: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
+// const MIN_HABITAT_ID: u32 = 9414;
+// const MAX_HABITAT_ID: u32 = 9600;
+// const MIN_LOCATION_ID: u32 = 9634;
+// const MAX_LOCATION_ID: u32 = 9800;
+
+
+fn command_list_openzt_mod_ids(_args: Vec<&str>) -> Result<String, CommandError> {
+    let Ok(binding) = MOD_ID_SET.lock() else {
+        error!("Failed to lock mod id set; returning from command_list_openzt_mod_ids");
+        return Err(CommandError::new("Failed to lock mod id set".to_string()));
+    };
+    let mut result_string = String::new();
+    for mod_id in binding.iter() {
+        result_string.push_str(&format!("{}\n", mod_id));
+    }
+    Ok(result_string)
+}
+
+fn command_list_openzt_locations_habitats(_args: Vec<&str>) -> Result<String, CommandError> {
+    let Ok(binding) = LOCATIONS_HABITATS_RESOURCE_MAP.lock() else {
+        error!("Failed to lock locations/habitats map; returning from command_list_openzt_habitats");
+        return Err(CommandError::new("Failed to lock locations/habitats map".to_string()));
+    };
+    let mut result_string = String::new();
+    for (id, _) in binding.iter() {
+        let name = get_string_from_registry(*id).unwrap_or("<error>".to_string());
+        result_string.push_str(&format!("{} {}\n", id, name));
+    }
+    Ok(result_string)
+}
+
+// TODO: Return result from here
+fn add_location_or_habitat(name: &String, icon_resource_id: &String) {
+    let Ok(mut resource_binding) = LOCATIONS_HABITATS_RESOURCE_MAP.lock() else {
+        error!(
+            "Failed to lock locations/habitats map; returning from add_location_or_habitat for {}",
+            name
+        );
+        return;
+    };
+    let Ok(mut id_binding) = LOCATIONS_HABITATS_ID_MAP.lock() else {
+        error!(
+            "Failed to lock locations/habitats map; returning from add_location_or_habitat for {}",
+            name
+        );
+        return;
+    };
+    let Ok(string_id) = add_string_to_registry(name.clone()) else {
+        error!("Failed to add string to registry: {}", name);
+        return;
+    };
+    info!("Adding location/habitat: {} {} -> {}", name, icon_resource_id, string_id);
+    let icon_resource_id_cstring = CString::new(icon_resource_id.clone()).unwrap();
+    resource_binding.insert(string_id, icon_resource_id_cstring.into_raw() as u32);
+    id_binding.insert(name.clone(), string_id);
+}
+
+fn get_location_or_habitat_by_id(id: u32) -> Option<u32> {
+    let Ok(binding) = LOCATIONS_HABITATS_RESOURCE_MAP.lock() else {
+        error!(
+            "Failed to lock locations/habitats map; returning None from get_location_or_habitat_by_id for {}",
+            id
+        );
+        return None;
+    };
+    binding.get(&id).cloned()
+}
+
+fn get_location_or_habitat_by_name(name: &String) -> Option<u32> {
+    let Ok(binding) = LOCATIONS_HABITATS_ID_MAP.lock() else {
+        error!(
+            "Failed to lock locations/habitats map; returning None from get_location_or_habitat_by_name for {}",
+            name
+        );
+        return None;
+    };
+    binding.get(name).cloned()
+}
+
+// Adds a new mod id to the set, returns false if the mod_id already exists
+fn add_new_mod_id(mod_id: &String) -> bool {
+    let Ok(mut binding) = MOD_ID_SET.lock() else {
+        error!("Failed to lock mod id set; returning from add_mod_id for {}", mod_id);
+        return false;
+    };
+    binding.insert(mod_id.clone())
+}
+
+enum ResourceType {
+    Location,
+    Habitat,
+}
+
+impl Display for ResourceType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ResourceType::Location => write!(f, "location"),
+            ResourceType::Habitat => write!(f, "habitat"),
+        }
+    }
+}
+
+enum ZTResourceType {
+    Animation,
+    Ani,
+    Palette,
+}
+
+impl Display for ZTResourceType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ZTResourceType::Animation => write!(f, "animation"),
+            ZTResourceType::Palette => write!(f, "palette"),
+            ZTResourceType::Ani => write!(f, "ani"),
+        }
+    }
+}
+
+fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_name: &String) {
+    info!("Loading defs from {} {}", mod_id, def_file_name);
+    let Some(defs_file) = file_map.get(def_file_name) else {
+        error!("Error reading defs.toml from OpenZT mod");
+        return;
+    };
+
+    let intermediate_string = String::from_utf8_lossy(&defs_file).to_string();
+
+    let Ok(defs) = toml::from_str::<mods::ModDefinition>(&intermediate_string) else {
+        error!("Error parsing defs.toml from OpenZT mod");
+        return;
+    };
+
+    info!("Loading defs: {}", defs.len());
+
+    // Habitats
+    if let Some(habitats) = defs.habitats() {
+        for (habitat_name, habitat_def) in habitats.iter() {
+            let base_resource_id =
+                openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
+            let Ok(icon_name) =
+                load_icon_definition(&base_resource_id, habitat_def, file_map, mod_id, include_str!("../resources/include/infoimg-habitat.ani").to_string())
+            else {
+                error!("Error loading icon definition for habitat: {}", habitat_name);
+                continue;
+            };
+            add_location_or_habitat(&habitat_def.name(), &base_resource_id);
+        }
+    };
+
+    // Locations
+    if let Some(locations) = defs.locations() {
+        for (location_name, location_def) in locations.iter() {
+            let base_resource_id =
+                openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
+            let Ok(icon_name) =
+                load_icon_definition(&base_resource_id, location_def, file_map, mod_id, include_str!("../resources/include/infoimg-location.ani").to_string())
+            else {
+                error!("Error loading icon definition for location: {}", location_name);
+                continue;
+            };
+            add_location_or_habitat(&location_def.name(), &base_resource_id);
+        }
+    };
+}
+
+fn load_icon_definition(
+    base_resource_id: &String,
+    icon_definition: &mods::IconDefinition,
+    file_map: &HashMap<String, Box<[u8]>>,
+    mod_id: &String,
+    base_config: String,
+) -> Result<String, ()> {
+    let Some(icon_file) = file_map.get(icon_definition.icon_path()) else {
+        error!(
+            "Error loading openzt mod {}, cannot find file {} for icon_def {}",
+            mod_id,
+            icon_definition.icon_path(),
+            icon_definition.name()
+        );
+        return Err(());
+    };
+    let Some(icon_file_palette) = file_map.get(icon_definition.icon_palette_path()) else {
+        error!(
+            "Error loading openzt mod {}, cannot find file {} for icon_def {}",
+            mod_id,
+            icon_definition.icon_palette_path(),
+            icon_definition.name()
+        );
+        return Err(());
+    };
+
+    let mut animation = Animation::parse(icon_file);
+    animation.set_palette_filename(icon_definition.icon_palette_path().clone());
+    let (new_animation_bytes, icon_size) = animation.write();
+    let new_icon_file = new_animation_bytes.into_boxed_slice();
+
+    let mut ani_cfg = Ini::new_cs();
+    ani_cfg.set_comment_symbols(&[';', '#', ':']);
+    if let Err(err) =
+        ani_cfg.read(base_config)
+    {
+        error!("Error reading ini: {}", err);
+        return Err(());
+    };
+
+    if ani_cfg.set(
+        "animation",
+        "dir1",
+        Some(openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Animation)),
+    ) == None
+    {
+        error!("Error setting dir1 for ani");
+        return Err(());
+    }
+
+    let mut write_options = WriteOptions::default();
+    write_options.space_around_delimiters = true;
+    write_options.blank_lines_between_sections = 1;
+    let new_string = ani_cfg.pretty_writes(&write_options);
+    info!("New ani: \n{}", new_string);
+    let file_size = new_string.len() as u32;
+    let file_name = openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Ani);
+
+    let Ok(new_c_string) = CString::new(new_string) else {
+        error!(
+            "Error loading openzt mod {} when converting .ani to CString after modifying {}",
+            mod_id, file_name
+        );
+        return Err(());
+    };
+
+    let Ok(ztfile) = ZTFile::new_text(file_name.clone(), file_size, new_c_string) else {
+        error!(
+            "Error loading openzt mod {} when creating ZTFile for .ani after modifying {}",
+            mod_id, file_name
+        );
+        return Err(());
+    };
+    add_ztfile(Path::new("zip::./openzt.ztd"), file_name, ztfile);
+
+    let animation_file_name =
+        openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Animation);
+    let animation_ztfile =
+        ZTFile::new_raw_bytes(animation_file_name.clone(), icon_size as u32, new_icon_file);
+
+    add_ztfile(Path::new("zip::./openzt.ztd"), animation_file_name.clone(), animation_ztfile);
+
+    let palette_file_name =
+        openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Palette);
+    let palette_ztfile = ZTFile::new_raw_bytes(
+        palette_file_name.clone(),
+        icon_file_palette.len() as u32,
+        icon_file_palette.clone(),
+    );
+    add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name, palette_ztfile);
+
+    Ok(animation_file_name)
+}
+
+fn openzt_base_resource_id(
+    mod_id: &String,
+    resource_type: ResourceType,
+    resource_name: &String,
+) -> String {
+    let resource_type_name = resource_type.to_string();
+    format!("openzt.mods.{}.{}.{}", mod_id, resource_type_name, resource_name)
+}
+
+fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTResourceType) -> String {
+    format!("{}.{}", base_resource_id, file_type.to_string())
 }
 
 fn handle_ztd(resource: &PathBuf) {
