@@ -1,0 +1,4 @@
+[locations.moon]
+name="Moon"
+icon_path="icons/moon/N"
+icon_palette_path="resources/moon/moon.pal"

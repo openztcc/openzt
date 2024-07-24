@@ -3,9 +3,7 @@ use std::{collections::HashMap, sync::Mutex};
 use once_cell::sync::Lazy;
 use tracing::info;
 
-use crate::debug_dll::get_from_memory;
-
-use crate::console::CommandError;
+use crate::{console::CommandError, debug_dll::get_from_memory};
 
 static BF_REGISTRY: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 

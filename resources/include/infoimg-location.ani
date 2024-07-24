@@ -1,0 +1,8 @@
+[animation]
+dir0 = openzt_resource
+dir1 = resource_name
+animation = animation
+x0 = -30
+y0 = -36
+x1 = 37
+y1 = 36
