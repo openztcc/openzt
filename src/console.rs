@@ -2,18 +2,17 @@ extern crate winapi;
 
 use std::{
     collections::HashMap,
+    error::Error,
+    fmt,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     sync::Mutex,
     thread,
 };
 
-use std::error::Error;
-use std::fmt;
-
 use once_cell::sync::Lazy; //TODO: Use std::sync::LazyCell when it becomes stable
 use retour_utils::hook_module;
-use tracing::{info, error};
+use tracing::{error, info};
 
 #[derive(Debug)]
 pub struct CommandError {
@@ -74,8 +73,9 @@ impl From<&str> for CommandError {
 
 #[hook_module("zoo.exe")]
 pub mod zoo_console {
-    use super::{add_to_command_register, call_next_command, command_list_commands, start_server};
     use tracing::error;
+
+    use super::{add_to_command_register, call_next_command, command_list_commands, start_server};
 
     #[hook(unsafe extern "thiscall" ZTApp_updateGame, offset = 0x0001a6d1)]
     fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
@@ -84,7 +84,7 @@ pub mod zoo_console {
     }
 
     pub fn init() {
-        unsafe { 
+        unsafe {
             if !init_detours().is_ok() {
                 error!("Failed to initialize console detours");
             }
@@ -108,9 +108,11 @@ static COMMAND_QUEUE: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<S
 pub fn add_to_command_register(command_name: String, command_callback: CommandCallback) {
     info!("Registring command {} to registry", command_name);
     let Ok(mut data_mutex) = COMMAND_REGISTRY.lock() else {
-        error!("Failed to lock command registry mutex when adding command {} to registry", command_name);
+        error!(
+            "Failed to lock command registry mutex when adding command {} to registry",
+            command_name
+        );
         return;
-
     };
     data_mutex.insert(command_name, command_callback);
 }
