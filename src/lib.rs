@@ -1,5 +1,5 @@
 // #![feature(abi_thiscall, let_chains)]
-#![feature(let_chains)]
+#![feature(let_chains, map_try_insert)]
 #![allow(dead_code)]
 
 use std::{net::TcpStream, sync::Mutex};

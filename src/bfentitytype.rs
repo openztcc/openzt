@@ -1248,18 +1248,17 @@ pub struct ZTStaffType {
 
 impl EntityType for ZTStaffType {
     fn print_config_integers(&self) -> String {
-        format!("{}\ncWorkCheck: {}\ncChaseCheck: {}\ncMonthlyCost: {}\ncDutiesTextID: {}\ncWeaponRange: {}\n",
+        format!("{}\ncWorkCheck: {}\ncChaseCheck: {}\ncDutiesTextID: {}\ncWeaponRange: {}\n",
         self.ztunit_type.print_config_integers(),
         self.work_check,
         self.chase_check,
-        self.monthly_cost,
         self.duties_text_id,
         self.weapon_range,
         )
     }
 
     fn print_config_floats(&self) -> String {
-        self.ztunit_type.print_config_floats()
+        format!("{}\ncMonthlyCost: {}\n", self.ztunit_type.print_config_floats(), self.monthly_cost)
     }
 
     fn print_config_strings(&self) -> String {

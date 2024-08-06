@@ -1,12 +1,6 @@
-use core::{fmt::Display, slice};
+use core::{fmt::Display, slice, cell::RefCell};
 use std::{
-    collections::{HashMap, HashSet},
-    ffi::CString,
-    fmt,
-    fs::File,
-    io::{self, BufReader, Read},
-    path::{Path, PathBuf},
-    sync::Mutex,
+    borrow::Borrow, collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, sync::Mutex, rc::Rc
 };
 
 use bf_configparser::ini::{Ini, WriteOptions};
@@ -14,7 +8,9 @@ use once_cell::sync::Lazy;
 use retour_utils::hook_module;
 use tracing::{error, info};
 use walkdir::WalkDir;
-use zip::read::ZipFile;
+use zip::read::{ZipArchive, ZipFile};
+
+use regex::Regex;
 
 use crate::{
     animation::Animation,
@@ -208,6 +204,7 @@ pub trait FromZipFile<T> {
     fn from_zip_file(file: &mut ZipFile) -> io::Result<T>;
 }
 
+// TODO: Remove, default functionality of ResourceManager, not done via a handler
 fn add_file_to_maps(entry: &Path, file: &mut ZipFile) {
     let lowercase_file_name = file.name().to_lowercase();
     if check_file(&lowercase_file_name) {
@@ -707,7 +704,7 @@ pub fn init() {
     );
     add_to_command_register("list_openzt_mods".to_string(), command_list_openzt_mod_ids);
     add_to_command_register("list_openzt_locations_habitats".to_string(), command_list_openzt_locations_habitats);
-    add_handler(Handler::new(None, None, add_file_to_maps, ModType::Legacy));
+    // add_handler(Handler::new(None, None, add_file_to_maps, ModType::Legacy));
     // add_handler(Handler::new(None, None, load_open_zt_mod, ModType::OpenZT))
     // TODO: Add OpenZT mod handler
 }
@@ -915,38 +912,91 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     resources
 }
 
+
+use std::borrow::BorrowMut;
+
+struct ZipFileReference {
+    zip: ZipArchive<BufReader<File>>,
+    filename: String,
+}
+
+// TODO: In future this could be an enum, within LazyResourceMap we could then use take_mut to swap out the enum variant
+struct LazyResourceMap {
+    not_loaded: HashMap<String, ZipFileReference>,
+    loaded: HashMap<String, Box<[u8]>>,
+}
+
+impl LazyResourceMap {
+    fn new() -> Self {
+        Self {
+            not_loaded: HashMap::new(),
+            loaded: HashMap::new(),
+        }
+    }
+
+    fn insert_not_loaded(&mut self, key: String, value: ZipFileReference) {
+        self.not_loaded.insert(key, value);
+    }
+
+    fn insert_loaded(&mut self, key: String, value: Box<[u8]>) {
+        self.loaded.insert(key, value);
+    }
+
+    fn get(&mut self, key: &str) -> Option<&Box<[u8]>> {
+        match self.not_loaded.remove(key) {
+            Some(mut zip_file) => {
+                let mut file_buffer = vec![0u8; zip_file.zip.by_name(&zip_file.filename).unwrap().size() as usize].into_boxed_slice();
+                if let Err(e) = zip_file.zip.by_name(&zip_file.filename).unwrap().read_exact(&mut file_buffer) {
+                        error!("Error reading file: {} -> {}", zip_file.filename, e);
+                        return None;
+                }; 
+                match self.loaded.try_insert(key.to_string(), file_buffer) {
+                    Ok(result_buffer) => Some(result_buffer),
+                    Err(_) => {
+                        error!("Error inserting file into loaded map: {}", key);
+                        None
+                    }
+                }
+            }
+            None => {
+                self.loaded.get(key)
+            }
+        }
+    }
+}
+
 fn load_resources(paths: Vec<String>) {
     use std::time::Instant;
     let now = Instant::now();
+
+    let mut full_map = HashMap::new();
 
     paths.iter().rev().for_each(|path| {
         let resources = get_ztd_resources(Path::new(path), false);
         resources.iter().for_each(|resource| {
             info!("Loading resource: {}", resource.display());
             let file_name = resource.to_str().unwrap_or_default().to_lowercase();
-            // if file_name.ends_with(".ztd") {
-            //     handle_ztd(resource);
-            // } else if file_name.ends_with(".zip") {
-            //     handle_ztd2(resource);
-            // }
             if file_name.ends_with(".ztd") {
-                handle_ztd2(resource);
+                let tmp_map = handle_ztd2(resource);
+                full_map.extend(tmp_map);
             }
         });
     });
 
     let elapsed = now.elapsed();
     info!("Loaded {} mods in: {:.2?}", get_num_resources(), elapsed);
-    // list_openzt_mod_buffer();
 }
 
-// Handler V2, supporting OpenZT and legacy mods
-fn handle_ztd2(resource: &PathBuf) {
+// TODO: Return a Result<HashMap, ZTDLoadError>
+// Or even Result<LazyResourceMap, ZTDLoadError>
+fn handle_ztd2(resource: &PathBuf) -> HashMap<String, Box<[u8]>> {
+    let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
+    let mut other_file_map: HashMap<String, ZipFile> = HashMap::new();
     let file = match File::open(resource) {
         Ok(file) => file,
         Err(e) => {
             error!("Error opening file: {}", e);
-            return;
+            return file_map;
         }
     };
 
@@ -956,13 +1006,14 @@ fn handle_ztd2(resource: &PathBuf) {
         Ok(zip) => zip,
         Err(e) => {
             error!("Error reading zip: {}", e);
-            return;
+            return file_map;
         }
     };
 
-    let mut openzt_mod = false;
+    // If zip contains a meta.toml file, we assume it is an OpenZT mod
+    // We also load all resources immediately
+    let openzt_mod = zip.by_name("meta.toml").is_ok();
 
-    let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
     for i in 0..zip.len() {
         let mut file = match zip.by_index(i) {
             Ok(file) => file,
@@ -975,43 +1026,199 @@ fn handle_ztd2(resource: &PathBuf) {
             continue;
         }
         let file_name = file.name().to_string();
-        if file_name == "meta.toml" {
-            openzt_mod = true;
-        }
 
-        let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
-        match file.read_exact(&mut file_buffer) {
-            Ok(bytes_read) => bytes_read,
-            Err(e) => {
-                error!("Error reading file: {} -> {}", file.name(), e);
-                continue;
-            }
-        };
+        // if openzt_mod {
+            let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
+            match file.read_exact(&mut file_buffer) {
+                Ok(bytes_read) => bytes_read,
+                Err(e) => {
+                    error!("Error reading file: {} -> {}", file.name(), e);
+                    continue;
+                }
+            };
 
-        file_map.insert(file_name, file_buffer);
+            file_map.insert(file_name, file_buffer);
+        // } else {
+            // other_file_map.insert(file_name, file);
+        // }
+
     }
 
     if openzt_mod {
         file_map = load_open_zt_mod(file_map);
     }
 
-    load_legacy_mod(file_map);
+    file_map
 }
 
-fn load_legacy_mod(file_map: HashMap<String, Box<[u8]>>) {
-    let keys = file_map.keys().clone();
-    for file in keys {
-        if file == "meta.toml" || file.starts_with("defs/") || file.starts_with("resources/") {
-            continue;
+#[derive(Debug)]
+enum LegacyCfgType {
+    Ambient,
+    Animal,
+    Building,
+    Fence,
+    Filter,
+    Food,
+    Free,
+    Fringe,
+    Guest,
+    Help,
+    Item,
+    Path,
+    Rubble,
+    Scenario,
+    Scenery,
+    Staff,
+    Tile,
+    Wall,
+    Expansion,
+    Show,
+    Tank,
+    UIInfoImage,
+    Economy,
+}
+
+#[derive(Debug)]
+struct LegacyCfg {
+    cfg_type: LegacyCfgType,
+    file_name: String,
+}
+
+fn map_legacy_cfg_type(file_type_str: &str, file_name: String) -> Result<LegacyCfg, String> {
+    match file_type_str {
+        "ambient" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Ambient,
+            file_name,
+        }),
+        "animal" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Animal,
+            file_name,
+        }),
+        "bldg" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Building,
+            file_name,
+        }),
+        "fences" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Fence,
+            file_name,
+        }),
+        "filter" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Filter,
+            file_name,
+        }),
+        "food" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Food,
+            file_name,
+        }),
+        "free" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Free,
+            file_name,
+        }),
+        "fringe" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Fringe,
+            file_name,
+        }),
+        "guests" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Guest,
+            file_name,
+        }),
+        "help" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Help,
+            file_name,
+        }),
+        "items" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Item,
+            file_name,
+        }),
+        "paths" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Path,
+            file_name,
+        }),
+        "rubble" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Rubble,
+            file_name,
+        }),
+        "scenar" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Scenario,
+            file_name,
+        }),
+        "scener" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Scenery,
+            file_name,
+        }),
+        "staff" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Staff,
+            file_name,
+        }),
+        "tile" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Tile,
+            file_name,
+        }),
+        "twall" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Wall,
+            file_name,
+        }),
+        "xpac" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Expansion,
+            file_name,
+        }),
+        "shows" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Show,
+            file_name,
+        }),
+        "tanks" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Tank,
+            file_name,
+        }),
+        "ui/infoimg" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::UIInfoImage,
+            file_name,
+        }),
+        "economy" => Ok(LegacyCfg {
+            cfg_type: LegacyCfgType::Economy,
+            file_name,
+        }),
+        _ => Err(format!("Unknown legacy cfg type: {}", file_type_str)),
+    }
+}
+
+static LEGACY_CFG_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^((ambient|animal|bldg|fences|filter|food|free|fringe|guests|help|items|paths|rubble|scenar|scener|staff|tile|twall|xpac)[\w\-. ]*?\.cfg)|((shows|tanks|ui\/infoimg|economy)\.cfg)$").unwrap());
+
+fn get_legacy_cfg_type(file_name: &String) -> Option<LegacyCfg> {
+    let capture = LEGACY_CFG_REGEX.captures(file_name)?;
+    match capture.iter().collect::<Vec<_>>().as_slice() {
+        [_, Some(file_name), Some(file_type), None, None] => {
+            map_legacy_cfg_type(&file_type.as_str(), file_name.as_str().to_string()).ok()
         }
+        [_, None, None, Some(file_name), Some(file_type)] => {
+            map_legacy_cfg_type(&file_type.as_str(), file_name.as_str().to_string()).ok()
+        }
+        _ => {
+            None
+        }
+    }
+}
+
+// fn load_legacy_mod(file_map: HashMap<String, Box<[u8]>>) {
+//     let keys = file_map.keys().clone();
+//     for file in keys {
+//         if file == "meta.toml" || file.starts_with("defs/") || file.starts_with("resources/") {
+//             continue;
+//         }
         
-        let data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
-            Ok(data_mutex) => data_mutex,
-            Err(e) => {
-                error!("Error locking resource handler array: {}", e);
-                return;
-            }
-        };
+//         let data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
+//             Ok(data_mutex) => data_mutex,
+//             Err(e) => {
+//                 error!("Error locking resource handler array: {}", e);
+//                 return;
+//             }
+//         };
+
+//         let legacy_cfg_type = get_legacy_cfg_type(file);
+//         if legacy_cfg_type.is_some() {
+//             info!("Cfg Type: {:?}", legacy_cfg_type);
+//         }
+
         // for handler in data_mutex.iter() {
         //     for i in 0..zip.len() {
         //         // ZipFile doesn't provide a .seek() method to set the cursor to the start of the file, so we create new ZipFile for each handler
@@ -1033,8 +1240,8 @@ fn load_legacy_mod(file_map: HashMap<String, Box<[u8]>>) {
         // if file.starts_with("defs/") {
         //     load_def(file_map, file);
         // }
-    }
-}
+    // }
+// }
 
 fn load_open_zt_mod(file_map: HashMap<String, Box<[u8]>>) -> HashMap<String, Box<[u8]>> {
     let Some(meta_file) = file_map.get("meta.toml") else {
