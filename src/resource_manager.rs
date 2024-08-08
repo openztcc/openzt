@@ -3,12 +3,14 @@ use std::{
     borrow::Borrow, collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, sync::Mutex, rc::Rc
 };
 
+use anyhow::Context;
+
 use bf_configparser::ini::{Ini, WriteOptions};
 use once_cell::sync::Lazy;
 use retour_utils::hook_module;
 use tracing::{error, info};
 use walkdir::WalkDir;
-use zip::read::{ZipArchive, ZipFile};
+use zip::{read::{ZipArchive, ZipFile}, result};
 
 use regex::Regex;
 
@@ -915,6 +917,7 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
 
 use std::borrow::BorrowMut;
 
+// TODO: Change to Rc<RefCell<ZipArchive<BufReader<File>>>> or Rc<RefCell<ZipFile>> (try latter first)
 struct ZipFileReference {
     zip: ZipArchive<BufReader<File>>,
     filename: String,
@@ -934,32 +937,47 @@ impl LazyResourceMap {
         }
     }
 
-    fn insert_not_loaded(&mut self, key: String, value: ZipFileReference) {
-        self.not_loaded.insert(key, value);
+    fn insert_not_loaded(&mut self, key: String, value: ZipFileReference) -> Option<ZipFileReference>{
+        self.not_loaded.insert(key, value)
     }
 
-    fn insert_loaded(&mut self, key: String, value: Box<[u8]>) {
-        self.loaded.insert(key, value);
+    fn insert_loaded(&mut self, key: String, value: Box<[u8]>) -> Option<Box<[u8]>> {
+        self.loaded.insert(key, value)
     }
 
-    fn get(&mut self, key: &str) -> Option<&Box<[u8]>> {
+    // fn load_and_insert(&mut self, key: String, mut value: ZipFileReference) -> anyhow::Result<&Box<[u8]>> {
+    fn load_and_insert(&mut self, key: String, mut archive: ZipArchive<BufReader<File>>) -> anyhow::Result<&Box<[u8]>> {
+        let mut file = archive.by_name(&key)
+            .with_context(|| format!("Error finding file in archive: {}", &key))?;
+
+        let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
+
+        file.read_exact(&mut file_buffer)
+            .with_context(|| format!("Error reading file: {}", &key))?;
+
+        self.loaded.insert(key.clone(), file_buffer);
+        Ok(self.loaded.get(&key).unwrap())
+    }
+
+    fn get(&mut self, key: &str) -> anyhow::Result<Option<&Box<[u8]>>> {
         match self.not_loaded.remove(key) {
             Some(mut zip_file) => {
                 let mut file_buffer = vec![0u8; zip_file.zip.by_name(&zip_file.filename).unwrap().size() as usize].into_boxed_slice();
-                if let Err(e) = zip_file.zip.by_name(&zip_file.filename).unwrap().read_exact(&mut file_buffer) {
-                        error!("Error reading file: {} -> {}", zip_file.filename, e);
-                        return None;
-                }; 
+
+                zip_file.zip.by_name(&zip_file.filename).unwrap().read_exact(&mut file_buffer)
+                    .with_context(|| format!("Error reading file: {}", zip_file.filename))?;
+
+                // TODO: Figure out why using ? here causes a lifetime issue
                 match self.loaded.try_insert(key.to_string(), file_buffer) {
-                    Ok(result_buffer) => Some(result_buffer),
+                    Ok(result_buffer) => Ok(Some(result_buffer)),
                     Err(_) => {
                         error!("Error inserting file into loaded map: {}", key);
-                        None
+                        Ok(None)
                     }
                 }
             }
             None => {
-                self.loaded.get(key)
+                Ok(self.loaded.get(key))
             }
         }
     }
@@ -985,6 +1003,57 @@ fn load_resources(paths: Vec<String>) {
 
     let elapsed = now.elapsed();
     info!("Loaded {} mods in: {:.2?}", get_num_resources(), elapsed);
+}
+
+// TODO: Pass in reference to resource map, insert loaded/unloaded resources into map
+// Maybe pass in and pass back out?
+// Maybe method should be on the resource map?
+fn handle_ztd3(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<()> {
+    let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
+    let mut other_file_map: HashMap<String, ZipFile> = HashMap::new();
+    let file = File::open(resource)
+            .with_context(|| format!("Error opening file: {}", resource.display()))?;
+
+    let mut buf_reader = BufReader::new(file);
+
+    let mut zip = zip::ZipArchive::new(&mut buf_reader)
+        .with_context(|| format!("Error reading zip: {}", resource.display()))?;
+
+    // If zip contains a meta.toml file, we assume it is an OpenZT mod
+    // We also load all resources immediately
+    let openzt_mod = zip.by_name("meta.toml").is_ok();
+
+    for i in 0..zip.len() {
+        let mut file = match zip.by_index(i) {
+            Ok(file) => file,
+            Err(e) => {
+                error!("Error reading zip file: {}", e);
+                continue;
+            }
+        };
+        if file.is_dir() {
+            continue;
+        }
+        let file_name = file.name().to_string();
+
+        // if openzt_mod {
+            let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
+            match file.read_exact(&mut file_buffer) {
+                Ok(bytes_read) => bytes_read,
+                Err(e) => {
+                    error!("Error reading file: {} -> {}", file.name(), e);
+                    continue;
+                }
+            };
+
+            file_map.insert(file_name, file_buffer);
+    }
+
+    if openzt_mod {
+        file_map = load_open_zt_mod(file_map);
+    }
+    // file_map
+    Ok(())
 }
 
 // TODO: Return a Result<HashMap, ZTDLoadError>
