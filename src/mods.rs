@@ -42,8 +42,18 @@ pub struct Meta {
     mod_id: String,
     #[serde(deserialize_with = "deserialize_version")]
     version: Version,
+    ztd_type: ZtdType,
     link: Option<String>,
     dependencies: Vec<Dependencies>,
+}
+
+#[derive(Deserialize, Default, PartialEq, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum ZtdType {
+    Legacy,
+    Combined,
+    #[default]
+    Openzt,
 }
 
 #[derive(Debug, PartialEq, Clone, Getters)]

@@ -915,11 +915,9 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
 }
 
 
-use std::borrow::BorrowMut;
-
-// TODO: Change to Rc<RefCell<ZipArchive<BufReader<File>>>> or Rc<RefCell<ZipFile>> (try latter first)
+// TODO: Change to Rc<RefCell<ZipArchive<BufReader<File>>>>
 struct ZipFileReference {
-    zip: ZipArchive<BufReader<File>>,
+    zip: Rc<RefCell<ZipArchive<BufReader<File>>>>,
     filename: String,
 }
 
@@ -946,8 +944,9 @@ impl LazyResourceMap {
     }
 
     // fn load_and_insert(&mut self, key: String, mut value: ZipFileReference) -> anyhow::Result<&Box<[u8]>> {
-    fn load_and_insert(&mut self, key: String, mut archive: ZipArchive<BufReader<File>>) -> anyhow::Result<&Box<[u8]>> {
-        let mut file = archive.by_name(&key)
+    fn load_and_insert(&mut self, key: String, mut archive: Rc<RefCell<ZipArchive<BufReader<File>>>>) -> anyhow::Result<&Box<[u8]>> {
+        let mut binding = archive.borrow_mut();
+        let mut file = binding.by_name(&key)
             .with_context(|| format!("Error finding file in archive: {}", &key))?;
 
         let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
@@ -961,11 +960,14 @@ impl LazyResourceMap {
 
     fn get(&mut self, key: &str) -> anyhow::Result<Option<&Box<[u8]>>> {
         match self.not_loaded.remove(key) {
-            Some(mut zip_file) => {
-                let mut file_buffer = vec![0u8; zip_file.zip.by_name(&zip_file.filename).unwrap().size() as usize].into_boxed_slice();
+            Some(mut zip_file_ref) => {
+                let mut binding = zip_file_ref.zip.borrow_mut();
+                let mut zip_file = binding.by_name(&zip_file_ref.filename)
+                    .with_context(|| format!("Error finding file in archive: {}", zip_file_ref.filename))?;
+                let mut file_buffer = vec![0u8; zip_file.size() as usize].into_boxed_slice();
 
-                zip_file.zip.by_name(&zip_file.filename).unwrap().read_exact(&mut file_buffer)
-                    .with_context(|| format!("Error reading file: {}", zip_file.filename))?;
+                zip_file.read_exact(&mut file_buffer)
+                    .with_context(|| format!("Error reading file: {}", zip_file_ref.filename))?;
 
                 // TODO: Figure out why using ? here causes a lifetime issue
                 match self.loaded.try_insert(key.to_string(), file_buffer) {
@@ -1019,9 +1021,11 @@ fn handle_ztd3(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<
     let mut zip = zip::ZipArchive::new(&mut buf_reader)
         .with_context(|| format!("Error reading zip: {}", resource.display()))?;
 
-    // If zip contains a meta.toml file, we assume it is an OpenZT mod
-    // We also load all resources immediately
-    let openzt_mod = zip.by_name("meta.toml").is_ok();
+    let ztd_type = load_open_zt_mod(&zip)?;
+
+    if ztd_type == ZtdType::OpenZT {
+        Ok(())
+    }
 
     for i in 0..zip.len() {
         let mut file = match zip.by_index(i) {
@@ -1049,9 +1053,6 @@ fn handle_ztd3(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<
             file_map.insert(file_name, file_buffer);
     }
 
-    if openzt_mod {
-        file_map = load_open_zt_mod(file_map);
-    }
     // file_map
     Ok(())
 }
@@ -1312,36 +1313,56 @@ fn get_legacy_cfg_type(file_name: &String) -> Option<LegacyCfg> {
     // }
 // }
 
-fn load_open_zt_mod(file_map: HashMap<String, Box<[u8]>>) -> HashMap<String, Box<[u8]>> {
-    let Some(meta_file) = file_map.get("meta.toml") else {
-        error!("Error reading meta.toml from OpenZT mod");
-        return file_map;
-    };
+fn read_file_from_zip(zip: &mut ZipArchive<BufReader<File>>, file_name: &str) -> anyhow::Result<Box<[u8]>> {
+    let mut file = zip.by_name(file_name)
+        .with_context(|| format!("Error finding file in archive: {}", file_name))?;
 
-    let intermediate_string = String::from_utf8_lossy(&meta_file).to_string();
+    let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
 
-    let Ok(meta) = toml::from_str::<mods::Meta>(&intermediate_string) else {
-        error!("Error parsing meta.toml from OpenZT mod");
-        return file_map;
-    };
+    file.read_exact(&mut file_buffer)
+        .with_context(|| format!("Error reading file: {}", file_name))?;
+
+    Ok(file_buffer)
+}
+
+fn read_file_from_zip_to_string(zip: &mut ZipArchive<BufReader<File>>, file_name: &str) -> anyhow::Result<String> {
+    let mut buffer = read_file_from_zip(zip, file_name)?;
+
+    Ok(String::from_utf8_lossy(&meta_file).to_string())
+}
+
+
+fn load_open_zt_mod(&mut archive: ZipArchive<BufReader<File>>) -> anyhow::Result<mods::ZtdType> {
+    if archive.by_name("meta.toml").is_err() {
+        return Ok(mods::ZtdType::Legacy);
+    }
+
+    let meta = toml::from_str::<mods::Meta>(&read_file_from_zip_to_string(&mut archive, "meta.toml")?)
+        .with_context("Failed to parse meta.toml")?;
 
     let mod_id = meta.mod_id().to_string();
 
     if !add_new_mod_id(&mod_id) {
-        error!("Mod already loaded: {}", mod_id);
-        return file_map;
+        return error!("Mod already loaded: {}", mod_id);
     }
 
     info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
 
-    let keys = file_map.keys().clone();
-    for file in keys {
-        info!("Loading file: {}", file);
-        if file.starts_with("defs/") {
-            load_def(&mod_id, &file_map, &file);
+    for i in 0..zip.len() {
+        let file = zip.by_index(i)
+            .with_context(|| format!("Error reading zip file: {}", e))?;
+        
+        if file.is_dir() {
+            continue;
         }
+        let file_name = file.name().to_string();
+
+        load_def_2(&mod_id, &file_name, &mut file);
     }
-    file_map
+
+    Ok(meta.ztd_type().clone())
+
+    
 }
 
 // Map between the id ZT uses to reference locations/habitats and the string ptr of the animation (icon) resource
@@ -1469,6 +1490,51 @@ impl Display for ZTResourceType {
             ZTResourceType::Ani => write!(f, "ani"),
         }
     }
+}
+
+fn load_def_2(mod_id: &String, file_name: &String, file: &mut ZipFile) -> anyhow::Result<mods::ModDefinition> {
+    info!("Loading defs from {} {}", mod_id, file_name);
+    let mut intermediate_string = String::new();
+    file.read_to_string(&mut intermediate_string)
+        .with_context(|| format!("Error reading defs.toml from OpenZT mod: {}", file_name))?;
+
+    let Ok(defs) = toml::from_str::<mods::ModDefinition>(&intermediate_string)
+        .with_context(|| format!("Error parsing defs.toml from OpenZT mod: {}", file_name))?;
+
+    info!("Loading defs: {}", defs.len());
+
+    // Habitats
+    if let Some(habitats) = defs.habitats() {
+        for (habitat_name, habitat_def) in habitats.iter() {
+            let base_resource_id =
+                openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
+            let Ok(icon_name) = load_icon_definition(
+                &base_resource_id,
+                habitat_def,
+                file,
+                mod_id,
+                include_str!("../resources/include/infoimg-habitat.ani").to_string(),
+            )?;
+            add_location_or_habitat(&habitat_def.name(), &base_resource_id);
+        }
+    }
+
+    // Locations
+    if let Some(locations) = defs.locations() {
+        for (location_name, location_def) in locations.iter() {
+            let base_resource_id =
+                openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
+            let Ok(icon_name) = load_icon_definition(
+                &base_resource_id,
+                location_def,
+                file,
+                mod_id,
+                include_str!("../resources/include/infoimg-location.ani").to_string(),
+            )?;
+            add_location_or_habitat(&location_def.name(), &base_resource_id);
+        }
+    }
+    Ok(defs)
 }
 
 fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_name: &String) {
