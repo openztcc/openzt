@@ -457,7 +457,8 @@ pub mod custom_expansion {
             );
         }
 
-        reimplemented_result
+        // reimplemented_result
+        result
     }
 
     #[hook(unsafe extern "stdcall" ZTUI_expansionselect_setup, offset=0x001291fb)]
@@ -709,13 +710,7 @@ fn add_expansion_with_string_value(
     };
     let name_string_start_ptr = name_string_c_string.into_raw() as u32;
     let name_string_end_ptr = name_string_start_ptr + name_len as u32 + 1;
-    let Ok(name_id) = add_string_to_registry(string_value.clone()) else {
-        error!(
-            "Error adding string to registry: {}, whilst adding expansion: {}",
-            string_value, name
-        );
-        return;
-    };
+    let name_id = add_string_to_registry(string_value.clone());
     if let Err(err) = add_expansion(
         Expansion {
             expansion_id,

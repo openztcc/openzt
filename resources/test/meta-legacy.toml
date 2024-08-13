@@ -1,0 +1,7 @@
+name="my fun mod"
+description="a mod full of fun"
+authors=["Finn"]
+mod_id="finn.my_fun_mod"
+version="1.0.0"
+link="https://mywebsite.com/myfunmod"
+ztd_type="legacy"

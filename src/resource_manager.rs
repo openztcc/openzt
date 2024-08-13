@@ -1,9 +1,9 @@
-use core::{fmt::Display, slice, cell::RefCell};
+use std::{fmt::Display, slice, cell::RefCell, str};
 use std::{
     borrow::Borrow, collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, sync::Mutex, rc::Rc
 };
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 
 use bf_configparser::ini::{Ini, WriteOptions};
 use once_cell::sync::Lazy;
@@ -706,9 +706,6 @@ pub fn init() {
     );
     add_to_command_register("list_openzt_mods".to_string(), command_list_openzt_mod_ids);
     add_to_command_register("list_openzt_locations_habitats".to_string(), command_list_openzt_locations_habitats);
-    // add_handler(Handler::new(None, None, add_file_to_maps, ModType::Legacy));
-    // add_handler(Handler::new(None, None, load_open_zt_mod, ModType::OpenZT))
-    // TODO: Add OpenZT mod handler
 }
 
 #[hook_module("zoo.exe")]
@@ -906,8 +903,6 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
             continue;
         };
         if filename.to_lowercase().ends_with(".ztd") && !filename.starts_with("ztat") {
-            // || filename.to_lowercase().ends_with(".zip")
-        // {
             resources.push(entry.path().to_path_buf());
         }
     }
@@ -915,7 +910,6 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
 }
 
 
-// TODO: Change to Rc<RefCell<ZipArchive<BufReader<File>>>>
 struct ZipFileReference {
     zip: Rc<RefCell<ZipArchive<BufReader<File>>>>,
     filename: String,
@@ -943,7 +937,6 @@ impl LazyResourceMap {
         self.loaded.insert(key, value)
     }
 
-    // fn load_and_insert(&mut self, key: String, mut value: ZipFileReference) -> anyhow::Result<&Box<[u8]>> {
     fn load_and_insert(&mut self, key: String, mut archive: Rc<RefCell<ZipArchive<BufReader<File>>>>) -> anyhow::Result<&Box<[u8]>> {
         let mut binding = archive.borrow_mut();
         let mut file = binding.by_name(&key)
@@ -989,7 +982,7 @@ fn load_resources(paths: Vec<String>) {
     use std::time::Instant;
     let now = Instant::now();
 
-    let mut full_map = HashMap::new();
+    let mut map = LazyResourceMap::new();
 
     paths.iter().rev().for_each(|path| {
         let resources = get_ztd_resources(Path::new(path), false);
@@ -997,8 +990,9 @@ fn load_resources(paths: Vec<String>) {
             info!("Loading resource: {}", resource.display());
             let file_name = resource.to_str().unwrap_or_default().to_lowercase();
             if file_name.ends_with(".ztd") {
-                let tmp_map = handle_ztd2(resource);
-                full_map.extend(tmp_map);
+                if let Err(err) = handle_ztd(&mut map, resource) {
+                    error!("Error loading ztd: {} -> {}", file_name, err);
+                }
             }
         });
     });
@@ -1007,24 +1001,21 @@ fn load_resources(paths: Vec<String>) {
     info!("Loaded {} mods in: {:.2?}", get_num_resources(), elapsed);
 }
 
-// TODO: Pass in reference to resource map, insert loaded/unloaded resources into map
-// Maybe pass in and pass back out?
-// Maybe method should be on the resource map?
-fn handle_ztd3(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<()> {
+fn handle_ztd(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<()> {
     let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
     let mut other_file_map: HashMap<String, ZipFile> = HashMap::new();
     let file = File::open(resource)
             .with_context(|| format!("Error opening file: {}", resource.display()))?;
 
-    let mut buf_reader = BufReader::new(file);
+    let buf_reader = BufReader::new(file);
 
-    let mut zip = zip::ZipArchive::new(&mut buf_reader)
+    let mut zip = zip::ZipArchive::new(buf_reader)
         .with_context(|| format!("Error reading zip: {}", resource.display()))?;
 
-    let ztd_type = load_open_zt_mod(&zip)?;
+    let ztd_type = load_open_zt_mod(map, &mut zip)?;
 
-    if ztd_type == ZtdType::OpenZT {
-        Ok(())
+    if ztd_type == mods::ZtdType::Openzt {
+        return Ok(());
     }
 
     for i in 0..zip.len() {
@@ -1055,70 +1046,6 @@ fn handle_ztd3(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<
 
     // file_map
     Ok(())
-}
-
-// TODO: Return a Result<HashMap, ZTDLoadError>
-// Or even Result<LazyResourceMap, ZTDLoadError>
-fn handle_ztd2(resource: &PathBuf) -> HashMap<String, Box<[u8]>> {
-    let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
-    let mut other_file_map: HashMap<String, ZipFile> = HashMap::new();
-    let file = match File::open(resource) {
-        Ok(file) => file,
-        Err(e) => {
-            error!("Error opening file: {}", e);
-            return file_map;
-        }
-    };
-
-    let mut buf_reader = BufReader::new(file);
-
-    let mut zip = match zip::ZipArchive::new(&mut buf_reader) {
-        Ok(zip) => zip,
-        Err(e) => {
-            error!("Error reading zip: {}", e);
-            return file_map;
-        }
-    };
-
-    // If zip contains a meta.toml file, we assume it is an OpenZT mod
-    // We also load all resources immediately
-    let openzt_mod = zip.by_name("meta.toml").is_ok();
-
-    for i in 0..zip.len() {
-        let mut file = match zip.by_index(i) {
-            Ok(file) => file,
-            Err(e) => {
-                error!("Error reading zip file: {}", e);
-                continue;
-            }
-        };
-        if file.is_dir() {
-            continue;
-        }
-        let file_name = file.name().to_string();
-
-        // if openzt_mod {
-            let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
-            match file.read_exact(&mut file_buffer) {
-                Ok(bytes_read) => bytes_read,
-                Err(e) => {
-                    error!("Error reading file: {} -> {}", file.name(), e);
-                    continue;
-                }
-            };
-
-            file_map.insert(file_name, file_buffer);
-        // } else {
-            // other_file_map.insert(file_name, file);
-        // }
-
-    }
-
-    if openzt_mod {
-        file_map = load_open_zt_mod(file_map);
-    }
-
-    file_map
 }
 
 #[derive(Debug)]
@@ -1269,50 +1196,7 @@ fn get_legacy_cfg_type(file_name: &String) -> Option<LegacyCfg> {
     }
 }
 
-// fn load_legacy_mod(file_map: HashMap<String, Box<[u8]>>) {
-//     let keys = file_map.keys().clone();
-//     for file in keys {
-//         if file == "meta.toml" || file.starts_with("defs/") || file.starts_with("resources/") {
-//             continue;
-//         }
-        
-//         let data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
-//             Ok(data_mutex) => data_mutex,
-//             Err(e) => {
-//                 error!("Error locking resource handler array: {}", e);
-//                 return;
-//             }
-//         };
-
-//         let legacy_cfg_type = get_legacy_cfg_type(file);
-//         if legacy_cfg_type.is_some() {
-//             info!("Cfg Type: {:?}", legacy_cfg_type);
-//         }
-
-        // for handler in data_mutex.iter() {
-        //     for i in 0..zip.len() {
-        //         // ZipFile doesn't provide a .seek() method to set the cursor to the start of the file, so we create new ZipFile for each handler
-        //         let mut file = match zip.by_index(i) {
-        //             Ok(file) => file,
-        //             Err(e) => {
-        //                 error!("Error reading zip file: {}", e);
-        //                 continue;
-        //             }
-        //         };
-        //         if file.is_dir() {
-        //             continue;
-        //         }
-        //         handler.handle(resource, &mut file);
-        //     }
-        // }
-
-        // info!("Loading file: {}", file);
-        // if file.starts_with("defs/") {
-        //     load_def(file_map, file);
-        // }
-    // }
-// }
-
+// TODO: Make some ZipFile and ZipArchive wrappers and add these functions to them
 fn read_file_from_zip(zip: &mut ZipArchive<BufReader<File>>, file_name: &str) -> anyhow::Result<Box<[u8]>> {
     let mut file = zip.by_name(file_name)
         .with_context(|| format!("Error finding file in archive: {}", file_name))?;
@@ -1328,37 +1212,64 @@ fn read_file_from_zip(zip: &mut ZipArchive<BufReader<File>>, file_name: &str) ->
 fn read_file_from_zip_to_string(zip: &mut ZipArchive<BufReader<File>>, file_name: &str) -> anyhow::Result<String> {
     let mut buffer = read_file_from_zip(zip, file_name)?;
 
-    Ok(String::from_utf8_lossy(&meta_file).to_string())
+    Ok(str::from_utf8(&buffer).with_context(|| format!("Error converting file {} to utf8", file_name))?.to_string())
 }
 
+fn zip_file_to_string(mut zip: ZipFile) -> anyhow::Result<String> {
+    let mut buffer = vec![0u8; zip.size() as usize].into_boxed_slice();
+    zip.read_exact(&mut buffer)
+        .with_context(|| format!("Error reading file: {}", zip.name()))?;
 
-fn load_open_zt_mod(&mut archive: ZipArchive<BufReader<File>>) -> anyhow::Result<mods::ZtdType> {
+    Ok(str::from_utf8(&buffer).with_context(|| format!("Error converting file {} to utf8", zip.name()))?.to_string())
+}
+
+fn load_open_zt_mod(map: &mut LazyResourceMap, archive: &mut ZipArchive<BufReader<File>>) -> anyhow::Result<mods::ZtdType> {
     if archive.by_name("meta.toml").is_err() {
         return Ok(mods::ZtdType::Legacy);
     }
 
-    let meta = toml::from_str::<mods::Meta>(&read_file_from_zip_to_string(&mut archive, "meta.toml")?)
-        .with_context("Failed to parse meta.toml")?;
+    let meta = toml::from_str::<mods::Meta>(&read_file_from_zip_to_string(archive, "meta.toml")?)
+        .with_context(|| "Failed to parse meta.toml")?;
 
     let mod_id = meta.mod_id().to_string();
 
     if !add_new_mod_id(&mod_id) {
-        return error!("Mod already loaded: {}", mod_id);
+        return Err(anyhow!("Mod already loaded: {}", mod_id));
     }
 
     info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
 
-    for i in 0..zip.len() {
-        let file = zip.by_index(i)
-            .with_context(|| format!("Error reading zip file: {}", e))?;
+    let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)
+            // TODO: Create tpye that wraps ZipArchive and provide archive name for better error reporting
+            .with_context(|| format!("Error reading zip file at index {}", i))?;
         
         if file.is_dir() {
             continue;
         }
         let file_name = file.name().to_string();
 
-        load_def_2(&mod_id, &file_name, &mut file);
+        let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
+        file.read_exact(&mut file_buffer)
+            .with_context(|| format!("Error reading file: {}", file_name))?;
+
+        file_map.insert(file_name, file_buffer);
     }
+
+    let keys = file_map.keys().clone();
+
+    for file_name in keys {
+        if file_name.starts_with("defs/") {
+            load_def_2(&mod_id, &file_name, &file_map)?;
+        }
+    }
+    // for (file_name, file_buffer) in file_map.iter() {
+    //     if file_name.starts_with("defs/") {
+    //         load_def_2(&mod_id, &file_name, &mut file_buffer)?;
+    //     }
+    // }
 
     Ok(meta.ztd_type().clone())
 
@@ -1406,31 +1317,24 @@ fn command_list_openzt_locations_habitats(_args: Vec<&str>) -> Result<String, Co
 }
 
 // TODO: Return result from here
-fn add_location_or_habitat(name: &String, icon_resource_id: &String) {
-    let Ok(mut resource_binding) = LOCATIONS_HABITATS_RESOURCE_MAP.lock() else {
-        error!(
-            "Failed to lock locations/habitats map; returning from add_location_or_habitat for {}",
-            name
-        );
-        return;
-    };
-    let Ok(mut id_binding) = LOCATIONS_HABITATS_ID_MAP.lock() else {
-        error!(
-            "Failed to lock locations/habitats map; returning from add_location_or_habitat for {}",
-            name
-        );
-        return;
-    };
-    let Ok(string_id) = add_string_to_registry(name.clone()) else {
-        error!("Failed to add string to registry: {}", name);
-        return;
-    };
+fn add_location_or_habitat(name: &String, icon_resource_id: &String) -> anyhow::Result<()> {
+    let mut resource_binding = LOCATIONS_HABITATS_RESOURCE_MAP.lock().unwrap();
+
+    let mut id_binding = LOCATIONS_HABITATS_ID_MAP.lock().unwrap();
+
+    let string_id = add_string_to_registry(name.clone());
+
     info!("Adding location/habitat: {} {} -> {}", name, icon_resource_id, string_id);
-    let icon_resource_id_cstring = CString::new(icon_resource_id.clone()).unwrap();
+
+    let icon_resource_id_cstring = CString::new(icon_resource_id.clone())
+        .with_context(|| format!("Failed to create cstring for location/habitat {} with icon_resource_id {}", name, icon_resource_id))?;
     resource_binding.insert(string_id, icon_resource_id_cstring.into_raw() as u32);
     id_binding.insert(name.clone(), string_id);
+
+    Ok(())
 }
 
+// TODO: Return Result<Option<u32>>
 fn get_location_or_habitat_by_id(id: u32) -> Option<u32> {
     let Ok(binding) = LOCATIONS_HABITATS_RESOURCE_MAP.lock() else {
         error!(
@@ -1442,6 +1346,7 @@ fn get_location_or_habitat_by_id(id: u32) -> Option<u32> {
     binding.get(&id).cloned()
 }
 
+// TODO: Return Result<Option<u32>>
 fn get_location_or_habitat_by_name(name: &String) -> Option<u32> {
     let Ok(binding) = LOCATIONS_HABITATS_ID_MAP.lock() else {
         error!(
@@ -1454,6 +1359,7 @@ fn get_location_or_habitat_by_name(name: &String) -> Option<u32> {
 }
 
 // Adds a new mod id to the set, returns false if the mod_id already exists
+// TODO: Return Result<bool>
 fn add_new_mod_id(mod_id: &String) -> bool {
     let Ok(mut binding) = MOD_ID_SET.lock() else {
         error!("Failed to lock mod id set; returning from add_mod_id for {}", mod_id);
@@ -1492,14 +1398,18 @@ impl Display for ZTResourceType {
     }
 }
 
-fn load_def_2(mod_id: &String, file_name: &String, file: &mut ZipFile) -> anyhow::Result<mods::ModDefinition> {
-    info!("Loading defs from {} {}", mod_id, file_name);
-    let mut intermediate_string = String::new();
-    file.read_to_string(&mut intermediate_string)
-        .with_context(|| format!("Error reading defs.toml from OpenZT mod: {}", file_name))?;
+// Return array of read files ()
+fn load_def_2(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
+    info!("Loading defs {} from {}", file_name, mod_id);
 
-    let Ok(defs) = toml::from_str::<mods::ModDefinition>(&intermediate_string)
-        .with_context(|| format!("Error parsing defs.toml from OpenZT mod: {}", file_name))?;
+    let file = file_map.get(file_name)
+        .with_context(|| format!("Error finding file {} in resource map for mod {}", file_name, mod_id))?;
+
+    let mut intermediate_string = str::from_utf8(file)
+        .with_context(|| format!("Error converting file {} to utf8 for mod {}", file_name, mod_id))?.to_string();
+
+    let defs = toml::from_str::<mods::ModDefinition>(&intermediate_string)
+        .with_context(|| format!("Error parsing defs from OpenZT mod: {}", file_name))?;
 
     info!("Loading defs: {}", defs.len());
 
@@ -1508,10 +1418,10 @@ fn load_def_2(mod_id: &String, file_name: &String, file: &mut ZipFile) -> anyhow
         for (habitat_name, habitat_def) in habitats.iter() {
             let base_resource_id =
                 openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
-            let Ok(icon_name) = load_icon_definition(
+            let icon_name = load_icon_definition_2( 
                 &base_resource_id,
                 habitat_def,
-                file,
+                &file_map,
                 mod_id,
                 include_str!("../resources/include/infoimg-habitat.ani").to_string(),
             )?;
@@ -1524,10 +1434,10 @@ fn load_def_2(mod_id: &String, file_name: &String, file: &mut ZipFile) -> anyhow
         for (location_name, location_def) in locations.iter() {
             let base_resource_id =
                 openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
-            let Ok(icon_name) = load_icon_definition(
+            let icon_name = load_icon_definition_2(
                 &base_resource_id,
                 location_def,
-                file,
+                &file_map,
                 mod_id,
                 include_str!("../resources/include/infoimg-location.ani").to_string(),
             )?;
@@ -1537,51 +1447,124 @@ fn load_def_2(mod_id: &String, file_name: &String, file: &mut ZipFile) -> anyhow
     Ok(defs)
 }
 
-fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_name: &String) {
-    info!("Loading defs from {} {}", mod_id, def_file_name);
-    let Some(defs_file) = file_map.get(def_file_name) else {
-        error!("Error reading defs.toml from OpenZT mod");
-        return;
+// fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_name: &String) {
+//     info!("Loading defs from {} {}", mod_id, def_file_name);
+//     let Some(defs_file) = file_map.get(def_file_name) else {
+//         error!("Error reading defs.toml from OpenZT mod");
+//         return;
+//     };
+
+//     let intermediate_string = String::from_utf8_lossy(&defs_file).to_string();
+
+//     let Ok(defs) = toml::from_str::<mods::ModDefinition>(&intermediate_string) else {
+//         error!("Error parsing defs.toml from OpenZT mod");
+//         return;
+//     };
+
+//     info!("Loading defs: {}", defs.len());
+
+//     // Habitats
+//     if let Some(habitats) = defs.habitats() {
+//         for (habitat_name, habitat_def) in habitats.iter() {
+//             let base_resource_id =
+//                 openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
+//             let Ok(icon_name) =
+//                 load_icon_definition(&base_resource_id, habitat_def, file_map, mod_id, include_str!("../resources/include/infoimg-habitat.ani").to_string())
+//             else {
+//                 error!("Error loading icon definition for habitat: {}", habitat_name);
+//                 continue;
+//             };
+//             add_location_or_habitat(&habitat_def.name(), &base_resource_id);
+//         }
+//     };
+
+//     // Locations
+//     if let Some(locations) = defs.locations() {
+//         for (location_name, location_def) in locations.iter() {
+//             let base_resource_id =
+//                 openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
+//             let Ok(icon_name) =
+//                 load_icon_definition(&base_resource_id, location_def, file_map, mod_id, include_str!("../resources/include/infoimg-location.ani").to_string())
+//             else {
+//                 error!("Error loading icon definition for location: {}", location_name);
+//                 continue;
+//             };
+//             add_location_or_habitat(&location_def.name(), &base_resource_id);
+//         }
+//     };
+// }
+
+fn load_icon_definition_2(
+    base_resource_id: &String,
+    icon_definition: &mods::IconDefinition,
+    file_map: &HashMap<String, Box<[u8]>>,
+    mod_id: &String,
+    base_config: String,
+) -> anyhow::Result<String> {
+    let icon_file = file_map.get(icon_definition.icon_path())
+        .with_context(|| format!("Error loading openzt mod {}, cannot find file {} for icon_def {}", mod_id, icon_definition.icon_path(), icon_definition.name()))?;
+    
+    let icon_file_palette = file_map.get(icon_definition.icon_palette_path())
+        .with_context(|| format!("Error loading openzt mod {}, cannot find file {} for icon_def {}", mod_id, icon_definition.icon_palette_path(), icon_definition.name()))?;
+
+    let mut animation = Animation::parse(icon_file);
+    animation.set_palette_filename(icon_definition.icon_palette_path().clone());
+    let (new_animation_bytes, icon_size) = animation.write();
+    let new_icon_file = new_animation_bytes.into_boxed_slice();
+
+    let mut ani_cfg = Ini::new_cs();
+    ani_cfg.set_comment_symbols(&[';', '#', ':']);
+    ani_cfg.read(base_config).map_err(|s| anyhow!("Error reading ini: {}", s))?;
+
+    if ani_cfg.set(
+        "animation",
+        "dir1",
+        Some(openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Animation)),
+    ) == None
+    {
+        return Err(anyhow!("Error setting dir1 for ani"));
+    }
+
+    let mut write_options = WriteOptions::default();
+    write_options.space_around_delimiters = true;
+    write_options.blank_lines_between_sections = 1;
+    let new_string = ani_cfg.pretty_writes(&write_options);
+    info!("New ani: \n{}", new_string);
+    let file_size = new_string.len() as u32;
+    let file_name = openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Ani);
+
+    let Ok(new_c_string) = CString::new(new_string) else {
+        return Err(anyhow!(
+            "Error loading openzt mod {} when converting .ani to CString after modifying {}",
+            mod_id, file_name
+        ));
     };
 
-    let intermediate_string = String::from_utf8_lossy(&defs_file).to_string();
-
-    let Ok(defs) = toml::from_str::<mods::ModDefinition>(&intermediate_string) else {
-        error!("Error parsing defs.toml from OpenZT mod");
-        return;
+    let Ok(ztfile) = ZTFile::new_text(file_name.clone(), file_size, new_c_string) else {
+        return Err(anyhow!(
+            "Error loading openzt mod {} when creating ZTFile for .ani after modifying {}",
+            mod_id, file_name
+        ));
     };
+    add_ztfile(Path::new("zip::./openzt.ztd"), file_name, ztfile);
 
-    info!("Loading defs: {}", defs.len());
+    let animation_file_name =
+        openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Animation);
+    let animation_ztfile =
+        ZTFile::new_raw_bytes(animation_file_name.clone(), icon_size as u32, new_icon_file);
 
-    // Habitats
-    if let Some(habitats) = defs.habitats() {
-        for (habitat_name, habitat_def) in habitats.iter() {
-            let base_resource_id =
-                openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
-            let Ok(icon_name) =
-                load_icon_definition(&base_resource_id, habitat_def, file_map, mod_id, include_str!("../resources/include/infoimg-habitat.ani").to_string())
-            else {
-                error!("Error loading icon definition for habitat: {}", habitat_name);
-                continue;
-            };
-            add_location_or_habitat(&habitat_def.name(), &base_resource_id);
-        }
-    };
+    add_ztfile(Path::new("zip::./openzt.ztd"), animation_file_name.clone(), animation_ztfile);
 
-    // Locations
-    if let Some(locations) = defs.locations() {
-        for (location_name, location_def) in locations.iter() {
-            let base_resource_id =
-                openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
-            let Ok(icon_name) =
-                load_icon_definition(&base_resource_id, location_def, file_map, mod_id, include_str!("../resources/include/infoimg-location.ani").to_string())
-            else {
-                error!("Error loading icon definition for location: {}", location_name);
-                continue;
-            };
-            add_location_or_habitat(&location_def.name(), &base_resource_id);
-        }
-    };
+    let palette_file_name =
+        openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Palette);
+    let palette_ztfile = ZTFile::new_raw_bytes(
+        palette_file_name.clone(),
+        icon_file_palette.len() as u32,
+        icon_file_palette.clone(),
+    );
+    add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name, palette_ztfile);
+
+    Ok(animation_file_name)
 }
 
 fn load_icon_definition(
@@ -1689,49 +1672,6 @@ fn openzt_base_resource_id(
 
 fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTResourceType) -> String {
     format!("{}.{}", base_resource_id, file_type.to_string())
-}
-
-fn handle_ztd(resource: &PathBuf) {
-    let file = match File::open(resource) {
-        Ok(file) => file,
-        Err(e) => {
-            error!("Error opening file: {}", e);
-            return;
-        }
-    };
-
-    let mut buf_reader = BufReader::new(file);
-
-    let mut zip = match zip::ZipArchive::new(&mut buf_reader) {
-        Ok(zip) => zip,
-        Err(e) => {
-            error!("Error reading zip: {}", e);
-            return;
-        }
-    };
-    let data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
-        Ok(data_mutex) => data_mutex,
-        Err(e) => {
-            error!("Error locking resource handler array: {}", e);
-            return;
-        }
-    };
-    for handler in data_mutex.iter() {
-        for i in 0..zip.len() {
-            // ZipFile doesn't provide a .seek() method to set the cursor to the start of the file, so we create new ZipFile for each handler
-            let mut file = match zip.by_index(i) {
-                Ok(file) => file,
-                Err(e) => {
-                    error!("Error reading zip file: {}", e);
-                    continue;
-                }
-            };
-            if file.is_dir() {
-                continue;
-            }
-            handler.handle(resource, &mut file);
-        }
-    }
 }
 
 static RESOURCE_HANDLER_ARRAY: Lazy<Mutex<Vec<Handler>>> = Lazy::new(|| Mutex::new(Vec::new()));
