@@ -1222,7 +1222,7 @@ fn load_open_zt_mod(map: &mut LazyResourceMap, archive: &mut ZipArchive<BufReade
 
     for file_name in keys {
         if file_name.starts_with("defs/") {
-            load_def_2(&mod_id, &file_name, &file_map)?;
+            load_def(&mod_id, &file_name, &file_map)?;
         }
     }
 
@@ -1325,8 +1325,7 @@ impl Display for ZTResourceType {
     }
 }
 
-// Return array of read files ()
-fn load_def_2(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
+fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
     info!("Loading defs {} from {}", file_name, mod_id);
 
     let file = file_map.get(file_name)
@@ -1345,7 +1344,7 @@ fn load_def_2(mod_id: &String, file_name: &String, file_map: &HashMap<String, Bo
         for (habitat_name, habitat_def) in habitats.iter() {
             let base_resource_id =
                 openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
-            let icon_name = load_icon_definition_2( 
+            let icon_name = load_icon_definition( 
                 &base_resource_id,
                 habitat_def,
                 &file_map,
@@ -1361,7 +1360,7 @@ fn load_def_2(mod_id: &String, file_name: &String, file_map: &HashMap<String, Bo
         for (location_name, location_def) in locations.iter() {
             let base_resource_id =
                 openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
-            let icon_name = load_icon_definition_2(
+            let icon_name = load_icon_definition(
                 &base_resource_id,
                 location_def,
                 &file_map,
@@ -1374,54 +1373,7 @@ fn load_def_2(mod_id: &String, file_name: &String, file_map: &HashMap<String, Bo
     Ok(defs)
 }
 
-// fn load_def(mod_id: &String, file_map: &HashMap<String, Box<[u8]>>, def_file_name: &String) {
-//     info!("Loading defs from {} {}", mod_id, def_file_name);
-//     let Some(defs_file) = file_map.get(def_file_name) else {
-//         error!("Error reading defs.toml from OpenZT mod");
-//         return;
-//     };
-
-//     let intermediate_string = String::from_utf8_lossy(&defs_file).to_string();
-
-//     let Ok(defs) = toml::from_str::<mods::ModDefinition>(&intermediate_string) else {
-//         error!("Error parsing defs.toml from OpenZT mod");
-//         return;
-//     };
-
-//     info!("Loading defs: {}", defs.len());
-
-//     // Habitats
-//     if let Some(habitats) = defs.habitats() {
-//         for (habitat_name, habitat_def) in habitats.iter() {
-//             let base_resource_id =
-//                 openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
-//             let Ok(icon_name) =
-//                 load_icon_definition(&base_resource_id, habitat_def, file_map, mod_id, include_str!("../resources/include/infoimg-habitat.ani").to_string())
-//             else {
-//                 error!("Error loading icon definition for habitat: {}", habitat_name);
-//                 continue;
-//             };
-//             add_location_or_habitat(&habitat_def.name(), &base_resource_id);
-//         }
-//     };
-
-//     // Locations
-//     if let Some(locations) = defs.locations() {
-//         for (location_name, location_def) in locations.iter() {
-//             let base_resource_id =
-//                 openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
-//             let Ok(icon_name) =
-//                 load_icon_definition(&base_resource_id, location_def, file_map, mod_id, include_str!("../resources/include/infoimg-location.ani").to_string())
-//             else {
-//                 error!("Error loading icon definition for location: {}", location_name);
-//                 continue;
-//             };
-//             add_location_or_habitat(&location_def.name(), &base_resource_id);
-//         }
-//     };
-// }
-
-fn load_icon_definition_2(
+fn load_icon_definition(
     base_resource_id: &String,
     icon_definition: &mods::IconDefinition,
     file_map: &HashMap<String, Box<[u8]>>,
@@ -1472,100 +1424,6 @@ fn load_icon_definition_2(
             "Error loading openzt mod {} when creating ZTFile for .ani after modifying {}",
             mod_id, file_name
         ));
-    };
-    add_ztfile(Path::new("zip::./openzt.ztd"), file_name, ztfile);
-
-    let animation_file_name =
-        openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Animation);
-    let animation_ztfile =
-        ZTFile::new_raw_bytes(animation_file_name.clone(), icon_size as u32, new_icon_file);
-
-    add_ztfile(Path::new("zip::./openzt.ztd"), animation_file_name.clone(), animation_ztfile);
-
-    let palette_file_name =
-        openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Palette);
-    let palette_ztfile = ZTFile::new_raw_bytes(
-        palette_file_name.clone(),
-        icon_file_palette.len() as u32,
-        icon_file_palette.clone(),
-    );
-    add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name, palette_ztfile);
-
-    Ok(animation_file_name)
-}
-
-fn load_icon_definition(
-    base_resource_id: &String,
-    icon_definition: &mods::IconDefinition,
-    file_map: &HashMap<String, Box<[u8]>>,
-    mod_id: &String,
-    base_config: String,
-) -> Result<String, ()> {
-    let Some(icon_file) = file_map.get(icon_definition.icon_path()) else {
-        error!(
-            "Error loading openzt mod {}, cannot find file {} for icon_def {}",
-            mod_id,
-            icon_definition.icon_path(),
-            icon_definition.name()
-        );
-        return Err(());
-    };
-    let Some(icon_file_palette) = file_map.get(icon_definition.icon_palette_path()) else {
-        error!(
-            "Error loading openzt mod {}, cannot find file {} for icon_def {}",
-            mod_id,
-            icon_definition.icon_palette_path(),
-            icon_definition.name()
-        );
-        return Err(());
-    };
-
-    let mut animation = Animation::parse(icon_file);
-    animation.set_palette_filename(icon_definition.icon_palette_path().clone());
-    let (new_animation_bytes, icon_size) = animation.write();
-    let new_icon_file = new_animation_bytes.into_boxed_slice();
-
-    let mut ani_cfg = Ini::new_cs();
-    ani_cfg.set_comment_symbols(&[';', '#', ':']);
-    if let Err(err) =
-        ani_cfg.read(base_config)
-    {
-        error!("Error reading ini: {}", err);
-        return Err(());
-    };
-
-    if ani_cfg.set(
-        "animation",
-        "dir1",
-        Some(openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Animation)),
-    ) == None
-    {
-        error!("Error setting dir1 for ani");
-        return Err(());
-    }
-
-    let mut write_options = WriteOptions::default();
-    write_options.space_around_delimiters = true;
-    write_options.blank_lines_between_sections = 1;
-    let new_string = ani_cfg.pretty_writes(&write_options);
-    info!("New ani: \n{}", new_string);
-    let file_size = new_string.len() as u32;
-    let file_name = openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Ani);
-
-    let Ok(new_c_string) = CString::new(new_string) else {
-        error!(
-            "Error loading openzt mod {} when converting .ani to CString after modifying {}",
-            mod_id, file_name
-        );
-        return Err(());
-    };
-
-    let Ok(ztfile) = ZTFile::new_text(file_name.clone(), file_size, new_c_string) else {
-        error!(
-            "Error loading openzt mod {} when creating ZTFile for .ani after modifying {}",
-            mod_id, file_name
-        );
-        return Err(());
     };
     add_ztfile(Path::new("zip::./openzt.ztd"), file_name, ztfile);
 
