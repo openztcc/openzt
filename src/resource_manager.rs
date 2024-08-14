@@ -297,55 +297,27 @@ static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> =
 static RESOURCE_PTR_PTR_SET: Lazy<Mutex<HashSet<u32>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 pub fn add_ptr_ptr(ptr_ptr: u32) {
-    let Ok(mut binding) = RESOURCE_PTR_PTR_SET.lock() else {
-        error!("Failed to lock resource ptr ptr set; returning from add_ptr_ptr for {}", ptr_ptr);
-        return;
-    };
+    let mut binding = RESOURCE_PTR_PTR_SET.lock().unwrap();
     binding.insert(ptr_ptr);
 }
 
 pub fn check_ptr_ptr(ptr_ptr: u32) -> bool {
-    let Ok(binding) = RESOURCE_PTR_PTR_SET.lock() else {
-        error!(
-            "Failed to lock resource ptr ptr set; returning false from check_ptr_ptr for {}",
-            ptr_ptr
-        );
-        return false;
-    };
+    let binding = RESOURCE_PTR_PTR_SET.lock().unwrap();
     binding.contains(&ptr_ptr)
 }
 
 pub fn check_file(file_name: &str) -> bool {
-    let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
-        error!(
-            "Failed to lock resource string to ptr map; returning false from check_file for {}",
-            file_name
-        );
-        return false;
-    };
+    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
     binding.contains_key(&file_name.to_lowercase())
 }
 
 pub fn get_file_ptr(file_name: &str) -> Option<u32> {
-    let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
-        error!(
-            "Failed to lock resource string to ptr map; returning None from get_file_ptr for {}",
-            file_name
-        );
-        return None;
-    };
-    let return_value = binding.get(&file_name.to_lowercase()).copied();
-    if file_name.starts_with("openzt") || file_name.starts_with("ui/infoimg") {
-        info!("Getting file ptr for: {}", file_name);
-    }
-    return_value
+    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+    binding.get(&file_name.to_lowercase()).copied()
 }
 
 fn get_num_resources() -> usize {
-    let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
-        error!("Failed to lock resource string to ptr map; returning 0 from get_num_resources");
-        return 0;
-    };
+    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
     binding.len()
 }
 
@@ -353,10 +325,7 @@ fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError
     if args.len() > 1 {
         return Err(CommandError::new("Too many arguments".to_string()));
     }
-    let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
-        error!("Failed to lock resource string to ptr map; returning from command_list_resource_strings");
-        return Err(CommandError::new("Failed to lock resource string to ptr map".to_string()));
-    };
+    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
     let mut result_string = String::new();
     for (resource_string, _) in binding.iter() {
         if args.len() == 1 && !resource_string.starts_with(args[0]) {
@@ -368,10 +337,7 @@ fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError
 }
 
 fn command_list_openzt_resource_strings(_args: Vec<&str>) -> Result<String, CommandError> {
-    let Ok(binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
-        error!("Failed to lock resource string to ptr map; returning from command_list_resource_strings");
-        return Err(CommandError::new("Failed to lock resource string to ptr map".to_string()));
-    };
+    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
     let mut result_string = String::new();
     for (resource_string, _) in binding.iter() {
         if resource_string.starts_with("openzt") {
@@ -390,13 +356,7 @@ fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
     ztd_path = ztd_path.replace("./", "zip::./").replace('\\', "/");
     let lowercase_filename = file_name.to_lowercase();
 
-    let Ok(mut binding) = RESOURCE_STRING_TO_PTR_MAP.lock() else {
-        error!(
-            "Failed to lock resource string to ptr map; returning from add_ztfile for {}",
-            file_name
-        );
-        return;
-    };
+    let mut binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
 
     let bf_zip_name_ptr = match CString::new(ztd_path.clone()) {
         Ok(c_string) => c_string.into_raw() as u32,
@@ -1265,11 +1225,6 @@ fn load_open_zt_mod(map: &mut LazyResourceMap, archive: &mut ZipArchive<BufReade
             load_def_2(&mod_id, &file_name, &file_map)?;
         }
     }
-    // for (file_name, file_buffer) in file_map.iter() {
-    //     if file_name.starts_with("defs/") {
-    //         load_def_2(&mod_id, &file_name, &mut file_buffer)?;
-    //     }
-    // }
 
     Ok(meta.ztd_type().clone())
 
@@ -1285,17 +1240,8 @@ static LOCATIONS_HABITATS_ID_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(
 // Used to ensure mod_ids don't clash, a mod will not load if an id is already in this map
 static MOD_ID_SET: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
-// const MIN_HABITAT_ID: u32 = 9414;
-// const MAX_HABITAT_ID: u32 = 9600;
-// const MIN_LOCATION_ID: u32 = 9634;
-// const MAX_LOCATION_ID: u32 = 9800;
-
-
 fn command_list_openzt_mod_ids(_args: Vec<&str>) -> Result<String, CommandError> {
-    let Ok(binding) = MOD_ID_SET.lock() else {
-        error!("Failed to lock mod id set; returning from command_list_openzt_mod_ids");
-        return Err(CommandError::new("Failed to lock mod id set".to_string()));
-    };
+    let binding = MOD_ID_SET.lock().unwrap();
     let mut result_string = String::new();
     for mod_id in binding.iter() {
         result_string.push_str(&format!("{}\n", mod_id));
@@ -1304,10 +1250,7 @@ fn command_list_openzt_mod_ids(_args: Vec<&str>) -> Result<String, CommandError>
 }
 
 fn command_list_openzt_locations_habitats(_args: Vec<&str>) -> Result<String, CommandError> {
-    let Ok(binding) = LOCATIONS_HABITATS_RESOURCE_MAP.lock() else {
-        error!("Failed to lock locations/habitats map; returning from command_list_openzt_habitats");
-        return Err(CommandError::new("Failed to lock locations/habitats map".to_string()));
-    };
+    let binding = LOCATIONS_HABITATS_RESOURCE_MAP.lock().unwrap();
     let mut result_string = String::new();
     for (id, _) in binding.iter() {
         let name = get_string_from_registry(*id).unwrap_or("<error>".to_string());
@@ -1316,7 +1259,6 @@ fn command_list_openzt_locations_habitats(_args: Vec<&str>) -> Result<String, Co
     Ok(result_string)
 }
 
-// TODO: Return result from here
 fn add_location_or_habitat(name: &String, icon_resource_id: &String) -> anyhow::Result<()> {
     let mut resource_binding = LOCATIONS_HABITATS_RESOURCE_MAP.lock().unwrap();
 
@@ -1336,35 +1278,20 @@ fn add_location_or_habitat(name: &String, icon_resource_id: &String) -> anyhow::
 
 // TODO: Return Result<Option<u32>>
 fn get_location_or_habitat_by_id(id: u32) -> Option<u32> {
-    let Ok(binding) = LOCATIONS_HABITATS_RESOURCE_MAP.lock() else {
-        error!(
-            "Failed to lock locations/habitats map; returning None from get_location_or_habitat_by_id for {}",
-            id
-        );
-        return None;
-    };
+    let binding = LOCATIONS_HABITATS_RESOURCE_MAP.lock().unwrap();
     binding.get(&id).cloned()
 }
 
 // TODO: Return Result<Option<u32>>
 fn get_location_or_habitat_by_name(name: &String) -> Option<u32> {
-    let Ok(binding) = LOCATIONS_HABITATS_ID_MAP.lock() else {
-        error!(
-            "Failed to lock locations/habitats map; returning None from get_location_or_habitat_by_name for {}",
-            name
-        );
-        return None;
-    };
+    let binding = LOCATIONS_HABITATS_ID_MAP.lock().unwrap();
     binding.get(name).cloned()
 }
 
 // Adds a new mod id to the set, returns false if the mod_id already exists
 // TODO: Return Result<bool>
 fn add_new_mod_id(mod_id: &String) -> bool {
-    let Ok(mut binding) = MOD_ID_SET.lock() else {
-        error!("Failed to lock mod id set; returning from add_mod_id for {}", mod_id);
-        return false;
-    };
+    let mut binding = MOD_ID_SET.lock().unwrap();
     binding.insert(mod_id.clone())
 }
 
@@ -1677,22 +1604,10 @@ fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTResource
 static RESOURCE_HANDLER_ARRAY: Lazy<Mutex<Vec<Handler>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 pub fn add_handler(handler: Handler) {
-    let mut data_mutex = match RESOURCE_HANDLER_ARRAY.lock() {
-        Ok(data_mutex) => data_mutex,
-        Err(e) => {
-            error!("Error locking resource handler array: {}", e);
-            return;
-        }
-    };
+    let mut data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
     data_mutex.push(handler);
 }
 
 fn get_handlers() -> Vec<Handler> {
-    match RESOURCE_HANDLER_ARRAY.lock() {
-        Ok(binding) => binding.clone(),
-        Err(e) => {
-            error!("Error locking resource handler array: {}", e);
-            Vec::new()
-        }
-    }
+    RESOURCE_HANDLER_ARRAY.lock().unwrap().clone()
 }

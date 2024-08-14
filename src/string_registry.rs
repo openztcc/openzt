@@ -22,9 +22,7 @@ pub fn add_string_to_registry(string_val: String) -> u32 {
 pub fn get_string_from_registry(string_id: u32) -> Result<String, &'static str> {
     info!("Getting string from registry: {}", string_id);
     let string = {
-        let Ok(data_mutex) = STRING_REGISTRY.lock() else {
-            return Err("Failed to lock string registry mutex");
-        };
+        let data_mutex = STRING_REGISTRY.lock().unwrap();
         data_mutex
             .get((string_id - STRING_REGISTRY_ID_OFFSET) as usize)
             .cloned()

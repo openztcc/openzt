@@ -155,26 +155,14 @@ static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
-    let mut data_mutex = match MEMBER_SETS.lock() {
-        Ok(mutex) => mutex,
-        Err(poisoned) => {
-            error!("Error locking member set mutex: {:?}", poisoned);
-            return;
-        }
-    };
+    let mut data_mutex = MEMBER_SETS.lock().unwrap();
 
     let set = data_mutex.entry(member).or_default();
     set.insert(entity_name);
 }
 
 pub fn is_member(entity_name: &str, member: &str) -> bool {
-    let data_mutex = match MEMBER_SETS.lock() {
-        Ok(mutex) => mutex,
-        Err(poisoned) => {
-            error!("Error locking member set mutex: {:?}", poisoned);
-            return false;
-        }
-    };
+    let data_mutex = MEMBER_SETS.lock().unwrap();
     match data_mutex.get(member) {
         Some(set) => set.contains(entity_name),
         None => false,
@@ -182,13 +170,7 @@ pub fn is_member(entity_name: &str, member: &str) -> bool {
 }
 
 pub fn get_members(member: &str) -> Option<HashSet<String>> {
-    let data_mutex = match MEMBER_SETS.lock() {
-        Ok(mutex) => mutex,
-        Err(poisoned) => {
-            error!("Error locking member set mutex: {:?}", poisoned);
-            return None;
-        }
-    };
+    let data_mutex = MEMBER_SETS.lock().unwrap();
     data_mutex.get(member).cloned()
 }
 
@@ -203,12 +185,7 @@ fn get_cc_expansion_name(subdir: &str) -> String {
 }
 
 fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
-    let data_mutex = match MEMBER_SETS.lock() {
-        Ok(mutex) => mutex,
-        Err(poisoned) => {
-            return Err(Into::into(format!("Error locking member set mutex: {}", poisoned)));
-        }
-    };
+    let data_mutex = MEMBER_SETS.lock().unwrap();
     let mut result = String::new();
 
     for (set_name, members) in data_mutex.iter() {
@@ -227,16 +204,7 @@ fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> Result<(), String> {
-    let mut data_mutex = match EXPANSION_ARRAY.lock() {
-        Ok(mutex) => mutex,
-        Err(poisoned) => {
-            return Err(format!(
-                "Error locking expansion array mutex: {} cannot add expansion {}",
-                poisoned,
-                expansion.name_string()
-            ));
-        }
-    };
+    let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
     if data_mutex.len() >= MAX_EXPANSION_SIZE {
         return Err("Max expansion size reached".to_string());
     }
@@ -252,34 +220,15 @@ fn add_expansion(expansion: Expansion, save_to_memory: bool) -> Result<(), Strin
 }
 
 fn get_expansion(expansion_id: u32) -> Option<Expansion> {
-    let data_mutex = match EXPANSION_ARRAY.lock() {
-        Ok(mutex) => mutex,
-        Err(poisoned) => {
-            error!(
-                "Error locking expansion array mutex: {:?}, could not get expansion by id: {}",
-                poisoned, expansion_id
-            );
-            return None;
-        }
-    };
+    let data_mutex = EXPANSION_ARRAY.lock().unwrap();
     data_mutex
         .iter()
         .find(|expansion| expansion.expansion_id == expansion_id)
         .cloned()
 }
 
-// fn expansion_number() -> usize {
-//     EXPANSION_ARRAY.lock().unwrap().len()
-// }
-
 fn save_mutex() {
-    let data_mutex = match EXPANSION_ARRAY.lock() {
-        Ok(mutex) => mutex,
-        Err(poisoned) => {
-            error!("Error locking expansion array mutex: {:?}, not saved", poisoned);
-            return;
-        }
-    };
+    let data_mutex = EXPANSION_ARRAY.lock().unwrap();
     inner_save_mutex(data_mutex)
 }
 
@@ -301,13 +250,7 @@ fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
 }
 
 fn get_expansions() -> Vec<Expansion> {
-    match EXPANSION_ARRAY.lock() {
-        Ok(mutex) => mutex.clone(),
-        Err(poisoned) => {
-            error!("Error locking expansion array mutex: {:?}", poisoned);
-            Vec::new()
-        }
-    }
+    EXPANSION_ARRAY.lock().unwrap().clone()
 }
 
 #[derive(Debug)]
