@@ -502,11 +502,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     }
 }
 
-fn filter_entity_type(
-    buy_tab: &BuyTab,
-    current_expansion: &Expansion,
-    entity: &ZTEntityType,
-) -> bool {
+fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &ZTEntityType) -> bool {
     match buy_tab {
         BuyTab::Animal => {
             if !entity.is_member("animals".to_string()) {
@@ -640,12 +636,7 @@ fn add_expansion_with_string_id(id: u32, name: String, string_id: u32, save_to_m
     }
 }
 
-fn add_expansion_with_string_value(
-    expansion_id: u32,
-    name: String,
-    string_value: String,
-    save_to_memory: bool,
-) {
+fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value: String, save_to_memory: bool) {
     let name_len = name.len();
     let Ok(name_string_c_string) = CString::new(name.clone()) else {
         error!("Error creating CString from name: {}", name);
@@ -680,10 +671,11 @@ fn handle_member_parsing(path: &Path, file: &mut ZipFile) {
     }
 }
 
+// TODO: Remove these hacks
 static FILE_NAME_OVERRIDES: Lazy<HashMap<String, String>> = Lazy::new(|| {
     vec![
         ("fences/tankwall.ai".to_string(), "fences/tankwal1.ai".to_string()), // Assumed spelling mistake
-        ("fences/hedge.ai".to_string(), "fences/not_hedge.ai".to_string()), // Duplicates, this one isn't loaded
+        ("fences/hedge.ai".to_string(), "fences/not_hedge.ai".to_string()),   // Duplicates, this one isn't loaded
         // TODO: Below might not be needed?
         ("scenery/other/fountain.ai".to_string(), "scenery/other/other_fountain.ai".to_string()), // Duplicates, this one isn't loaded
     ]
@@ -738,24 +730,12 @@ fn is_cc(path: &Path) -> bool {
         return false;
     };
 
-    match parent
-        .file_name()
-        .unwrap_or_default()
-        .to_str()
-        .unwrap_or_default()
-    {
+    match parent.file_name().unwrap_or_default().to_str().unwrap_or_default() {
         "zupdate" | "xpack1" | "zupdate1" | "xpack2" => false,
-        "dlupdate" | "dupdate" | "updates" | "" => {
-            match path
-                .file_name()
-                .unwrap_or_default()
-                .to_str()
-                .unwrap_or_default()
-            {
-                "" => false,
-                file_name => !OFFICIAL_FILESET.contains(file_name),
-            }
-        }
+        "dlupdate" | "dupdate" | "updates" | "" => match path.file_name().unwrap_or_default().to_str().unwrap_or_default() {
+            "" => false,
+            file_name => !OFFICIAL_FILESET.contains(file_name),
+        },
         _ => true,
     }
 }
@@ -848,37 +828,12 @@ pub fn init() {
     add_to_command_register("list_expansion".to_string(), command_get_expansions);
     add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
     add_to_command_register("get_members".to_string(), command_get_members);
-    add_handler(Handler::new(
-        Some("xpac".to_string()),
-        Some("cfg".to_string()),
-        handle_expansion_config,
-        ModType::Legacy,
-    ));
-    add_handler(Handler::new(
-        None,
-        Some("uca".to_string()),
-        handle_member_parsing,
-        ModType::Legacy,
-    ));
-    add_handler(Handler::new(
-        None,
-        Some("ucs".to_string()),
-        handle_member_parsing,
-        ModType::Legacy,
-    ));
-    add_handler(Handler::new(
-        None,
-        Some("ucb".to_string()),
-        handle_member_parsing,
-        ModType::Legacy,
-    ));
-    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, ModType::Legacy));
-    add_handler(Handler::new(
-        Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()),
-        None,
-        handle_expansion_dropdown,
-        ModType::Legacy,
-    ));
+    add_handler(Handler::new(Some("xpac".to_string()), Some("cfg".to_string()), handle_expansion_config, RunStage::BeforeOpenZTMods));
+    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    add_handler(Handler::new(Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()), None, handle_expansion_dropdown, RunStage::BeforeOpenZTMods));
     if unsafe { custom_expansion::init_detours() }.is_err() {
         error!("Error initialising custom expansion detours");
     };

@@ -1,3 +1,3 @@
 group_imports = "StdExternalCrate"
 imports_granularity = "Crate"
-fn_call_width = 100
+max_width = 167
