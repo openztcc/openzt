@@ -758,12 +758,12 @@ pub mod zoo_resource_mgr {
 }
 
 ///Indicates when the handler should be called
-/// RawFiles means the handler is run on any matching files as they are loaded
+/// RawFiles means the handler is run on any matching files as they are loaded // TODO: Might not be needed, can add in later
 /// BeforeOpenZTMods means they are run on any files referenced by vanila *.cfg files but before any OpenZT mods are loaded
 /// AfterOpenZTMods is the same as above but after OpenZT mods are loaded
 #[derive(Clone, PartialEq)]
 pub enum RunStage {
-    RawFiles,
+    // RawFiles,
     BeforeOpenZTMods,
     AfterOpenZTMods,
 }
@@ -776,7 +776,8 @@ pub struct Handler {
     stage: RunStage
 }
 
-pub type HandlerFunction = fn(&Path, &mut ZipFile) -> ();
+// pub type HandlerFunction = fn(&Path, &mut ZipFile) -> ();
+pub type HandlerFunction = fn(&Path, &mut Box<[u8]>) -> ();
 
 impl Handler {
     pub fn new(matcher_prefix: Option<String>, matcher_suffix: Option<String>, handler: HandlerFunction, stage: RunStage) -> Self {
@@ -788,8 +789,7 @@ impl Handler {
         }
     }
 
-    fn handle(&self, entry: &Path, file: &mut ZipFile) {
-        let file_name = file.name();
+    fn handle(&self, entry: &Path, file_name: &String, file: &mut Box<[u8]>) {
         if let Some(prefix) = &self.matcher_prefix {
             if !file_name.starts_with(prefix) {
                 return;
@@ -876,7 +876,7 @@ impl LazyResourceMap {
         Ok(self.loaded.get(&key).unwrap())
     }
 
-    fn get(&mut self, key: &str) -> anyhow::Result<Option<&Box<[u8]>>> {
+    fn get(&mut self, key: &str) -> anyhow::Result<Option<&mut Box<[u8]>>> {
         match self.not_loaded.remove(key) {
             Some(mut zip_file_ref) => {
                 let mut binding = zip_file_ref.zip.borrow_mut();
@@ -898,7 +898,7 @@ impl LazyResourceMap {
                     }
                 }
             }
-            None => Ok(self.loaded.get(key)),
+            None => Ok(self.loaded.get_mut(key)),
         }
     }
 
@@ -949,6 +949,8 @@ fn load_resources(paths: Vec<String>) {
         elapsed
     );
 
+    let now = Instant::now();
+
     // TODO: Iterate over map and call handlers
     // Handlers based on file types?
     // Should handlers care about whether files are loaded via .cfg files? - No, they could edit the cfg files themselves
@@ -956,17 +958,35 @@ fn load_resources(paths: Vec<String>) {
 
     let data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
 
-    // for handler in data_mutex.iter() {
-    //     if handler.stage == RunStage::RawFiles {
-    //         map.files().for_each(|file| {
-    //             if let Some(data) = map.get(&file).unwrap() {
-    //                 handler.handle(Path::new(&file), &mut data.clone());
-    //             }
-    //         });
-    //     }
-    // }
+    let files = map.files().collect::<Vec<String>>().into_iter();
 
+    for handler in data_mutex.iter() {
+        if handler.stage == RunStage::BeforeOpenZTMods {
+            files.clone().for_each(|file| {
+                if let Some(mut data) = map.get(&file).unwrap() {
+                    handler.handle(Path::new(&file), &file, &mut data);
+                }
+            });
+        }
+    }
 
+    // apply_patches();
+
+    for handler in data_mutex.iter() {
+        if handler.stage == RunStage::AfterOpenZTMods {
+            files.clone().for_each(|file| {
+                if let Some(mut data) = map.get(&file).unwrap() {
+                    handler.handle(Path::new(&file), &file, &mut data);
+                }
+            });
+        }
+    }
+    
+    let elapsed = now.elapsed();
+    info!(
+        "Extra handling took an extra: {:.2?}",
+        elapsed
+    );
 }
 
 fn handle_ztd(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<i32> {

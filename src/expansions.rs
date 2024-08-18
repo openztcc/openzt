@@ -8,13 +8,14 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use bf_configparser::ini::Ini;
 use maplit::hashset;
 use once_cell::sync::Lazy;
 use retour_utils::hook_module;
 use tracing::{error, info};
 use zip::read::ZipFile;
+use crate::resource_manager::RunStage;
 
 use crate::{
     add_to_command_register,
@@ -26,7 +27,7 @@ use crate::{
     resource_manager::{
         add_handler, add_raw_bytes_to_map_with_path_override,
         add_txt_file_to_map_with_path_override, modify_ztfile_as_animation, modify_ztfile_as_ini,
-        Handler, ModType,
+        Handler,
     },
     string_registry::add_string_to_registry,
     ztui::{get_random_sex, get_selected_sex, BuyTab, Sex},
@@ -203,10 +204,10 @@ fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
 // There are no accessors for Expansions, ZT accesses expansions by directly iterating over the array, adding to the array also saves ptrs to ZT's memory keeping things in sync
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
-fn add_expansion(expansion: Expansion, save_to_memory: bool) -> Result<(), String> {
+fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<()> {
     let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
     if data_mutex.len() >= MAX_EXPANSION_SIZE {
-        return Err("Max expansion size reached".to_string());
+        return Err(anyhow!("Max expansion size reached"));
     }
     data_mutex.push(expansion);
 
@@ -659,15 +660,15 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
     }
 }
 
-fn handle_expansion_config(path: &Path, file: &mut ZipFile) {
+fn handle_expansion_config(path: &Path, file: &mut Box<[u8]>) {
     if let Err(e) = parse_expansion_config(file) {
-        info!("Error parsing expansion config: {} {} {}", path.display(), file.name(), e)
+        info!("Error parsing expansion config: {} {}", path.display(), e)
     }
 }
 
 fn handle_member_parsing(path: &Path, file: &mut ZipFile) {
     if let Err(e) = parse_member_config(path, file) {
-        error!("Error parsing member config: {} {} {}", path.display(), file.name(), e)
+        error!("Error parsing member config: {} {}", path.display(), e)
     }
 }
 
@@ -741,16 +742,17 @@ fn is_cc(path: &Path) -> bool {
 }
 
 // TODO: Remove use of anyhow here
-fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
-    let mut string_buffer = String::with_capacity(file.size() as usize);
-    file.read_to_string(&mut string_buffer)?;
+fn parse_expansion_config(file: &mut Box<[u8]>) -> anyhow::Result<()> {
+    // let mut string_buffer = String::with_capacity(file.size() as usize);
+    // file.read_to_string(&mut string_buffer)?;
+
+    let string_buffer = std::str::from_utf8(file).map_err(anyhow::Error::msg)?.to_string();
 
     let mut expansion_cfg = Ini::new();
     expansion_cfg
         .read(string_buffer)
         .map_err(anyhow::Error::msg)?;
 
-    // TODO: bf-configparser should return a custom error so we can use ? rather than map_err
     let mut id: u32 = expansion_cfg
         .get_parse("expansion", "id")
         .map_err(anyhow::Error::msg)?
@@ -782,8 +784,7 @@ fn parse_expansion_config(file: &mut ZipFile) -> anyhow::Result<()> {
             name_string_buffer_end_ptr: name_ptr + name.len() as u32 + 1,
         },
         false,
-    )
-    .map_err(anyhow::Error::msg)?;
+    )?;
 
     Ok(())
 }
@@ -829,11 +830,11 @@ pub fn init() {
     add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
     add_to_command_register("get_members".to_string(), command_get_members);
     add_handler(Handler::new(Some("xpac".to_string()), Some("cfg".to_string()), handle_expansion_config, RunStage::BeforeOpenZTMods));
-    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    add_handler(Handler::new(Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()), None, handle_expansion_dropdown, RunStage::BeforeOpenZTMods));
+    // add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    // add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    // add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    // add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    // add_handler(Handler::new(Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()), None, handle_expansion_dropdown, RunStage::BeforeOpenZTMods));
     if unsafe { custom_expansion::init_detours() }.is_err() {
         error!("Error initialising custom expansion detours");
     };
