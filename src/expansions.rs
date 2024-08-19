@@ -660,14 +660,14 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
     }
 }
 
-fn handle_expansion_config(path: &Path, file: &mut Box<[u8]>) {
+fn handle_expansion_config(path: &Path, _: &String, file: &mut Box<[u8]>) {
     if let Err(e) = parse_expansion_config(file) {
         info!("Error parsing expansion config: {} {}", path.display(), e)
     }
 }
 
-fn handle_member_parsing(path: &Path, file: &mut ZipFile) {
-    if let Err(e) = parse_member_config(path, file) {
+fn handle_member_parsing(path: &Path, file_name: &String, file: &mut Box<[u8]>) {
+    if let Err(e) = parse_member_config(path, file_name, file) {
         error!("Error parsing member config: {} {}", path.display(), e)
     }
 }
@@ -684,22 +684,17 @@ static FILE_NAME_OVERRIDES: Lazy<HashMap<String, String>> = Lazy::new(|| {
     .collect()
 });
 
-// TODO: Remove use of anyhow here
-fn parse_member_config(path: &Path, file: &mut ZipFile) -> anyhow::Result<()> {
-    let mut buffer = vec![0; file.size() as usize];
-    if let Err(error) = file.read(&mut buffer[..]) {
-        info!("Error reading member config {}: {}", file.name(), error);
-        return Ok(());
-    }
-    let string_buffer = String::from_utf8_lossy(&buffer[..]).to_string(); //TODO: Investigate parsing ANSI files
+fn parse_member_config(path: &Path, file_name: &String, file: &mut Box<[u8]>) -> anyhow::Result<()> {
+    let string_buffer = String::from_utf8_lossy(file).to_string(); //TODO: Investigate parsing ANSI files
 
     let mut member_cfg = Ini::new();
     member_cfg.set_comment_symbols(&[';', '#', ':']);
     member_cfg.read(string_buffer).map_err(anyhow::Error::msg)?;
 
-    let filepath = match FILE_NAME_OVERRIDES.get(file.name()) {
+    // TODO: Remove this hack once all cfg files are correctly parsed
+    let filepath = match FILE_NAME_OVERRIDES.get(file_name) {
         Some(override_name) => override_name.to_string(),
-        None => file.name().to_ascii_lowercase(),
+        None => file_name.to_ascii_lowercase(),
     };
 
     let filename = Path::new(&filepath)
@@ -741,12 +736,8 @@ fn is_cc(path: &Path) -> bool {
     }
 }
 
-// TODO: Remove use of anyhow here
 fn parse_expansion_config(file: &mut Box<[u8]>) -> anyhow::Result<()> {
-    // let mut string_buffer = String::with_capacity(file.size() as usize);
-    // file.read_to_string(&mut string_buffer)?;
-
-    let string_buffer = std::str::from_utf8(file).map_err(anyhow::Error::msg)?.to_string();
+    let string_buffer = String::from_utf8_lossy(file).to_string(); //TODO: Investigate parsing ANSI files
 
     let mut expansion_cfg = Ini::new();
     expansion_cfg
@@ -789,21 +780,7 @@ fn parse_expansion_config(file: &mut Box<[u8]>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_expansion_dropdown(entry: &Path, file: &mut ZipFile) {
-    let enclosed_name = match file.enclosed_name() {
-        Some(name) => name,
-        None => {
-            error!("Error getting enclosed name for file");
-            return;
-        }
-    };
-    let file_name = match enclosed_name.file_name() {
-        Some(name) => name,
-        None => {
-            error!("Error getting file name for enclosed name");
-            return;
-        }
-    };
+fn handle_expansion_dropdown(path: &Path, file_name: &String, file: &mut Box<[u8]>) {
     let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
     let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
         error!("Error converting file path to string");
@@ -816,10 +793,10 @@ fn handle_expansion_dropdown(entry: &Path, file: &mut ZipFile) {
         .unwrap_or_default()
     {
         "ani" => {
-            add_txt_file_to_map_with_path_override(entry, file, file_path_string);
+            add_txt_file_to_map_with_path_override(path, file, file_path_string);
         }
         "pal" | "" => {
-            add_raw_bytes_to_map_with_path_override(entry, file, file_path_string);
+            add_raw_bytes_to_map_with_path_override(path, file, file_path_string);
         }
         _ => (),
     }
@@ -830,11 +807,11 @@ pub fn init() {
     add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
     add_to_command_register("get_members".to_string(), command_get_members);
     add_handler(Handler::new(Some("xpac".to_string()), Some("cfg".to_string()), handle_expansion_config, RunStage::BeforeOpenZTMods));
-    // add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    // add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    // add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    // add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    // add_handler(Handler::new(Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()), None, handle_expansion_dropdown, RunStage::BeforeOpenZTMods));
+    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    add_handler(Handler::new(Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()), None, handle_expansion_dropdown, RunStage::BeforeOpenZTMods));
     if unsafe { custom_expansion::init_detours() }.is_err() {
         error!("Error initialising custom expansion detours");
     };

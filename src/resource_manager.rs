@@ -761,11 +761,12 @@ pub mod zoo_resource_mgr {
 /// RawFiles means the handler is run on any matching files as they are loaded // TODO: Might not be needed, can add in later
 /// BeforeOpenZTMods means they are run on any files referenced by vanila *.cfg files but before any OpenZT mods are loaded
 /// AfterOpenZTMods is the same as above but after OpenZT mods are loaded
+/// AfterFiltering is run on files that are referenced in *.cfg files only
 #[derive(Clone, PartialEq)]
 pub enum RunStage {
-    // RawFiles,
     BeforeOpenZTMods,
     AfterOpenZTMods,
+    AfterFiltering
 }
 
 #[derive(Clone)]
@@ -777,7 +778,7 @@ pub struct Handler {
 }
 
 // pub type HandlerFunction = fn(&Path, &mut ZipFile) -> ();
-pub type HandlerFunction = fn(&Path, &mut Box<[u8]>) -> ();
+pub type HandlerFunction = fn(&Path, &String, &mut Box<[u8]>) -> ();
 
 impl Handler {
     pub fn new(matcher_prefix: Option<String>, matcher_suffix: Option<String>, handler: HandlerFunction, stage: RunStage) -> Self {
@@ -801,7 +802,7 @@ impl Handler {
             }
         }
 
-        (self.handler)(entry, file);
+        (self.handler)(entry, file_name, file);
     }
 }
 
@@ -924,6 +925,7 @@ fn load_resources(paths: Vec<String>) {
     let now = Instant::now();
     let mut resource_count = 0;
 
+    // TODO: LazyStatic this
     let mut map = LazyResourceMap::new();
 
     paths.iter().rev().for_each(|path| {
@@ -953,7 +955,7 @@ fn load_resources(paths: Vec<String>) {
 
     // TODO: Iterate over map and call handlers
     // Handlers based on file types?
-    // Should handlers care about whether files are loaded via .cfg files? - No, they could edit the cfg files themselves
+    // Should handlers care about whether files are loaded via .cfg files? - Configurable
     // Need to implement basic ordering for handlers (BeforeMods, AfterMods, others?)
 
     let data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
@@ -975,6 +977,27 @@ fn load_resources(paths: Vec<String>) {
     for handler in data_mutex.iter() {
         if handler.stage == RunStage::AfterOpenZTMods {
             files.clone().for_each(|file| {
+                if let Some(mut data) = map.get(&file).unwrap() {
+                    handler.handle(Path::new(&file), &file, &mut data);
+                }
+            });
+        }
+    }
+
+    let mut filtered_files = Vec::new();
+
+    files.clone().for_each(|file| {
+        if let Some(data) = map.get(&file).unwrap() {
+            if file.ends_with(".cfg") {
+                let inner_filtered = parse_cfg(&file, data);
+                filtered_files.extend(inner_filtered);
+            }
+        }
+    });
+
+    for handler in data_mutex.iter() {
+        if handler.stage == RunStage::AfterFiltering {
+            filtered_files.clone().into_iter().for_each(|file| {
                 if let Some(mut data) = map.get(&file).unwrap() {
                     handler.handle(Path::new(&file), &file, &mut data);
                 }
@@ -1018,6 +1041,17 @@ fn handle_ztd(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<i
     });
 
     Ok(load_count)
+}
+
+
+fn parse_cfg(file_name: &String, data: &mut Box<[u8]>) -> Vec<String> {
+    let results = Vec::new();
+
+
+
+
+
+    return results;
 }
 
 #[derive(Debug)]
