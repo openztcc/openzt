@@ -51,6 +51,34 @@ pub enum ZTFileType {
     Bmp,
 }
 
+// impl From<String> for ZTFileType {
+    // fn from(file_name: String)
+// }
+
+impl From<&Path> for ZTFileType {
+    fn from(path: &Path) -> Self {
+        let file_extension = path.extension().unwrap_or_default().to_str().unwrap_or_default();
+        match file_extension {
+            "ai" => ZTFileType::Ai,
+            "ani" => ZTFileType::Ani,
+            "cfg" => ZTFileType::Cfg,
+            "lyt" => ZTFileType::Lyt,
+            "scn" => ZTFileType::Scn,
+            "uca" => ZTFileType::Uca,
+            "ucs" => ZTFileType::Ucs,
+            "ucb" => ZTFileType::Ucb,
+            "ini" => ZTFileType::Ini,
+            "txt" => ZTFileType::Txt,
+            "toml" => ZTFileType::Toml,
+            "tga" => ZTFileType::TGA,
+            "wav" => ZTFileType::Wav,
+            "lle" => ZTFileType::Lle,
+            "bmp" => ZTFileType::Bmp,
+            _ => ZTFileType::Animation,
+        }
+    }
+}
+
 impl From<BFResourcePtr> for ZTFile {
     fn from(bf_resource_ptr: BFResourcePtr) -> Self {
         let filename = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
@@ -159,6 +187,11 @@ impl From<BFResourcePtr> for ZTFile {
 }
 
 impl ZTFile {
+    pub fn new_text_from_bytes(file_name: String, file_size: u32, data: Box<[u8]>) -> anyhow::Result<ZTFile> {
+        let c_string = CString::new(str::from_utf8(&data)?).unwrap();
+        ZTFile::new_text(file_name, file_size, c_string)
+    }
+    
     pub fn new_text(file_name: String, file_size: u32, data: CString) -> anyhow::Result<ZTFile> {
         let file_extension = Path::new(&file_name).extension().unwrap_or_default().to_str().unwrap_or_default();
         match file_extension {
@@ -195,22 +228,22 @@ pub trait FromZipFile<T> {
 }
 
 // TODO: Remove, default functionality of ResourceManager, not done via a handler
-fn add_file_to_maps(entry: &Path, file: &mut ZipFile) {
-    let lowercase_file_name = file.name().to_lowercase();
-    if check_file(&lowercase_file_name) {
-        // File already exists, skip loading
-        return;
-    }
-    // TODO: Figure out issues with loading ini, txt and non-text files
-    // NOTE: Non-text files seem to work fine when not using mods
-    let file_extension = Path::new(&lowercase_file_name).extension().unwrap_or_default().to_str().unwrap_or_default();
-    if matches!(file_extension, "ai" | "ani" | "cfg" | "lyt" | "scn" | "uca" | "ucs" | "ucb") {
-        // | "ini" | "txt") {
-        add_txt_file_to_map(entry, file);
-        // } else if matches!(file_extension, "tga" | "pal" | "wav" | "lle" | "bmp" | "") {
-        // add_raw_bytes_file_to_map(entry, file);
-    }
-}
+// fn add_file_to_maps(entry: &Path, file: &mut ZipFile) {
+//     let lowercase_file_name = file.name().to_lowercase();
+//     if check_file(&lowercase_file_name) {
+//         // File already exists, skip loading
+//         return;
+//     }
+//     // TODO: Figure out issues with loading ini, txt and non-text files
+//     // NOTE: Non-text files seem to work fine when not using mods
+//     let file_extension = Path::new(&lowercase_file_name).extension().unwrap_or_default().to_str().unwrap_or_default();
+//     if matches!(file_extension, "ai" | "ani" | "cfg" | "lyt" | "scn" | "uca" | "ucs" | "ucb") {
+//         // | "ini" | "txt") {
+//         add_txt_file_to_map(entry, file);
+//         // } else if matches!(file_extension, "tga" | "pal" | "wav" | "lle" | "bmp" | "") {
+//         // add_raw_bytes_file_to_map(entry, file);
+//     }
+// }
 
 pub fn add_txt_file_to_map_with_path_override(entry: &Path, file: &mut ZipFile, path: String) {
     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
@@ -778,7 +811,7 @@ pub struct Handler {
 }
 
 // pub type HandlerFunction = fn(&Path, &mut ZipFile) -> ();
-pub type HandlerFunction = fn(&Path, &String, &mut Box<[u8]>) -> ();
+pub type HandlerFunction = fn(&Path, &String, &mut LazyResource) -> ();
 
 impl Handler {
     pub fn new(matcher_prefix: Option<String>, matcher_suffix: Option<String>, handler: HandlerFunction, stage: RunStage) -> Self {
@@ -790,7 +823,7 @@ impl Handler {
         }
     }
 
-    fn handle(&self, entry: &Path, file_name: &String, file: &mut Box<[u8]>) {
+    fn handle(&self, entry: &Path, file_name: &String, file: &mut LazyResource) {
         if let Some(prefix) = &self.matcher_prefix {
             if !file_name.starts_with(prefix) {
                 return;
@@ -843,80 +876,120 @@ impl ZipFileReference {
     }
 }
 
-// TODO: In future this could be an enum, within LazyResourceMap we could then use take_mut to swap out the enum variant
 struct LazyResourceMap {
-    not_loaded: HashMap<String, ZipFileReference>,
-    loaded: HashMap<String, Box<[u8]>>,
+    map: HashMap<String, LazyResource>,
+}
+
+struct LazyResource {
+    archive_path: String,
+    filename: String,
+    archive: Rc<RefCell<ZipArchive<BufReader<File>>>>,
+    type_: ZTFileType,
+    modified: bool,
+    data: Option<u32>, // a pointer to a BFResourcePtr
 }
 
 impl LazyResourceMap {
     fn new() -> Self {
         Self {
-            not_loaded: HashMap::new(),
-            loaded: HashMap::new(),
+            map: HashMap::new(),
         }
     }
 
-    fn insert_not_loaded(&mut self, key: String, value: ZipFileReference) -> Option<ZipFileReference> {
-        self.not_loaded.insert(key, value)
+    // fn insert(&mut self, key: String, value: LazyResource) -> Option<LazyResource> {
+    //     self.map.insert(key, value)
+    // }
+    
+    fn insert(&mut self, archive_path: String, filename: String, archive: Rc<RefCell<ZipArchive<BufReader<File>>>>) {
+        
+        self.map.insert(filename.clone(), LazyResource {
+            archive_path,
+            filename: filename.clone(),
+            archive,
+            type_: ZTFileType::from(Path::new(&filename)),
+            modified: false,
+            data: None,
+        });
     }
 
-    fn insert_loaded(&mut self, key: String, value: Box<[u8]>) -> Option<Box<[u8]>> {
-        self.loaded.insert(key, value)
-    }
+    // fn insert_not_loaded(&mut self, key: String, value: ZipFileReference) -> Option<ZipFileReference> {
+    //     self.not_loaded.insert(key, value)
+    // }
 
-    fn load_and_insert(&mut self, key: String, mut archive: Rc<RefCell<ZipArchive<BufReader<File>>>>) -> anyhow::Result<&Box<[u8]>> {
-        let mut binding = archive.borrow_mut();
-        let mut file = binding.by_name(&key).with_context(|| format!("Error finding file in archive: {}", &key))?;
+    // fn insert_loaded(&mut self, key: String, value: Box<[u8]>) -> Option<Box<[u8]>> {
+    //     self.loaded.insert(key, value)
+    // }
 
-        let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
+    // fn load_and_insert(&mut self, key: String, mut archive: Rc<RefCell<ZipArchive<BufReader<File>>>>) -> anyhow::Result<&Box<[u8]>> {
+    //     let mut binding = archive.borrow_mut();
+    //     let mut file = binding.by_name(&key).with_context(|| format!("Error finding file in archive: {}", &key))?;
 
-        file.read_exact(&mut file_buffer).with_context(|| format!("Error reading file: {}", &key))?;
+    //     let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
 
-        self.loaded.insert(key.clone(), file_buffer);
-        Ok(self.loaded.get(&key).unwrap())
-    }
+    //     file.read_exact(&mut file_buffer).with_context(|| format!("Error reading file: {}", &key))?;
 
-    fn get(&mut self, key: &str) -> anyhow::Result<Option<&mut Box<[u8]>>> {
-        match self.not_loaded.remove(key) {
-            Some(mut zip_file_ref) => {
-                let mut binding = zip_file_ref.zip.borrow_mut();
-                let mut zip_file = binding
-                    .by_name(&zip_file_ref.filename)
-                    .with_context(|| format!("Error finding file in archive: {}", zip_file_ref.filename))?;
-                let mut file_buffer = vec![0u8; zip_file.size() as usize].into_boxed_slice();
+    //     self.loaded.insert(key.clone(), file_buffer);
+    //     Ok(self.loaded.get(&key).unwrap())
+    // }
 
-                zip_file
-                    .read_exact(&mut file_buffer)
-                    .with_context(|| format!("Error reading file: {}", zip_file_ref.filename))?;
+    fn get(&mut self, key: &str) -> anyhow::Result<Option<&mut LazyResource>> {
+        match self.map.get_mut(key) {
+            Some(value) => {
+                if value.data.is_none() {
+                    let mut binding = value.archive.borrow_mut();
+                    let mut file = binding.by_name(&value.filename).with_context(|| format!("Error finding file in archive: {}", value.filename))?;
+                    let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
 
-                // TODO: Figure out why using ? here causes a lifetime issue
-                match self.loaded.try_insert(key.to_string(), file_buffer) {
-                    Ok(result_buffer) => Ok(Some(result_buffer)),
-                    Err(_) => {
-                        error!("Error inserting file into loaded map: {}", key);
-                        Ok(None)
-                    }
+                    file.read_exact(&mut file_buffer).with_context(|| format!("Error reading file: {}", value.filename))?;
+
+                    value.data = Some(ZTFile::new_text(value.filename.clone(), file_buffer.len() as u32, CString::new(file_buffer).unwrap()));
                 }
-            }
-            None => Ok(self.loaded.get_mut(key)),
+
+                Ok(Some(value))
+            },
+            None => Ok(None),
         }
+        // match self.not_loaded.remove(key) {
+        //     Some(mut zip_file_ref) => {
+        //         let mut binding = zip_file_ref.zip.borrow_mut();
+        //         let mut zip_file = binding
+        //             .by_name(&zip_file_ref.filename)
+        //             .with_context(|| format!("Error finding file in archive: {}", zip_file_ref.filename))?;
+        //         let mut file_buffer = vec![0u8; zip_file.size() as usize].into_boxed_slice();
+
+        //         zip_file
+        //             .read_exact(&mut file_buffer)
+        //             .with_context(|| format!("Error reading file: {}", zip_file_ref.filename))?;
+
+        //         // TODO: Figure out why using ? here causes a lifetime issue
+        //         match self.loaded.try_insert(key.to_string(), file_buffer) {
+        //             Ok(result_buffer) => Ok(Some(result_buffer)),
+        //             Err(_) => {
+        //                 error!("Error inserting file into loaded map: {}", key);
+        //                 Ok(None)
+        //             }
+        //         }
+        //     }
+        //     None => Ok(self.loaded.get_mut(key)),
+        // }
+
+
     }
 
     fn loaded_len(&self) -> usize {
-        self.loaded.len()
+        self.map.values().filter(|x| x.data.is_some()).count()
     }
 
     fn not_loaded_len(&self) -> usize {
-        self.not_loaded.len()
+        self.map.values().filter(|x| x.data.is_none()).count()
     }
 
     fn len(&self) -> usize {
-        self.loaded_len() + self.not_loaded_len()
+        self.map.len()
     }
 
     fn files(&self) -> Box<dyn Iterator<Item = String> + '_> {
-        Box::new(self.not_loaded.keys().cloned())
+        Box::new(self.map.keys().cloned())
     }
 }
 
@@ -965,8 +1038,8 @@ fn load_resources(paths: Vec<String>) {
     for handler in data_mutex.iter() {
         if handler.stage == RunStage::BeforeOpenZTMods {
             files.clone().for_each(|file| {
-                if let Some(mut data) = map.get(&file).unwrap() {
-                    handler.handle(Path::new(&file), &file, &mut data);
+                if let Some(data) = map.get(&file).unwrap() {
+                    handler.handle(Path::new(&file), &file, data);
                 }
             });
         }
@@ -978,7 +1051,7 @@ fn load_resources(paths: Vec<String>) {
         if handler.stage == RunStage::AfterOpenZTMods {
             files.clone().for_each(|file| {
                 if let Some(mut data) = map.get(&file).unwrap() {
-                    handler.handle(Path::new(&file), &file, &mut data);
+                    handler.handle(Path::new(&file), &file, data);
                 }
             });
         }
@@ -999,7 +1072,7 @@ fn load_resources(paths: Vec<String>) {
         if handler.stage == RunStage::AfterFiltering {
             filtered_files.clone().into_iter().for_each(|file| {
                 if let Some(mut data) = map.get(&file).unwrap() {
-                    handler.handle(Path::new(&file), &file, &mut data);
+                    handler.handle(Path::new(&file), &file, data);
                 }
             });
         }
@@ -1035,8 +1108,7 @@ fn handle_ztd(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<i
     let archive = Rc::new(RefCell::new(zip));
 
     archive.borrow_mut().file_names().for_each(|file_name| {
-        let zip_file_ref = ZipFileReference::new(archive.clone(), file_name.to_string());
-        map.insert_not_loaded(file_name.to_string(), zip_file_ref);
+        map.insert(resource_string.clone(), file_name.to_string(), archive.clone());
         load_count += 1;
     });
 
@@ -1044,12 +1116,8 @@ fn handle_ztd(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<i
 }
 
 
-fn parse_cfg(file_name: &String, data: &mut Box<[u8]>) -> Vec<String> {
+fn parse_cfg(file_name: &String, data: &mut LazyResource) -> Vec<String> {
     let results = Vec::new();
-
-
-
-
 
     return results;
 }
@@ -1327,20 +1395,17 @@ fn add_location_or_habitat(name: &String, icon_resource_id: &String) -> anyhow::
     Ok(())
 }
 
-// TODO: Return Result<Option<u32>>
 fn get_location_or_habitat_by_id(id: u32) -> Option<u32> {
     let binding = LOCATIONS_HABITATS_RESOURCE_MAP.lock().unwrap();
     binding.get(&id).cloned()
 }
 
-// TODO: Return Result<Option<u32>>
 fn get_location_or_habitat_by_name(name: &String) -> Option<u32> {
     let binding = LOCATIONS_HABITATS_ID_MAP.lock().unwrap();
     binding.get(name).cloned()
 }
 
 // Adds a new mod id to the set, returns false if the mod_id already exists
-// TODO: Return Result<bool>
 fn add_new_mod_id(mod_id: &String) -> bool {
     let mut binding = MOD_ID_SET.lock().unwrap();
     binding.insert(mod_id.clone())

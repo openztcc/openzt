@@ -15,7 +15,6 @@ use once_cell::sync::Lazy;
 use retour_utils::hook_module;
 use tracing::{error, info};
 use zip::read::ZipFile;
-use crate::resource_manager::RunStage;
 
 use crate::{
     add_to_command_register,
@@ -27,7 +26,7 @@ use crate::{
     resource_manager::{
         add_handler, add_raw_bytes_to_map_with_path_override,
         add_txt_file_to_map_with_path_override, modify_ztfile_as_animation, modify_ztfile_as_ini,
-        Handler,
+        Handler, RunStage, LazyResource,
     },
     string_registry::add_string_to_registry,
     ztui::{get_random_sex, get_selected_sex, BuyTab, Sex},
@@ -660,13 +659,13 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
     }
 }
 
-fn handle_expansion_config(path: &Path, _: &String, file: &mut Box<[u8]>) {
+fn handle_expansion_config(path: &Path, _: &String, file: &mut LazyResource) {
     if let Err(e) = parse_expansion_config(file) {
         info!("Error parsing expansion config: {} {}", path.display(), e)
     }
 }
 
-fn handle_member_parsing(path: &Path, file_name: &String, file: &mut Box<[u8]>) {
+fn handle_member_parsing(path: &Path, file_name: &String, file: &mut LazyResource) {
     if let Err(e) = parse_member_config(path, file_name, file) {
         error!("Error parsing member config: {} {}", path.display(), e)
     }
@@ -780,7 +779,7 @@ fn parse_expansion_config(file: &mut Box<[u8]>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_expansion_dropdown(path: &Path, file_name: &String, file: &mut Box<[u8]>) {
+fn handle_expansion_dropdown(path: &Path, file_name: &String, file: &mut LazyResource) {
     let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
     let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
         error!("Error converting file path to string");
@@ -807,10 +806,10 @@ pub fn init() {
     add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
     add_to_command_register("get_members".to_string(), command_get_members);
     add_handler(Handler::new(Some("xpac".to_string()), Some("cfg".to_string()), handle_expansion_config, RunStage::BeforeOpenZTMods));
-    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
-    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, RunStage::AfterOpenZTMods));
+    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing, RunStage::AfterFiltering));
+    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing, RunStage::AfterFiltering));
+    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing, RunStage::AfterFiltering));
+    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, RunStage::AfterFiltering));
     add_handler(Handler::new(Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()), None, handle_expansion_dropdown, RunStage::BeforeOpenZTMods));
     if unsafe { custom_expansion::init_detours() }.is_err() {
         error!("Error initialising custom expansion detours");
