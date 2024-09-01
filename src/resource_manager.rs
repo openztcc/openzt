@@ -1,6 +1,6 @@
-use std::{fmt::Display, slice, cell::RefCell, str};
+use std::{fmt::Display, slice, str};
 use std::{
-    borrow::Borrow, collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, sync::{Mutex, Arc},
+    collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, sync::{Mutex, Arc},
 };
 
 use anyhow::{Context, anyhow};
@@ -10,11 +10,10 @@ use once_cell::sync::Lazy;
 use retour_utils::hook_module;
 use tracing::{error, info};
 use walkdir::WalkDir;
-use zip::{read::{ZipArchive, ZipFile}, result};
+use zip::read::{ZipArchive, ZipFile};
 
 use regex::Regex;
 
-use crate::debug_dll::get_string_from_memory_with_size;
 use crate::{
     animation::Animation,
     console::{add_to_command_register, CommandError},
@@ -242,65 +241,65 @@ pub trait FromZipFile<T> {
     fn from_zip_file(file: &mut ZipFile) -> io::Result<T>;
 }
 
-pub fn add_txt_file_to_map_with_path_override(entry: &Path, file: &mut LazyResource, path: String) {
-    let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
-    match file.read_exact(&mut buffer) {
-        Ok(bytes_read) => bytes_read,
-        Err(e) => {
-            error!("Error reading file: {} {} -> {}", entry.display(), file.name(), e);
-            return;
-        }
-    };
+// pub fn add_txt_file_to_map_with_path_override(entry: &Path, file: &mut LazyResource, path: String) {
+//     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
+//     match file.read_exact(&mut buffer) {
+//         Ok(bytes_read) => bytes_read,
+//         Err(e) => {
+//             error!("Error reading file: {} {} -> {}", entry.display(), file.name(), e);
+//             return;
+//         }
+//     };
 
-    let intermediate_string = String::from_utf8_lossy(&buffer).to_string();
+//     let intermediate_string = String::from_utf8_lossy(&buffer).to_string();
 
-    let file_size = intermediate_string.len();
-    let file_contents = match CString::new(intermediate_string) {
-        Ok(c_string) => c_string,
-        Err(e) => {
-            error!("Error converting file contents to CString: {} {} -> {}", entry.display(), file.name(), e);
-            return;
-        }
-    };
+//     let file_size = intermediate_string.len();
+//     let file_contents = match CString::new(intermediate_string) {
+//         Ok(c_string) => c_string,
+//         Err(e) => {
+//             error!("Error converting file contents to CString: {} {} -> {}", entry.display(), file.name(), e);
+//             return;
+//         }
+//     };
 
-    let ztfile = match ZTFile::new_text(path.clone(), file_size as u32, file_contents) {
-        Ok(ztfile) => ztfile,
-        Err(e) => {
-            error!("Error creating ZTFile from text: {} {} -> {}", entry.display(), file.name(), e);
-            return;
-        }
-    };
+//     let ztfile = match ZTFile::new_text(path.clone(), file_size as u32, file_contents) {
+//         Ok(ztfile) => ztfile,
+//         Err(e) => {
+//             error!("Error creating ZTFile from text: {} {} -> {}", entry.display(), file.name(), e);
+//             return;
+//         }
+//     };
 
-    add_ztfile(entry, path, ztfile);
-}
+//     add_ztfile(entry, path, ztfile);
+// }
 
-pub fn add_txt_file_to_map(entry: &Path, file: &mut ZipFile) {
-    let file_name = file.name().to_string().to_lowercase();
+// pub fn add_txt_file_to_map(entry: &Path, file: &mut ZipFile) {
+//     let file_name = file.name().to_string().to_lowercase();
 
-    add_txt_file_to_map_with_path_override(entry, file, file_name)
-}
+//     add_txt_file_to_map_with_path_override(entry, file, file_name)
+// }
 
-pub fn add_raw_bytes_to_map_with_path_override(entry: &Path, file: &mut ZipFile, path: String) {
-    let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
-    match file.read_exact(&mut buffer) {
-        Ok(_) => {}
-        Err(e) => {
-            error!("Error reading file: {} {} -> {}", entry.display(), file.name(), e);
-            return;
-        }
-    };
+// pub fn add_raw_bytes_to_map_with_path_override(entry: &Path, file: &mut ZipFile, path: String) {
+//     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
+//     match file.read_exact(&mut buffer) {
+//         Ok(_) => {}
+//         Err(e) => {
+//             error!("Error reading file: {} {} -> {}", entry.display(), file.name(), e);
+//             return;
+//         }
+//     };
 
-    let file_size = file.size() as u32;
-    add_ztfile(entry, path.clone(), ZTFile::new_raw_bytes(path, file_size, buffer));
-}
+//     let file_size = file.size() as u32;
+//     add_ztfile(entry, path.clone(), ZTFile::new_raw_bytes(path, file_size, buffer));
+// }
 
-pub fn add_raw_bytes_file_to_map(entry: &Path, file: &mut ZipFile) {
-    let file_name = file.name().to_string().to_lowercase();
-    add_raw_bytes_to_map_with_path_override(entry, file, file_name)
-}
+// pub fn add_raw_bytes_file_to_map(entry: &Path, file: &mut ZipFile) {
+//     let file_name = file.name().to_string().to_lowercase();
+//     add_raw_bytes_to_map_with_path_override(entry, file, file_name)
+// }
 
 // Contains a mapping of file_paths to BFResourcePtrs
-static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+// static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 // static RESOURCE_PTR_PTR_SET: Lazy<Mutex<HashSet<u32>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
@@ -314,15 +313,15 @@ static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new
 //     binding.contains(&ptr_ptr)
 // }
 
-pub fn check_file(file_name: &str) -> bool {
-    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
-    binding.contains_key(&file_name.to_lowercase())
-}
+// pub fn check_file(file_name: &str) -> bool {
+//     let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+//     binding.contains_key(&file_name.to_lowercase())
+// }
 
-pub fn get_file_ptr(file_name: &str) -> Option<u32> {
-    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
-    binding.get(&file_name.to_lowercase()).copied()
-}
+// pub fn get_file_ptr(file_name: &str) -> Option<u32> {
+//     let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+//     binding.get(&file_name.to_lowercase()).copied()
+// }
 
 fn get_num_mod_ids() -> usize {
     let binding = MOD_ID_SET.lock().unwrap();
@@ -333,9 +332,9 @@ fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError
     if args.len() > 1 {
         return Err(CommandError::new("Too many arguments".to_string()));
     }
-    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+    let binding = LAZY_RESOURCE_MAP.lock().unwrap();
     let mut result_string = String::new();
-    for (resource_string, _) in binding.iter() {
+    for resource_string in binding.files() {
         if args.len() == 1 && !resource_string.starts_with(args[0]) {
             continue;
         }
@@ -345,9 +344,9 @@ fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError
 }
 
 fn command_list_openzt_resource_strings(_args: Vec<&str>) -> Result<String, CommandError> {
-    let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+    let binding = LAZY_RESOURCE_MAP.lock().unwrap();
     let mut result_string = String::new();
-    for (resource_string, _) in binding.iter() {
+    for resource_string in binding.files() {
         if resource_string.starts_with("openzt") {
             result_string.push_str(&format!("{}\n", resource_string));
         }
@@ -355,15 +354,13 @@ fn command_list_openzt_resource_strings(_args: Vec<&str>) -> Result<String, Comm
     Ok(result_string)
 }
 
-fn ztfile_to_raw_resource(path: &Path, file_name: String, ztfile: ZTFile)  -> anyhow::Result<u32> {
-    let Some(ztd_path) = path.to_str() else {
-        return Err(anyhow!("Failed to convert path to string: {}", path.display()));
-    };
-    let mut ztd_path = ztd_path.to_string();
+fn ztfile_to_raw_resource(path: &String, file_name: String, ztfile: ZTFile)  -> anyhow::Result<u32> {
+    // let Some(ztd_path) = path.to_str() else {
+    //     return Err(anyhow!("Failed to convert path to string: {}", path.display()));
+    // };
+    let mut ztd_path = path.clone();
     ztd_path = ztd_path.replace("./", "zip::./").replace('\\', "/");
     let lowercase_filename = file_name.to_lowercase();
-
-    let mut binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
 
     let bf_zip_name_ptr = match CString::new(ztd_path.clone()) {
         Ok(c_string) => c_string.into_raw() as u32,
@@ -416,7 +413,8 @@ fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
     ztd_path = ztd_path.replace("./", "zip::./").replace('\\', "/");
     let lowercase_filename = file_name.to_lowercase();
 
-    let mut binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+    // let mut binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+    let mut binding = LAZY_RESOURCE_MAP.lock().unwrap();
 
     let bf_zip_name_ptr = match CString::new(ztd_path.clone()) {
         Ok(c_string) => c_string.into_raw() as u32,
@@ -850,9 +848,9 @@ pub enum RunStage {
     AfterFiltering
 }
 
-pub type IniHandlerFunction = fn(&Path, &String, Ini) -> Option<(String, String, Ini)>;
-pub type AnimationHandlerFunction = fn(&Path, &String, Animation) -> Option<(String, String, Animation)>;
-pub type RawBytesHandlerFunction = fn(&Path, &String, Box<[u8]>) -> Option<(String, String, Box<[u8]>)>;
+pub type IniHandlerFunction = fn(&String, &String, Ini) -> Option<(String, String, Ini)>;
+pub type AnimationHandlerFunction = fn(&String, &String, Animation) -> Option<(String, String, Animation)>;
+pub type RawBytesHandlerFunction = fn(&String, &String, Box<[u8]>) -> Option<(String, String, Box<[u8]>)>;
 
 pub struct HandlerBuilder<const HasStage: bool, const HasHandler: bool> {
     matcher_prefix: Option<String>,
@@ -864,17 +862,17 @@ pub struct HandlerBuilder<const HasStage: bool, const HasHandler: bool> {
 }
 
 impl<const HasStage: bool, const HasHandler: bool> HandlerBuilder<HasStage, HasHandler> {
-    fn prefix(mut self, prefix: &str) -> HandlerBuilder<HasStage, HasHandler> {
+    pub fn prefix(mut self, prefix: &str) -> HandlerBuilder<HasStage, HasHandler> {
         self.matcher_prefix = Some(prefix.to_owned());
         self
     }
 
-    fn suffix(mut self, suffix: &str) -> HandlerBuilder<HasStage, HasHandler> {
+    pub fn suffix(mut self, suffix: &str) -> HandlerBuilder<HasStage, HasHandler> {
         self.matcher_suffix = Some(suffix.to_owned());
         self
     }
 
-    fn ini_handler(self, handler: IniHandlerFunction) -> HandlerBuilder<HasStage, true> {
+    pub fn ini_handler(self, handler: IniHandlerFunction) -> HandlerBuilder<HasStage, true> {
         HandlerBuilder {
             matcher_prefix: self.matcher_prefix,
             matcher_suffix: self.matcher_suffix,
@@ -885,7 +883,7 @@ impl<const HasStage: bool, const HasHandler: bool> HandlerBuilder<HasStage, HasH
         }
     }
 
-    fn animation_handler(self, handler: AnimationHandlerFunction) -> HandlerBuilder<HasStage, true> {
+    pub fn animation_handler(self, handler: AnimationHandlerFunction) -> HandlerBuilder<HasStage, true> {
         HandlerBuilder {
             matcher_prefix: self.matcher_prefix,
             matcher_suffix: self.matcher_suffix,
@@ -896,7 +894,7 @@ impl<const HasStage: bool, const HasHandler: bool> HandlerBuilder<HasStage, HasH
         }
     }
 
-    fn raw_bytes_handler(self, handler: RawBytesHandlerFunction) -> HandlerBuilder<HasStage, true> {
+    pub fn raw_bytes_handler(self, handler: RawBytesHandlerFunction) -> HandlerBuilder<HasStage, true> {
         HandlerBuilder {
             matcher_prefix: self.matcher_prefix,
             matcher_suffix: self.matcher_suffix,
@@ -907,7 +905,7 @@ impl<const HasStage: bool, const HasHandler: bool> HandlerBuilder<HasStage, HasH
         }
     }
 
-    fn stage(self, stage: RunStage) -> HandlerBuilder<true, HasHandler> {
+    pub fn run_stage(self, stage: RunStage) -> HandlerBuilder<true, HasHandler> {
         HandlerBuilder {
             matcher_prefix: self.matcher_prefix,
             matcher_suffix: self.matcher_suffix,
@@ -920,7 +918,7 @@ impl<const HasStage: bool, const HasHandler: bool> HandlerBuilder<HasStage, HasH
 }
 
 impl HandlerBuilder<true, true> {
-    fn build(self) -> Handler {
+    pub fn build(self) -> Handler {
         unsafe {
             Handler {
                 matcher_prefix: self.matcher_prefix,
@@ -971,31 +969,40 @@ impl Handler {
         let new_file = match ZTFileType::from(Path::new(&file_name)) {
             ZTFileType::Ini | ZTFileType::Ai | ZTFileType::Ani | ZTFileType::Cfg | ZTFileType::Lyt | ZTFileType::Scn | ZTFileType::Uca | ZTFileType::Ucs | ZTFileType::Ucb => {
                 if let Some(handler) = self.ini_handler {
-                    // TODO: Load data hare
-                    let ini = Ini::new();
-                    let Ok(input_string) = str::from_utf8(file) else {
+                    let Some((archive_name, file)) = get_file(file_name) else {
+                        error!("Error getting file: {}", file_name);
+                        return;
+                    };
+                    let mut ini = Ini::new();
+                    let Ok(input_string) = str::from_utf8(&file) else {
                         error!("Error converting file to string: {}", file_name);
                         return;
                     };
                     ini.read(input_string.to_string());
-                    if let Some((new_file_name, new_file_path, new_ini)) = handler(entry, file_name, ini) {
+                    if let Some((new_file_name, new_file_path, new_ini)) = handler(&archive_name, file_name, ini) {
                         
                     }
                 }
             }
             ZTFileType::Animation => {
                 if let Some(handler) = self.animation_handler {
-                    // TODO: Load data hare
+                    let Some((archive_name, file)) = get_file(file_name) else {
+                        error!("Error getting file: {}", file_name);
+                        return;
+                    };
                     let animation = Animation::parse(&file);
-                    if let Some((new_file_name, new_file_path, new_animation)) = handler(entry, file_name, animation) {
+                    if let Some((new_file_name, new_file_path, new_animation)) = handler(&archive_name, file_name, animation) {
                         
                     }
                 }
             }
             ZTFileType::Bmp | ZTFileType::Lle | ZTFileType::TGA | ZTFileType::Wav | ZTFileType::Palette => {
                 if let Some(handler) = self.raw_bytes_handler {
-                    // TODO: Load data hare
-                    if let Some((new_file_name, new_file_path, new_data)) = handler(entry, file_name, file) {
+                    let Some((archive_name, mut file)) = get_file(file_name) else {
+                        error!("Error getting file: {}", file_name);
+                        return;
+                    };
+                    if let Some((new_file_name, new_file_path, new_data)) = handler(&archive_name, file_name, file) {
 
                     }
                 }
@@ -1008,15 +1015,15 @@ impl Handler {
     }
 }
 
-fn get_file(file_name: &str) -> Option<Box<[u8]>> {
+fn get_file(file_name: &str) -> Option<(String, Box<[u8]>)> {
     let mut map = LAZY_RESOURCE_MAP.lock().unwrap();
-    match map.get_mut(file_name) {
+    match map.get_mut(&file_name.to_lowercase()) {
         Ok(Some(file)) => {
-            let resource_ptr = get_from_memory::<BFResourcePtr>(file.data);
+            let resource_ptr = get_from_memory::<BFResourcePtr>(file.data.unwrap());
             let tmp_slice = unsafe {slice::from_raw_parts(resource_ptr.data_ptr as *const _, resource_ptr.content_size as usize) };
             let mut new_slice = vec![0; resource_ptr.content_size as usize];
             new_slice.copy_from_slice(tmp_slice);
-            Some(new_slice.into_boxed_slice())
+            Some((get_string_from_memory(resource_ptr.bf_zip_name_ptr), new_slice.into_boxed_slice()))
         },
         _ => None
     }
@@ -1048,16 +1055,16 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     resources
 }
 
-struct ZipFileReference {
-    zip: Arc<Mutex<ZipArchive<BufReader<File>>>>,
-    filename: String,
-}
+// struct ZipFileReference {
+//     zip: Arc<Mutex<ZipArchive<BufReader<File>>>>,
+//     filename: String,
+// }
 
-impl ZipFileReference {
-    fn new(zip: Arc<Mutex<ZipArchive<BufReader<File>>>>, filename: String) -> Self {
-        Self { zip, filename }
-    }
-}
+// impl ZipFileReference {
+//     fn new(zip: Arc<Mutex<ZipArchive<BufReader<File>>>>, filename: String) -> Self {
+//         Self { zip, filename }
+//     }
+// }
 
 
 static LAZY_RESOURCE_MAP: Lazy<Mutex<LazyResourceMap>> = Lazy::new(|| Mutex::new(LazyResourceMap::new()));
@@ -1066,34 +1073,27 @@ pub struct LazyResourceMap {
     map: HashMap<String, LazyResource>,
 }
 
-struct LazyResource {
-    pub archive_path: String,
-    pub filename: String,
-    pub archive: Arc<Mutex<ZipArchive<BufReader<File>>>>,
-    pub type_: ZTFileType,
-    pub modified: bool,
-    pub data: Option<u32>, // a pointer to a BFResourcePtr
+enum ResourceBacking {
+    LazyZipFile{archive_name: String, archive: Arc<Mutex<ZipArchive<BufReader<File>>>>},
+    LoadedZipFile{archive_name: String, archive: Arc<Mutex<ZipArchive<BufReader<File>>>>, data: u32},
+    Custom{data: u32},
 }
 
-// TODO: Delete this?
-pub struct ConcreteResource {
-    pub archive_path: String,
+struct ConcreteResource {
+    archive_name: Option<String>,
+    filename: String,
+    type_: ZTFileType,
+    data: u32,
+}
+
+struct LazyResource {
+    pub backing: ResourceBacking,
+    // pub archive_path: String,
     pub filename: String,
+    // pub archive: Option<Arc<Mutex<ZipArchive<BufReader<File>>>>>,
     pub type_: ZTFileType,
     // pub modified: bool,
-    pub data: u32,
-}
-
-impl From<LazyResource> for ConcreteResource {
-    fn from(resource: LazyResource) -> Self {
-        Self {
-            archive_path: resource.archive_path,
-            filename: resource.filename,
-            type_: resource.type_,
-            // modified: resource.modified,
-            data: resource.data.unwrap(),
-        }
-    }
+    // pub data: Option<u32>, // a pointer to a BFResourcePtr
 }
 
 impl LazyResourceMap {
@@ -1103,63 +1103,87 @@ impl LazyResourceMap {
         }
     }
     
-    fn insert(&mut self, archive_path: String, filename: String, archive: Arc<Mutex<ZipArchive<BufReader<File>>>>) {
-        
-        let modified = self.map.get(&filename).is_some();
+    // TODO: Unload old resource if it exists
+    fn insert_lazy(&mut self, archive_path: String, filename: String, archive: Arc<Mutex<ZipArchive<BufReader<File>>>>) {
+        // let modified = self.map.get(&filename).is_some();
 
         self.map.insert(filename.clone(), LazyResource {
-            archive_path,
+            backing: ResourceBacking::ZipFile(archive_path.clone(), archive),
+            // archive_path,
             filename: filename.clone(),
-            archive,
+            // Some(archive),
             type_: ZTFileType::from(Path::new(&filename)),
-            modified,
-            data: None,
+            // data: None,
         });
     }
 
-    fn get_mut(&mut self, key: &str) -> anyhow::Result<Option<&mut ConcreteResource>> {
-        match self.map.get_mut(key) {
-            Some(value) => {
-                if value.data.is_none() {
-                    let mut binding = value.archive.lock().unwrap();
-                    let mut file = binding.by_name(&value.filename).with_context(|| format!("Error finding file in archive: {}", value.filename))?;
-                    let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
+    // TODO: Unload old resource if it exists
+    fn insert_loaded(&mut self, resource: LazyResource) {
+        self.map.insert(resource.filename.clone(), resource);
+    }
 
-                    file.read_exact(&mut file_buffer).with_context(|| format!("Error reading file: {}", value.filename))?;
-                    let ztfile = ZTFile::new(value.filename.clone(), file_buffer.len() as u32, file_buffer)?;
-                    value.data = Some(ztfile_to_raw_resource(Path::new(&value.archive_path), value.filename.clone(), ztfile)?);
-                }
+    fn get(&mut self, key: &str) -> anyhow::Result<Option<ConcreteResource>> {
+        let Some(resource) = self.map.get_mut(key) else {
+            return Ok(None);
+        };
 
-                Ok(Some(value))
+        let (archive_name, data) = match resource.backing {
+            ResourceBacking::LazyZipFile{archive_name, archive} => {
+                let mut binding = archive.lock().unwrap();
+                let mut file = binding.by_name(&resource.filename).with_context(|| format!("Error finding file in archive: {}", resource.filename))?;
+                let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
+
+                file.read_exact(&mut file_buffer).with_context(|| format!("Error reading file: {}", resource.filename))?;
+                let ztfile = ZTFile::new(resource.filename.clone(), file_buffer.len() as u32, file_buffer)?;
+                let data = ztfile_to_raw_resource(&archive_name, resource.filename.clone(), ztfile)?;
+                // TODO: Use std::mem::take/replace to avoid cloning
+                resource.backing = ResourceBacking::LoadedZipFile{archive_name: archive_name.clone(), archive, data: data.clone()};
+                (Some(archive_name), data)
             },
-            None => Ok(None),
-        }
-    }
+            ResourceBacking::LoadedZipFile{archive_name, archive, data} => (Some(archive_name), data),
+            ResourceBacking::Custom{data} => (None, data),
+        };
 
-    pub fn get(&mut self, key: &str) -> anyhow::Result<Option<&ConcreteResource>> {
-        // We re-wrap the LazyResource to drop the mutable borrow
-        match self.get_mut(key)? {
-            Some(value) => Ok(Some(value)),
-            None => Ok(None),
-        }
+        Ok(Some(ConcreteResource{
+            archive_name: archive_name.clone(),
+            filename: resource.filename.clone(),
+            type_: resource.type_.clone(),
+            data: data.clone(),
+        }))
     }
-        
-
 
     fn loaded_len(&self) -> usize {
-        self.map.values().filter(|x| x.data.is_some()).count()
+        self.map.values().filter(|x| matches!(x.backing, ResourceBacking::LoadedZipFile{..} | ResourceBacking::Custom{..})).count()
     }
 
     fn not_loaded_len(&self) -> usize {
-        self.map.values().filter(|x| x.data.is_none()).count()
+        self.map.values().filter(|x| matches!(x.backing, ResourceBacking::LazyZipFile{..})).count()
     }
 
     fn len(&self) -> usize {
         self.map.len()
     }
 
+    fn contains_key(&self, key: &str) -> bool {
+        self.map.contains_key(key)
+    }
+
     fn files(&self) -> Box<dyn Iterator<Item = String> + '_> {
         Box::new(self.map.keys().cloned())
+    }
+}
+
+pub fn check_file(file_name: &str) -> bool {
+    let binding = LAZY_RESOURCE_MAP.lock().unwrap();
+    binding.contains_key(&file_name.to_lowercase())
+}
+
+pub fn get_file_ptr(file_name: &str) -> Option<u32> {
+    let mut binding = LAZY_RESOURCE_MAP.lock().unwrap();
+    if let Ok(Some(resource)) = binding.get(&file_name.to_lowercase()) {
+        Some(resource.data)
+    } else {
+        None
     }
 }
 
@@ -1168,8 +1192,6 @@ fn load_resources(paths: Vec<String>) {
     let now = Instant::now();
     let mut resource_count = 0;
 
-    // TODO: LazyStatic this
-    // let mut map = LazyResourceMap::new();
     let mut map = LAZY_RESOURCE_MAP.lock().unwrap();
 
     paths.iter().rev().for_each(|path| {
@@ -1196,11 +1218,6 @@ fn load_resources(paths: Vec<String>) {
     );
 
     let now = Instant::now();
-
-    // TODO: Iterate over map and call handlers
-    // Handlers based on file types?
-    // Should handlers care about whether files are loaded via .cfg files? - Configurable
-    // Need to implement basic ordering for handlers (BeforeMods, AfterMods, others?)
 
     let data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
 
@@ -1273,7 +1290,7 @@ fn handle_ztd(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<i
     let archive = Arc::new(Mutex::new(zip));
 
     archive.lock().unwrap().file_names().for_each(|file_name| {
-        map.insert(resource_string.clone(), file_name.to_string(), archive.clone());
+        map.insert_lazy(resource_string.clone(), file_name.to_string(), archive.clone());
         load_count += 1;
     });
 

@@ -3,7 +3,6 @@ use std::{
     ffi::CString,
     fmt,
     fmt::Display,
-    io::Read,
     path::Path,
     sync::{Mutex, MutexGuard},
 };
@@ -14,20 +13,13 @@ use maplit::hashset;
 use once_cell::sync::Lazy;
 use retour_utils::hook_module;
 use tracing::{error, info};
-use zip::read::ZipFile;
 
 use crate::{
-    add_to_command_register,
-    bfentitytype::{ZTEntityType, ZTEntityTypeClass},
-    console::CommandError,
-    debug_dll::{
-        get_from_memory, get_string_from_memory, get_string_from_memory_bounded, get_string_from_memory_with_size, save_to_memory
-    },
-    resource_manager::{
-        add_handler, add_raw_bytes_to_map_with_path_override, add_txt_file_to_map_with_path_override, modify_ztfile_as_animation, modify_ztfile_as_ini, BFResourcePtr, Handler, ConcreteResource, RunStage
-    },
-    string_registry::add_string_to_registry,
-    ztui::{get_random_sex, get_selected_sex, BuyTab, Sex},
+    add_to_command_register, animation::Animation, bfentitytype::{ZTEntityType, ZTEntityTypeClass}, console::CommandError, debug_dll::{
+        get_from_memory, get_string_from_memory, get_string_from_memory_bounded,  save_to_memory
+    }, resource_manager::{
+        add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage
+    }, string_registry::add_string_to_registry, ztui::{get_random_sex, get_selected_sex, BuyTab, Sex}
 };
 
 static OFFICIAL_FILESET: Lazy<HashSet<&str>> = Lazy::new(|| {
@@ -657,16 +649,18 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
     }
 }
 
-fn handle_expansion_config(path: &Path, _: &String, file: &mut ConcreteResource) {
-    if let Err(e) = parse_expansion_config(file) {
-        info!("Error parsing expansion config: {} {}", path.display(), e)
+fn handle_expansion_config(path: &String, _: &String, file: Ini) -> Option<(String, String, Ini)> {
+    if let Err(e) = parse_expansion_config(&file) {
+        error!("Error parsing expansion config: {} {}", path, e);
     }
+    None
 }
 
-fn handle_member_parsing(path: &Path, file_name: &String, file: &mut ConcreteResource) {
+fn handle_member_parsing(path: &String, file_name: &String, file: Ini) -> Option<(String, String, Ini)> {
     if let Err(e) = parse_member_config(path, file_name, file) {
-        error!("Error parsing member config: {} {}", path.display(), e)
+        error!("Error parsing member config: {} {}", path, e)
     }
+    None
 }
 
 // TODO: Remove these hacks
@@ -681,15 +675,7 @@ static FILE_NAME_OVERRIDES: Lazy<HashMap<String, String>> = Lazy::new(|| {
     .collect()
 });
 
-fn parse_member_config(path: &Path, file_name: &String, file: &mut ConcreteResource) -> anyhow::Result<()> {
-    let resource: BFResourcePtr = get_from_memory(file.data.with_context(|| format!("data {} : {} has not been loaded", file.archive_path, file.filename))?);
-    let string_buffer = get_string_from_memory_with_size(resource.data_ptr, resource.content_size);
-
-    let mut member_cfg = Ini::new();
-    member_cfg.set_comment_symbols(&[';', '#', ':']);
-    member_cfg.read(string_buffer).map_err(anyhow::Error::msg)?;
-
-    // TODO: Remove this hack once all cfg files are correctly parsed
+fn parse_member_config(path: &String, file_name: &String, file: Ini) -> anyhow::Result<()> {
     let filepath = match FILE_NAME_OVERRIDES.get(file_name) {
         Some(override_name) => override_name.to_string(),
         None => file_name.to_ascii_lowercase(),
@@ -702,7 +688,8 @@ fn parse_member_config(path: &Path, file_name: &String, file: &mut ConcreteResou
         .unwrap()
         .to_string();
 
-    if let Some(keys) = member_cfg.get_keys("member") {
+    // TODO: get_keys shouldn't need a mutable ini
+    if let Some(keys) = file.clone().get_keys("member") {
         for key in keys {
             add_member(filename.clone(), key);
         }
@@ -719,7 +706,8 @@ fn parse_member_config(path: &Path, file_name: &String, file: &mut ConcreteResou
     Ok(())
 }
 
-fn is_cc(path: &Path) -> bool {
+fn is_cc(archive: &String) -> bool {
+    let path = Path::new(archive);
     let Some(parent) = path.parent() else {
         return false;
     };
@@ -735,16 +723,6 @@ fn is_cc(path: &Path) -> bool {
 }
 
 fn parse_expansion_config(expansion_cfg: &Ini) -> anyhow::Result<()> {
-    // let string_buffer = String::from_utf8_lossy(file).to_string();
-    // let string_buffer = get_string_from_memory_bounded(file.data, file.data + file.);
-    // let resource: BFResourcePtr = get_from_memory(file.data.with_context(|| format!("data {} : {} has not been loaded", file.archive_path, file.filename))?);
-    // let string_buffer = get_string_from_memory_with_size(resource.data_ptr, resource.content_size);
-
-    // let mut expansion_cfg = Ini::new();
-    // expansion_cfg
-        // .read(string_buffer)
-        // .map_err(anyhow::Error::msg)?;
-
     let mut id: u32 = expansion_cfg
         .get_parse("expansion", "id")
         .map_err(anyhow::Error::msg)?
@@ -781,38 +759,49 @@ fn parse_expansion_config(expansion_cfg: &Ini) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_expansion_dropdown(path: &Path, file_name: &String, file: &mut ConcreteResource) {
+fn handle_expansion_dropdown_ani(path: &String, file_name: &String, file: Ini) -> Option<(String, String, Ini)> {
     let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
     let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
         error!("Error converting file path to string");
-        return;
+        return None
     };
-    match Path::new(&file_path_string)
-        .extension()
-        .unwrap_or_default()
-        .to_str()
-        .unwrap_or_default()
-    {
-        "ani" => {
-            add_txt_file_to_map_with_path_override(path, file, file_path_string);
-        }
-        "pal" | "" => {
-            add_raw_bytes_to_map_with_path_override(path, file, file_path_string);
-        }
-        _ => (),
-    }
+    Some((path.clone(), file_path_string, file))
+}
+
+fn handle_expansion_dropdown_raw_bytes(path: &String, file_name: &String, file: Box<[u8]>) -> Option<(String, String, Box<[u8]>)> {
+    let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
+    let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
+        error!("Error converting file path to string");
+        return None;
+    };
+    Some((path.clone(), file_path_string, file))
+}
+
+fn handle_expansion_dropdown_animation(path: &String, file_name: &String, file: Animation) -> Option<(String, String, Animation)> {
+    let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
+    let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
+        error!("Error converting file path to string");
+        return None;
+    };
+    Some((path.clone(), file_path_string, file))
 }
 
 pub fn init() {
     add_to_command_register("list_expansion".to_string(), command_get_expansions);
     add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
     add_to_command_register("get_members".to_string(), command_get_members);
-    add_handler(Handler::new(Some("xpac".to_string()), Some("cfg".to_string()), handle_expansion_config, RunStage::BeforeOpenZTMods));
-    add_handler(Handler::new(None, Some("uca".to_string()), handle_member_parsing, RunStage::AfterFiltering));
-    add_handler(Handler::new(None, Some("ucs".to_string()), handle_member_parsing, RunStage::AfterFiltering));
-    add_handler(Handler::new(None, Some("ucb".to_string()), handle_member_parsing, RunStage::AfterFiltering));
-    add_handler(Handler::new(None, Some("ai".to_string()), handle_member_parsing, RunStage::AfterFiltering));
-    add_handler(Handler::new(Some(EXPANSION_ZT_RESOURCE_PREFIX.to_string()), None, handle_expansion_dropdown, RunStage::BeforeOpenZTMods));
+    add_handler(Handler::builder().prefix("xpac").suffix("cfg").run_stage(RunStage::BeforeOpenZTMods).ini_handler(handle_expansion_config).build());
+    add_handler(Handler::builder().prefix("uca").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
+    add_handler(Handler::builder().prefix("ucs").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
+    add_handler(Handler::builder().prefix("ucb").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
+    add_handler(Handler::builder().prefix("ai").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
+    add_handler(Handler::builder()
+                    .prefix(EXPANSION_ZT_RESOURCE_PREFIX)
+                    .run_stage(RunStage::BeforeOpenZTMods)
+                    .ini_handler(handle_expansion_dropdown_ani)
+                    .raw_bytes_handler(handle_expansion_dropdown_raw_bytes)
+                    .animation_handler(handle_expansion_dropdown_animation)
+                    .build());
     if unsafe { custom_expansion::init_detours() }.is_err() {
         error!("Error initialising custom expansion detours");
     };
