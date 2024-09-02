@@ -442,7 +442,7 @@ fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
                 content_size: length,
             }));
 
-            binding.insert(file_name.clone(), resource_ptr as u32);
+            binding.insert_custom(file_name.clone(), resource_ptr as u32);
         }
         ZTFile::RawBytes(data, _, length) => {
             let ptr = data.as_ptr() as u32;
@@ -455,7 +455,7 @@ fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
                 content_size: length,
             }));
 
-            binding.insert(lowercase_filename.clone(), resource_ptr as u32);
+            binding.insert_custom(lowercase_filename.clone(), resource_ptr as u32);
         }
     }
 }
@@ -1017,9 +1017,9 @@ impl Handler {
 
 fn get_file(file_name: &str) -> Option<(String, Box<[u8]>)> {
     let mut map = LAZY_RESOURCE_MAP.lock().unwrap();
-    match map.get_mut(&file_name.to_lowercase()) {
+    match map.get(&file_name.to_lowercase()) {
         Ok(Some(file)) => {
-            let resource_ptr = get_from_memory::<BFResourcePtr>(file.data.unwrap());
+            let resource_ptr = get_from_memory::<BFResourcePtr>(file.data);
             let tmp_slice = unsafe {slice::from_raw_parts(resource_ptr.data_ptr as *const _, resource_ptr.content_size as usize) };
             let mut new_slice = vec![0; resource_ptr.content_size as usize];
             new_slice.copy_from_slice(tmp_slice);
@@ -1073,6 +1073,7 @@ pub struct LazyResourceMap {
     map: HashMap<String, LazyResource>,
 }
 
+#[derive(Clone)]
 enum ResourceBacking {
     LazyZipFile{archive_name: String, archive: Arc<Mutex<ZipArchive<BufReader<File>>>>},
     LoadedZipFile{archive_name: String, archive: Arc<Mutex<ZipArchive<BufReader<File>>>>, data: u32},
@@ -1108,7 +1109,7 @@ impl LazyResourceMap {
         // let modified = self.map.get(&filename).is_some();
 
         self.map.insert(filename.clone(), LazyResource {
-            backing: ResourceBacking::ZipFile(archive_path.clone(), archive),
+            backing: ResourceBacking::LazyZipFile{archive_name: archive_path.clone(), archive},
             // archive_path,
             filename: filename.clone(),
             // Some(archive),
@@ -1122,12 +1123,21 @@ impl LazyResourceMap {
         self.map.insert(resource.filename.clone(), resource);
     }
 
+    fn insert_custom(&mut self, filename: String, data: u32) {
+        self.map.insert(filename.clone(), LazyResource {
+            backing: ResourceBacking::Custom{data},
+            filename: filename.clone(),
+            type_: ZTFileType::from(Path::new(&filename)),
+        });
+    }
+
     fn get(&mut self, key: &str) -> anyhow::Result<Option<ConcreteResource>> {
         let Some(resource) = self.map.get_mut(key) else {
             return Ok(None);
         };
 
-        let (archive_name, data) = match resource.backing {
+        // TODO: Use std::mem::take/replace to avoid cloning
+        let (archive_name, data) = match resource.backing.clone() {
             ResourceBacking::LazyZipFile{archive_name, archive} => {
                 let mut binding = archive.lock().unwrap();
                 let mut file = binding.by_name(&resource.filename).with_context(|| format!("Error finding file in archive: {}", resource.filename))?;
@@ -1136,8 +1146,7 @@ impl LazyResourceMap {
                 file.read_exact(&mut file_buffer).with_context(|| format!("Error reading file: {}", resource.filename))?;
                 let ztfile = ZTFile::new(resource.filename.clone(), file_buffer.len() as u32, file_buffer)?;
                 let data = ztfile_to_raw_resource(&archive_name, resource.filename.clone(), ztfile)?;
-                // TODO: Use std::mem::take/replace to avoid cloning
-                resource.backing = ResourceBacking::LoadedZipFile{archive_name: archive_name.clone(), archive, data: data.clone()};
+                resource.backing = ResourceBacking::LoadedZipFile{archive_name: archive_name.clone(), archive: archive.clone(), data: data.clone()};
                 (Some(archive_name), data)
             },
             ResourceBacking::LoadedZipFile{archive_name, archive, data} => (Some(archive_name), data),
