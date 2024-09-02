@@ -145,14 +145,14 @@ static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
-    let mut data_mutex = MEMBER_SETS.lock().unwrap();
+    let mut data_mutex = MEMBER_SETS.try_lock().unwrap();
 
     let set = data_mutex.entry(member).or_default();
     set.insert(entity_name);
 }
 
 pub fn is_member(entity_name: &str, member: &str) -> bool {
-    let data_mutex = MEMBER_SETS.lock().unwrap();
+    let data_mutex = MEMBER_SETS.try_lock().unwrap();
     match data_mutex.get(member) {
         Some(set) => set.contains(entity_name),
         None => false,
@@ -160,7 +160,7 @@ pub fn is_member(entity_name: &str, member: &str) -> bool {
 }
 
 pub fn get_members(member: &str) -> Option<HashSet<String>> {
-    let data_mutex = MEMBER_SETS.lock().unwrap();
+    let data_mutex = MEMBER_SETS.try_lock().unwrap();
     data_mutex.get(member).cloned()
 }
 
@@ -175,7 +175,7 @@ fn get_cc_expansion_name(subdir: &str) -> String {
 }
 
 fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
-    let data_mutex = MEMBER_SETS.lock().unwrap();
+    let data_mutex = MEMBER_SETS.try_lock().unwrap();
     let mut result = String::new();
 
     for (set_name, members) in data_mutex.iter() {
@@ -194,7 +194,7 @@ fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<()> {
-    let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
+    let mut data_mutex = EXPANSION_ARRAY.try_lock().unwrap();
     if data_mutex.len() >= MAX_EXPANSION_SIZE {
         return Err(anyhow!("Max expansion size reached"));
     }
@@ -210,7 +210,7 @@ fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<(
 }
 
 fn get_expansion(expansion_id: u32) -> Option<Expansion> {
-    let data_mutex = EXPANSION_ARRAY.lock().unwrap();
+    let data_mutex = EXPANSION_ARRAY.try_lock().unwrap();
     data_mutex
         .iter()
         .find(|expansion| expansion.expansion_id == expansion_id)
@@ -218,7 +218,7 @@ fn get_expansion(expansion_id: u32) -> Option<Expansion> {
 }
 
 fn save_mutex() {
-    let data_mutex = EXPANSION_ARRAY.lock().unwrap();
+    let data_mutex = EXPANSION_ARRAY.try_lock().unwrap();
     inner_save_mutex(data_mutex)
 }
 
@@ -240,7 +240,7 @@ fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
 }
 
 fn get_expansions() -> Vec<Expansion> {
-    EXPANSION_ARRAY.lock().unwrap().clone()
+    EXPANSION_ARRAY.try_lock().unwrap().clone()
 }
 
 #[derive(Debug)]

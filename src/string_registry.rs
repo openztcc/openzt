@@ -13,7 +13,7 @@ const GLOBAL_BFAPP: u32 = 0x00638148;
 static STRING_REGISTRY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 pub fn add_string_to_registry(string_val: String) -> u32 {
-    let mut data_mutex = STRING_REGISTRY.lock().unwrap();
+    let mut data_mutex = STRING_REGISTRY.try_lock().unwrap();
     info!("Added string to registry: {} -> {}", string_val.clone(), data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET);
     data_mutex.push(string_val);
     data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1
@@ -22,7 +22,7 @@ pub fn add_string_to_registry(string_val: String) -> u32 {
 pub fn get_string_from_registry(string_id: u32) -> Result<String, &'static str> {
     info!("Getting string from registry: {}", string_id);
     let string = {
-        let data_mutex = STRING_REGISTRY.lock().unwrap();
+        let data_mutex = STRING_REGISTRY.try_lock().unwrap();
         data_mutex
             .get((string_id - STRING_REGISTRY_ID_OFFSET) as usize)
             .cloned()

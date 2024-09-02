@@ -304,27 +304,27 @@ pub trait FromZipFile<T> {
 // static RESOURCE_PTR_PTR_SET: Lazy<Mutex<HashSet<u32>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 // pub fn add_ptr_ptr(ptr_ptr: u32) {
-//     let mut binding = RESOURCE_PTR_PTR_SET.lock().unwrap();
+//     let mut binding = RESOURCE_PTR_PTR_SET.try_lock().unwrap();
 //     binding.insert(ptr_ptr);
 // }
 
 // pub fn check_ptr_ptr(ptr_ptr: u32) -> bool {
-//     let binding = RESOURCE_PTR_PTR_SET.lock().unwrap();
+//     let binding = RESOURCE_PTR_PTR_SET.try_lock().unwrap();
 //     binding.contains(&ptr_ptr)
 // }
 
 // pub fn check_file(file_name: &str) -> bool {
-//     let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+//     let binding = RESOURCE_STRING_TO_PTR_MAP.try_lock().unwrap();
 //     binding.contains_key(&file_name.to_lowercase())
 // }
 
 // pub fn get_file_ptr(file_name: &str) -> Option<u32> {
-//     let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
+//     let binding = RESOURCE_STRING_TO_PTR_MAP.try_lock().unwrap();
 //     binding.get(&file_name.to_lowercase()).copied()
 // }
 
 fn get_num_mod_ids() -> usize {
-    let binding = MOD_ID_SET.lock().unwrap();
+    let binding = MOD_ID_SET.try_lock().unwrap();
     binding.len()
 }
 
@@ -332,7 +332,7 @@ fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError
     if args.len() > 1 {
         return Err(CommandError::new("Too many arguments".to_string()));
     }
-    let binding = LAZY_RESOURCE_MAP.lock().unwrap();
+    let binding = LAZY_RESOURCE_MAP.try_lock().unwrap();
     let mut result_string = String::new();
     for resource_string in binding.files() {
         if args.len() == 1 && !resource_string.starts_with(args[0]) {
@@ -344,7 +344,7 @@ fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError
 }
 
 fn command_list_openzt_resource_strings(_args: Vec<&str>) -> Result<String, CommandError> {
-    let binding = LAZY_RESOURCE_MAP.lock().unwrap();
+    let binding = LAZY_RESOURCE_MAP.try_lock().unwrap();
     let mut result_string = String::new();
     for resource_string in binding.files() {
         if resource_string.starts_with("openzt") {
@@ -413,8 +413,7 @@ fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
     ztd_path = ztd_path.replace("./", "zip::./").replace('\\', "/");
     let lowercase_filename = file_name.to_lowercase();
 
-    // let mut binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
-    let mut binding = LAZY_RESOURCE_MAP.lock().unwrap();
+    let mut binding = LAZY_RESOURCE_MAP.try_lock().unwrap();
 
     let bf_zip_name_ptr = match CString::new(ztd_path.clone()) {
         Ok(c_string) => c_string.into_raw() as u32,
@@ -1016,7 +1015,7 @@ impl Handler {
 }
 
 fn get_file(file_name: &str) -> Option<(String, Box<[u8]>)> {
-    let mut map = LAZY_RESOURCE_MAP.lock().unwrap();
+    let mut map = LAZY_RESOURCE_MAP.try_lock().unwrap();
     match map.get(&file_name.to_lowercase()) {
         Ok(Some(file)) => {
             let resource_ptr = get_from_memory::<BFResourcePtr>(file.data);
@@ -1139,7 +1138,7 @@ impl LazyResourceMap {
         // TODO: Use std::mem::take/replace to avoid cloning
         let (archive_name, data) = match resource.backing.clone() {
             ResourceBacking::LazyZipFile{archive_name, archive} => {
-                let mut binding = archive.lock().unwrap();
+                let mut binding = archive.try_lock().unwrap();
                 let mut file = binding.by_name(&resource.filename).with_context(|| format!("Error finding file in archive: {}", resource.filename))?;
                 let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
 
@@ -1183,12 +1182,12 @@ impl LazyResourceMap {
 }
 
 pub fn check_file(file_name: &str) -> bool {
-    let binding = LAZY_RESOURCE_MAP.lock().unwrap();
+    let binding = LAZY_RESOURCE_MAP.try_lock().unwrap();
     binding.contains_key(&file_name.to_lowercase())
 }
 
 pub fn get_file_ptr(file_name: &str) -> Option<u32> {
-    let mut binding = LAZY_RESOURCE_MAP.lock().unwrap();
+    let mut binding = LAZY_RESOURCE_MAP.try_lock().unwrap();
     if let Ok(Some(resource)) = binding.get(&file_name.to_lowercase()) {
         Some(resource.data)
     } else {
@@ -1201,21 +1200,21 @@ fn load_resources(paths: Vec<String>) {
     let now = Instant::now();
     let mut resource_count = 0;
 
-    let mut map = LAZY_RESOURCE_MAP.lock().unwrap();
-
     paths.iter().rev().for_each(|path| {
         let resources = get_ztd_resources(Path::new(path), false);
         resources.iter().for_each(|resource| {
             info!("Loading resource: {}", resource.display());
             let file_name = resource.to_str().unwrap_or_default().to_lowercase();
             if file_name.ends_with(".ztd") {
-                match handle_ztd(&mut map, resource) {
+                match handle_ztd(resource) {
                     Ok(count) => resource_count += count,
                     Err(err) => error!("Error loading ztd: {} -> {}", file_name, err),
                 }
             }
         });
     });
+
+    let mut map = LAZY_RESOURCE_MAP.try_lock().unwrap();
 
     let elapsed = now.elapsed();
     info!(
@@ -1228,7 +1227,7 @@ fn load_resources(paths: Vec<String>) {
 
     let now = Instant::now();
 
-    let data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
+    let data_mutex = RESOURCE_HANDLER_ARRAY.try_lock().unwrap();
 
     let files = map.files().collect::<Vec<String>>().into_iter();
 
@@ -1276,7 +1275,7 @@ fn load_resources(paths: Vec<String>) {
     );
 }
 
-fn handle_ztd(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<i32> {
+fn handle_ztd(resource: &PathBuf) -> anyhow::Result<i32> {
     let mut load_count = 0;
     let file = File::open(resource).with_context(|| format!("Error opening file: {}", resource.display()))?;
 
@@ -1290,7 +1289,7 @@ fn handle_ztd(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<i
 
     let mut zip = zip::ZipArchive::new(buf_reader).with_context(|| format!("Error reading zip: {}", resource.display()))?;
 
-    let ztd_type = load_open_zt_mod(map, &mut zip)?;
+    let ztd_type = load_open_zt_mod(&mut zip)?;
 
     if ztd_type == mods::ZtdType::Openzt {
         return Ok(0);
@@ -1298,7 +1297,9 @@ fn handle_ztd(map: &mut LazyResourceMap, resource: &PathBuf) -> anyhow::Result<i
 
     let archive = Arc::new(Mutex::new(zip));
 
-    archive.lock().unwrap().file_names().for_each(|file_name| {
+    let mut map = LAZY_RESOURCE_MAP.try_lock().unwrap();
+    
+    archive.try_lock().unwrap().file_names().for_each(|file_name| {
         map.insert_lazy(resource_string.clone(), file_name.to_string(), archive.clone());
         load_count += 1;
     });
@@ -1492,7 +1493,7 @@ fn zip_file_to_string(mut zip: ZipFile) -> anyhow::Result<String> {
         .to_string())
 }
 
-fn load_open_zt_mod(map: &mut LazyResourceMap, archive: &mut ZipArchive<BufReader<File>>) -> anyhow::Result<mods::ZtdType> {
+fn load_open_zt_mod(archive: &mut ZipArchive<BufReader<File>>) -> anyhow::Result<mods::ZtdType> {
     if archive.by_name("meta.toml").is_err() {
         return Ok(mods::ZtdType::Legacy);
     }
@@ -1551,7 +1552,7 @@ static LOCATIONS_HABITATS_ID_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(
 static MOD_ID_SET: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 fn command_list_openzt_mod_ids(_args: Vec<&str>) -> Result<String, CommandError> {
-    let binding = MOD_ID_SET.lock().unwrap();
+    let binding = MOD_ID_SET.try_lock().unwrap();
     let mut result_string = String::new();
     for mod_id in binding.iter() {
         result_string.push_str(&format!("{}\n", mod_id));
@@ -1560,7 +1561,7 @@ fn command_list_openzt_mod_ids(_args: Vec<&str>) -> Result<String, CommandError>
 }
 
 fn command_list_openzt_locations_habitats(_args: Vec<&str>) -> Result<String, CommandError> {
-    let binding = LOCATIONS_HABITATS_RESOURCE_MAP.lock().unwrap();
+    let binding = LOCATIONS_HABITATS_RESOURCE_MAP.try_lock().unwrap();
     let mut result_string = String::new();
     for (id, _) in binding.iter() {
         let name = get_string_from_registry(*id).unwrap_or("<error>".to_string());
@@ -1570,9 +1571,9 @@ fn command_list_openzt_locations_habitats(_args: Vec<&str>) -> Result<String, Co
 }
 
 fn add_location_or_habitat(name: &String, icon_resource_id: &String) -> anyhow::Result<()> {
-    let mut resource_binding = LOCATIONS_HABITATS_RESOURCE_MAP.lock().unwrap();
+    let mut resource_binding = LOCATIONS_HABITATS_RESOURCE_MAP.try_lock().unwrap();
 
-    let mut id_binding = LOCATIONS_HABITATS_ID_MAP.lock().unwrap();
+    let mut id_binding = LOCATIONS_HABITATS_ID_MAP.try_lock().unwrap();
 
     let string_id = add_string_to_registry(name.clone());
 
@@ -1587,18 +1588,18 @@ fn add_location_or_habitat(name: &String, icon_resource_id: &String) -> anyhow::
 }
 
 fn get_location_or_habitat_by_id(id: u32) -> Option<u32> {
-    let binding = LOCATIONS_HABITATS_RESOURCE_MAP.lock().unwrap();
+    let binding = LOCATIONS_HABITATS_RESOURCE_MAP.try_lock().unwrap();
     binding.get(&id).cloned()
 }
 
 fn get_location_or_habitat_by_name(name: &String) -> Option<u32> {
-    let binding = LOCATIONS_HABITATS_ID_MAP.lock().unwrap();
+    let binding = LOCATIONS_HABITATS_ID_MAP.try_lock().unwrap();
     binding.get(name).cloned()
 }
 
 // Adds a new mod id to the set, returns false if the mod_id already exists
 fn add_new_mod_id(mod_id: &String) -> bool {
-    let mut binding = MOD_ID_SET.lock().unwrap();
+    let mut binding = MOD_ID_SET.try_lock().unwrap();
     binding.insert(mod_id.clone())
 }
 
@@ -1762,10 +1763,10 @@ fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTResource
 static RESOURCE_HANDLER_ARRAY: Lazy<Mutex<Vec<Handler>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 pub fn add_handler(handler: Handler) {
-    let mut data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();
+    let mut data_mutex = RESOURCE_HANDLER_ARRAY.try_lock().unwrap();
     data_mutex.push(handler);
 }
 
 fn get_handlers() -> Vec<Handler> {
-    RESOURCE_HANDLER_ARRAY.lock().unwrap().clone()
+    RESOURCE_HANDLER_ARRAY.try_lock().unwrap().clone()
 }

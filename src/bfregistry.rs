@@ -12,7 +12,7 @@ pub fn command_list_registry(_args: Vec<&str>) -> Result<String, CommandError> {
 }
 
 pub fn list_registry() -> Result<String, String> {
-    let data_mutex = BF_REGISTRY.lock().unwrap();
+    let data_mutex = BF_REGISTRY.try_lock().unwrap();
     let mut string_array = Vec::new();
     for (key, value) in data_mutex.iter() {
         string_array.push(format!("{}: {:#08x}", key, value));
@@ -21,12 +21,12 @@ pub fn list_registry() -> Result<String, String> {
 }
 
 pub fn add_to_registry(key: &String, value: u32) {
-    let mut data_mutex = BF_REGISTRY.lock().unwrap();
+    let mut data_mutex = BF_REGISTRY.try_lock().unwrap();
     data_mutex.insert(key.to_string(), value);
 }
 
 pub fn get_from_registry(key: String) -> Option<u32> {
-    let data_mutex = BF_REGISTRY.lock().unwrap();
+    let data_mutex = BF_REGISTRY.try_lock().unwrap();
 
     data_mutex.get(&key).cloned()
 }
