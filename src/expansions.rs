@@ -135,24 +135,26 @@ const EXPANSION_CURRENT: u32 = 0x00638d4c;
 const MAX_EXPANSION_SIZE: usize = 14;
 
 const EXPANSION_ZT_RESOURCE_PREFIX: &str = "ui/sharedui/listbk/";
-const EXPANSION_OPENZT_RESOURCE_PREFIX: &str = "openzt/openzt/expansion_dropdown/";
+// TODO: Change this to align with OpenZT's resource prefix
+const EXPANSION_OPENZT_RESOURCE_PREFIX: &str = "openzt.patches.expansion";
 const EXPANSION_RESOURCE_ANI: &str = "listbk.ani";
 const EXPANSION_RESOURCE_LYT: &str = "ui/xpac.lyt";
 const EXPANSION_RESOURCE_PAL: &str = "listbk.pal";
 const EXPANSION_RESOURCE_ANIMATION: &str = "N";
+// TODO: Use -> const EXPANSION_RESOURCE_ANIMATION: &str = "listbk.animation";
 
 static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
-    let mut data_mutex = MEMBER_SETS.try_lock().unwrap();
+    let mut data_mutex = MEMBER_SETS.lock().unwrap();
 
     let set = data_mutex.entry(member).or_default();
     set.insert(entity_name);
 }
 
 pub fn is_member(entity_name: &str, member: &str) -> bool {
-    let data_mutex = MEMBER_SETS.try_lock().unwrap();
+    let data_mutex = MEMBER_SETS.lock().unwrap();
     match data_mutex.get(member) {
         Some(set) => set.contains(entity_name),
         None => false,
@@ -160,7 +162,7 @@ pub fn is_member(entity_name: &str, member: &str) -> bool {
 }
 
 pub fn get_members(member: &str) -> Option<HashSet<String>> {
-    let data_mutex = MEMBER_SETS.try_lock().unwrap();
+    let data_mutex = MEMBER_SETS.lock().unwrap();
     data_mutex.get(member).cloned()
 }
 
@@ -175,7 +177,7 @@ fn get_cc_expansion_name(subdir: &str) -> String {
 }
 
 fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
-    let data_mutex = MEMBER_SETS.try_lock().unwrap();
+    let data_mutex = MEMBER_SETS.lock().unwrap();
     let mut result = String::new();
 
     for (set_name, members) in data_mutex.iter() {
@@ -194,7 +196,7 @@ fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<()> {
-    let mut data_mutex = EXPANSION_ARRAY.try_lock().unwrap();
+    let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
     if data_mutex.len() >= MAX_EXPANSION_SIZE {
         return Err(anyhow!("Max expansion size reached"));
     }
@@ -210,7 +212,7 @@ fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<(
 }
 
 fn get_expansion(expansion_id: u32) -> Option<Expansion> {
-    let data_mutex = EXPANSION_ARRAY.try_lock().unwrap();
+    let data_mutex = EXPANSION_ARRAY.lock().unwrap();
     data_mutex
         .iter()
         .find(|expansion| expansion.expansion_id == expansion_id)
@@ -218,7 +220,7 @@ fn get_expansion(expansion_id: u32) -> Option<Expansion> {
 }
 
 fn save_mutex() {
-    let data_mutex = EXPANSION_ARRAY.try_lock().unwrap();
+    let data_mutex = EXPANSION_ARRAY.lock().unwrap();
     inner_save_mutex(data_mutex)
 }
 
@@ -240,7 +242,7 @@ fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
 }
 
 fn get_expansions() -> Vec<Expansion> {
-    EXPANSION_ARRAY.try_lock().unwrap().clone()
+    EXPANSION_ARRAY.lock().unwrap().clone()
 }
 
 #[derive(Debug)]
@@ -443,7 +445,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
         cfg.set(
             "background",
             "animation",
-            Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "listbk"),
+            Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "." + "listbk"),
         );
     }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
@@ -723,6 +725,7 @@ fn is_cc(archive: &String) -> bool {
 }
 
 fn parse_expansion_config(expansion_cfg: &Ini) -> anyhow::Result<()> {
+    info!("Parsing expansion config");
     let mut id: u32 = expansion_cfg
         .get_parse("expansion", "id")
         .map_err(anyhow::Error::msg)?
@@ -760,30 +763,33 @@ fn parse_expansion_config(expansion_cfg: &Ini) -> anyhow::Result<()> {
 }
 
 fn handle_expansion_dropdown_ani(path: &String, file_name: &String, file: Ini) -> Option<(String, String, Ini)> {
-    let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
-    let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
+    let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name));
+    let file_path = Path::new(&new_file_string);
+    let Some(file_path_string) = file_path.to_str() else {
         error!("Error converting file path to string");
         return None
     };
-    Some((path.clone(), file_path_string, file))
+    Some((path.clone(), file_path_string.to_owned(), file))
 }
 
 fn handle_expansion_dropdown_raw_bytes(path: &String, file_name: &String, file: Box<[u8]>) -> Option<(String, String, Box<[u8]>)> {
-    let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
-    let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
+    let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name));
+    let file_path = Path::new(&new_file_string);
+    let Some(file_path_string) = file_path.to_str() else {
         error!("Error converting file path to string");
         return None;
     };
-    Some((path.clone(), file_path_string, file))
+    Some((path.clone(), file_path_string.to_owned(), file))
 }
 
 fn handle_expansion_dropdown_animation(path: &String, file_name: &String, file: Animation) -> Option<(String, String, Animation)> {
-    let file_path = Path::new(EXPANSION_OPENZT_RESOURCE_PREFIX).join(file_name);
-    let Ok(file_path_string) = file_path.clone().into_os_string().into_string() else {
+    let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name));
+    let file_path = Path::new(&new_file_string);
+    let Some(file_path_string) = file_path.to_str() else {
         error!("Error converting file path to string");
         return None;
     };
-    Some((path.clone(), file_path_string, file))
+    Some((path.clone(), file_path_string.to_owned(), file))
 }
 
 pub fn init() {
@@ -791,10 +797,10 @@ pub fn init() {
     add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
     add_to_command_register("get_members".to_string(), command_get_members);
     add_handler(Handler::builder().prefix("xpac").suffix("cfg").run_stage(RunStage::BeforeOpenZTMods).ini_handler(handle_expansion_config).build());
-    add_handler(Handler::builder().prefix("uca").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
-    add_handler(Handler::builder().prefix("ucs").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
-    add_handler(Handler::builder().prefix("ucb").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
-    add_handler(Handler::builder().prefix("ai").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
+    add_handler(Handler::builder().suffix("uca").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
+    add_handler(Handler::builder().suffix("ucs").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
+    add_handler(Handler::builder().suffix("ucb").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
+    add_handler(Handler::builder().suffix("ai").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
     add_handler(Handler::builder()
                     .prefix(EXPANSION_ZT_RESOURCE_PREFIX)
                     .run_stage(RunStage::BeforeOpenZTMods)
