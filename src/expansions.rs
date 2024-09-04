@@ -18,7 +18,7 @@ use crate::{
     add_to_command_register, animation::Animation, bfentitytype::{ZTEntityType, ZTEntityTypeClass}, console::CommandError, debug_dll::{
         get_from_memory, get_string_from_memory, get_string_from_memory_bounded,  save_to_memory
     }, resource_manager::{
-        add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage
+        add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage, OPENZT_DIR0
     }, string_registry::add_string_to_registry, ztui::{get_random_sex, get_selected_sex, BuyTab, Sex}
 };
 
@@ -451,8 +451,10 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
 
+    let animation_resource_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX.to_string(),  EXPANSION_RESOURCE_ANIMATION);
+
     if let Err(err) = modify_ztfile_as_ini(
-        &(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_ANI),
+        &format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX.to_string(), EXPANSION_RESOURCE_ANI),
         |cfg| {
             let old_y0 = cfg
                 .get_parse::<i32>("animation", "y0")
@@ -466,16 +468,16 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
             let new_y1 = old_y1 + (number_of_additional_expansions * 10);
             cfg.set("animation", "y0", Some(new_y0.to_string()));
             cfg.set("animation", "y1", Some(new_y1.to_string()));
-            cfg.set("animation", "dir0", Some("openzt".to_string()));
-            cfg.set("animation", "dir1", Some("openzt".to_string()));
-            cfg.set("animation", "dir2", Some("expansion_dropdown".to_string()));
+            cfg.set("animation", "dir0", Some(OPENZT_DIR0.to_string()));
+            cfg.set("animation", "dir1", Some(animation_resource_string.clone()));
+            cfg.remove_key("animation", "dir2");
         },
     ) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
     info!("Check");
     let animation_result = modify_ztfile_as_animation(
-        &(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_ANIMATION),
+        &animation_resource_string,
         |animation| {
             for _ in 0..number_of_additional_expansions {
                 if let Err(e) = animation.duplicate_pixel_rows(0, 10, 31) {
@@ -485,7 +487,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
             }
             animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
             animation.set_palette_filename(
-                EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + EXPANSION_RESOURCE_PAL,
+                format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX.to_string(), EXPANSION_RESOURCE_PAL),
             );
         },
     );

@@ -735,6 +735,8 @@ pub fn init() {
     add_to_command_register("list_openzt_locations_habitats".to_string(), command_list_openzt_locations_habitats);
 }
 
+pub const OPENZT_DIR0: &str = "openzt_resource";
+
 #[hook_module("zoo.exe")]
 pub mod zoo_resource_mgr {
     use bf_configparser::ini::Ini;
@@ -742,6 +744,7 @@ pub mod zoo_resource_mgr {
 
     use super::{check_file, get_file_ptr, get_location_or_habitat_by_id, load_resources, BFResourcePtr};
     use crate::debug_dll::{get_ini_path, get_string_from_memory, save_to_memory};
+    use crate::resource_manager::OPENZT_DIR0;
 
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
     fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> u8 {
@@ -764,7 +767,7 @@ pub mod zoo_resource_mgr {
 
     fn bf_resource_inner(this_ptr: u32, file_name: u32) -> bool {
         let mut file_name_string = get_string_from_memory(file_name).to_lowercase();
-        if file_name_string.starts_with("openzt_resource") {
+        if file_name_string.starts_with(OPENZT_DIR0) {
             match parse_openzt_resource_string(file_name_string.clone()) {
                 Ok(resource_name) => {
                     file_name_string = resource_name;
@@ -794,7 +797,7 @@ pub mod zoo_resource_mgr {
     }
 
     fn parse_openzt_resource_string(file_name: String) -> Result<String, &'static str> {
-        if file_name.starts_with("openzt_resource") {
+        if file_name.starts_with(OPENZT_DIR0) {
             let mut split = file_name.split('/').collect::<Vec<&str>>();
             if split.len() == 2 || split.len() == 3 {
                 return Ok(split[1].to_owned());
@@ -1916,3 +1919,7 @@ pub fn add_handler(handler: Handler) {
 fn get_handlers() -> Vec<Handler> {
     RESOURCE_HANDLER_ARRAY.lock().unwrap().clone()
 }
+
+// struct OpenZTResource {
+    
+// }
