@@ -1,9 +1,10 @@
+use std::boxed;
 use std::{fmt::Display, slice, str};
 use std::{
     collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, sync::{Mutex, Arc},
 };
 
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
 
 use bf_configparser::ini::{Ini, WriteOptions};
 use once_cell::sync::Lazy;
@@ -243,88 +244,6 @@ impl ZTFile {
 pub trait FromZipFile<T> {
     fn from_zip_file(file: &mut ZipFile) -> io::Result<T>;
 }
-
-// pub fn add_txt_file_to_map_with_path_override(entry: &Path, file: &mut LazyResource, path: String) {
-//     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
-//     match file.read_exact(&mut buffer) {
-//         Ok(bytes_read) => bytes_read,
-//         Err(e) => {
-//             error!("Error reading file: {} {} -> {}", entry.display(), file.name(), e);
-//             return;
-//         }
-//     };
-
-//     let intermediate_string = String::from_utf8_lossy(&buffer).to_string();
-
-//     let file_size = intermediate_string.len();
-//     let file_contents = match CString::new(intermediate_string) {
-//         Ok(c_string) => c_string,
-//         Err(e) => {
-//             error!("Error converting file contents to CString: {} {} -> {}", entry.display(), file.name(), e);
-//             return;
-//         }
-//     };
-
-//     let ztfile = match ZTFile::new_text(path.clone(), file_size as u32, file_contents) {
-//         Ok(ztfile) => ztfile,
-//         Err(e) => {
-//             error!("Error creating ZTFile from text: {} {} -> {}", entry.display(), file.name(), e);
-//             return;
-//         }
-//     };
-
-//     add_ztfile(entry, path, ztfile);
-// }
-
-// pub fn add_txt_file_to_map(entry: &Path, file: &mut ZipFile) {
-//     let file_name = file.name().to_string().to_lowercase();
-
-//     add_txt_file_to_map_with_path_override(entry, file, file_name)
-// }
-
-// pub fn add_raw_bytes_to_map_with_path_override(entry: &Path, file: &mut ZipFile, path: String) {
-//     let mut buffer = vec![0; file.size() as usize].into_boxed_slice();
-//     match file.read_exact(&mut buffer) {
-//         Ok(_) => {}
-//         Err(e) => {
-//             error!("Error reading file: {} {} -> {}", entry.display(), file.name(), e);
-//             return;
-//         }
-//     };
-
-//     let file_size = file.size() as u32;
-//     add_ztfile(entry, path.clone(), ZTFile::new_raw_bytes(path, file_size, buffer));
-// }
-
-// pub fn add_raw_bytes_file_to_map(entry: &Path, file: &mut ZipFile) {
-//     let file_name = file.name().to_string().to_lowercase();
-//     add_raw_bytes_to_map_with_path_override(entry, file, file_name)
-// }
-
-// Contains a mapping of file_paths to BFResourcePtrs
-// static RESOURCE_STRING_TO_PTR_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
-
-// static RESOURCE_PTR_PTR_SET: Lazy<Mutex<HashSet<u32>>> = Lazy::new(|| Mutex::new(HashSet::new()));
-
-// pub fn add_ptr_ptr(ptr_ptr: u32) {
-//     let mut binding = RESOURCE_PTR_PTR_SET.lock().unwrap();
-//     binding.insert(ptr_ptr);
-// }
-
-// pub fn check_ptr_ptr(ptr_ptr: u32) -> bool {
-//     let binding = RESOURCE_PTR_PTR_SET.lock().unwrap();
-//     binding.contains(&ptr_ptr)
-// }
-
-// pub fn check_file(file_name: &str) -> bool {
-//     let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
-//     binding.contains_key(&file_name.to_lowercase())
-// }
-
-// pub fn get_file_ptr(file_name: &str) -> Option<u32> {
-//     let binding = RESOURCE_STRING_TO_PTR_MAP.lock().unwrap();
-//     binding.get(&file_name.to_lowercase()).copied()
-// }
 
 fn get_num_mod_ids() -> usize {
     let binding = MOD_ID_SET.lock().unwrap();
@@ -792,6 +711,9 @@ pub mod zoo_resource_mgr {
             save_to_memory(this_ptr, ptr);
             true
         } else {
+            if !file_name_string.starts_with("ztat") {
+                info!("Missing file: {}", file_name_string);
+            }
             false
         }
     }
@@ -988,7 +910,9 @@ impl Handler {
                         error!("Error getting file: {}", file_name);
                         return;
                     };
-                    let mut ini = Ini::new();
+                    let mut ini = Ini::new_cs();
+                    ini.set_comment_symbols(&[';', '#', ':']);
+
                     let Ok(input_string) = str::from_utf8(&file) else {
                         error!("Error converting file to string: {}", file_name);
                         return;
@@ -1172,8 +1096,47 @@ impl LazyResourceMap {
             map: HashMap::new(),
         }
     }
+
+    fn _drop(&mut self, file_name: String) -> Option<()> {
+        let Some(value) = self.map.remove(&file_name) else {
+            return None;
+        };
+        
+        self.drop_inner(value);
+        Some(())
+    }
+
+    fn drop_inner(&mut self, resource: LazyResource) {
+        let data = match resource.backing {
+            ResourceBacking::LoadedZipFile{data, archive_name, archive } => {
+                data
+            },
+            ResourceBacking::Custom{data} => {
+                data
+            },
+            ResourceBacking::LazyZipFile{archive_name, archive} => {
+                return;
+            }
+        };
+        let bf_resource_ptr = unsafe { Box::from_raw(data as *mut BFResourcePtr) };
+        match resource.type_ {
+            ZTFileType::Ini | ZTFileType::Ai | ZTFileType::Ani | ZTFileType::Cfg | ZTFileType::Lyt | ZTFileType::Scn | ZTFileType::Uca | ZTFileType::Ucs | ZTFileType::Ucb | ZTFileType::Toml | ZTFileType::Txt => {
+                let data_string = unsafe { CString::from_raw(data as *mut i8) };
+                drop(data_string);
+            }
+            ZTFileType::Animation | ZTFileType::Bmp | ZTFileType::Lle | ZTFileType::TGA | ZTFileType::Wav | ZTFileType::Palette | ZTFileType::Zoo => {
+                let data_vec: Box<[u8]> = unsafe {
+                    Box::from_raw(slice::from_raw_parts_mut(
+                        bf_resource_ptr.data_ptr as *mut _,
+                        bf_resource_ptr.content_size as usize,
+                    ))
+                };
+                drop(data_vec);
+            }
+        }
+        drop(bf_resource_ptr);
+    }
     
-    // TODO: Unload old resource if it exists
     fn insert_lazy(&mut self, archive_path: String, file_name: String, archive: Arc<Mutex<ZipArchive<BufReader<File>>>>) {
         let file_type = match ZTFileType::try_from(Path::new(&file_name)) {
             Ok(file_type) => file_type,
@@ -1183,33 +1146,39 @@ impl LazyResourceMap {
             }
         };
 
-        self.map.insert(file_name.clone().to_ascii_lowercase(), LazyResource {
+        if let Some(existing) = self.map.insert(file_name.clone().to_ascii_lowercase(), LazyResource {
             backing: ResourceBacking::LazyZipFile{archive_name: archive_path.clone(), archive},
             // archive_path,
             filename: file_name.clone(),
             // Some(archive),
             type_: file_type,
             // data: None,
-        });
+        }) {
+            self.drop_inner(existing);
+        }
     }
 
     // TODO: Unload old resource if it exists
     fn insert_loaded(&mut self, resource: LazyResource) {
-        self.map.insert(resource.filename.to_ascii_lowercase(), resource);
+        if let Some(existing) = self.map.insert(resource.filename.to_ascii_lowercase(), resource) {
+            self.drop_inner(existing);
+        }
     }
 
     fn insert_custom(&mut self, file_name: String, file_type: ZTFileType, data: u32) {
-        self.map.insert(file_name.to_ascii_lowercase(), LazyResource {
+        if let Some(existing) = self.map.insert(file_name.to_ascii_lowercase(), LazyResource {
             backing: ResourceBacking::Custom{data},
             filename: file_name.clone(),
             type_: file_type,
-        });
+        }) {
+            self.drop_inner(existing);
+        }
     }
 
     fn get(&mut self, key: &str) -> anyhow::Result<Option<ConcreteResource>> {
         let lowercase_key = key.to_ascii_lowercase();
         let Some(resource) = self.map.get_mut(&lowercase_key) else {
-        info!("LazyResource not found: {}", lowercase_key);
+            info!("LazyResource not found: {}", lowercase_key);
             return Ok(None);
         };
 
@@ -1226,8 +1195,12 @@ impl LazyResourceMap {
                 resource.backing = ResourceBacking::LoadedZipFile{archive_name: archive_name.clone(), archive: archive.clone(), data: data.clone()};
                 (Some(archive_name), data)
             },
-            ResourceBacking::LoadedZipFile{archive_name, archive, data} => (Some(archive_name), data),
-            ResourceBacking::Custom{data} => (None, data),
+            ResourceBacking::LoadedZipFile{archive_name, archive, data} => {
+                (Some(archive_name), data)
+            },
+            ResourceBacking::Custom{data} => {
+                (None, data)
+            }
         };
 
         Ok(Some(ConcreteResource{
@@ -1406,7 +1379,8 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
             error!("Error getting file: {}", file_name);
             return Vec::new();
         };
-        let mut ini = Ini::new();
+        let mut ini = Ini::new_cs();
+        ini.set_comment_symbols(&[';', '#', ':']);
         let Ok(input_string) = str::from_utf8(&file) else {
             error!("Error converting file to string: {}", file_name);
             return Vec::new();
@@ -1919,7 +1893,3 @@ pub fn add_handler(handler: Handler) {
 fn get_handlers() -> Vec<Handler> {
     RESOURCE_HANDLER_ARRAY.lock().unwrap().clone()
 }
-
-// struct OpenZTResource {
-    
-// }

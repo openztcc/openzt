@@ -392,8 +392,7 @@ pub mod custom_expansion {
             );
         }
 
-        // reimplemented_result
-        result
+        reimplemented_result
     }
 
     #[hook(unsafe extern "stdcall" ZTUI_expansionselect_setup, offset=0x001291fb)]
@@ -606,7 +605,6 @@ fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &
 }
 
 fn add_expansion_with_string_id(id: u32, name: String, string_id: u32, save_to_memory: bool) {
-    // TODO: get len first to avoid needing to clone?
     let name_len = name.len();
     let name_ptr = match CString::new(name.clone()) {
         Ok(name_string_c_string) => name_string_c_string.into_raw() as u32,
@@ -667,25 +665,8 @@ fn handle_member_parsing(path: &String, file_name: &String, file: Ini) -> Option
     None
 }
 
-// TODO: Remove these hacks
-static FILE_NAME_OVERRIDES: Lazy<HashMap<String, String>> = Lazy::new(|| {
-    vec![
-        ("fences/tankwall.ai".to_string(), "fences/tankwal1.ai".to_string()), // Assumed spelling mistake
-        ("fences/hedge.ai".to_string(), "fences/not_hedge.ai".to_string()),   // Duplicates, this one isn't loaded
-        // TODO: Below might not be needed?
-        ("scenery/other/fountain.ai".to_string(), "scenery/other/other_fountain.ai".to_string()), // Duplicates, this one isn't loaded
-    ]
-    .into_iter()
-    .collect()
-});
-
 fn parse_member_config(path: &String, file_name: &String, file: Ini) -> anyhow::Result<()> {
-    let filepath = match FILE_NAME_OVERRIDES.get(file_name) {
-        Some(override_name) => override_name.to_string(),
-        None => file_name.to_ascii_lowercase(),
-    };
-
-    let filename = Path::new(&filepath)
+    let filename = Path::new(&file_name.to_ascii_lowercase())
         .file_stem()
         .unwrap()
         .to_str()
@@ -693,7 +674,7 @@ fn parse_member_config(path: &String, file_name: &String, file: Ini) -> anyhow::
         .to_string();
 
     // TODO: get_keys shouldn't need a mutable ini
-    if let Some(keys) = file.clone().get_keys("member") {
+    if let Some(keys) = file.clone().get_keys("Member") {
         for key in keys {
             add_member(filename.clone(), key);
         }
