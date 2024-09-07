@@ -1828,9 +1828,14 @@ fn load_icon_definition(
         )
     })?;
 
+    let palette_file_name = openzt_full_resource_id_path(&base_resource_id, ZTResourceType::Palette);
+    let palette_ztfile = ZTFile::new_raw_bytes(palette_file_name.clone(), icon_file_palette.len() as u32, icon_file_palette.clone());
+    add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name.clone(), palette_ztfile);
+
     let mut animation = Animation::parse(icon_file);
-    animation.set_palette_filename(icon_definition.icon_palette_path().clone());
+    animation.set_palette_filename(palette_file_name.clone());
     let (new_animation_bytes, icon_size) = animation.write();
+
     let new_icon_file = new_animation_bytes.into_boxed_slice();
 
     let mut ani_cfg = Ini::new_cs();

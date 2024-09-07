@@ -135,13 +135,11 @@ const EXPANSION_CURRENT: u32 = 0x00638d4c;
 const MAX_EXPANSION_SIZE: usize = 14;
 
 const EXPANSION_ZT_RESOURCE_PREFIX: &str = "ui/sharedui/listbk/";
-// TODO: Change this to align with OpenZT's resource prefix
 const EXPANSION_OPENZT_RESOURCE_PREFIX: &str = "openzt.patches.expansion";
 const EXPANSION_RESOURCE_ANI: &str = "listbk.ani";
 const EXPANSION_RESOURCE_LYT: &str = "ui/xpac.lyt";
 const EXPANSION_RESOURCE_PAL: &str = "listbk.pal";
-const EXPANSION_RESOURCE_ANIMATION: &str = "N";
-// TODO: Use -> const EXPANSION_RESOURCE_ANIMATION: &str = "listbk.animation";
+const EXPANSION_RESOURCE_ANIMATION: &str = "listbk.animation";
 
 static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -766,7 +764,7 @@ fn handle_expansion_dropdown_raw_bytes(path: &String, file_name: &String, file: 
 }
 
 fn handle_expansion_dropdown_animation(path: &String, file_name: &String, file: Animation) -> Option<(String, String, Animation)> {
-    let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name));
+    let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_ANIMATION);
     let file_path = Path::new(&new_file_string);
     let Some(file_path_string) = file_path.to_str() else {
         error!("Error converting file path to string");
