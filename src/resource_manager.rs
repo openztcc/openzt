@@ -276,9 +276,6 @@ fn command_list_openzt_resource_strings(_args: Vec<&str>) -> Result<String, Comm
 }
 
 fn ztfile_to_raw_resource(path: &String, file_name: String, ztfile: ZTFile)  -> anyhow::Result<u32> {
-    // let Some(ztd_path) = path.to_str() else {
-    //     return Err(anyhow!("Failed to convert path to string: {}", path.display()));
-    // };
     let mut ztd_path = path.clone();
     ztd_path = ztd_path.replace("./", "zip::./").replace('\\', "/");
     let lowercase_filename = file_name.to_lowercase();
@@ -1009,20 +1006,6 @@ fn get_file(file_name: &str) -> Option<(String, Box<[u8]>)> {
     }
 }
 
-// fn insert_file(file_name: &str, data: Box<[u8]>) {
-//     let mut map = LAZY_RESOURCE_MAP.lock().unwrap();
-//     let resource_ptr = Box::new(BFResourcePtr {
-//         num_refs: 100,
-//         bf_zip_name_ptr: 0,
-//         bf_resource_name_ptr: 0,
-//         data_ptr: data.as_ptr() as u32,
-//         content_size: data.len() as u32,
-//     });
-//     let resource_ptr_ptr = Box::into_raw(resource_ptr) as u32;
-//     map.insert_custom(file_name.to_owned(), ZTFileType::try_from(Path::new(file_name)).unwrap(), resource_ptr_ptr);
-//     std::mem::forget(data);
-// }
-
 // Note: We are excluding ztat* files until we need to override anything inside them, as they have a rediculous amount of files
 fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     let mut resources = Vec::new();
@@ -1049,18 +1032,6 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     resources
 }
 
-// struct ZipFileReference {
-//     zip: Arc<Mutex<ZipArchive<BufReader<File>>>>,
-//     filename: String,
-// }
-
-// impl ZipFileReference {
-//     fn new(zip: Arc<Mutex<ZipArchive<BufReader<File>>>>, filename: String) -> Self {
-//         Self { zip, filename }
-//     }
-// }
-
-
 static LAZY_RESOURCE_MAP: Lazy<Mutex<LazyResourceMap>> = Lazy::new(|| Mutex::new(LazyResourceMap::new()));
 
 pub struct LazyResourceMap {
@@ -1083,12 +1054,8 @@ struct ConcreteResource {
 
 struct LazyResource {
     pub backing: ResourceBacking,
-    // pub archive_path: String,
     pub filename: String,
-    // pub archive: Option<Arc<Mutex<ZipArchive<BufReader<File>>>>>,
     pub type_: ZTFileType,
-    // pub modified: bool,
-    // pub data: Option<u32>, // a pointer to a BFResourcePtr
 }
 
 impl LazyResourceMap {
@@ -1149,17 +1116,13 @@ impl LazyResourceMap {
 
         if let Some(existing) = self.map.insert(file_name.clone().to_ascii_lowercase(), LazyResource {
             backing: ResourceBacking::LazyZipFile{archive_name: archive_path.clone(), archive},
-            // archive_path,
             filename: file_name.clone(),
-            // Some(archive),
             type_: file_type,
-            // data: None,
         }) {
             self.drop_inner(existing);
         }
     }
 
-    // TODO: Unload old resource if it exists
     fn insert_loaded(&mut self, resource: LazyResource) {
         if let Some(existing) = self.map.insert(resource.filename.to_ascii_lowercase(), resource) {
             self.drop_inner(existing);
@@ -1296,6 +1259,7 @@ fn load_resources(paths: Vec<String>) {
         }
     }
 
+    // TODO: Implement patching
     // apply_patches();
 
     info!("Running AfterOpenZTMods handlers");
