@@ -395,7 +395,7 @@ pub mod custom_expansion {
 
     #[hook(unsafe extern "stdcall" ZTUI_expansionselect_setup, offset=0x001291fb)]
     pub fn ztui_expansionselect_setup() {
-        unsafe { ZTUI_expansionselect_setup.call() }; //TODO: Remove this call once all functionality has been replicated
+        unsafe { ZTUI_expansionselect_setup.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
 
         initialise_expansions();
     }
