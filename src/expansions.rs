@@ -763,7 +763,7 @@ fn handle_expansion_dropdown_raw_bytes(path: &String, file_name: &String, file: 
     Some((path.clone(), file_path_string.to_owned(), file))
 }
 
-fn handle_expansion_dropdown_animation(path: &String, file_name: &String, file: Animation) -> Option<(String, String, Animation)> {
+fn handle_expansion_dropdown_animation(path: &String, _: &String, file: Animation) -> Option<(String, String, Animation)> {
     let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_ANIMATION);
     let file_path = Path::new(&new_file_string);
     let Some(file_path_string) = file_path.to_str() else {

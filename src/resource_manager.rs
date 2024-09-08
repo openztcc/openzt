@@ -1,4 +1,3 @@
-use std::boxed;
 use std::{fmt::Display, slice, str};
 use std::{
     collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, sync::{Mutex, Arc},
@@ -659,7 +658,7 @@ pub const OPENZT_DIR0: &str = "openzt_resource";
 #[hook_module("zoo.exe")]
 pub mod zoo_resource_mgr {
     use bf_configparser::ini::Ini;
-    use tracing::{info, span};
+    use tracing::info;
 
     use super::{check_file, get_file_ptr, get_location_or_habitat_by_id, load_resources, BFResourcePtr};
     use crate::debug_dll::{get_ini_path, get_string_from_memory, save_to_memory};
@@ -675,7 +674,6 @@ pub mod zoo_resource_mgr {
 
     #[hook(unsafe extern "thiscall" BFResource_prepare, offset = 0x000047f4)]
     fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32) -> u8 {
-        let string = get_string_from_memory(file_name);
         if bf_resource_inner(this_ptr, file_name) {
             return 1;
         }
@@ -720,7 +718,7 @@ pub mod zoo_resource_mgr {
 
     fn parse_openzt_resource_string(file_name: String) -> Result<String, &'static str> {
         if file_name.starts_with(OPENZT_DIR0) {
-            let mut split = file_name.split('/').collect::<Vec<&str>>();
+            let split = file_name.split('/').collect::<Vec<&str>>();
             if split.len() == 2 || split.len() == 3 {
                 return Ok(split[1].to_owned());
             }
@@ -780,7 +778,7 @@ pub type IniHandlerFunction = fn(&String, &String, Ini) -> Option<(String, Strin
 pub type AnimationHandlerFunction = fn(&String, &String, Animation) -> Option<(String, String, Animation)>;
 pub type RawBytesHandlerFunction = fn(&String, &String, Box<[u8]>) -> Option<(String, String, Box<[u8]>)>;
 
-pub struct HandlerBuilder<const HasStage: bool, const HasHandler: bool> {
+pub struct HandlerBuilder<const HAS_STAGE: bool, const HAS_HANDLER: bool> {
     matcher_prefix: Option<String>,
     matcher_suffix: Option<String>,
     ini_handler: Option<IniHandlerFunction>,
@@ -789,18 +787,18 @@ pub struct HandlerBuilder<const HasStage: bool, const HasHandler: bool> {
     stage: Option<RunStage>,
 }
 
-impl<const HasStage: bool, const HasHandler: bool> HandlerBuilder<HasStage, HasHandler> {
-    pub fn prefix(mut self, prefix: &str) -> HandlerBuilder<HasStage, HasHandler> {
+impl<const HAS_STAGE: bool, const HAS_HANDLER: bool> HandlerBuilder<HAS_STAGE, HAS_HANDLER> {
+    pub fn prefix(mut self, prefix: &str) -> HandlerBuilder<HAS_STAGE, HAS_HANDLER> {
         self.matcher_prefix = Some(prefix.to_owned());
         self
     }
 
-    pub fn suffix(mut self, suffix: &str) -> HandlerBuilder<HasStage, HasHandler> {
+    pub fn suffix(mut self, suffix: &str) -> HandlerBuilder<HAS_STAGE, HAS_HANDLER> {
         self.matcher_suffix = Some(suffix.to_owned());
         self
     }
 
-    pub fn ini_handler(self, handler: IniHandlerFunction) -> HandlerBuilder<HasStage, true> {
+    pub fn ini_handler(self, handler: IniHandlerFunction) -> HandlerBuilder<HAS_STAGE, true> {
         HandlerBuilder {
             matcher_prefix: self.matcher_prefix,
             matcher_suffix: self.matcher_suffix,
@@ -811,7 +809,7 @@ impl<const HasStage: bool, const HasHandler: bool> HandlerBuilder<HasStage, HasH
         }
     }
 
-    pub fn animation_handler(self, handler: AnimationHandlerFunction) -> HandlerBuilder<HasStage, true> {
+    pub fn animation_handler(self, handler: AnimationHandlerFunction) -> HandlerBuilder<HAS_STAGE, true> {
         HandlerBuilder {
             matcher_prefix: self.matcher_prefix,
             matcher_suffix: self.matcher_suffix,
@@ -822,7 +820,7 @@ impl<const HasStage: bool, const HasHandler: bool> HandlerBuilder<HasStage, HasH
         }
     }
 
-    pub fn raw_bytes_handler(self, handler: RawBytesHandlerFunction) -> HandlerBuilder<HasStage, true> {
+    pub fn raw_bytes_handler(self, handler: RawBytesHandlerFunction) -> HandlerBuilder<HAS_STAGE, true> {
         HandlerBuilder {
             matcher_prefix: self.matcher_prefix,
             matcher_suffix: self.matcher_suffix,
@@ -833,7 +831,7 @@ impl<const HasStage: bool, const HasHandler: bool> HandlerBuilder<HasStage, HasH
         }
     }
 
-    pub fn run_stage(self, stage: RunStage) -> HandlerBuilder<true, HasHandler> {
+    pub fn run_stage(self, stage: RunStage) -> HandlerBuilder<true, HAS_HANDLER> {
         HandlerBuilder {
             matcher_prefix: self.matcher_prefix,
             matcher_suffix: self.matcher_suffix,
@@ -917,7 +915,10 @@ impl Handler {
                         error!("Error converting file to string: {}", file_name);
                         return;
                     };
-                    ini.read(input_string.to_string());
+                    if let Err(e) = ini.read(input_string.to_string()) {
+                        error!("Error reading ini {}: {}", file_name, e);
+                        return;
+                    }
                     if let Some((new_archive_name, new_file_path, new_ini)) = handler(&archive_name, file_name, ini) {
                         let mut write_options = WriteOptions::default();
                         write_options.space_around_delimiters = true;
@@ -929,7 +930,7 @@ impl Handler {
                             Ok(new_c_string) => {
                                 Some((new_archive_name, new_file_path, ZTFile::Text(new_c_string, file_type, new_string_length)))
                             },
-                            Err(e) => {
+                            Err(_) => {
                                 error!("Error converting ini to CString after modifying {}", file_name);
                                 None
                             }
@@ -962,7 +963,7 @@ impl Handler {
             ZTFileType::Bmp | ZTFileType::Lle | ZTFileType::TGA | ZTFileType::Wav | ZTFileType::Palette => {
                 if let Some(handler) = self.raw_bytes_handler {
                     info!("Raw Bytes Handler {} {} is handling file: {}", self.matcher_prefix.as_deref().unwrap_or_default(), self.matcher_suffix.as_deref().unwrap_or_default(), file_name);
-                    let Some((archive_name, mut file)) = get_file(file_name) else {
+                    let Some((archive_name, file)) = get_file(file_name) else {
                         error!("Error getting file: {}", file_name);
                         return;
                     };
@@ -1108,13 +1109,13 @@ impl LazyResourceMap {
 
     fn drop_inner(&mut self, resource: LazyResource) {
         let data = match resource.backing {
-            ResourceBacking::LoadedZipFile{data, archive_name, archive } => {
+            ResourceBacking::LoadedZipFile{data, archive_name: _, archive: _ } => {
                 data
             },
             ResourceBacking::Custom{data} => {
                 data
             },
-            ResourceBacking::LazyZipFile{archive_name, archive} => {
+            ResourceBacking::LazyZipFile{archive_name: _, archive: _} => {
                 return;
             }
         };
@@ -1195,7 +1196,7 @@ impl LazyResourceMap {
                 resource.backing = ResourceBacking::LoadedZipFile{archive_name: archive_name.clone(), archive: archive.clone(), data: data.clone()};
                 (Some(archive_name), data)
             },
-            ResourceBacking::LoadedZipFile{archive_name, archive, data} => {
+            ResourceBacking::LoadedZipFile{archive_name, archive: _, data} => {
                 (Some(archive_name), data)
             },
             ResourceBacking::Custom{data} => {
@@ -1266,7 +1267,7 @@ fn load_resources(paths: Vec<String>) {
     });
 
     let files = {
-        let mut map = LAZY_RESOURCE_MAP.lock().unwrap();
+        let map = LAZY_RESOURCE_MAP.lock().unwrap();
 
         let elapsed = now.elapsed();
         info!(
@@ -1375,7 +1376,7 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
     if let Some(legacy_cfg) = get_legacy_cfg_type(file_name) {
         info!("Legacy cfg: {} {:?}", file_name, legacy_cfg.cfg_type);
 
-        let Some((archive_name, file)) = get_file(file_name) else {
+        let Some((_archive_name, file)) = get_file(file_name) else {
             error!("Error getting file: {}", file_name);
             return Vec::new();
         };
@@ -1385,7 +1386,10 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
             error!("Error converting file to string: {}", file_name);
             return Vec::new();
         };
-        ini.read(input_string.to_string());
+        if let Err(e) = ini.read(input_string.to_string()) {
+            error!("Error reading ini {}: {}", file_name, e);
+            return Vec::new();
+        }
 
         match legacy_cfg.cfg_type {
             LegacyCfgType::Ambient => parse_simple_cfg(&ini, "ambient"),
@@ -1426,7 +1430,7 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
 fn parse_simple_cfg(file: &Ini, section_name: &str) -> Vec<String> {
     let mut results = Vec::new();
     if let Some(section) = file.get_map().unwrap_or_default().get(section_name) {
-        for (key, value) in section.iter() {
+        for (_, value) in section.iter() {
             if let Some(value) = value {
                 if value.len() == 1 {
                     results.push(value[0].clone());
@@ -1600,7 +1604,7 @@ fn read_file_from_zip(zip: &mut ZipArchive<BufReader<File>>, file_name: &str) ->
 }
 
 fn read_file_from_zip_to_string(zip: &mut ZipArchive<BufReader<File>>, file_name: &str) -> anyhow::Result<String> {
-    let mut buffer = read_file_from_zip(zip, file_name)?;
+    let buffer = read_file_from_zip(zip, file_name)?;
 
     Ok(str::from_utf8(&buffer)
         .with_context(|| format!("Error converting file {} to utf8", file_name))?
@@ -1763,7 +1767,7 @@ fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<
         .get(file_name)
         .with_context(|| format!("Error finding file {} in resource map for mod {}", file_name, mod_id))?;
 
-    let mut intermediate_string = str::from_utf8(file)
+    let intermediate_string = str::from_utf8(file)
         .with_context(|| format!("Error converting file {} to utf8 for mod {}", file_name, mod_id))?
         .to_string();
 
@@ -1775,14 +1779,14 @@ fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<
     if let Some(habitats) = defs.habitats() {
         for (habitat_name, habitat_def) in habitats.iter() {
             let base_resource_id = openzt_base_resource_id(&mod_id, ResourceType::Habitat, habitat_name);
-            let icon_name = load_icon_definition(
+            load_icon_definition(
                 &base_resource_id,
                 habitat_def,
                 &file_map,
                 mod_id,
                 include_str!("../resources/include/infoimg-habitat.ani").to_string(),
             )?;
-            add_location_or_habitat(&habitat_def.name(), &base_resource_id);
+            add_location_or_habitat(&habitat_def.name(), &base_resource_id)?;
         }
     }
 
@@ -1790,14 +1794,14 @@ fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<
     if let Some(locations) = defs.locations() {
         for (location_name, location_def) in locations.iter() {
             let base_resource_id = openzt_base_resource_id(&mod_id, ResourceType::Location, location_name);
-            let icon_name = load_icon_definition(
+            load_icon_definition(
                 &base_resource_id,
                 location_def,
                 &file_map,
                 mod_id,
                 include_str!("../resources/include/infoimg-location.ani").to_string(),
             )?;
-            add_location_or_habitat(&location_def.name(), &base_resource_id);
+            add_location_or_habitat(&location_def.name(), &base_resource_id)?;
         }
     }
     Ok(defs)
@@ -1809,7 +1813,7 @@ fn load_icon_definition(
     file_map: &HashMap<String, Box<[u8]>>,
     mod_id: &String,
     base_config: String,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<()> {
     let icon_file = file_map.get(icon_definition.icon_path()).with_context(|| {
         format!(
             "Error loading openzt mod {}, cannot find file {} for icon_def {}",
@@ -1876,7 +1880,7 @@ fn load_icon_definition(
     let palette_ztfile = ZTFile::new_raw_bytes(palette_file_name.clone(), icon_file_palette.len() as u32, icon_file_palette.clone());
     add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name, palette_ztfile);
 
-    Ok(animation_file_name)
+    Ok(())
 }
 
 fn openzt_base_resource_id(mod_id: &String, resource_type: ResourceType, resource_name: &String) -> String {
