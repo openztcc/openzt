@@ -30,6 +30,7 @@ field_accessor_as_string_trait = { path = "libs/field_accessor_as_string_trait" 
 serde = {version = "1.0.203", features = ["derive"]}
 toml = "0.8.14"
 regex = "1.10.5"
+public = "0.2.2"
 
 [lib]
 name = "openzt"

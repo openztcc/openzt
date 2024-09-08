@@ -502,6 +502,7 @@ dependencies = [
  "maplit",
  "num_enum",
  "once_cell",
+ "public",
  "regex",
  "retour",
  "retour-utils",
@@ -596,6 +597,12 @@ checksum = "e835ff2298f5721608eb1a980ecaee1aef2c132bf95ecc026a11b7bf3c01c02e"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "public"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "667546e771dadcc524095906f6b8e6182548519be5f27fd9cb09676b1a3e5cef"
 
 [[package]]
 name = "quote"
