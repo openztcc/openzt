@@ -1,8 +1,8 @@
 mod commands;
 //TODO: Split this mod up
 mod resource_manager;
-
 mod hooks;
+mod bfresourcemgr;
 
 use commands::init_commands;
 use hooks::init_hooks;

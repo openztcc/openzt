@@ -13,7 +13,8 @@ mod zoo_resource_mgr {
     use bf_configparser::ini::Ini;
     use tracing::info;
 
-    use crate::resource_manager::resource_manager::{check_file, get_file_ptr, get_location_or_habitat_by_id, load_resources, BFResourcePtr, OPENZT_DIR0};
+    use crate::resource_manager::bfresourcemgr::BFResourcePtr;
+    use crate::resource_manager::resource_manager::{check_file, get_file_ptr, get_location_or_habitat_by_id, load_resources, OPENZT_DIR0};
     use crate::debug_dll::{get_ini_path, get_string_from_memory, save_to_memory};
 
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
@@ -30,8 +31,7 @@ mod zoo_resource_mgr {
             return 1;
         }
 
-        let return_value = unsafe { BFResource_prepare.call(this_ptr, file_name) };
-        return_value
+        unsafe { BFResource_prepare.call(this_ptr, file_name) }
     }
 
     fn bf_resource_inner(this_ptr: u32, file_name: u32) -> bool {
@@ -107,10 +107,9 @@ mod zoo_resource_mgr {
 
     #[hook(unsafe extern "cdecl" ZTUI_general_getInfoImageName, offset = 0x000f85d2)]
     fn zoo_ui_general_get_info_image_name(id: u32) -> u32 {
-        let return_value = match get_location_or_habitat_by_id(id) {
+        match get_location_or_habitat_by_id(id) {
             Some(resource_ptr) => resource_ptr,
             None => unsafe { ZTUI_general_getInfoImageName.call(id) },
-        };
-        return_value
+        }
     }
 }

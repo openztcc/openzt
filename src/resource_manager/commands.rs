@@ -1,7 +1,8 @@
 use crate::console::{CommandError, add_to_command_register};
 use crate::string_registry::get_string_from_registry;
 use crate::debug_dll::get_string_from_memory;
-use crate::resource_manager::resource_manager::{LAZY_RESOURCE_MAP, LOCATIONS_HABITATS_RESOURCE_MAP, MOD_ID_SET, read_bf_resource_mgr_from_memory, read_bf_resource_dir_contents_from_memory};
+use crate::resource_manager::resource_manager::{LAZY_RESOURCE_MAP, LOCATIONS_HABITATS_RESOURCE_MAP, MOD_ID_SET};
+use crate::resource_manager::bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory};
 
 pub fn init_commands() {
     add_to_command_register("list_resources".to_owned(), command_list_resources);

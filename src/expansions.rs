@@ -448,10 +448,10 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
 
-    let animation_resource_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX.to_string(),  EXPANSION_RESOURCE_ANIMATION);
+    let animation_resource_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX,  EXPANSION_RESOURCE_ANIMATION);
 
     if let Err(err) = modify_ztfile_as_ini(
-        &format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX.to_string(), EXPANSION_RESOURCE_ANI),
+        &format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_ANI),
         |cfg| {
             let old_y0 = cfg
                 .get_parse::<i32>("animation", "y0")
@@ -484,7 +484,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
             }
             animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
             animation.set_palette_filename(
-                format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX.to_string(), EXPANSION_RESOURCE_PAL),
+                format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_PAL),
             );
         },
     );
@@ -649,21 +649,21 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
     }
 }
 
-fn handle_expansion_config(path: &String, _: &String, file: Ini) -> Option<(String, String, Ini)> {
+fn handle_expansion_config(path: &str, _: &str, file: Ini) -> Option<(String, String, Ini)> {
     if let Err(e) = parse_expansion_config(&file) {
         error!("Error parsing expansion config: {} {}", path, e);
     }
     None
 }
 
-fn handle_member_parsing(path: &String, file_name: &String, file: Ini) -> Option<(String, String, Ini)> {
+fn handle_member_parsing(path: &str, file_name: &str, file: Ini) -> Option<(String, String, Ini)> {
     if let Err(e) = parse_member_config(path, file_name, file) {
         error!("Error parsing member config: {} {}", path, e)
     }
     None
 }
 
-fn parse_member_config(path: &String, file_name: &String, file: Ini) -> anyhow::Result<()> {
+fn parse_member_config(path: &str, file_name: &str, file: Ini) -> anyhow::Result<()> {
     let filename = Path::new(&file_name.to_ascii_lowercase())
         .file_stem()
         .unwrap()
@@ -689,7 +689,7 @@ fn parse_member_config(path: &String, file_name: &String, file: Ini) -> anyhow::
     Ok(())
 }
 
-fn is_cc(archive: &String) -> bool {
+fn is_cc(archive: &str) -> bool {
     let path = Path::new(archive);
     let Some(parent) = path.parent() else {
         return false;
@@ -743,34 +743,34 @@ fn parse_expansion_config(expansion_cfg: &Ini) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_expansion_dropdown_ani(path: &String, file_name: &String, file: Ini) -> Option<(String, String, Ini)> {
+fn handle_expansion_dropdown_ani(path: &str, file_name: &str, file: Ini) -> Option<(String, String, Ini)> {
     let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name));
     let file_path = Path::new(&new_file_string);
     let Some(file_path_string) = file_path.to_str() else {
         error!("Error converting file path to string");
         return None
     };
-    Some((path.clone(), file_path_string.to_owned(), file))
+    Some((path.to_owned(), file_path_string.to_owned(), file))
 }
 
-fn handle_expansion_dropdown_raw_bytes(path: &String, file_name: &String, file: Box<[u8]>) -> Option<(String, String, Box<[u8]>)> {
+fn handle_expansion_dropdown_raw_bytes(path: &str, file_name: &str, file: Box<[u8]>) -> Option<(String, String, Box<[u8]>)> {
     let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name));
     let file_path = Path::new(&new_file_string);
     let Some(file_path_string) = file_path.to_str() else {
         error!("Error converting file path to string");
         return None;
     };
-    Some((path.clone(), file_path_string.to_owned(), file))
+    Some((path.to_owned(), file_path_string.to_owned(), file))
 }
 
-fn handle_expansion_dropdown_animation(path: &String, _: &String, file: Animation) -> Option<(String, String, Animation)> {
+fn handle_expansion_dropdown_animation(path: &str, _: &str, file: Animation) -> Option<(String, String, Animation)> {
     let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_ANIMATION);
     let file_path = Path::new(&new_file_string);
     let Some(file_path_string) = file_path.to_str() else {
         error!("Error converting file path to string");
         return None;
     };
-    Some((path.clone(), file_path_string.to_owned(), file))
+    Some((path.to_owned(), file_path_string.to_owned(), file))
 }
 
 pub fn init() {
