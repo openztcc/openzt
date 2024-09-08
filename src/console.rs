@@ -107,23 +107,14 @@ static COMMAND_QUEUE: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<S
 
 pub fn add_to_command_register(command_name: String, command_callback: CommandCallback) {
     info!("Registring command {} to registry", command_name);
-    let Ok(mut data_mutex) = COMMAND_REGISTRY.lock() else {
-        error!(
-            "Failed to lock command registry mutex when adding command {} to registry",
-            command_name
-        );
-        return;
-    };
+    let mut data_mutex = COMMAND_REGISTRY.lock().unwrap();
     data_mutex.insert(command_name, command_callback);
 }
 
 fn call_command(command_name: String, args: Vec<&str>) -> Result<String, CommandError> {
     info!("Calling command {} with args {:?}", command_name, args);
     let command = {
-        let Ok(data_mutex) = COMMAND_REGISTRY.lock() else {
-            error!("Failed to lock command registry mutex when calling command {}", command_name);
-            return Err(Into::into("Failed to lock command registry mutex when calling command"));
-        };
+        let data_mutex = COMMAND_REGISTRY.lock().unwrap();
         data_mutex.get(&command_name).cloned()
     };
     match command {
@@ -146,10 +137,7 @@ pub fn call_next_command() {
     };
     let args: Vec<&str> = command_args.collect();
 
-    let Ok(mut result_mutex) = COMMAND_RESULTS.lock() else {
-        error!("Failed to lock command results mutex when calling next command {}", command_name);
-        return;
-    };
+    let mut result_mutex = COMMAND_RESULTS.lock().unwrap();
 
     match call_command(command_name.to_string(), args) {
         Ok(result) => {
@@ -163,46 +151,30 @@ pub fn call_next_command() {
 }
 
 pub fn get_next_result() -> Option<String> {
-    let Ok(mut data_mutex) = COMMAND_RESULTS.lock() else {
-        error!("Failed to lock command results mutex when getting next result");
-        return None;
-    };
+    let mut data_mutex = COMMAND_RESULTS.lock().unwrap();
     data_mutex.pop()
 }
 
 fn add_to_command_queue(command: String) {
     info!("Adding command {} to queue", command);
-    let Ok(mut data_mutex) = COMMAND_QUEUE.lock() else {
-        error!("Failed to lock command queue mutex when adding command {} to queue", command);
-        return;
-    };
+    let mut data_mutex = COMMAND_QUEUE.lock().unwrap();
     data_mutex.push(command);
 }
 
 pub fn get_from_command_queue() -> Option<String> {
-    let Ok(mut data_mutex) = COMMAND_QUEUE.lock() else {
-        error!("Failed to lock command queue mutex when getting command from queue");
-        return None;
-    };
+    let mut data_mutex = COMMAND_QUEUE.lock().unwrap();
     data_mutex.pop()
 }
 
 pub fn command_list_commands(_args: Vec<&str>) -> Result<String, CommandError> {
     info!("Getting command list");
-    match COMMAND_REGISTRY.lock() {
-        Ok(data_mutex) => {
-            let mut result = String::new();
-            for command_name in data_mutex.keys() {
-                info!("Found command {}", command_name);
-                result.push_str(&format!("{}\n", command_name));
-            }
-            Ok(result)
-        }
-        Err(err) => {
-            info!("Error getting command list: {}", err);
-            Err(Into::into("Error getting command list"))
-        }
+    let data_mutex = COMMAND_REGISTRY.lock().unwrap();
+    let mut result = String::new();
+    for command_name in data_mutex.keys() {
+        info!("Found command {}", command_name);
+        result.push_str(&format!("{}\n", command_name));
     }
+    Ok(result)
 }
 
 fn handle_client(mut stream: TcpStream) {

@@ -12,11 +12,7 @@ pub struct ZTString {
 
 impl fmt::Display for ZTString {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            get_string_from_memory_bounded(self.start_ptr, self.end_ptr, self.buffer_end_ptr)
-        )
+        write!(f, "{}", get_string_from_memory_bounded(self.start_ptr, self.end_ptr, self.buffer_end_ptr))
     }
 }
 

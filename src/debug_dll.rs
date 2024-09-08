@@ -137,6 +137,10 @@ pub fn log_exe_location_memory_value() {
     debug_logger(&format!("exe location from rust: {}", rust_exe_location));
 }
 
+pub fn get_string_from_memory_with_size(address: u32, size: u32) -> String {
+    get_string_from_memory_bounded(address, address + size, address + size)
+}
+
 pub fn get_string_from_memory_bounded(start: u32, end: u32, buffer_end: u32) -> String {
     let mut string = String::new();
     let mut char_address = start;

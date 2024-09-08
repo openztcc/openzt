@@ -54,9 +54,7 @@ impl Line {
     pub fn calc_byte_size(&self) -> usize {
         let mut size = mem::size_of::<u8>();
         for draw_instruction in &self.draw_instructions {
-            size += mem::size_of::<u8>()
-                + mem::size_of::<u8>()
-                + (draw_instruction.colors.len() * mem::size_of::<u8>());
+            size += mem::size_of::<u8>() + mem::size_of::<u8>() + (draw_instruction.colors.len() * mem::size_of::<u8>());
         }
         size
     }
@@ -116,11 +114,7 @@ impl Animation {
                     for _ in 0..num_colors {
                         colors.push(read_le_primitive(data, &mut index));
                     }
-                    draw_instructions.push(DrawInstruction {
-                        offset,
-                        num_colors,
-                        colors,
-                    });
+                    draw_instructions.push(DrawInstruction { offset, num_colors, colors });
                 }
                 lines.push(Line {
                     num_draw_instructions,
@@ -183,12 +177,7 @@ impl Animation {
         (bytes, accumulator)
     }
 
-    pub fn duplicate_pixel_rows(
-        &mut self,
-        frame: usize,
-        start_index: usize,
-        end_index: usize,
-    ) -> Result<&mut Self, &'static str> {
+    pub fn duplicate_pixel_rows(&mut self, frame: usize, start_index: usize, end_index: usize) -> Result<&mut Self, &'static str> {
         let mut additional_bytes: usize = 0;
         if start_index > end_index {
             return Err("Start index must be less than end index");
@@ -205,9 +194,7 @@ impl Animation {
             additional_bytes += line.calc_byte_size();
         }
 
-        self.frames[frame]
-            .lines
-            .splice(end_index..end_index, new_lines);
+        self.frames[frame].lines.splice(end_index..end_index, new_lines);
 
         self.frames[frame].num_bytes += additional_bytes as u32;
 
@@ -243,10 +230,7 @@ mod parsing_tests {
         let animation = Animation::parse(include_bytes!("../resources/test/N"));
         assert!(animation.header.is_some());
         assert!(!animation.header.unwrap().extra_frame);
-        assert_eq!(
-            animation.palette_filename,
-            "ANIMALS/01BFCC32/ICMEIOLA/ICMEIOLA.PAL".to_string()
-        );
+        assert_eq!(animation.palette_filename, "ANIMALS/01BFCC32/ICMEIOLA/ICMEIOLA.PAL".to_string());
         assert_eq!(animation.num_frames, 1);
         assert_eq!(animation.frames.len(), 1);
     }
@@ -271,10 +255,7 @@ mod parsing_tests {
         let animation = Animation::parse(include_bytes!("../resources/test/N"));
         let mut animation_to_modify = animation.clone();
         animation_to_modify.duplicate_pixel_rows(0, 0, 1).unwrap();
-        assert_eq!(
-            animation.frames[0].pixel_height + 1,
-            animation_to_modify.frames[0].pixel_height
-        );
+        assert_eq!(animation.frames[0].pixel_height + 1, animation_to_modify.frames[0].pixel_height);
         animation_to_modify.set_palette_filename(animation.palette_filename.clone());
         assert_eq!(animation.palette_filename_length, animation_to_modify.palette_filename_length);
         let (animation_bytes, _) = animation_to_modify.write();

@@ -42,8 +42,28 @@ pub struct Meta {
     mod_id: String,
     #[serde(deserialize_with = "deserialize_version")]
     version: Version,
+    #[serde(default = "default_ztd_type")]
+    ztd_type: ZtdType,
     link: Option<String>,
+    #[serde(default = "default_empty_dependencies")]
     dependencies: Vec<Dependencies>,
+}
+
+fn default_ztd_type() -> ZtdType {
+    ZtdType::Openzt
+}
+
+fn default_empty_dependencies() -> Vec<Dependencies> {
+    Vec::new()
+}
+
+#[derive(Deserialize, Default, PartialEq, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum ZtdType {
+    Legacy,
+    Combined,
+    #[default]
+    Openzt,
 }
 
 #[derive(Debug, PartialEq, Clone, Getters)]
@@ -194,12 +214,27 @@ mod mod_loading_tests {
         assert_eq!(meta.version.patch, 0);
         assert_eq!(meta.link, Some("https://mywebsite.com/myfunmod".to_string()));
         assert_eq!(meta.dependencies.len(), 1);
+        assert_eq!(meta.ztd_type, super::ZtdType::Openzt);
         let dep = meta.dependencies[0].clone();
         assert_eq!(dep.mod_id, "finn.my_other_mod");
         assert_eq!(dep.name, "my other mod");
         assert_eq!(dep.min_version.unwrap(), Version{major: 1, minor: 1, patch: 2});
         assert!(dep.optional);
         assert_eq!(dep.ordering, super::Ordering::Before);
+    }
+
+    #[test]
+    fn test_parse_meta_legacy() {
+        let meta: super::Meta = toml::from_str(include_str!("../resources/test/meta-legacy.toml")).unwrap();
+        assert_eq!(meta.name, "my fun mod");
+        assert_eq!(meta.description, "a mod full of fun");
+        assert_eq!(meta.authors, vec!["Finn".to_string()]);
+        assert_eq!(meta.mod_id, "finn.my_fun_mod");
+        assert_eq!(meta.version, Version{major: 1, minor: 0, patch: 0});
+        assert_eq!(meta.version.minor, 0);
+        assert_eq!(meta.version.patch, 0);
+        assert_eq!(meta.link, Some("https://mywebsite.com/myfunmod".to_string()));
+        assert_eq!(meta.ztd_type, super::ZtdType::Legacy);
     }
 
     fn check_moon_location(location: &super::IconDefinition) {

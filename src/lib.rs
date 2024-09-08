@@ -327,10 +327,6 @@ fn get_ini_path() -> String {
 
 #[hook_module("zoo.exe")]
 mod zoo_misc {
-    use tracing::info;
-
-    use crate::debug_dll::get_string_from_memory;
-
     #[hook(unsafe extern "thiscall" UIControl_useAnimation, offset = 0x0000b1f89)]
     fn ui_control_use_animation(this_ptr: u32, param_1: u32, param_2: bool) {
         unsafe { UIControl_useAnimation.call(this_ptr, param_1, param_2) }
