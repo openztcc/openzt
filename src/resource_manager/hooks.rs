@@ -14,7 +14,9 @@ mod zoo_resource_mgr {
     use tracing::info;
 
     use crate::resource_manager::bfresourcemgr::BFResourcePtr;
-    use crate::resource_manager::resource_manager::{check_file, get_file_ptr, get_location_or_habitat_by_id, load_resources, OPENZT_DIR0};
+    use crate::resource_manager::lazyresourcemap::{check_file, get_file_ptr};
+    use crate::resource_manager::openzt_mods::get_location_or_habitat_by_id;
+    use crate::resource_manager::legacy_loading::{load_resources, OPENZT_DIR0};
     use crate::debug_dll::{get_ini_path, get_string_from_memory, save_to_memory};
 
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]

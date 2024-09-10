@@ -1,8 +1,9 @@
 use crate::console::{CommandError, add_to_command_register};
 use crate::string_registry::get_string_from_registry;
 use crate::debug_dll::get_string_from_memory;
-use crate::resource_manager::resource_manager::{LAZY_RESOURCE_MAP, LOCATIONS_HABITATS_RESOURCE_MAP, MOD_ID_SET};
 use crate::resource_manager::bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory};
+use crate::resource_manager::lazyresourcemap::get_file_names;
+use crate::resource_manager::openzt_mods::{get_mod_ids, get_location_habitat_ids};
 
 pub fn init_commands() {
     add_to_command_register("list_resources".to_owned(), command_list_resources);
@@ -13,15 +14,12 @@ pub fn init_commands() {
     add_to_command_register("list_openzt_locations_habitats".to_string(), command_list_openzt_locations_habitats);
 }
 
-// TODO: Don't use the LAZY_RESOURCE_MAP directly, use a function that returns the resource strings
-// Or maybe make the inner map LazyStatic and move access to within each LazyResourceMap function
 fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() > 1 {
         return Err(CommandError::new("Too many arguments".to_string()));
     }
-    let binding = LAZY_RESOURCE_MAP.lock().unwrap();
     let mut result_string = String::new();
-    for resource_string in binding.files() {
+    for resource_string in get_file_names() {
         if args.len() == 1 && !resource_string.starts_with(args[0]) {
             continue;
         }
@@ -31,9 +29,8 @@ fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError
 }
 
 fn command_list_openzt_resource_strings(_args: Vec<&str>) -> Result<String, CommandError> {
-    let binding = LAZY_RESOURCE_MAP.lock().unwrap();
     let mut result_string = String::new();
-    for resource_string in binding.files() {
+    for resource_string in get_file_names() {
         if resource_string.starts_with("openzt") {
             result_string.push_str(&format!("{}\n", resource_string));
         }
@@ -67,19 +64,17 @@ fn command_get_bf_resource_mgr(_args: Vec<&str>) -> Result<String, CommandError>
 
 
 fn command_list_openzt_mod_ids(_args: Vec<&str>) -> Result<String, CommandError> {
-    let binding = MOD_ID_SET.lock().unwrap();
     let mut result_string = String::new();
-    for mod_id in binding.iter() {
+    for mod_id in get_mod_ids() {
         result_string.push_str(&format!("{}\n", mod_id));
     }
     Ok(result_string)
 }
 
 fn command_list_openzt_locations_habitats(_args: Vec<&str>) -> Result<String, CommandError> {
-    let binding = LOCATIONS_HABITATS_RESOURCE_MAP.lock().unwrap();
     let mut result_string = String::new();
-    for (id, _) in binding.iter() {
-        let name = get_string_from_registry(*id).unwrap_or("<error>".to_string());
+    for id in get_location_habitat_ids() {
+        let name = get_string_from_registry(id).unwrap_or("<error>".to_string());
         result_string.push_str(&format!("{} {}\n", id, name));
     }
     Ok(result_string)
