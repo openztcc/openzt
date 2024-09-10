@@ -33,7 +33,7 @@ impl From<std::num::ParseIntError> for ParseError {
     }
 }
 
-#[derive(Deserialize, Debug, Getters)]
+#[derive(Deserialize, Debug, Getters, Clone)]
 #[get = "pub"]
 pub struct Meta {
     name: String,

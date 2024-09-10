@@ -170,7 +170,7 @@ fn handle_ztd(resource: &PathBuf) -> anyhow::Result<i32> {
     let archive = Arc::new(Mutex::new(zip));
 
     archive.lock().unwrap().file_names().filter(|s| !s.ends_with("/")).for_each(|file_name| {
-        add_lazy(resource_string.clone(), file_name.to_string(), archive.clone());
+        add_lazy(file_name.to_string(), archive.clone());
         load_count += 1;
     });
 

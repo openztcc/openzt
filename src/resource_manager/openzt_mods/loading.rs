@@ -51,14 +51,14 @@ pub fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTFile
 }
 
 pub fn load_open_zt_mod(archive: &mut ZtdArchive) -> anyhow::Result<mods::ZtdType> {
+    let archive_name = archive.name().to_string();
     let Ok(mut meta_file) =  archive.by_name("meta.toml") else {
         return Ok(mods::ZtdType::Legacy);
     };
 
     let meta = toml::from_str::<mods::Meta>(
-        &meta_file.read_to_string().with_context(|| format!("error reading meta.toml from {}", &archive.name()))?
+        &String::try_from(meta_file).with_context(|| format!("error reading meta.toml from {}", &archive_name))?
     ).with_context(|| "Failed to parse meta.toml")?;
-    // let meta = toml::from_str::<mods::Meta>(&read_file_from_zip_to_string(archive, "meta.toml")?).with_context(|| "Failed to parse meta.toml")?;
 
     if meta.ztd_type() == &mods::ZtdType::Legacy {
         return Ok(mods::ZtdType::Legacy);
@@ -78,7 +78,7 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive) -> anyhow::Result<mods::ZtdTyp
         let mut file = archive
             .by_index(i)
             // TODO: Create type that wraps ZipArchive and provide archive name for better error reporting
-            .with_context(|| format!("Error reading zip file at index {}", i))?;
+            .with_context(|| format!("Error reading zip file at index {} from file {}", i, archive_name))?;
 
         if file.is_dir() {
             continue;

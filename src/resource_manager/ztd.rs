@@ -97,7 +97,7 @@ impl ZtdArchive {
 //     }
 // }
 
-struct ZtdFile<'a> {
+pub struct ZtdFile<'a> {
     inner: ZipFile<'a>,
 }
 
@@ -135,25 +135,28 @@ impl ZtdFile<'_> {
     }
 }
 
-// impl TryInto<String> for ZtdFile<'_> {
-//     type Error;
-//     // type anyhow::Error;
+impl TryFrom<ZtdFile<'_>> for String {
+    type Error = anyhow::Error;
 
-//     fn try_into(self) -> Result<String, anyhow::Error> {
+    fn try_from(mut file: ZtdFile) -> Result<String, Self::Error> {
+        let mut buffer = vec![0u8; file.size() as usize].into_boxed_slice();
+        file.inner.read_exact(&mut buffer).with_context(|| format!("Error reading file: {}", file.inner.name()))?;
+
+        Ok(str::from_utf8(&buffer)
+            .with_context(|| format!("Error converting file {} to utf8", file.inner.name()))?
+            .to_string())
+    }
+}
+
+// impl<E: std::convert::From<anyhow::Error>> TryInto<String> for ZtdFile<'_> {
+//     type Error = anyhow::Error;
+
+//     fn try_into(mut self) -> Result<String, Self::Error> {
 //         let mut buffer = vec![0u8; self.inner.size() as usize].into_boxed_slice();
-//         self.inner.clone().read_exact(&mut buffer).with_context(|| format!("Error reading file: {}", self.inner.name()))?;
+//         self.inner.read_exact(&mut buffer).with_context(|| format!("Error reading file: {}", self.inner.name()))?;
 
-//         Ok(str::from_utf8(&buffer)
+//         Ok::<std::string::String, E>(str::from_utf8(&buffer)
 //             .with_context(|| format!("Error converting file {} to utf8", self.inner.name()))?
 //             .to_string())
 //     }
-// }
-
-
-
-// pub trait TryInto<T>: Sized {
-//     type Error;
-
-//     // Required method
-//     fn try_into(self) -> Result<T, Self::Error>;
 // }

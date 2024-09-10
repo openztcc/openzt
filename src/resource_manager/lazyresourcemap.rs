@@ -270,7 +270,7 @@ pub fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
     }
 }
 
-pub fn add_lazy(archive_path: String, file_name: String, archive: Arc<Mutex<ZtdArchive>>) {
+pub fn add_lazy(file_name: String, archive: Arc<Mutex<ZtdArchive>>) {
     LazyResourceMap::insert_lazy(file_name, archive);
 }
 
