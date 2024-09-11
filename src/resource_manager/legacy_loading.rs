@@ -1,34 +1,26 @@
-use std::{fmt::Display, slice, str};
 use std::{
-    collections::{HashMap, HashSet}, ffi::CString, fmt, fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, sync::{Mutex, Arc},
+    io,
+    path::{Path, PathBuf},
+    str,
+    sync::{Arc, Mutex},
 };
 
-use anyhow::{anyhow, Context};
-
-use bf_configparser::ini::{Ini, WriteOptions};
+use bf_configparser::ini::Ini;
 use once_cell::sync::Lazy;
+use regex::Regex;
 use tracing::{error, info};
 use walkdir::WalkDir;
-use zip::read::{ZipArchive, ZipFile};
-
-use regex::Regex;
-use crate::resource_manager::bfresourcemgr::BFResourcePtr;
-
-use crate::{
-    animation::Animation,
-    debug_dll::{get_from_memory, get_string_from_memory},
-    mods,
-    string_registry::add_string_to_registry,
-};
-
-use crate::resource_manager::ztfile::ZTFile;
-use crate::resource_manager::handlers::{get_handlers, RunStage};
-use crate::resource_manager::lazyresourcemap::{get_file, get_num_resources, get_file_names, add_lazy};
-use crate::resource_manager::openzt_mods::get_num_mod_ids;
-use crate::resource_manager::openzt_mods::{load_def, load_open_zt_mod};
+use zip::read::ZipFile;
 
 use super::ztd::ZtdArchive;
-
+use crate::{
+    mods,
+    resource_manager::{
+        handlers::{get_handlers, RunStage},
+        lazyresourcemap::{add_lazy, get_file, get_file_names, get_num_resources},
+        openzt_mods::{get_num_mod_ids, load_open_zt_mod},
+    },
+};
 
 pub trait FromZipFile<T> {
     fn from_zip_file(file: &mut ZipFile) -> io::Result<T>;
@@ -61,7 +53,6 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     }
     resources
 }
-
 
 pub fn load_resources(paths: Vec<String>) {
     use std::time::Instant;
@@ -134,27 +125,24 @@ pub fn load_resources(paths: Vec<String>) {
     for handler in get_handlers().iter() {
         if handler.stage() == RunStage::AfterFiltering {
             filtered_files.clone().into_iter().for_each(|file| {
-               handler.handle(&file);
+                handler.handle(&file);
             });
         }
     }
-    
+
     let elapsed = now.elapsed();
-    info!(
-        "Extra handling took an extra: {:.2?}",
-        elapsed
-    );
+    info!("Extra handling took an extra: {:.2?}", elapsed);
 }
 
 fn handle_ztd(resource: &PathBuf) -> anyhow::Result<i32> {
     let mut load_count = 0;
     // let file = File::open(resource).with_context(|| format!("Error opening file: {}", resource.display()))?;
 
-    let resource_string = resource
-        .clone()
-        .into_os_string()
-        .into_string()
-        .map_err(|e| anyhow::anyhow!("error converting resource path to string: {}", e.to_string_lossy()))?;
+    // let resource_string = resource
+    //     .clone()
+    //     .into_os_string()
+    //     .into_string()
+    //     .map_err(|e| anyhow::anyhow!("error converting resource path to string: {}", e.to_string_lossy()))?;
 
     // let buf_reader = BufReader::new(file);
 
@@ -176,7 +164,6 @@ fn handle_ztd(resource: &PathBuf) -> anyhow::Result<i32> {
 
     Ok(load_count)
 }
-
 
 fn parse_cfg(file_name: &String) -> Vec<String> {
     if let Some(legacy_cfg) = get_legacy_cfg_type(file_name) {
@@ -201,7 +188,7 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
             LegacyCfgType::Ambient => parse_simple_cfg(&ini, "ambient"),
             LegacyCfgType::Animal => parse_simple_cfg(&ini, "animals"), //parse_subtypes_cfg(&ini, "animals"),
             LegacyCfgType::Building => parse_simple_cfg(&ini, "building"),
-            LegacyCfgType::Fence => parse_simple_cfg(&ini, "fences"), //parse_subtypes_cfg(&ini, "fences"),
+            LegacyCfgType::Fence => parse_simple_cfg(&ini, "fences"),  //parse_subtypes_cfg(&ini, "fences"),
             LegacyCfgType::Filter => parse_simple_cfg(&ini, "filter"), //parse_subtypes_cfg(&ini, "filter"),
             LegacyCfgType::Food => parse_simple_cfg(&ini, "food"),
             LegacyCfgType::Free => parse_simple_cfg(&ini, "freeform"),
@@ -217,7 +204,7 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
                 results.append(&mut parse_simple_cfg(&ini, "foliage"));
                 results.append(&mut parse_simple_cfg(&ini, "other"));
                 results
-            },
+            }
             LegacyCfgType::Staff => parse_simple_cfg(&ini, "staff"), //parse_subtypes_cfg(&ini, "staff"),
             LegacyCfgType::Tile => Vec::new(),
             LegacyCfgType::Wall => parse_simple_cfg(&ini, "tankwall"), //parse_subtypes_cfg(&ini, "tankwall"),
@@ -386,15 +373,8 @@ static LEGACY_CFG_REGEX: Lazy<Regex> = Lazy::new(|| {
 fn get_legacy_cfg_type(file_name: &str) -> Option<LegacyCfg> {
     let capture = LEGACY_CFG_REGEX.captures(file_name)?;
     match capture.iter().collect::<Vec<_>>().as_slice() {
-        [_, Some(file_name), Some(file_type), None, None] => {
-            map_legacy_cfg_type(file_type.as_str(), file_name.as_str().to_string()).ok()
-        }
-        [_, None, None, Some(file_name), Some(file_type)] => {
-            map_legacy_cfg_type(file_type.as_str(), file_name.as_str().to_string()).ok()
-        }
-        _ => {
-            None
-        }
+        [_, Some(file_name), Some(file_type), None, None] => map_legacy_cfg_type(file_type.as_str(), file_name.as_str().to_string()).ok(),
+        [_, None, None, Some(file_name), Some(file_type)] => map_legacy_cfg_type(file_type.as_str(), file_name.as_str().to_string()).ok(),
+        _ => None,
     }
 }
-

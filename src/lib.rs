@@ -43,9 +43,7 @@ mod version;
 mod mods;
 
 #[cfg(target_os = "windows")]
-use winapi::um::winnt::{
-    DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH,
-};
+use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
 use crate::{
     console::{add_to_command_register, zoo_console},
@@ -70,10 +68,7 @@ pub fn dll_first_load() {
         return;
     };
 
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(Mutex::new(stream))
-        .with_max_level(Level::INFO)
-        .finish();
+    let subscriber = tracing_subscriber::fmt().with_writer(Mutex::new(stream)).with_max_level(Level::INFO).finish();
 
     if tracing::subscriber::set_global_default(subscriber).is_err() {
         info!("Failed to set global default subscriber, logging may not function");
@@ -124,15 +119,7 @@ mod zoo_logging {
     use crate::{capture_ztlog::log_from_zt, debug_dll::get_string_from_memory};
 
     #[hook(unsafe extern "cdecl" ZooLogging_LogHook, offset = 0x00001363)]
-    fn zoo_log_func(
-        source_file: u32,
-        param_2: u32,
-        param_3: u32,
-        _param_4: u8,
-        _param_5: u32,
-        _param_6: u32,
-        log_message: u32,
-    ) {
+    fn zoo_log_func(source_file: u32, param_2: u32, param_3: u32, _param_4: u8, _param_5: u32, _param_6: u32, log_message: u32) {
         let source_file_string = get_string_from_memory(source_file);
         let log_message_string = get_string_from_memory(log_message);
         log_from_zt(&source_file_string, param_2, param_3, &log_message_string);
@@ -233,46 +220,27 @@ fn load_debug_settings_from_ini() {
 
 #[no_mangle]
 pub fn patch_load_debug_ini_call() {
-    debug_dll::debug_logger(&format!(
-        "load_debug_settings_from_ini {:p}",
-        load_debug_settings_from_ini as *const ()
-    ));
-    debug_dll::debug_logger(&format!(
-        "load_debug_settings_from_ini (u32) {}",
-        load_debug_settings_from_ini as u32
-    ));
+    debug_dll::debug_logger(&format!("load_debug_settings_from_ini {:p}", load_debug_settings_from_ini as *const ()));
+    debug_dll::debug_logger(&format!("load_debug_settings_from_ini (u32) {}", load_debug_settings_from_ini as u32));
     debug_dll::get_code_from_memory(debug_dll::DEBUG_INI_LOAD_CALL_ADDRESS, 0x10);
-    debug_dll::patch_call(
-        debug_dll::DEBUG_INI_LOAD_CALL_ADDRESS,
-        load_debug_settings_from_ini as u32,
-    );
+    debug_dll::patch_call(debug_dll::DEBUG_INI_LOAD_CALL_ADDRESS, load_debug_settings_from_ini as u32);
 }
 
 #[no_mangle]
 extern "C" fn patch_load_int_from_ini_call() {
     debug_dll::debug_logger(&format!("load_int_from_ini {:p}", load_int_from_ini as *const ()));
-    debug_dll::patch_calls(
-        debug_dll::LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET.to_vec(),
-        load_int_from_ini as u32,
-    );
+    debug_dll::patch_calls(debug_dll::LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET.to_vec(), load_int_from_ini as u32);
     debug_dll::patch_nops_series(debug_dll::LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET_NOP.to_vec());
 }
 
 #[no_mangle]
 extern "C" fn patch_load_value_from_ini_call() {
     debug_dll::debug_logger(&format!("load_value_from_ini {:p}", load_value_from_ini as *const ()));
-    debug_dll::patch_calls(
-        debug_dll::LOAD_VALUE_FROM_INI_ADDRESS_ARRAY.to_vec(),
-        load_value_from_ini as u32,
-    );
+    debug_dll::patch_calls(debug_dll::LOAD_VALUE_FROM_INI_ADDRESS_ARRAY.to_vec(), load_value_from_ini as u32);
 }
 
 #[no_mangle]
-extern "cdecl" fn load_int_from_ini(
-    section_address: &u32,
-    header_address: &u32,
-    default: i32,
-) -> u32 {
+extern "cdecl" fn load_int_from_ini(section_address: &u32, header_address: &u32, default: i32) -> u32 {
     debug_dll::debug_logger(&format!(
         "load_int_from_ini {:p} {:p} default: {}",
         *section_address as *const (), *header_address as *const (), default
@@ -282,20 +250,12 @@ extern "cdecl" fn load_int_from_ini(
     let mut zoo_ini = Ini::new();
     zoo_ini.load(get_ini_path()).unwrap();
     let result = load_ini::load_int_with_default(&zoo_ini, &section, &header, default) as u32;
-    debug_dll::debug_logger(&format!(
-        "load_int_from_ini {} {} result: {}",
-        section, header, result
-    ));
+    debug_dll::debug_logger(&format!("load_int_from_ini {} {} result: {}", section, header, result));
     result
 }
 
 #[no_mangle]
-extern "cdecl" fn load_value_from_ini<'a>(
-    result_address: &'a u32,
-    section_address: &u32,
-    header_address: &u32,
-    default_address: &u32,
-) -> &'a u32 {
+extern "cdecl" fn load_value_from_ini<'a>(result_address: &'a u32, section_address: &u32, header_address: &u32, default_address: &u32) -> &'a u32 {
     debug_dll::debug_logger(&format!(
         "load_value_from_ini {:p} {:p} default: {:p}",
         *section_address as *const (), *header_address as *const (), *default_address as *const ()
@@ -307,14 +267,8 @@ extern "cdecl" fn load_value_from_ini<'a>(
     zoo_ini.load(get_ini_path()).unwrap();
     let result = load_ini::load_string_with_default(&zoo_ini, &section, &header, &default);
 
-    debug_dll::debug_logger(&format!(
-        "load_value_from_ini {} {} result: {}",
-        section, header, result
-    ));
-    debug_dll::debug_logger(&format!(
-        "encoding string at address: {:p}",
-        *result_address as *const ()
-    ));
+    debug_dll::debug_logger(&format!("load_value_from_ini {} {} result: {}", section, header, result));
+    debug_dll::debug_logger(&format!("encoding string at address: {:p}", *result_address as *const ()));
     debug_dll::save_string_to_memory(*result_address, &result);
     result_address
 }
@@ -347,7 +301,7 @@ mod zoo_misc {
         // }
         unsafe { UIControl_setAnimation.call(this_ptr, param_1, param_2) }
     }
-    
+
     // 0x0000176ce
     #[hook(unsafe extern "cdecl" UIControl_UILoadAnimation, offset = 0x0000176ce)]
     fn ui_control_ui_load_animation(param_1: u32, param_2: u32, param_3: u32) -> u8 {
@@ -363,7 +317,6 @@ mod zoo_misc {
     fn zoo_gxlleanimset_attempt_bfconfigfile(this_ptr: u32, param_1: u32, param_2: u32) -> u8 {
         unsafe { GXLLEAnimSet_attempt_bfconfigfile.call(this_ptr, param_1, param_2) }
     }
-
 
     #[hook(unsafe extern "thiscall" GXLLEAnim_attempt, offset = 0x000011e21)]
     fn zoo_gxlleanim_attempt(this_ptr: u32, param_1: u32) -> u8 {

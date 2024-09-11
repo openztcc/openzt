@@ -113,8 +113,7 @@ fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
         return Err(Into::into("Expected 1 argument"));
     }
     let address = args[0].parse()?;
-    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 =
-        unsafe { std::mem::transmute(0x0040157d) };
+    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
     let ui_element_addr = get_element_fn(BFUIMGR_PTR, address);
     if ui_element_addr == 0 {
         return Err(Into::into("No element found"));
@@ -125,8 +124,7 @@ fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
 }
 
 fn get_element(id: UIElementId) -> Option<UIElement> {
-    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 =
-        unsafe { std::mem::transmute(0x0040157d) };
+    let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
     let ui_element_addr = get_element_fn(BFUIMGR_PTR, id as u32);
     if ui_element_addr == 0 {
         return None;
@@ -185,10 +183,7 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
     if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion)
         && !tsr.state.is_hidden()
     {
-        if get_element(UIElementId::PaintTerrainTab)?
-            .state
-            .is_selected()
-        {
+        if get_element(UIElementId::PaintTerrainTab)?.state.is_selected() {
             return Some(BuyTab::PaintTerrain);
         }
         if get_element(UIElementId::TerraformTab)?.state.is_selected() {
@@ -220,9 +215,7 @@ pub fn get_selected_sex() -> Option<Sex> {
 
 pub fn get_random_sex() -> Option<Sex> {
     let string_address = get_from_memory::<u32>(RANDOM_SEX_STRING_PTR);
-    match get_string_from_memory_bounded(string_address, string_address + 4, string_address + 8)
-        .as_str()
-    {
+    match get_string_from_memory_bounded(string_address, string_address + 4, string_address + 8).as_str() {
         "m" => Some(Sex::Male),
         "f" => Some(Sex::Female),
         _ => None,
@@ -261,8 +254,11 @@ pub struct UIElement {
 
 impl fmt::Display for UIElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "UIElement {{ unknown_u32_1: {:#x}, unknown_u32_2: {:#x}, unknown_string_1: {}, string_content: {}, element_name: {}, state: {} }}",
-               self.unknown_u32_1, self.unknown_u32_2, self.unknown_string_1, self.string_content, self.element_name, self.state)
+        write!(
+            f,
+            "UIElement {{ unknown_u32_1: {:#x}, unknown_u32_2: {:#x}, unknown_string_1: {}, string_content: {}, element_name: {}, state: {} }}",
+            self.unknown_u32_1, self.unknown_u32_2, self.unknown_string_1, self.string_content, self.element_name, self.state
+        )
     }
 }
 

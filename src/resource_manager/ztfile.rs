@@ -1,26 +1,14 @@
-use std::ffi::CString;
-use std::str;
-use std::slice;
-use std::fmt;
+use std::{ffi::CString, fmt, path::Path, slice, str};
 
 use anyhow::anyhow;
-
-use crate::resource_manager::bfresourcemgr::BFResourcePtr;
-
-use crate::animation::Animation;
-
+use bf_configparser::ini::{Ini, WriteOptions};
 use tracing::{error, info};
 
-use bf_configparser::ini::Ini;
-
-use bf_configparser::ini::WriteOptions;
-
-use crate::debug_dll::{save_to_memory, get_from_memory, get_string_from_memory};
-
-use std::path::Path;
-
-use crate::resource_manager::lazyresourcemap::get_file_ptr;
-
+use crate::{
+    animation::Animation,
+    debug_dll::{get_from_memory, get_string_from_memory, save_to_memory},
+    resource_manager::{bfresourcemgr::BFResourcePtr, lazyresourcemap::get_file_ptr},
+};
 
 #[derive(Debug, Clone)]
 pub enum ZTFile {
@@ -107,103 +95,47 @@ impl TryFrom<&Path> for ZTFileType {
 impl From<BFResourcePtr> for ZTFile {
     fn from(bf_resource_ptr: BFResourcePtr) -> Self {
         let filename = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
-        let file_extension = Path::new(&filename)
-            .extension()
-            .unwrap_or_default()
-            .to_str()
-            .unwrap_or_default();
+        let file_extension = Path::new(&filename).extension().unwrap_or_default().to_str().unwrap_or_default();
         let file_size = bf_resource_ptr.content_size;
         let data = bf_resource_ptr.data_ptr;
         match file_extension {
-            "ai" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Ai,
-                file_size,
-            ),
-            "cfg" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Cfg,
-                file_size,
-            ),
-            "lyt" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Lyt,
-                file_size,
-            ),
-            "scn" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Scn,
-                file_size,
-            ),
-            "uca" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Uca,
-                file_size,
-            ),
-            "ucs" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Ucs,
-                file_size,
-            ),
-            "ucb" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Ucb,
-                file_size,
-            ),
-            "ani" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Ani,
-                file_size,
-            ),
-            "ini" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Ini,
-                file_size,
-            ),
-            "txt" => ZTFile::Text(
-                unsafe { CString::from_raw(data as *mut i8) },
-                ZTFileType::Txt,
-                file_size,
-            ),
+            "ai" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ai, file_size),
+            "cfg" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Cfg, file_size),
+            "lyt" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Lyt, file_size),
+            "scn" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Scn, file_size),
+            "uca" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Uca, file_size),
+            "ucs" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ucs, file_size),
+            "ucb" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ucb, file_size),
+            "ani" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ani, file_size),
+            "ini" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Ini, file_size),
+            "txt" => ZTFile::Text(unsafe { CString::from_raw(data as *mut i8) }, ZTFileType::Txt, file_size),
             "tga" => ZTFile::RawBytes(
-                unsafe {
-                    Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize))
-                },
+                unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) },
                 ZTFileType::Tga,
                 file_size,
             ),
             "pal" => ZTFile::RawBytes(
-                unsafe {
-                    Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize))
-                },
+                unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) },
                 ZTFileType::Palette,
                 file_size,
             ),
             "wav" => ZTFile::RawBytes(
-                unsafe {
-                    Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize))
-                },
+                unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) },
                 ZTFileType::Wav,
                 file_size,
             ),
             "lle" => ZTFile::RawBytes(
-                unsafe {
-                    Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize))
-                },
+                unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) },
                 ZTFileType::Lle,
                 file_size,
             ),
             "bmp" => ZTFile::RawBytes(
-                unsafe {
-                    Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize))
-                },
+                unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) },
                 ZTFileType::Bmp,
                 file_size,
             ),
             _ => ZTFile::RawBytes(
-                unsafe {
-                    Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize))
-                },
+                unsafe { Box::from_raw(slice::from_raw_parts_mut(data as *mut _, file_size as usize)) },
                 ZTFileType::Animation,
                 file_size,
             ),
@@ -231,7 +163,9 @@ pub struct ZTFileBuilder<const HAS_FILE_NAME: bool, const HAS_FILE_SIZE: bool, c
     cstring_data: Option<CString>,
 }
 
-impl<const HAS_FILE_NAME: bool, const HAS_FILE_SIZE: bool, const HAS_TYPE: bool, const HAS_DATA: bool> ZTFileBuilder<HAS_FILE_NAME, HAS_FILE_SIZE, HAS_TYPE, HAS_DATA> {
+impl<const HAS_FILE_NAME: bool, const HAS_FILE_SIZE: bool, const HAS_TYPE: bool, const HAS_DATA: bool>
+    ZTFileBuilder<HAS_FILE_NAME, HAS_FILE_SIZE, HAS_TYPE, HAS_DATA>
+{
     pub fn file_name(self, file_name: String) -> ZTFileBuilder<true, HAS_FILE_SIZE, HAS_TYPE, HAS_DATA> {
         ZTFileBuilder {
             file_name: Some(file_name),
@@ -288,21 +222,9 @@ impl<const HAS_FILE_NAME: bool, const HAS_FILE_SIZE: bool, const HAS_TYPE: bool>
 impl ZTFileBuilder<true, true, true, true> {
     pub fn build(self) -> ZTFile {
         if self.raw_data.is_some() {
-            unsafe {
-                ZTFile::RawBytes (
-                    self.raw_data.unwrap_unchecked(),
-                    self.type_.unwrap_unchecked(),
-                    self.file_size.unwrap_unchecked(),
-                )
-            }
+            unsafe { ZTFile::RawBytes(self.raw_data.unwrap_unchecked(), self.type_.unwrap_unchecked(), self.file_size.unwrap_unchecked()) }
         } else {
-            unsafe {
-                ZTFile::Text (
-                    self.cstring_data.unwrap_unchecked(),
-                    self.type_.unwrap_unchecked(),
-                    self.file_size.unwrap_unchecked(),
-                )
-            }
+            unsafe { ZTFile::Text(self.cstring_data.unwrap_unchecked(), self.type_.unwrap_unchecked(), self.file_size.unwrap_unchecked()) }
         }
     }
 }
@@ -360,12 +282,7 @@ where
 {
     modify_ztfile(file_name, |file: &mut BFResourcePtr| {
         info!("Modifying animation");
-        let data_vec: Box<[u8]> = unsafe {
-            Box::from_raw(slice::from_raw_parts_mut(
-                file.data_ptr as *mut _,
-                file.content_size as usize,
-            ))
-        };
+        let data_vec: Box<[u8]> = unsafe { Box::from_raw(slice::from_raw_parts_mut(file.data_ptr as *mut _, file.content_size as usize)) };
         let mut animation = Animation::parse(&data_vec);
         modifier(&mut animation);
         let (new_animation_bytes, length) = animation.write();
@@ -377,9 +294,9 @@ where
     })
 }
 
-pub fn ztfile_to_raw_resource(path: &str, file_name: String, ztfile: ZTFile)  -> anyhow::Result<u32> {
+pub fn ztfile_to_raw_resource(path: &str, file_name: String, ztfile: ZTFile) -> anyhow::Result<u32> {
     let mut ztd_path = path.to_string();
-    ztd_path = ztd_path.replace("./", "zip::./").replace('\\', "/");
+    ztd_path = ztd_path.replace('\\', "/").replace("./", "zip::./");
     let lowercase_filename = file_name.to_lowercase();
 
     let bf_zip_name_ptr = match CString::new(ztd_path.clone()) {

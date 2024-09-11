@@ -1,5 +1,4 @@
 use retour_utils::hook_module;
-
 use tracing::error;
 
 pub fn init_hooks() {
@@ -13,11 +12,15 @@ mod zoo_resource_mgr {
     use bf_configparser::ini::Ini;
     use tracing::info;
 
-    use crate::resource_manager::bfresourcemgr::BFResourcePtr;
-    use crate::resource_manager::lazyresourcemap::{check_file, get_file_ptr};
-    use crate::resource_manager::openzt_mods::get_location_or_habitat_by_id;
-    use crate::resource_manager::legacy_loading::{load_resources, OPENZT_DIR0};
-    use crate::debug_dll::{get_ini_path, get_string_from_memory, save_to_memory};
+    use crate::{
+        debug_dll::{get_ini_path, get_string_from_memory, save_to_memory},
+        resource_manager::{
+            bfresourcemgr::BFResourcePtr,
+            lazyresourcemap::{check_file, get_file_ptr},
+            legacy_loading::{load_resources, OPENZT_DIR0},
+            openzt_mods::get_location_or_habitat_by_id,
+        },
+    };
 
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
     fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> u8 {

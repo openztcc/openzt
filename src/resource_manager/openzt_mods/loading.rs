@@ -1,26 +1,27 @@
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::CString,
+    fmt,
+    path::Path,
+    str,
+    sync::Mutex,
+};
+
 use anyhow::{anyhow, Context};
-
-use std::{collections::{HashSet, HashMap}, sync::Mutex};
-use std::{fmt, str};
-
-use crate::resource_manager::{ztd::ZtdArchive, ztfile::ZTFile};
-
-use std::path::Path;
-use crate::resource_manager::openzt_mods::habitats_locations::add_location_or_habitat;
-use crate::resource_manager::lazyresourcemap::add_ztfile;
-use crate::animation::Animation;
-
-use bf_configparser::ini::Ini;
-use bf_configparser::ini::WriteOptions;
-
-use std::ffi::CString;
-
-use crate::mods;
-use tracing::info;
+use bf_configparser::ini::{Ini, WriteOptions};
 use once_cell::sync::Lazy;
+use tracing::info;
 
-use crate::resource_manager::ztfile::ZTFileType;
-
+use crate::{
+    animation::Animation,
+    mods,
+    resource_manager::{
+        lazyresourcemap::add_ztfile,
+        openzt_mods::habitats_locations::add_location_or_habitat,
+        ztd::ZtdArchive,
+        ztfile::{ZTFile, ZTFileType},
+    },
+};
 
 // Used to ensure mod_ids don't clash, a mod will not load if an id is already in this map
 static MOD_ID_SET: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
@@ -52,13 +53,12 @@ pub fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTFile
 
 pub fn load_open_zt_mod(archive: &mut ZtdArchive) -> anyhow::Result<mods::ZtdType> {
     let archive_name = archive.name().to_string();
-    let Ok(mut meta_file) =  archive.by_name("meta.toml") else {
+    let Ok(meta_file) = archive.by_name("meta.toml") else {
         return Ok(mods::ZtdType::Legacy);
     };
 
-    let meta = toml::from_str::<mods::Meta>(
-        &String::try_from(meta_file).with_context(|| format!("error reading meta.toml from {}", &archive_name))?
-    ).with_context(|| "Failed to parse meta.toml")?;
+    let meta = toml::from_str::<mods::Meta>(&String::try_from(meta_file).with_context(|| format!("error reading meta.toml from {}", &archive_name))?)
+        .with_context(|| "Failed to parse meta.toml")?;
 
     if meta.ztd_type() == &mods::ZtdType::Legacy {
         return Ok(mods::ZtdType::Legacy);
@@ -189,7 +189,12 @@ fn load_icon_definition(
     })?;
 
     let palette_file_name = openzt_full_resource_id_path(base_resource_id, ZTFileType::Palette);
-    let palette_ztfile = ZTFile::builder().file_name(palette_file_name.clone()).file_size(icon_file_palette.len() as u32).type_(ZTFileType::Palette).raw_data(icon_file_palette.clone()).build();
+    let palette_ztfile = ZTFile::builder()
+        .file_name(palette_file_name.clone())
+        .file_size(icon_file_palette.len() as u32)
+        .type_(ZTFileType::Palette)
+        .raw_data(icon_file_palette.clone())
+        .build();
     add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name.clone(), palette_ztfile);
 
     let mut animation = Animation::parse(icon_file);
@@ -202,7 +207,10 @@ fn load_icon_definition(
     ani_cfg.set_comment_symbols(&[';', '#', ':']);
     ani_cfg.read(base_config).map_err(|s| anyhow!("Error reading ini: {}", s))?;
 
-    if ani_cfg.set("animation", "dir1", Some(openzt_full_resource_id_path(base_resource_id, ZTFileType::Animation))).is_none() {
+    if ani_cfg
+        .set("animation", "dir1", Some(openzt_full_resource_id_path(base_resource_id, ZTFileType::Animation)))
+        .is_none()
+    {
         return Err(anyhow!("Error setting dir1 for ani"));
     }
 
@@ -222,17 +230,32 @@ fn load_icon_definition(
         ));
     };
 
-    let ztfile = ZTFile::builder().file_name(file_name.clone()).file_size(file_size).type_(ZTFileType::Ani).cstring_data(new_c_string).build();
+    let ztfile = ZTFile::builder()
+        .file_name(file_name.clone())
+        .file_size(file_size)
+        .type_(ZTFileType::Ani)
+        .cstring_data(new_c_string)
+        .build();
 
     add_ztfile(Path::new("zip::./openzt.ztd"), file_name, ztfile);
 
     let animation_file_name = openzt_full_resource_id_path(base_resource_id, ZTFileType::Animation);
-    let animation_ztfile = ZTFile::builder().file_name(animation_file_name.clone()).file_size(icon_size as u32).type_(ZTFileType::Animation).raw_data(new_icon_file).build();
+    let animation_ztfile = ZTFile::builder()
+        .file_name(animation_file_name.clone())
+        .file_size(icon_size as u32)
+        .type_(ZTFileType::Animation)
+        .raw_data(new_icon_file)
+        .build();
 
     add_ztfile(Path::new("zip::./openzt.ztd"), animation_file_name.clone(), animation_ztfile);
 
     let palette_file_name = openzt_full_resource_id_path(base_resource_id, ZTFileType::Palette);
-    let palette_ztfile = ZTFile::builder().file_name(palette_file_name.clone()).file_size(icon_file_palette.len() as u32).type_(ZTFileType::Palette).raw_data(icon_file_palette.clone()).build();
+    let palette_ztfile = ZTFile::builder()
+        .file_name(palette_file_name.clone())
+        .file_size(icon_file_palette.len() as u32)
+        .type_(ZTFileType::Palette)
+        .raw_data(icon_file_palette.clone())
+        .build();
     add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name, palette_ztfile);
 
     Ok(())

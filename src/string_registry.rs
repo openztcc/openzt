@@ -14,7 +14,11 @@ static STRING_REGISTRY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::
 
 pub fn add_string_to_registry(string_val: String) -> u32 {
     let mut data_mutex = STRING_REGISTRY.lock().unwrap();
-    info!("Added string to registry: {} -> {}", string_val.clone(), data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET);
+    info!(
+        "Added string to registry: {} -> {}",
+        string_val.clone(),
+        data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET
+    );
     data_mutex.push(string_val);
     data_mutex.len() as u32 + STRING_REGISTRY_ID_OFFSET - 1
 }
@@ -23,9 +27,7 @@ pub fn get_string_from_registry(string_id: u32) -> Result<String, &'static str> 
     info!("Getting string from registry: {}", string_id);
     let string = {
         let data_mutex = STRING_REGISTRY.lock().unwrap();
-        data_mutex
-            .get((string_id - STRING_REGISTRY_ID_OFFSET) as usize)
-            .cloned()
+        data_mutex.get((string_id - STRING_REGISTRY_ID_OFFSET) as usize).cloned()
     };
     match string {
         Some(string) => Ok(string),
@@ -72,12 +74,7 @@ pub mod zoo_string {
         }
         if string_id >= STRING_REGISTRY_ID_OFFSET {
             if let Ok(string) = get_string_from_registry(string_id) {
-                info!(
-                    "BFApp::loadString string_id: {}, override: {} -> {}",
-                    string_id,
-                    string,
-                    string.len()
-                );
+                info!("BFApp::loadString string_id: {}, override: {} -> {}", string_id, string, string.len());
                 save_string_to_memory(string_buffer, &string);
                 return string.len() as u32 + 1;
             }
@@ -119,7 +116,5 @@ pub fn init() {
 }
 
 fn is_user_type_id(param_1: u32) -> bool {
-    (19000 <= param_1 && param_1 <= 21999)
-        || (49000 <= param_1 && param_1 <= 51999)
-        || (74000 <= param_1 && param_1 <= 76999)
+    (19000 <= param_1 && param_1 <= 21999) || (49000 <= param_1 && param_1 <= 51999) || (74000 <= param_1 && param_1 <= 76999)
 }

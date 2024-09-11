@@ -1,24 +1,17 @@
-use std::str;
-use std::ffi::CString;
+use std::{ffi::CString, path::Path, str, sync::Mutex};
 
-use std::sync::Mutex;
+use bf_configparser::ini::{Ini, WriteOptions};
+use getset::CopyGetters;
 use once_cell::sync::Lazy;
-
-use bf_configparser::ini::Ini;
-use bf_configparser::ini::WriteOptions;
-
-use crate::resource_manager::ztfile::{ZTFileType, ZTFile};
-use crate::resource_manager::lazyresourcemap::add_ztfile;
-
-use crate::animation::Animation;
-
-use crate::resource_manager::lazyresourcemap::get_file;
-
-use std::path::Path;
-
 use tracing::{error, info};
 
-use getset::CopyGetters;
+use crate::{
+    animation::Animation,
+    resource_manager::{
+        lazyresourcemap::{add_ztfile, get_file},
+        ztfile::{ZTFile, ZTFileType},
+    },
+};
 
 static RESOURCE_HANDLER_ARRAY: Lazy<Mutex<Vec<Handler>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
@@ -39,7 +32,7 @@ pub fn get_handlers() -> Vec<Handler> {
 pub enum RunStage {
     BeforeOpenZTMods,
     AfterOpenZTMods,
-    AfterFiltering
+    AfterFiltering,
 }
 
 pub type IniHandlerFunction = fn(&str, &str, Ini) -> Option<(String, String, Ini)>;
@@ -73,7 +66,7 @@ impl<const HAS_STAGE: bool, const HAS_HANDLER: bool> HandlerBuilder<HAS_STAGE, H
             ini_handler: Some(handler),
             animation_handler: self.animation_handler,
             raw_bytes_handler: self.raw_bytes_handler,
-            stage: self.stage
+            stage: self.stage,
         }
     }
 
@@ -84,7 +77,7 @@ impl<const HAS_STAGE: bool, const HAS_HANDLER: bool> HandlerBuilder<HAS_STAGE, H
             ini_handler: self.ini_handler,
             animation_handler: Some(handler),
             raw_bytes_handler: self.raw_bytes_handler,
-            stage: self.stage
+            stage: self.stage,
         }
     }
 
@@ -95,7 +88,7 @@ impl<const HAS_STAGE: bool, const HAS_HANDLER: bool> HandlerBuilder<HAS_STAGE, H
             ini_handler: self.ini_handler,
             animation_handler: self.animation_handler,
             raw_bytes_handler: Some(handler),
-            stage: self.stage
+            stage: self.stage,
         }
     }
 
@@ -106,7 +99,7 @@ impl<const HAS_STAGE: bool, const HAS_HANDLER: bool> HandlerBuilder<HAS_STAGE, H
             ini_handler: self.ini_handler,
             animation_handler: self.animation_handler,
             raw_bytes_handler: self.raw_bytes_handler,
-            stage: Some(stage)
+            stage: Some(stage),
         }
     }
 }
@@ -120,7 +113,7 @@ impl HandlerBuilder<true, true> {
                 ini_handler: self.ini_handler,
                 animation_handler: self.animation_handler,
                 raw_bytes_handler: self.raw_bytes_handler,
-                stage: self.stage.unwrap_unchecked()
+                stage: self.stage.unwrap_unchecked(),
             }
         }
     }
@@ -133,8 +126,8 @@ pub struct Handler {
     ini_handler: Option<IniHandlerFunction>,
     animation_handler: Option<AnimationHandlerFunction>,
     raw_bytes_handler: Option<RawBytesHandlerFunction>,
-    #[getset(get_copy  = "pub")]
-    stage: RunStage
+    #[getset(get_copy = "pub")]
+    stage: RunStage,
 }
 
 impl Handler {
@@ -145,7 +138,7 @@ impl Handler {
             ini_handler: None,
             animation_handler: None,
             raw_bytes_handler: None,
-            stage: None
+            stage: None,
         }
     }
 
@@ -170,13 +163,27 @@ impl Handler {
         };
 
         let new_file = match file_type {
-            ZTFileType::Ini | ZTFileType::Ai | ZTFileType::Ani | ZTFileType::Cfg | ZTFileType::Lyt | ZTFileType::Scn | ZTFileType::Uca | ZTFileType::Ucs | ZTFileType::Ucb => {
+            ZTFileType::Ini
+            | ZTFileType::Ai
+            | ZTFileType::Ani
+            | ZTFileType::Cfg
+            | ZTFileType::Lyt
+            | ZTFileType::Scn
+            | ZTFileType::Uca
+            | ZTFileType::Ucs
+            | ZTFileType::Ucb => {
                 if let Some(handler) = self.ini_handler {
-                    info!("Ini Handler {} {} is handling file: {}", self.matcher_prefix.as_deref().unwrap_or_default(), self.matcher_suffix.as_deref().unwrap_or_default(), file_name);
                     let Some((archive_name, file)) = get_file(file_name) else {
                         error!("Error getting file: {}", file_name);
                         return;
                     };
+                    info!(
+                        "Ini Handler {} {} is handling file: {} {}",
+                        self.matcher_prefix.as_deref().unwrap_or_default(),
+                        self.matcher_suffix.as_deref().unwrap_or_default(),
+                        archive_name,
+                        file_name
+                    );
                     let mut ini = Ini::new_cs();
                     ini.set_comment_symbols(&[';', '#', ':']);
 
@@ -196,9 +203,7 @@ impl Handler {
                         let new_string_length = new_string.len() as u32;
 
                         match CString::new(new_string) {
-                            Ok(new_c_string) => {
-                                Some((new_archive_name, new_file_path, ZTFile::Text(new_c_string, file_type, new_string_length)))
-                            },
+                            Ok(new_c_string) => Some((new_archive_name, new_file_path, ZTFile::Text(new_c_string, file_type, new_string_length))),
                             Err(_) => {
                                 error!("Error converting ini to CString after modifying {}", file_name);
                                 None
@@ -213,7 +218,12 @@ impl Handler {
             }
             ZTFileType::Animation => {
                 if let Some(handler) = self.animation_handler {
-                    info!("Animation Handler {} {} is handling file: {}", self.matcher_prefix.as_deref().unwrap_or_default(), self.matcher_suffix.as_deref().unwrap_or_default(), file_name);
+                    info!(
+                        "Animation Handler {} {} is handling file: {}",
+                        self.matcher_prefix.as_deref().unwrap_or_default(),
+                        self.matcher_suffix.as_deref().unwrap_or_default(),
+                        file_name
+                    );
                     let Some((archive_name, file)) = get_file(file_name) else {
                         error!("Error getting file: {}", file_name);
                         return;
@@ -221,7 +231,11 @@ impl Handler {
                     let animation = Animation::parse(&file);
                     if let Some((new_archive_name, new_file_path, new_animation)) = handler(&archive_name, file_name, animation) {
                         let (new_animation_bytes, animation_size) = new_animation.write();
-                        Some((new_archive_name, new_file_path, ZTFile::RawBytes(new_animation_bytes.into_boxed_slice(), ZTFileType::Animation, animation_size as u32)))
+                        Some((
+                            new_archive_name,
+                            new_file_path,
+                            ZTFile::RawBytes(new_animation_bytes.into_boxed_slice(), ZTFileType::Animation, animation_size as u32),
+                        ))
                     } else {
                         None
                     }
@@ -231,7 +245,12 @@ impl Handler {
             }
             ZTFileType::Bmp | ZTFileType::Lle | ZTFileType::Tga | ZTFileType::Wav | ZTFileType::Palette => {
                 if let Some(handler) = self.raw_bytes_handler {
-                    info!("Raw Bytes Handler {} {} is handling file: {}", self.matcher_prefix.as_deref().unwrap_or_default(), self.matcher_suffix.as_deref().unwrap_or_default(), file_name);
+                    info!(
+                        "Raw Bytes Handler {} {} is handling file: {}",
+                        self.matcher_prefix.as_deref().unwrap_or_default(),
+                        self.matcher_suffix.as_deref().unwrap_or_default(),
+                        file_name
+                    );
                     let Some((archive_name, file)) = get_file(file_name) else {
                         error!("Error getting file: {}", file_name);
                         return;
@@ -247,12 +266,12 @@ impl Handler {
                 }
             }
 
-            _ => return
+            _ => return,
         };
 
+        // TODO: Use "zip::./openzt.ztd" as archive?
         if let Some((new_archive_name, new_file_name, ztfile)) = new_file {
             add_ztfile(Path::new(&new_archive_name), new_file_name, ztfile)
         }
-
     }
 }

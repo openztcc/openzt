@@ -1,7 +1,9 @@
 use std::fmt::{Display, Formatter, Result};
-use crate::debug_dll::{get_from_memory, get_string_from_memory};
+
 use public::public;
 use tracing::{error, info};
+
+use crate::debug_dll::{get_from_memory, get_string_from_memory};
 
 const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
 
@@ -108,7 +110,6 @@ impl Name for BFResourceZip {
 pub fn read_bf_resource_mgr_from_memory() -> BFResourceMgr {
     get_from_memory::<BFResourceMgr>(GLOBAL_BFRESOURCEMGR_ADDRESS)
 }
-
 
 pub fn read_bf_resource_dir_contents_from_memory() -> Vec<BFResourceDirContents> {
     info!("Reading BFResourceDir from memory");

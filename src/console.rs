@@ -65,9 +65,7 @@ impl From<String> for CommandError {
 
 impl From<&str> for CommandError {
     fn from(err: &str) -> Self {
-        CommandError {
-            message: err.to_string(),
-        }
+        CommandError { message: err.to_string() }
     }
 }
 
@@ -98,8 +96,7 @@ pub mod zoo_console {
 
 type CommandCallback = fn(args: Vec<&str>) -> Result<String, CommandError>;
 
-static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, CommandCallback>>> =
-    Lazy::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
+static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, CommandCallback>>> = Lazy::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
 
 static COMMAND_RESULTS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<String>::new()));
 

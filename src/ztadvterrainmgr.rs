@@ -37,13 +37,10 @@ impl From<ZTAdvTerrainMgr_raw> for ZTAdvTerrainMgr {
         let mut bf_terrain_type_info_array = Vec::new();
         let mut current_bf_terrain_type_info_address = raw.bf_terrain_type_info_array_start;
         while current_bf_terrain_type_info_address < raw.bf_terrain_type_info_array_end {
-            bf_terrain_type_info_array
-                .push(read_bfterraintypeinfo_from_memory(current_bf_terrain_type_info_address));
+            bf_terrain_type_info_array.push(read_bfterraintypeinfo_from_memory(current_bf_terrain_type_info_address));
             current_bf_terrain_type_info_address += BFTERRAINTYPEINFO_SIZE as u32;
         }
-        ZTAdvTerrainMgr {
-            bf_terrain_type_info_array,
-        }
+        ZTAdvTerrainMgr { bf_terrain_type_info_array }
     }
 }
 

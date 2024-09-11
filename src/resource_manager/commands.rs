@@ -1,9 +1,13 @@
-use crate::console::{CommandError, add_to_command_register};
-use crate::string_registry::get_string_from_registry;
-use crate::debug_dll::get_string_from_memory;
-use crate::resource_manager::bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory};
-use crate::resource_manager::lazyresourcemap::get_file_names;
-use crate::resource_manager::openzt_mods::{get_mod_ids, get_location_habitat_ids};
+use crate::{
+    console::{add_to_command_register, CommandError},
+    debug_dll::get_string_from_memory,
+    resource_manager::{
+        bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory},
+        lazyresourcemap::get_file_names,
+        openzt_mods::{get_location_habitat_ids, get_mod_ids},
+    },
+    string_registry::get_string_from_registry,
+};
 
 pub fn init_commands() {
     add_to_command_register("list_resources".to_owned(), command_list_resources);
@@ -38,7 +42,6 @@ fn command_list_openzt_resource_strings(_args: Vec<&str>) -> Result<String, Comm
     Ok(result_string)
 }
 
-
 fn command_list_resources(_args: Vec<&str>) -> Result<String, CommandError> {
     let mut result_string = String::new();
     let bf_resource_dir_contents = read_bf_resource_dir_contents_from_memory();
@@ -61,7 +64,6 @@ fn command_get_bf_resource_mgr(_args: Vec<&str>) -> Result<String, CommandError>
     let bf_resource_mgr = read_bf_resource_mgr_from_memory();
     Ok(format!("{}", bf_resource_mgr))
 }
-
 
 fn command_list_openzt_mod_ids(_args: Vec<&str>) -> Result<String, CommandError> {
     let mut result_string = String::new();

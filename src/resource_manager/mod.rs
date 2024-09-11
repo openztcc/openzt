@@ -1,19 +1,18 @@
-mod commands;
-mod hooks;
 mod bfresourcemgr;
-mod lazyresourcemap;
-mod ztfile;
+mod commands;
 mod handlers;
-mod openzt_mods;
+mod hooks;
+mod lazyresourcemap;
 mod legacy_loading;
+mod openzt_mods;
 mod ztd;
+mod ztfile;
 
 use commands::init_commands;
+pub use handlers::{add_handler, Handler, RunStage};
 use hooks::init_hooks;
-
 pub use legacy_loading::OPENZT_DIR0;
 pub use ztfile::{modify_ztfile_as_animation, modify_ztfile_as_ini};
-pub use handlers::{add_handler, Handler, RunStage};
 
 pub fn init() {
     init_hooks();
