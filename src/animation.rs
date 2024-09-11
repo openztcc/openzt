@@ -1,35 +1,52 @@
 use std::mem;
 
-use crate::parsing::{read_le_primitive, read_string, write_le_primitive, write_string};
+use crate::binary_parsing::{read_le_primitive, read_string, write_le_primitive, write_string};
 
+/// Top level animation struct, contains an optional header, animation speed, palette filename, number of frames and the frames themselves
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Animation {
+    /// An optional header, generally not present in simpler animations
     pub header: Option<Header>,
+    /// Animation speed, in milliseconds. The time between each frame
     pub animation_speed: u32,
+    /// Length of the palette filename
     pub palette_filename_length: u32,
+    /// The filepath to the palette file used in the animation
     pub palette_filename: String,
+    /// The number of frames in the animation, not including the extra frame if present
     pub num_frames: u32,
+    /// The frames in the animation, including the extra frame if present
     pub frames: Vec<Frame>,
 }
 
+/// Optional header, not present in all animations
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Header {
+    /// The string ZTAF (FATZ when written in little endian)
     pub ztaf_string: u32,
     pub empty_4_bytes: u32,
+    /// Whether the animation has an extra (background) frame, not included in the [Animation::num_frames] count
     pub extra_frame: bool,
 }
 
+/// A single frame in an animation, contains the number of bytes, pixel height, pixel width, vertical offset, horizontal offset, a mystery u16 and the lines
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Frame {
+    /// Number of bytes in the grame
     pub num_bytes: u32,
+    /// Number of vertical pixels
     pub pixel_height: u16,
+    /// Number of horizontal pixels, also the number of lines in the frame
     pub pixel_width: u16,
+
     pub vertical_offset_y: u16,
     pub horizontal_offset_x: u16,
+    /// Unknown 2 bytes
     pub mystery_u16: u16,
+    /// Lines in the frame, each line contains a number of draw instructions
     pub lines: Vec<Line>,
 }
 
@@ -43,9 +60,11 @@ impl Frame {
     }
 }
 
+/// A single line in a frame, contains the number of draw instructions and the draw instructions themselves
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct Line {
+    /// The number of individual draw instructions in the line
     pub num_draw_instructions: u8,
     pub draw_instructions: Vec<DrawInstruction>,
 }
@@ -63,13 +82,18 @@ impl Line {
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct DrawInstruction {
+    /// The offset from the previous draw instruction, skipped pixels are transparent
     pub offset: u8,
+    /// The number of colors in the draw instruction
     pub num_colors: u8,
+    /// The colors in the draw instruction, each color is a palette index
     pub colors: Vec<u8>,
 }
 
 // TODO: Write test based on mod data
 impl Animation {
+    /// Parses a ZTAF animation file into an [Animation] struct, assumes little endian
+    /// If the file has extra data at the end, it will be ignored
     pub fn parse(data: &[u8]) -> Animation {
         let mut index = 0;
         let mut header = None;
@@ -142,6 +166,7 @@ impl Animation {
         }
     }
 
+    /// Writes the [Animation] struct to a byte array, little endian
     pub fn write(self) -> (Vec<u8>, usize) {
         let mut accumulator: usize = 0;
         let mut bytes = Vec::new();
@@ -177,6 +202,9 @@ impl Animation {
         (bytes, accumulator)
     }
 
+    /// Duplicates a range of pixel rows in a frame, increasing the pixel height and number of bytes in the frame
+    /// 
+    /// Useful for resizing UI elements, only works on an individual frame
     pub fn duplicate_pixel_rows(&mut self, frame: usize, start_index: usize, end_index: usize) -> Result<&mut Self, &'static str> {
         let mut additional_bytes: usize = 0;
         if start_index > end_index {
@@ -203,6 +231,7 @@ impl Animation {
         Ok(self)
     }
 
+    /// Changes the pallette filename to a new value, updating the length of the filename
     pub fn set_palette_filename(&mut self, palette_filename: String) {
         self.palette_filename = palette_filename;
         self.palette_filename_length = self.palette_filename.len() as u32 + 1;

@@ -30,9 +30,12 @@ mod string_registry;
 
 mod common;
 
-mod parsing;
+mod binary_parsing;
 
-mod animation;
+/// ZTAF Animation file format parsing, writing and some modification methods.
+/// 
+/// Based on documentation at <https://github.com/jbostoen/ZTStudio/wiki/ZT1-Graphics-Explained>
+pub mod animation;
 
 mod bfentitytype;
 
