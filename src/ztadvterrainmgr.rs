@@ -5,7 +5,7 @@ use tracing::info;
 use crate::{
     add_to_command_register,
     console::CommandError,
-    debug_dll::{get_from_memory, get_string_from_memory},
+    debug_dll::{get_from_memory, get_string_from_memory_bounded},
 };
 
 const GLOBAL_ZTADVTERRAINMGR_ADDRESS: u32 = 0x00638058;
@@ -48,7 +48,7 @@ impl Display for BFTerrainTypeInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "BFTerrainTypeInfo {{ vtable: {:#x} {} {} {} {} {} {} {} {} icon_string: {} }}",
+            "BFTerrainTypeInfo {{ vtable: {:#x} type_id: {} cost: {} blend: {} water: {} ?: {:#x} ?: {} ?: {} help_id: {} icon_string: {} }}",
             self.vtable,
             self.type_id,
             self.cost,
@@ -58,7 +58,7 @@ impl Display for BFTerrainTypeInfo {
             self.unknown_u32_6,
             self.unknown_u32_7,
             self.help_id,
-            get_string_from_memory(self.icon_string_start)
+            get_string_from_memory_bounded(self.icon_string_start, self.icon_string_end, self.icon_string_buffer_end)
         )
     }
 }

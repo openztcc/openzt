@@ -22,6 +22,7 @@ mod zoo_resource_mgr {
         },
     };
 
+    ///When Zoo Tycoon tries to load a resource we check if it's a resource we've already loaded and return that instead
     #[hook(unsafe extern "thiscall" BFResource_attempt, offset = 0x00003891)]
     fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> u8 {
         if bf_resource_inner(this_ptr, file_name) {
@@ -30,6 +31,7 @@ mod zoo_resource_mgr {
         unsafe { BFResource_attempt.call(this_ptr, file_name) }
     }
 
+    ///When Zoo Tycoon tries to load a resource we check if it's a resource we've already loaded and return that instead
     #[hook(unsafe extern "thiscall" BFResource_prepare, offset = 0x000047f4)]
     fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32) -> u8 {
         if bf_resource_inner(this_ptr, file_name) {

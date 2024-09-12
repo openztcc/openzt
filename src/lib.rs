@@ -1,4 +1,3 @@
-// #![feature(abi_thiscall, let_chains)]
 #![feature(let_chains)]
 #![allow(dead_code)]
 
@@ -8,26 +7,45 @@ use bf_configparser::ini::Ini;
 use retour_utils::hook_module;
 use tracing::{error, info, Level};
 
+/// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this 
+/// allowed customization via zoo.ini, but in practice it appears unused.
 mod bfregistry;
 
+/// Hooks into the vanilla game's logging system to re-log messages with the default OpenZT logger.
 mod capture_ztlog;
 
+/// Basic development console, includes a server that listens for a client connection to recieve commands from, 
+/// functions for registering commands with a function callback and hooks so that a command is run every game update
 mod console;
 
+/// Commands and functions for reading entities and entity types from the ZTWorldMgr class
 mod ztworldmgr;
 
 mod resource_manager;
 
+/// Reading and changing the state of the UI, contains hooks for UI elements and some basic UI manipulation functions.
 mod ztui;
 
+/// Assembly patches and functions to fix bugs in the vanilla game.
+/// 
+/// Currently fixes a crash when a maintenance worker tries to fix a 
+/// fence 1 tile away from the edge of the map, and a bug where the 
+/// game crashes if a zoo wall that is one tile away from the edge 
+/// of the map is deleted.
 mod bugfix;
 
+/// Methods for reading the vanilla ZTAdvTerrainMgr class, which contains information about terrain types.
 mod ztadvterrainmgr;
 
+/// Reimplementation of vanilla handling of Expansion Packs, including the ability to define custom expansions.
+/// 
+/// Default behaviour adds in an expansion called "Custom Content" which includes all non-vanilla entities.
+/// Expanding the Expansion dropdown is also handled here.
 mod expansions;
 
 mod string_registry;
 
+//TODO: Combine debug, common and binary_parsing into a util module
 mod common;
 
 mod binary_parsing;
@@ -35,12 +53,15 @@ mod binary_parsing;
 /// ZTAF Animation file format parsing, writing and some modification methods.
 /// 
 /// Based on documentation at <https://github.com/jbostoen/ZTStudio/wiki/ZT1-Graphics-Explained>
-pub mod animation;
+mod animation;
 
+/// Structs that mirror ZT Entity types and their properties. Currently there are many missing fields.
 mod bfentitytype;
 
+/// ztgamemgr module has commands to interact with the live zoo stats such as cash, num animals, species, guests, etc. via the vanilla ZTGameMgr class.
 mod ztgamemgr;
 
+/// Patches in the current OpenZT build version into the game's version string.
 mod version;
 
 mod mods;
@@ -90,45 +111,6 @@ mod zoo_ini {
     }
 }
 
-#[hook_module("zoo.exe")]
-mod zoo_bf_registry {
-    use crate::{
-        bfregistry::{add_to_registry, get_from_registry},
-        debug_dll::{get_from_memory, get_string_from_memory},
-    };
-
-    #[hook(unsafe extern "thiscall" BFRegistry_prtGetHook, offset = 0x000bdd22)]
-    fn prt_get(_this_prt: u32, class_name: u32, _delimeter_maybe: u8) -> u32 {
-        get_from_registry(get_string_from_memory(get_from_memory::<u32>(class_name))).unwrap()
-    }
-
-    #[hook(unsafe extern "cdecl" BFRegistry_AddHook, offset = 0x001770e5)]
-    fn add_to_bfregistry(param_1: u32, param_2: u32) -> u32 {
-        let param_1_string = get_string_from_memory(get_from_memory::<u32>(param_1));
-        add_to_registry(&param_1_string, param_2);
-        0x638001
-    }
-
-    #[hook(unsafe extern "cdecl" BFRegistry_AddUIHook, offset = 0x001774bf)]
-    fn add_to_bfregistry_ui(param_1: u32, param_2: u32) -> u32 {
-        let param_1_string = get_string_from_memory(get_from_memory::<u32>(param_1));
-        add_to_registry(&param_1_string, param_2);
-        0x638001
-    }
-}
-
-#[hook_module("zoo.exe")]
-mod zoo_logging {
-    use crate::{capture_ztlog::log_from_zt, debug_dll::get_string_from_memory};
-
-    #[hook(unsafe extern "cdecl" ZooLogging_LogHook, offset = 0x00001363)]
-    fn zoo_log_func(source_file: u32, param_2: u32, param_3: u32, _param_4: u8, _param_5: u32, _param_6: u32, log_message: u32) {
-        let source_file_string = get_string_from_memory(source_file);
-        let log_message_string = get_string_from_memory(log_message);
-        log_from_zt(&source_file_string, param_2, param_3, &log_message_string);
-    }
-}
-
 #[no_mangle]
 extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
     match reason {
@@ -153,20 +135,15 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 add_to_command_register("set_setting".to_owned(), command_set_setting);
             }
             if cfg!(feature = "bf_registry") {
+                use crate::bfregistry;
                 info!("Feature 'bf_registry' enabled");
-                use crate::bfregistry::command_list_registry;
-
-                if unsafe { zoo_bf_registry::init_detours() }.is_err() {
-                    error!("Failed to initialize bf_registry detours");
-                };
-                add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
+                bfregistry::init();
             }
 
-            if cfg!(feature = "zoo_logging") {
-                info!("Feature 'zoo_logging' enabled");
-                if unsafe { zoo_logging::init_detours() }.is_err() {
-                    error!("Failed to initialize zoo_logging detours");
-                }
+            if cfg!(feature = "capture_ztlog") {
+                use crate::capture_ztlog;
+                info!("Feature 'capture_ztlog' enabled");
+                capture_ztlog::init();
             }
 
             if cfg!(feature = "ztui") {
