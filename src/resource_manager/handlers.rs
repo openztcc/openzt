@@ -142,6 +142,7 @@ impl Handler {
         }
     }
 
+    // TODO: Return Result?
     pub fn handle(&self, file_name: &String) {
         if let Some(prefix) = &self.matcher_prefix {
             if !file_name.starts_with(prefix) {
@@ -228,9 +229,15 @@ impl Handler {
                         error!("Error getting file: {}", file_name);
                         return;
                     };
-                    let animation = Animation::parse(&file);
+                    let Ok(animation) = Animation::parse(&file) else {
+                        error!("Error parsing animation: {}", file_name);
+                        return;
+                    };
                     if let Some((new_archive_name, new_file_path, new_animation)) = handler(&archive_name, file_name, animation) {
-                        let (new_animation_bytes, animation_size) = new_animation.write();
+                        let Ok((new_animation_bytes, animation_size)) = new_animation.write() else {
+                            error!("Error writing animation: {}", file_name);
+                            return;
+                        };
                         Some((
                             new_archive_name,
                             new_file_path,

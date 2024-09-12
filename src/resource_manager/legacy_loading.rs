@@ -134,19 +134,8 @@ pub fn load_resources(paths: Vec<String>) {
     info!("Extra handling took an extra: {:.2?}", elapsed);
 }
 
-fn handle_ztd(resource: &PathBuf) -> anyhow::Result<i32> {
+fn handle_ztd(resource: &Path) -> anyhow::Result<i32> {
     let mut load_count = 0;
-    // let file = File::open(resource).with_context(|| format!("Error opening file: {}", resource.display()))?;
-
-    // let resource_string = resource
-    //     .clone()
-    //     .into_os_string()
-    //     .into_string()
-    //     .map_err(|e| anyhow::anyhow!("error converting resource path to string: {}", e.to_string_lossy()))?;
-
-    // let buf_reader = BufReader::new(file);
-
-    // let mut zip = zip::ZipArchive::new(buf_reader).with_context(|| format!("Error reading zip: {}", resource.display()))?;
     let mut zip = ZtdArchive::new(resource)?;
 
     let ztd_type = load_open_zt_mod(&mut zip)?;

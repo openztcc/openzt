@@ -1,8 +1,7 @@
 use std::{ffi::CString, fmt, path::Path, slice, str};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use bf_configparser::ini::{Ini, WriteOptions};
-use tracing::{error, info};
 
 use crate::{
     animation::Animation,
@@ -229,38 +228,33 @@ impl ZTFileBuilder<true, true, true, true> {
     }
 }
 
-pub fn modify_ztfile<F>(file_name: &str, modifier: F) -> Result<(), &'static str>
+pub fn modify_ztfile<F>(file_name: &str, modifier: F) -> anyhow::Result<()>
 where
-    F: Fn(&mut BFResourcePtr),
+    F: Fn(&mut BFResourcePtr) -> anyhow::Result<()>,
 {
-    let Some(bf_resource_ptr_ptr) = get_file_ptr(file_name) else {
-        info!("File not found: {}", file_name);
-        return Err("File not found");
-    };
+    let bf_resource_ptr_ptr = get_file_ptr(file_name).ok_or_else(|| anyhow!("File not found: {}", file_name))?;
     let mut bf_resource_ptr = get_from_memory::<BFResourcePtr>(bf_resource_ptr_ptr);
 
-    modifier(&mut bf_resource_ptr);
+    modifier(&mut bf_resource_ptr)?;
 
     save_to_memory::<BFResourcePtr>(bf_resource_ptr_ptr, bf_resource_ptr.clone());
 
     Ok(())
 }
 
-pub fn modify_ztfile_as_ini<F>(file_name: &str, modifier: F) -> Result<(), &'static str>
+pub fn modify_ztfile_as_ini<F>(file_name: &str, modifier: F) -> anyhow::Result<()>
 where
-    F: Fn(&mut Ini),
+    F: Fn(&mut Ini) -> anyhow::Result<()>,
 {
     modify_ztfile(file_name, |file: &mut BFResourcePtr| {
         let c_string = unsafe { CString::from_raw(file.data_ptr as *mut i8) };
         let c_string_as_string = c_string.to_string_lossy().to_string();
         let mut cfg = Ini::new_cs();
         cfg.set_comment_symbols(&[';', '#', ':']);
-        if let Err(err) = cfg.read(c_string_as_string) {
-            error!("Error reading ini: {}", err);
-            return;
-        };
 
-        modifier(&mut cfg);
+        cfg.read(c_string_as_string).map_err(|s| anyhow!("Error reading ini: {}", s))?;
+
+        modifier(&mut cfg)?;
 
         let mut write_options = WriteOptions::default();
         write_options.space_around_delimiters = true;
@@ -268,29 +262,30 @@ where
         let new_string = cfg.pretty_writes(&write_options);
         file.content_size = new_string.len() as u32;
 
-        let Ok(new_c_string) = CString::new(new_string) else {
-            error!("Error converting ini to CString after modifying {} writing unchanged version", file_name);
-            return;
-        };
+        let new_c_string = CString::new(new_string)
+            .with_context(|| format!("Error converting ini to CString after modifying {}", file_name))?;
         file.data_ptr = new_c_string.into_raw() as u32;
+        Ok(())
     })
 }
 
-pub fn modify_ztfile_as_animation<F>(file_name: &str, modifier: F) -> Result<(), &'static str>
+pub fn modify_ztfile_as_animation<F>(file_name: &str, modifier: F) -> anyhow::Result<()>
 where
-    F: Fn(&mut Animation),
+    F: Fn(&mut Animation) -> anyhow::Result<()>,
 {
     modify_ztfile(file_name, |file: &mut BFResourcePtr| {
-        info!("Modifying animation");
         let data_vec: Box<[u8]> = unsafe { Box::from_raw(slice::from_raw_parts_mut(file.data_ptr as *mut _, file.content_size as usize)) };
-        let mut animation = Animation::parse(&data_vec);
-        modifier(&mut animation);
-        let (new_animation_bytes, length) = animation.write();
+        let mut animation = Animation::parse(&data_vec)?;
+
+        modifier(&mut animation)?;
+
+        let (new_animation_bytes, length) = animation.write()?;
         let boxed_slice = new_animation_bytes.into_boxed_slice();
         let data_ptr = boxed_slice.as_ptr() as u32;
         std::mem::forget(boxed_slice);
         file.data_ptr = data_ptr;
         file.content_size = length as u32;
+        Ok(())
     })
 }
 

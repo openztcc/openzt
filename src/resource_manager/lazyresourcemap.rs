@@ -162,7 +162,7 @@ impl LazyResourceMap {
         Ok(Some(ConcreteResource {
             archive_name: archive_name.clone(),
             filename: resource.filename.clone(),
-            type_: resource.type_.clone(),
+            type_: resource.type_,
             data,
         }))
     }

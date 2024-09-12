@@ -412,6 +412,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
         let new_y = old_y + (number_of_additional_expansions * 30);
         cfg.set("list", "dy", Some(new_y.to_string()));
         cfg.set("background", "animation", Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "." + "listbk"));
+        Ok(())
     }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
@@ -428,19 +429,19 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
         cfg.set("animation", "dir0", Some(OPENZT_DIR0.to_string()));
         cfg.set("animation", "dir1", Some(animation_resource_string.clone()));
         cfg.remove_key("animation", "dir2");
+        Ok(())
     }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
     info!("Check");
     let animation_result = modify_ztfile_as_animation(&animation_resource_string, |animation| {
         for _ in 0..number_of_additional_expansions {
-            if let Err(e) = animation.duplicate_pixel_rows(0, 10, 31) {
-                info!("Error duplicating pixel rows when modifying animation: {}", e);
-                return;
-            }
+            animation.duplicate_pixel_rows(0, 10, 31)
+            .map_err(|e| anyhow!("Error duplicating pixel rows when modifying animation: {}", e))?;
         }
         animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
         animation.set_palette_filename(format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_PAL));
+        Ok(())
     });
     if let Err(e) = animation_result {
         info!("Error resizing expansion dropdown animation: {}", e);

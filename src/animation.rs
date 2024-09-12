@@ -94,25 +94,25 @@ pub struct DrawInstruction {
 impl Animation {
     /// Parses a ZTAF animation file into an [Animation] struct, assumes little endian
     /// If the file has extra data at the end, it will be ignored
-    pub fn parse(data: &[u8]) -> Animation {
+    pub fn parse(data: &[u8]) -> anyhow::Result<Animation> {
         let mut index = 0;
         let mut header = None;
-        let maybe_header = read_le_primitive(data, &mut index);
+        let maybe_header = read_le_primitive(data, &mut index)?;
         let animation_speed = match maybe_header {
             0x5A544146 => {
                 header = Some(Header {
                     ztaf_string: maybe_header,
-                    empty_4_bytes: read_le_primitive(data, &mut index),
-                    extra_frame: read_le_primitive(data, &mut index),
+                    empty_4_bytes: read_le_primitive(data, &mut index)?,
+                    extra_frame: read_le_primitive(data, &mut index)?,
                 });
-                read_le_primitive(data, &mut index)
+                read_le_primitive(data, &mut index)?
             }
             _ => maybe_header,
         };
 
-        let palette_filename_length = read_le_primitive(data, &mut index);
+        let palette_filename_length = read_le_primitive(data, &mut index)?;
         let palette_filename = read_string(data, &mut index, palette_filename_length as usize);
-        let num_frames = read_le_primitive(data, &mut index);
+        let num_frames = read_le_primitive(data, &mut index)?;
         let mut frames = Vec::new();
         for _ in 0..num_frames + {
             if header.clone().is_some_and(|h| h.extra_frame) {
@@ -121,22 +121,22 @@ impl Animation {
                 0
             }
         } {
-            let num_bytes = read_le_primitive(data, &mut index);
-            let pixel_height = read_le_primitive(data, &mut index);
-            let pixel_width = read_le_primitive(data, &mut index);
-            let vertical_offset_y = read_le_primitive(data, &mut index);
-            let horizontal_offset_x = read_le_primitive(data, &mut index);
-            let mystery_u16 = read_le_primitive(data, &mut index);
+            let num_bytes = read_le_primitive(data, &mut index)?;
+            let pixel_height = read_le_primitive(data, &mut index)?;
+            let pixel_width = read_le_primitive(data, &mut index)?;
+            let vertical_offset_y = read_le_primitive(data, &mut index)?;
+            let horizontal_offset_x = read_le_primitive(data, &mut index)?;
+            let mystery_u16 = read_le_primitive(data, &mut index)?;
             let mut lines = Vec::new();
             for _ in 0..pixel_height {
-                let num_draw_instructions = read_le_primitive(data, &mut index);
+                let num_draw_instructions = read_le_primitive(data, &mut index)?;
                 let mut draw_instructions = Vec::new();
                 for _ in 0..num_draw_instructions {
-                    let offset = read_le_primitive(data, &mut index);
-                    let num_colors = read_le_primitive(data, &mut index);
+                    let offset = read_le_primitive(data, &mut index)?;
+                    let num_colors = read_le_primitive(data, &mut index)?;
                     let mut colors = Vec::new();
                     for _ in 0..num_colors {
-                        colors.push(read_le_primitive(data, &mut index));
+                        colors.push(read_le_primitive(data, &mut index)?);
                     }
                     draw_instructions.push(DrawInstruction { offset, num_colors, colors });
                 }
@@ -156,18 +156,18 @@ impl Animation {
             });
         }
 
-        Animation {
+        Ok(Animation {
             header,
             animation_speed,
             palette_filename_length,
             palette_filename,
             num_frames,
             frames,
-        }
+        })
     }
 
     /// Writes the [Animation] struct to a byte array, little endian
-    pub fn write(self) -> (Vec<u8>, usize) {
+    pub fn write(self) -> anyhow::Result<(Vec<u8>, usize)> {
         let mut accumulator: usize = 0;
         let mut bytes = Vec::new();
         if let Some(header) = self.header {
@@ -176,7 +176,7 @@ impl Animation {
             write_le_primitive(&mut bytes, header.extra_frame, &mut accumulator);
         }
         write_le_primitive(&mut bytes, self.animation_speed, &mut accumulator);
-        write_string(&mut bytes, &self.palette_filename, &mut accumulator);
+        write_string(&mut bytes, &self.palette_filename, &mut accumulator)?;
         write_le_primitive(&mut bytes, self.num_frames, &mut accumulator);
 
         for frame in self.frames {
@@ -199,7 +199,7 @@ impl Animation {
             }
         }
         bytes.shrink_to_fit();
-        (bytes, accumulator)
+        Ok((bytes, accumulator))
     }
 
     /// Duplicates a range of pixel rows in a frame, increasing the pixel height and number of bytes in the frame
@@ -241,13 +241,11 @@ impl Animation {
 #[cfg(test)]
 mod parsing_tests {
 
-    use std::path::PathBuf;
-
     use super::Animation;
 
     #[test]
     fn test_parse_simple_anim_no_header() {
-        let animation = Animation::parse(include_bytes!("../resources/test/N-noheader"));
+        let animation = Animation::parse(include_bytes!("../resources/test/N-noheader")).unwrap();
         assert!(animation.header.is_none());
         assert_eq!(animation.palette_filename, "ui/sharedui/listbk/ltb.pal".to_string());
         assert_eq!(animation.num_frames, 1);
@@ -256,7 +254,7 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_simple_anim_with_header() {
-        let animation = Animation::parse(include_bytes!("../resources/test/N"));
+        let animation = Animation::parse(include_bytes!("../resources/test/N")).unwrap();
         assert!(animation.header.is_some());
         assert!(!animation.header.unwrap().extra_frame);
         assert_eq!(animation.palette_filename, "ANIMALS/01BFCC32/ICMEIOLA/ICMEIOLA.PAL".to_string());
@@ -266,29 +264,29 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_and_write() {
-        let animation = Animation::parse(include_bytes!("../resources/test/N"));
+        let animation = Animation::parse(include_bytes!("../resources/test/N")).unwrap();
         let animation_to_write = animation.clone();
         let (animation_bytes, _) = animation_to_write.write();
-        let animation_2 = Animation::parse(&animation_bytes[..]);
+        let animation_2 = Animation::parse(&animation_bytes[..]).unwrap();
         assert!(animation == animation_2);
     }
 
     #[test]
     fn test_calc_byte_size() {
-        let animation = Animation::parse(include_bytes!("../resources/test/N"));
+        let animation = Animation::parse(include_bytes!("../resources/test/N")).unwrap();
         assert_eq!(animation.frames[0].num_bytes, animation.frames[0].calc_byte_size() as u32);
     }
 
     #[test]
     fn test_parse_modify_and_write() {
-        let animation = Animation::parse(include_bytes!("../resources/test/N"));
+        let animation = Animation::parse(include_bytes!("../resources/test/N")).unwrap();
         let mut animation_to_modify = animation.clone();
         animation_to_modify.duplicate_pixel_rows(0, 0, 1).unwrap();
         assert_eq!(animation.frames[0].pixel_height + 1, animation_to_modify.frames[0].pixel_height);
         animation_to_modify.set_palette_filename(animation.palette_filename.clone());
         assert_eq!(animation.palette_filename_length, animation_to_modify.palette_filename_length);
         let (animation_bytes, _) = animation_to_modify.write();
-        let animation_2 = Animation::parse(&animation_bytes[..]);
+        let animation_2 = Animation::parse(&animation_bytes[..]).unwrap();
         assert_eq!(animation.frames[0].pixel_height + 1, animation_2.frames[0].pixel_height);
         assert_eq!(animation.palette_filename, animation_2.palette_filename);
         assert_eq!(animation.palette_filename_length, animation_2.palette_filename_length);

@@ -38,6 +38,10 @@ pub fn get_string_from_registry(string_id: u32) -> Result<String, &'static str> 
     }
 }
 
+fn is_user_type_id(param_1: u32) -> bool {
+    (19000..=21999).contains(&param_1) || (49000..=51999).contains(&param_1) || (74000..=76999).contains(&param_1)
+}
+
 fn command_get_string(args: Vec<&str>) -> Result<String, CommandError> {
     if args.is_empty() {
         return Err(Into::into("Usage: make_sel <id>"));
@@ -115,6 +119,3 @@ pub fn init() {
     add_to_command_register("get_string".to_string(), command_get_string)
 }
 
-fn is_user_type_id(param_1: u32) -> bool {
-    (19000 <= param_1 && param_1 <= 21999) || (49000 <= param_1 && param_1 <= 51999) || (74000 <= param_1 && param_1 <= 76999)
-}

@@ -816,7 +816,7 @@ impl EntityType for ZTUnitType {
                 self.surface as u32,
                 self.underwater as u32,
                 self.only_underwater as u32,
-                self.skip_trick_happiness as u32,
+                self.skip_trick_happiness,
                 self.skip_trick_chance as u32,
         )
     }
@@ -1182,9 +1182,9 @@ impl EntityType for ZTAnimalType {
         self.time_death,
         self.death_chance,
         self.dirt_chance,
-        self.water_needed as i32,
-        self.underwater_needed as i32,
-        self.land_needed as i32,
+        self.water_needed,
+        self.underwater_needed,
+        self.land_needed,
         self.enter_water_chance,
         self.enter_tank_chance,
         self.enter_land_chance,
@@ -1575,7 +1575,7 @@ fn command_sel_type(args: Vec<&str>) -> Result<String, CommandError> {
         Ok(entity_type.print_config_details())
     } else if args[0] == "-v" {
         // if -v flag is used, print the entity type configuration and other details
-        info!("Printing configuration for entity type at address {:#x}", entity_type_address as u32);
+        info!("Printing configuration for entity type at address {:#x}", entity_type_address);
         // print the entity type configuration for the selected entity type
         Ok(entity_type.print_config())
     } else if args.len() == 2 {

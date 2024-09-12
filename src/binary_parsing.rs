@@ -64,8 +64,7 @@ impl EndianWrite for bool {
     }
 }
 
-//TODO: These should all return Result<T, Error> instead of panicking via unwrap(), errors can then be handling in the calling functions
-pub fn read_le_primitive<'a, T, TArray>(bytes: &'a [u8], index: &mut usize) -> T
+pub fn read_le_primitive<'a, T, TArray>(bytes: &'a [u8], index: &mut usize) -> Result<T, <TArray as TryFrom<&'a [u8]>>::Error>
 where
     T: EndianRead<TArray>,
     TArray: TryFrom<&'a [u8]>,
@@ -73,7 +72,7 @@ where
 {
     let value_bytes = &bytes[*index..*index + mem::size_of::<T>()];
     *index += mem::size_of::<T>();
-    T::from_le_bytes(value_bytes.try_into().unwrap())
+    Ok(T::from_le_bytes(value_bytes.try_into()?))
 }
 
 pub fn write_le_primitive<T: EndianWrite>(vec: &mut Vec<u8>, value: T, accumulator: &mut usize) {
@@ -87,10 +86,11 @@ pub fn read_string(bytes: &[u8], index: &mut usize, length: usize) -> String {
     String::from_utf8(string_bytes.to_vec()).unwrap()
 }
 
-pub fn write_string(vec: &mut Vec<u8>, string: &str, accumulator: &mut usize) {
+pub fn write_string(vec: &mut Vec<u8>, string: &str, accumulator: &mut usize) -> Result<(), std::ffi::NulError> {
     let length = string.len() + 1;
-    let c_string = CString::new(string).unwrap();
+    let c_string = CString::new(string)?;
     *accumulator += length;
     write_le_primitive(vec, (length) as u32, accumulator);
     vec.extend_from_slice(c_string.as_bytes_with_nul());
+    Ok(())
 }

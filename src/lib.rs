@@ -43,11 +43,14 @@ mod ztadvterrainmgr;
 /// Expanding the Expansion dropdown is also handled here.
 mod expansions;
 
+/// Reimplementation of the vanilla BFApp::loadString, has functions to add a string to the OpenZT string registry, 
+/// will fallback to the vanilla BFApp::loadString if the string is not found in the registry.
 mod string_registry;
 
 //TODO: Combine debug, common and binary_parsing into a util module
 mod common;
 
+/// Helper methods for parsing binary data, including reading and writing binary data to and from buffers.
 mod binary_parsing;
 
 /// ZTAF Animation file format parsing, writing and some modification methods.
@@ -64,6 +67,7 @@ mod ztgamemgr;
 /// Patches in the current OpenZT build version into the game's version string.
 mod version;
 
+/// OpenZT mod structs
 mod mods;
 
 #[cfg(target_os = "windows")]

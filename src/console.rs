@@ -83,7 +83,7 @@ pub mod zoo_console {
 
     pub fn init() {
         unsafe {
-            if !init_detours().is_ok() {
+            if init_detours().is_err() {
                 error!("Failed to initialize console detours");
             }
         };

@@ -81,9 +81,9 @@ pub fn save_to_protected_memory<T>(address: u32, value: T) {
     unsafe {
         {
             let mut old_protect: u32 = 0;
-            VirtualProtect(address as *mut _, std::mem::size_of::<T>() as usize, PAGE_EXECUTE_READWRITE, &mut old_protect);
+            VirtualProtect(address as *mut _, std::mem::size_of::<T>(), PAGE_EXECUTE_READWRITE, &mut old_protect);
             ptr::write(address as *mut _, value);
-            VirtualProtect(address as *mut _, std::mem::size_of::<T>() as usize, old_protect, &mut old_protect);
+            VirtualProtect(address as *mut _, std::mem::size_of::<T>(), old_protect, &mut old_protect);
         }
     }
 }

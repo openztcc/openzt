@@ -23,10 +23,10 @@ use crate::{
     },
 };
 
-// Used to ensure mod_ids don't clash, a mod will not load if an id is already in this map
+/// Used to ensure mod_ids don't clash, a mod will not load if an id is already in this map
 static MOD_ID_SET: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
-// Adds a new mod id to the set, returns false if the mod_id already exists
+/// Tries to add a new mod id to the set, returns false if the mod_id already exists
 pub fn add_new_mod_id(mod_id: &str) -> bool {
     let mut binding = MOD_ID_SET.lock().unwrap();
     binding.insert(mod_id.to_string())
@@ -197,9 +197,9 @@ fn load_icon_definition(
         .build();
     add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name.clone(), palette_ztfile);
 
-    let mut animation = Animation::parse(icon_file);
+    let mut animation = Animation::parse(icon_file)?;
     animation.set_palette_filename(palette_file_name.clone());
-    let (new_animation_bytes, icon_size) = animation.write();
+    let (new_animation_bytes, icon_size) = animation.write()?;
 
     let new_icon_file = new_animation_bytes.into_boxed_slice();
 

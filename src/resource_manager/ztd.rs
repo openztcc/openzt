@@ -46,7 +46,7 @@ impl ZtdArchive {
     pub fn new(archive_path: &Path) -> anyhow::Result<Self> {
         let archive_name = archive_path.to_str().unwrap().to_string();
         let archive = ZipArchive::new(BufReader::new(
-            File::open(&archive_path).with_context(|| format!("Failed to open archive {}", archive_path.display()))?,
+            File::open(archive_path).with_context(|| format!("Failed to open archive {}", archive_path.display()))?,
         ))
         .with_context(|| format!("Failed to read archive {}", archive_path.display()))?;
 

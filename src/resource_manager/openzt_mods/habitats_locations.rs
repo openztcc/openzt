@@ -6,10 +6,10 @@ use tracing::info;
 
 use crate::string_registry::add_string_to_registry;
 
-// Map between the id ZT uses to reference locations/habitats and the string ptr of the animation (icon) resource
+/// Map between the id ZT uses to reference locations/habitats and the string ptr of the animation (icon) resource
 pub static LOCATIONS_HABITATS_RESOURCE_MAP: Lazy<Mutex<HashMap<u32, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
-// Map between the animation (icon resource) and the id ZT uses to reference location/habitats, this is used to lookup the id needed to add the habitat/location to an animal
+/// Map between the animation (icon resource) and the id ZT uses to reference location/habitats, this is used to lookup the id needed to add the habitat/location to an animal
 pub static LOCATIONS_HABITATS_ID_MAP: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub fn add_location_or_habitat(name: &String, icon_resource_id: &String) -> anyhow::Result<()> {
