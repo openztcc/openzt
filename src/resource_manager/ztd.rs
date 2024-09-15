@@ -8,34 +8,6 @@ use std::{
 use anyhow::Context;
 use zip::{read::ZipFile, ZipArchive};
 
-// // TODO: Make some ZipFile and ZipArchive wrappers and add these functions to them
-// fn read_file_from_zip(zip: &mut ZipArchive<BufReader<File>>, file_name: &str) -> anyhow::Result<Box<[u8]>> {
-//     let mut file = zip.by_name(file_name).with_context(|| format!("Error finding file in archive: {}", file_name))?;
-
-//     let mut file_buffer = vec![0u8; file.size() as usize].into_boxed_slice();
-
-//     file.read_exact(&mut file_buffer).with_context(|| format!("Error reading file: {}", file_name))?;
-
-//     Ok(file_buffer)
-// }
-
-// fn read_file_from_zip_to_string(zip: &mut ZipArchive<BufReader<File>>, file_name: &str) -> anyhow::Result<String> {
-//     let buffer = read_file_from_zip(zip, file_name)?;
-
-//     Ok(str::from_utf8(&buffer)
-//         .with_context(|| format!("Error converting file {} to utf8", file_name))?
-//         .to_string())
-// }
-
-// fn zip_file_to_string(mut zip: ZipFile) -> anyhow::Result<String> {
-//     let mut buffer = vec![0u8; zip.size() as usize].into_boxed_slice();
-//     zip.read_exact(&mut buffer).with_context(|| format!("Error reading file: {}", zip.name()))?;
-
-//     Ok(str::from_utf8(&buffer)
-//         .with_context(|| format!("Error converting file {} to utf8", zip.name()))?
-//         .to_string())
-// }
-
 pub struct ZtdArchive {
     archive: ZipArchive<BufReader<File>>,
     archive_name: String,
@@ -85,22 +57,6 @@ impl ZtdArchive {
         self.archive.file_names()
     }
 }
-
-// impl Iterator for ZtdArchive {
-//     type Item<'a> = ZtdFile<'a>;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         for i in 0..self.archive.len() {
-//             let file = self.archive.by_index(i).unwrap();
-
-//             if file.is_dir() {
-//                 continue;
-//             }
-//             return Some(ZtdFile::new(file));
-//         }
-//         None
-//     }
-// }
 
 pub struct ZtdFile<'a> {
     inner: ZipFile<'a>,
@@ -156,16 +112,3 @@ impl TryFrom<ZtdFile<'_>> for String {
             .to_string())
     }
 }
-
-// impl<E: std::convert::From<anyhow::Error>> TryInto<String> for ZtdFile<'_> {
-//     type Error = anyhow::Error;
-
-//     fn try_into(mut self) -> Result<String, Self::Error> {
-//         let mut buffer = vec![0u8; self.inner.size() as usize].into_boxed_slice();
-//         self.inner.read_exact(&mut buffer).with_context(|| format!("Error reading file: {}", self.inner.name()))?;
-
-//         Ok::<std::string::String, E>(str::from_utf8(&buffer)
-//             .with_context(|| format!("Error converting file {} to utf8", self.inner.name()))?
-//             .to_string())
-//     }
-// }

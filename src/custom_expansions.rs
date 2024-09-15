@@ -25,6 +25,7 @@ use crate::{
     ztui::{get_random_sex, get_selected_sex, BuyTab, Sex},
 };
 
+/// List of official ZTD files so we can determine if a given ZTD file is custom content
 static OFFICIAL_FILESET: Lazy<HashSet<&str>> = Lazy::new(|| {
     hashset! {"animals8.ztd",
         "awards5.ztd",
@@ -144,6 +145,7 @@ const EXPANSION_RESOURCE_LYT: &str = "ui/xpac.lyt";
 const EXPANSION_RESOURCE_PAL: &str = "listbk.pal";
 const EXPANSION_RESOURCE_ANIMATION: &str = "listbk.animation";
 
+/// Mutex to store the contents of each `member` set, determined by the `member` section in the `uca`, `ucs`, `ucb`, and `ai` files
 static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
@@ -174,21 +176,10 @@ fn get_cc_expansion_name(subdir: &str) -> String {
     CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string() + CUSTOM_CONTENT_EXPANSION_STRING_SUBDIR + subdir
 }
 
-fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
-    let data_mutex = MEMBER_SETS.lock().unwrap();
-    let mut result = String::new();
-
-    for (set_name, members) in data_mutex.iter() {
-        let members_as_string: Vec<String> = members.iter().cloned().collect();
-        result.push_str(&format!("Set: {} -> Members: {}\n", set_name, members_as_string.join(", ")));
-    }
-
-    Ok(result)
-}
-
-// There are no accessors for Expansions, ZT accesses expansions by directly iterating over the array, adding to the array also saves ptrs to ZT's memory keeping things in sync
+/// Mutex containing all expansions
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
+/// Adds to the expansion mutex and saves to ZT memory
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<()> {
     let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
     if data_mutex.len() >= MAX_EXPANSION_SIZE {
@@ -324,28 +315,12 @@ impl Display for ExpansionList {
         )
     }
 }
-
-fn command_get_expansions(_args: Vec<&str>) -> Result<String, CommandError> {
-    let mut string_array = Vec::new();
-    for expansion in read_expansions_from_memory() {
-        string_array.push(expansion.to_string());
-    }
-
-    Ok(string_array.join("\n"))
-}
-
-fn command_get_current_expansion(_args: Vec<&str>) -> Result<String, CommandError> {
-    match read_current_expansion() {
-        Some(expansion) => Ok(expansion.to_string()),
-        None => Ok("No current expansion".to_string()),
-    }
-}
-
+                        
 #[hook_module("zoo.exe")]
 pub mod custom_expansion {
     use tracing::info;
 
-    use super::{initialise_expansions, read_current_expansion};
+    use custom_expansions::{initialise_expansions, read_current_expansion};
     use crate::{bfentitytype::read_zt_entity_type_from_memory, ztui::get_current_buy_tab};
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
@@ -363,7 +338,7 @@ pub mod custom_expansion {
             return 0;
         };
 
-        let reimplemented_result = match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
+        let reimplemented_result = match custom_expansions::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
             true => 1,
             false => 0,
         };
@@ -594,20 +569,6 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
     }
 }
 
-fn handle_expansion_config(path: &str, _: &str, file: Ini) -> Option<(String, String, Ini)> {
-    if let Err(e) = parse_expansion_config(&file) {
-        error!("Error parsing expansion config: {} {}", path, e);
-    }
-    None
-}
-
-fn handle_member_parsing(path: &str, file_name: &str, file: Ini) -> Option<(String, String, Ini)> {
-    if let Err(e) = parse_member_config(path, file_name, file) {
-        error!("Error parsing member config: {} {}", path, e)
-    }
-    None
-}
-
 fn parse_member_config(path: &str, file_name: &str, file: Ini) -> anyhow::Result<()> {
     let filename = Path::new(&file_name.to_ascii_lowercase()).file_stem().unwrap().to_str().unwrap().to_string();
 
@@ -679,6 +640,20 @@ fn parse_expansion_config(expansion_cfg: &Ini) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn handle_expansion_config(path: &str, _: &str, file: Ini) -> Option<(String, String, Ini)> {
+    if let Err(e) = parse_expansion_config(&file) {
+        error!("Error parsing expansion config: {} {}", path, e);
+    }
+    None
+}
+
+fn handle_member_parsing(path: &str, file_name: &str, file: Ini) -> Option<(String, String, Ini)> {
+    if let Err(e) = parse_member_config(path, file_name, file) {
+        error!("Error parsing member config: {} {}", path, e)
+    }
+    None
+}
+
 fn handle_expansion_dropdown_ani(path: &str, file_name: &str, file: Ini) -> Option<(String, String, Ini)> {
     let new_file_string = format!(
         "{}.{}",
@@ -715,6 +690,34 @@ fn handle_expansion_dropdown_animation(path: &str, _: &str, file: Animation) -> 
         return None;
     };
     Some((path.to_owned(), file_path_string.to_owned(), file))
+}
+
+fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
+    let data_mutex = MEMBER_SETS.lock().unwrap();
+    let mut result = String::new();
+
+    for (set_name, members) in data_mutex.iter() {
+        let members_as_string: Vec<String> = members.iter().cloned().collect();
+        result.push_str(&format!("Set: {} -> Members: {}\n", set_name, members_as_string.join(", ")));
+    }
+
+    Ok(result)
+}
+
+fn command_get_expansions(_args: Vec<&str>) -> Result<String, CommandError> {
+    let mut string_array = Vec::new();
+    for expansion in read_expansions_from_memory() {
+        string_array.push(expansion.to_string());
+    }
+
+    Ok(string_array.join("\n"))
+}
+
+fn command_get_current_expansion(_args: Vec<&str>) -> Result<String, CommandError> {
+    match read_current_expansion() {
+        Some(expansion) => Ok(expansion.to_string()),
+        None => Ok("No current expansion".to_string()),
+    }
 }
 
 pub fn init() {

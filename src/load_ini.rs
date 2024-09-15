@@ -24,13 +24,6 @@ pub fn load_debug_settings(ini_path: &Path) -> DebugSettings {
     load_debug_settings_from_ini(debug_settings, ini_path)
 }
 
-// pub unsafe fn zt_load_debug_settings() -> i32 {
-//     let
-//     let debug_settings = load_debug_settings();
-
-//     return 1;
-// }
-
 fn load_debug_settings_from_ini(mut debug_settings: DebugSettings, ini_path: &Path) -> DebugSettings {
     let mut zoo_ini = Ini::new();
 

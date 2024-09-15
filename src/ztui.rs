@@ -11,6 +11,7 @@ use crate::{
 
 const BFUIMGR_PTR: u32 = 0x00638de0;
 
+/// UIElementId enum for currently used UI elements
 #[derive(Debug)]
 pub enum UIElementId {
     AnimalScrollingRegion = 2019,
@@ -222,13 +223,13 @@ pub fn get_random_sex() -> Option<Sex> {
     }
 }
 
-// returns the address of the selected entity
+/// returns the address of the selected entity
 pub fn get_selected_entity() -> u32 {
     let get_selected_entity_fn = unsafe { std::mem::transmute::<u32, fn() -> u32>(0x00410f84) };
     get_selected_entity_fn()
 }
 
-// returns the address of the selected entity type
+/// returns the address of the selected entity type
 pub fn get_selected_entity_type_address() -> u32 {
     let selected_entity = get_selected_entity();
     if selected_entity == 0 {
@@ -262,6 +263,14 @@ impl fmt::Display for UIElement {
     }
 }
 
+/// UIState struct for the state of a UI element
+/// UIState is a bitfield with the following bits:
+/// 0b1: hidden
+/// 0b10: disabled
+/// 0b100: highlighted
+/// 0b1000: selected
+/// 0b10_000: extra hidden?
+/// 0b10_0000_0000: focused
 #[derive(Debug)]
 #[repr(C)]
 pub struct UIState {
@@ -282,7 +291,7 @@ impl UIState {
         0b1000 & self.state != 0
     }
     fn is_extra_hidden(&self) -> bool {
-        0b1_0000 & self.state != 0
+        0b10_000 & self.state != 0
     }
     fn is_focused(&self) -> bool {
         0b10_0000_0000 & self.state != 0
