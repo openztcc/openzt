@@ -320,7 +320,7 @@ impl Display for ExpansionList {
 pub mod custom_expansion {
     use tracing::info;
 
-    use custom_expansions::{initialise_expansions, read_current_expansion};
+    use super::{initialise_expansions, read_current_expansion};
     use crate::{bfentitytype::read_zt_entity_type_from_memory, ztui::get_current_buy_tab};
 
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
@@ -338,7 +338,7 @@ pub mod custom_expansion {
             return 0;
         };
 
-        let reimplemented_result = match custom_expansions::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
+        let reimplemented_result = match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
             true => 1,
             false => 0,
         };
