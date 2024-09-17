@@ -266,7 +266,7 @@ mod parsing_tests {
     fn test_parse_and_write() {
         let animation = Animation::parse(include_bytes!("../resources/test/N")).unwrap();
         let animation_to_write = animation.clone();
-        let (animation_bytes, _) = animation_to_write.write();
+        let (animation_bytes, _) = animation_to_write.write().unwrap();
         let animation_2 = Animation::parse(&animation_bytes[..]).unwrap();
         assert!(animation == animation_2);
     }
@@ -285,7 +285,7 @@ mod parsing_tests {
         assert_eq!(animation.frames[0].pixel_height + 1, animation_to_modify.frames[0].pixel_height);
         animation_to_modify.set_palette_filename(animation.palette_filename.clone());
         assert_eq!(animation.palette_filename_length, animation_to_modify.palette_filename_length);
-        let (animation_bytes, _) = animation_to_modify.write();
+        let (animation_bytes, _) = animation_to_modify.write().unwrap();
         let animation_2 = Animation::parse(&animation_bytes[..]).unwrap();
         assert_eq!(animation.frames[0].pixel_height + 1, animation_2.frames[0].pixel_height);
         assert_eq!(animation.palette_filename, animation_2.palette_filename);

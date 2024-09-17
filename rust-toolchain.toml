@@ -1,2 +1,3 @@
 [toolchain]
-targets = ["nightly-i686-pc-windows-msvc"]
+targets = ["nightly-2024-07-26-i686-pc-windows-msvc"]
+# targets = ["nightly-i686-pc-windows-msvc"]

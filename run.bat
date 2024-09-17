@@ -1,7 +1,7 @@
 @echo off
 
 REM Run cargo build with specified arguments
-cargo +nightly build --lib --release --target=i686-pc-windows-msvc %*
+cargo +nightly-2024-05-02-i686-pc-windows-msvc build --lib --release --target=i686-pc-windows-msvc %*
 
 REM Check if the build succeeded
 if %ERRORLEVEL% neq 0 (
@@ -11,7 +11,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 REM Copy the file to the destination
-copy "target\i686-pc-windows-msvc\release\openzt.dll" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\lang003-openzt.dll"
+copy "target\i686-pc-windows-msvc\release\openzt.dll" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\lang301-openzt.dll"
 
 REM Run the zoo.exe executable
 start "Zoo Tycoon" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"

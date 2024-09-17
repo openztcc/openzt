@@ -570,7 +570,8 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
 }
 
 fn parse_member_config(path: &str, file_name: &str, file: Ini) -> anyhow::Result<()> {
-    let filename = Path::new(&file_name.to_ascii_lowercase()).file_stem().unwrap().to_str().unwrap().to_string();
+    info!("Parsing member config {} {}", path, file_name);
+    let filename = Path::new(&file_name.to_ascii_lowercase()).file_stem().with_context(|| format!("failed to parse member config {}", file_name))?.to_str().with_context(|| format!("failed to parse member config {}", file_name))?.to_string();
 
     // TODO: get_keys shouldn't need a mutable ini
     if let Some(keys) = file.clone().get_keys("Member") {

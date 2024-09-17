@@ -1,5 +1,3 @@
-extern crate winapi;
-
 use std::{
     collections::HashMap,
     error::Error,
@@ -13,6 +11,8 @@ use std::{
 use once_cell::sync::Lazy; //TODO: Use std::sync::LazyCell when it becomes stable
 use retour_utils::hook_module;
 use tracing::{error, info};
+
+use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 
 #[derive(Debug)]
 pub struct CommandError {
@@ -228,4 +228,29 @@ pub fn start_server() {
             }
         }
     }
+}
+
+
+
+pub fn init() -> windows::core::Result<()> {
+    zoo_console::init();
+
+    // Free the current console
+    unsafe { FreeConsole()? };
+
+    // Allocate a new console
+    unsafe { AllocConsole()? };
+
+    // Get the handle to the new console's standard output
+    // let handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }.unwrap();
+
+    // // Write to the new console
+    // write_to_console(handle, "Hello from the new console!\n")?;
+
+    // Wait for user input before closing
+    // println!("Press Enter to exit...");
+    // let mut input = String::new();
+    // std::io::stdin().read_line(&mut input).unwrap();
+
+    Ok(())
 }

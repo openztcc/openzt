@@ -2,9 +2,10 @@ use std::{mem::transmute, path::PathBuf, ptr};
 
 use tracing::{debug, info};
 #[cfg(target_os = "windows")]
-use winapi::um::memoryapi::VirtualProtect;
-#[cfg(target_os = "windows")]
-use winapi::um::winnt::PAGE_EXECUTE_READWRITE;
+use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS};
+// use winapi::um::memoryapi::VirtualProtect;
+// #[cfg(target_os = "windows")]
+// use winapi::um::winnt::PAGE_EXECUTE_READWRITE;
 
 use crate::{console::CommandError, load_ini::DebugSettings};
 
@@ -62,7 +63,7 @@ pub const LOAD_INT_FROM_INI_ADDRESS_ARRAY_SUBSET_NOP: [u32; 8] = [0x004bc224, 0x
 pub const LOAD_VALUE_FROM_INI_ADDRESS_ARRAY: [u32; 1] = [0x005221a8];
 
 pub fn debug_logger(message: &str) {
-    info!(message);
+    info!("{}", message);
 }
 
 pub fn map_from_memory<T>(address: u32) -> &'static mut T {
@@ -80,7 +81,7 @@ pub fn save_to_memory<T>(address: u32, value: T) {
 pub fn save_to_protected_memory<T>(address: u32, value: T) {
     unsafe {
         {
-            let mut old_protect: u32 = 0;
+            let mut old_protect: PAGE_PROTECTION_FLAGS = PAGE_PROTECTION_FLAGS(0);
             VirtualProtect(address as *mut _, std::mem::size_of::<T>(), PAGE_EXECUTE_READWRITE, &mut old_protect);
             ptr::write(address as *mut _, value);
             VirtualProtect(address as *mut _, std::mem::size_of::<T>(), old_protect, &mut old_protect);
@@ -185,7 +186,7 @@ pub fn patch_call(address: u32, new_address: u32) {
     unsafe {
         #[cfg(target_os = "windows")]
         {
-            let mut old_protect: u32 = 0;
+            let mut old_protect: PAGE_PROTECTION_FLAGS = PAGE_PROTECTION_FLAGS(0);
             VirtualProtect(address as *mut _, 5, PAGE_EXECUTE_READWRITE, &mut old_protect);
             ptr::write((address + 1) as *mut _, address_offset);
             VirtualProtect(address as *mut _, 5, old_protect, &mut old_protect);
@@ -414,7 +415,7 @@ pub fn patch_nop(address: u32) {
     unsafe {
         #[cfg(target_os = "windows")]
         {
-            let mut old_protect: u32 = 0;
+            let mut old_protect: PAGE_PROTECTION_FLAGS = PAGE_PROTECTION_FLAGS(0);
             VirtualProtect(address as *mut _, 1, PAGE_EXECUTE_READWRITE, &mut old_protect);
             ptr::write(address as *mut _, 0x90u8);
             VirtualProtect(address as *mut _, 1, old_protect, &mut old_protect);

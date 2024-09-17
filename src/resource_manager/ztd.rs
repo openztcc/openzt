@@ -16,7 +16,7 @@ pub struct ZtdArchive {
 
 impl ZtdArchive {
     pub fn new(archive_path: &Path) -> anyhow::Result<Self> {
-        let archive_name = archive_path.to_str().unwrap().to_string();
+        let archive_name = archive_path.to_str().with_context(|| format!("Error reading archive path {}", archive_path.display()))?.to_string();
         let archive = ZipArchive::new(BufReader::new(
             File::open(archive_path).with_context(|| format!("Failed to open archive {}", archive_path.display()))?,
         ))
