@@ -1,4 +1,6 @@
-use crate::debug_dll::{patch_nop, save_to_protected_memory};
+use tracing::error;
+
+use crate::util::{patch_nop, save_to_protected_memory};
 
 const ZOOWALL_MAP_EDGE_CRASH_ADDRESS: u32 = 0x050b260;
 
@@ -7,22 +9,28 @@ const ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2: u32 = 0x4a1fe7;
 // const ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_1: u32 = ;
 
 pub fn init() {
-    fix_zoowall_map_edge_crash();
-    fix_fence_one_tile_from_map_edge_crash()
+    if let Err(e) = fix_zoowall_map_edge_crash() {
+        error!("Failed to fix ZooWall map edge crash: {}", e);
+    }
+    if let Err(e) = fix_fence_one_tile_from_map_edge_crash() {
+        error!("Failed to fix ZooFence one tile from map edge crash: {}", e);
+    }
 }
 
-fn fix_zoowall_map_edge_crash() {
+fn fix_zoowall_map_edge_crash() -> anyhow::Result<()> {
     // We change a jump address to fix a bug trying access a null pointer
-    save_to_protected_memory(ZOOWALL_MAP_EDGE_CRASH_ADDRESS, 0xfffffcfeu32 as i32);
+    save_to_protected_memory(ZOOWALL_MAP_EDGE_CRASH_ADDRESS, 0xfffffcfeu32 as i32)?;
+    Ok(())
 }
 
-fn fix_fence_one_tile_from_map_edge_crash() {
+fn fix_fence_one_tile_from_map_edge_crash() -> anyhow::Result<()> {
     // This changes an if statement to cover the entire inner loop
-    save_to_protected_memory::<u8>(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_1, 0x45);
+    save_to_protected_memory::<u8>(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_1, 0x45)?;
     // The above change makes the second if statement redundant so we can add in a check for the null pointer
-    save_to_protected_memory::<u8>(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2, 0x85);
-    save_to_protected_memory::<u8>(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2 + 1, 0xC0);
-    patch_nop(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2 + 2);
+    save_to_protected_memory::<u8>(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2, 0x85)?;
+    save_to_protected_memory::<u8>(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2 + 1, 0xC0)?;
+    patch_nop(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2 + 2)?;
+    Ok(())
 }
 
 // Leaving this in incase future bugfixes require inline assembly

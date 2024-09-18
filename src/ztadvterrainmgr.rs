@@ -5,7 +5,7 @@ use tracing::info;
 use crate::{
     add_to_command_register,
     console::CommandError,
-    debug_dll::{get_from_memory, get_string_from_memory_bounded},
+    util::{get_from_memory, get_string_from_memory_bounded},
 };
 
 const GLOBAL_ZTADVTERRAINMGR_ADDRESS: u32 = 0x00638058;

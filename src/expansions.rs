@@ -19,7 +19,7 @@ use crate::{
     animation::Animation,
     bfentitytype::{ZTEntityType, ZTEntityTypeClass},
     console::CommandError,
-    debug_dll::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory},
+    util::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory},
     resource_manager::{add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage, OPENZT_DIR0},
     string_registry::add_string_to_registry,
     ztui::{get_random_sex, get_selected_sex, BuyTab, Sex},

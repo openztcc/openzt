@@ -8,7 +8,7 @@ use crate::{
     add_to_command_register,
     bfentitytype::{read_zt_entity_type_from_memory, ZTEntityType, ZTSceneryType},
     console::CommandError,
-    debug_dll::{get_from_memory, get_string_from_memory, map_from_memory},
+    util::{get_from_memory, get_string_from_memory, map_from_memory},
 };
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;

@@ -9,7 +9,7 @@ use tracing::info;
 
 use crate::{
     console::{add_to_command_register, CommandError},
-    debug_dll::{get_from_memory, get_string_from_memory, map_from_memory},
+    util::{get_from_memory, get_string_from_memory, map_from_memory},
     expansions::is_member,
     ztui::get_selected_entity_type_address,
     ztworldmgr,

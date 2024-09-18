@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter, Result};
 use public::public;
 use tracing::{error, info};
 
-use crate::debug_dll::{get_from_memory, get_string_from_memory};
+use crate::util::{get_from_memory, get_string_from_memory};
 
 const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
 

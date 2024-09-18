@@ -41,7 +41,7 @@ pub fn log_from_zt(source_file: &String, line_number: u32, level: u32, message: 
 
 #[hook_module("zoo.exe")]
 mod zoo_logging {
-    use crate::{capture_ztlog::log_from_zt, debug_dll::get_string_from_memory};
+    use crate::{capture_ztlog::log_from_zt, util::get_string_from_memory};
 
     #[hook(unsafe extern "cdecl" ZooLogging_LogHook, offset = 0x00001363)]
     fn zoo_log_func(source_file: u32, param_2: u32, param_3: u32, _param_4: u8, _param_5: u32, _param_6: u32, log_message: u32) {

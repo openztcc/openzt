@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use tracing::info;
 use retour_utils::hook_module;
 
-use crate::{console::{CommandError, add_to_command_register}, debug_dll::get_from_memory};
+use crate::{console::{CommandError, add_to_command_register}, util::get_from_memory};
 
 static BF_REGISTRY: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -57,7 +57,7 @@ pub fn read_bf_registry() {
 mod zoo_bf_registry {
     use crate::{
         bfregistry::{add_to_registry, get_from_registry},
-        debug_dll::{get_from_memory, get_string_from_memory},
+        util::{get_from_memory, get_string_from_memory},
     };
 
     #[hook(unsafe extern "thiscall" BFRegistry_prtGetHook, offset = 0x000bdd22)]
@@ -80,6 +80,7 @@ mod zoo_bf_registry {
     }
 }
 
+#[deprecated(since="0.1.0", note="no longer needed")]
 pub fn init() {
     if let Err(e) = unsafe { zoo_bf_registry::init_detours() } {
         info!("Error initialising bf_registry detours: {}", e);

@@ -13,7 +13,7 @@ mod zoo_resource_mgr {
     use tracing::info;
 
     use crate::{
-        debug_dll::{get_ini_path, get_string_from_memory, save_to_memory},
+        util::{get_ini_path, get_string_from_memory, save_to_memory},
         resource_manager::{
             bfresourcemgr::BFResourcePtr,
             lazyresourcemap::{check_file, get_file_ptr},

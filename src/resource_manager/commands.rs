@@ -1,6 +1,6 @@
 use crate::{
     console::{add_to_command_register, CommandError},
-    debug_dll::get_string_from_memory,
+    util::get_string_from_memory,
     resource_manager::{
         bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory},
         lazyresourcemap::get_file_names,

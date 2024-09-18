@@ -12,7 +12,7 @@ use tracing::{error, info};
 
 use super::ztd::ZtdArchive;
 use crate::{
-    debug_dll::{get_from_memory, get_string_from_memory},
+    util::{get_from_memory, get_string_from_memory},
     resource_manager::{
         bfresourcemgr::BFResourcePtr,
         ztfile::{ztfile_to_raw_resource, ZTFile, ZTFileType},

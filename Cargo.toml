@@ -42,11 +42,8 @@ name = "test"
 path = "src/debug.rs"
 
 [features]
-default = ["console", "ztui", "experimental"]
-release = ["console", "ztui"]
-console = []
+default = ["experimental"]
+release = []
 ini = []
-bf_registry = []
 capture_ztlog = []
-ztui = []
 experimental = []

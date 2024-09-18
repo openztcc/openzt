@@ -5,7 +5,7 @@ use bf_configparser::ini::{Ini, WriteOptions};
 
 use crate::{
     animation::Animation,
-    debug_dll::{get_from_memory, get_string_from_memory, save_to_memory},
+    util::{get_from_memory, get_string_from_memory, save_to_memory},
     resource_manager::{bfresourcemgr::BFResourcePtr, lazyresourcemap::get_file_ptr},
 };
 
