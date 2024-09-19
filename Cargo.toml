@@ -42,7 +42,7 @@ name = "test"
 path = "src/debug.rs"
 
 [features]
-default = ["experimental"]
+default = ["experimental", "ini"]
 release = []
 ini = []
 capture_ztlog = []
