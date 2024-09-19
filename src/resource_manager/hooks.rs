@@ -13,13 +13,13 @@ mod zoo_resource_mgr {
     use tracing::info;
 
     use crate::{
-        util::{get_ini_path, get_string_from_memory, save_to_memory},
         resource_manager::{
             bfresourcemgr::BFResourcePtr,
             lazyresourcemap::{check_file, get_file_ptr},
             legacy_loading::{load_resources, OPENZT_DIR0},
             openzt_mods::get_location_or_habitat_by_id,
         },
+        util::{get_ini_path, get_string_from_memory, save_to_memory},
     };
 
     ///When Zoo Tycoon tries to load a resource we check if it's a resource we've already loaded and return that instead

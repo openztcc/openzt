@@ -1,9 +1,8 @@
-#[cfg(target_os = "windows")]
-use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS};
-
-use std::{mem::transmute, path::PathBuf, ptr, fmt};
+use std::{fmt, mem::transmute, path::PathBuf, ptr};
 
 use tracing::debug;
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS};
 
 pub fn map_from_memory<T>(address: u32) -> &'static mut T {
     unsafe { transmute::<u32, &mut T>(address) }

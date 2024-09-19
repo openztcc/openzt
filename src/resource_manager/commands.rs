@@ -1,12 +1,12 @@
 use crate::{
     console::{add_to_command_register, CommandError},
-    util::get_string_from_memory,
     resource_manager::{
         bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory},
         lazyresourcemap::get_file_names,
         openzt_mods::{get_location_habitat_ids, get_mod_ids},
     },
     string_registry::get_string_from_registry,
+    util::get_string_from_memory,
 };
 
 pub fn init_commands() {

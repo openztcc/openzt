@@ -203,7 +203,7 @@ impl Animation {
     }
 
     /// Duplicates a range of pixel rows in a frame, increasing the pixel height and number of bytes in the frame
-    /// 
+    ///
     /// Useful for resizing UI elements, only works on an individual frame
     pub fn duplicate_pixel_rows(&mut self, frame: usize, start_index: usize, end_index: usize) -> Result<&mut Self, &'static str> {
         let mut additional_bytes: usize = 0;

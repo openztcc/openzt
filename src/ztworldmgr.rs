@@ -5,9 +5,8 @@ use num_enum::FromPrimitive;
 use tracing::info;
 
 use crate::{
-    console::add_to_command_register,
     bfentitytype::{read_zt_entity_type_from_memory, ZTEntityType, ZTSceneryType},
-    console::CommandError,
+    console::{add_to_command_register, CommandError},
     util::{get_from_memory, get_string_from_memory, map_from_memory},
 };
 

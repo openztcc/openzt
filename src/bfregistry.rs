@@ -1,10 +1,13 @@
 use std::{collections::HashMap, sync::Mutex};
 
 use once_cell::sync::Lazy;
-use tracing::info;
 use retour_utils::hook_module;
+use tracing::info;
 
-use crate::{console::{CommandError, add_to_command_register}, util::get_from_memory};
+use crate::{
+    console::{add_to_command_register, CommandError},
+    util::get_from_memory,
+};
 
 static BF_REGISTRY: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -80,7 +83,7 @@ mod zoo_bf_registry {
     }
 }
 
-#[deprecated(since="0.1.0", note="no longer needed")]
+#[deprecated(since = "0.1.0", note = "no longer needed")]
 pub fn init() {
     if let Err(e) = unsafe { zoo_bf_registry::init_detours() } {
         info!("Error initialising bf_registry detours: {}", e);

@@ -1,5 +1,5 @@
-use tracing::info;
 use retour_utils::hook_module;
+use tracing::info;
 
 enum ZTLogLevel {
     Trace,
@@ -50,7 +50,6 @@ mod zoo_logging {
         log_from_zt(&source_file_string, param_2, param_3, &log_message_string);
     }
 }
-
 
 pub fn init() {
     if let Err(e) = unsafe { zoo_logging::init_detours() } {

@@ -15,13 +15,12 @@ use retour_utils::hook_module;
 use tracing::{error, info};
 
 use crate::{
-    console::add_to_command_register,
     animation::Animation,
     bfentitytype::{ZTEntityType, ZTEntityTypeClass},
-    console::CommandError,
-    util::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory},
+    console::{add_to_command_register, CommandError},
     resource_manager::{add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage, OPENZT_DIR0},
     string_registry::add_string_to_registry,
+    util::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory},
     ztui::{get_random_sex, get_selected_sex, BuyTab, Sex},
 };
 
@@ -315,7 +314,7 @@ impl Display for ExpansionList {
         )
     }
 }
-                        
+
 #[hook_module("zoo.exe")]
 pub mod custom_expansion {
     use tracing::info;
@@ -411,8 +410,9 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     info!("Check");
     let animation_result = modify_ztfile_as_animation(&animation_resource_string, |animation| {
         for _ in 0..number_of_additional_expansions {
-            animation.duplicate_pixel_rows(0, 10, 31)
-            .map_err(|e| anyhow!("Error duplicating pixel rows when modifying animation: {}", e))?;
+            animation
+                .duplicate_pixel_rows(0, 10, 31)
+                .map_err(|e| anyhow!("Error duplicating pixel rows when modifying animation: {}", e))?;
         }
         animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
         animation.set_palette_filename(format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_PAL));
@@ -571,7 +571,12 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
 
 fn parse_member_config(path: &str, file_name: &str, file: Ini) -> anyhow::Result<()> {
     info!("Parsing member config {} {}", path, file_name);
-    let filename = Path::new(&file_name.to_ascii_lowercase()).file_stem().with_context(|| format!("failed to parse member config {}", file_name))?.to_str().with_context(|| format!("failed to parse member config {}", file_name))?.to_string();
+    let filename = Path::new(&file_name.to_ascii_lowercase())
+        .file_stem()
+        .with_context(|| format!("failed to parse member config {}", file_name))?
+        .to_str()
+        .with_context(|| format!("failed to parse member config {}", file_name))?
+        .to_string();
 
     // TODO: get_keys shouldn't need a mutable ini
     if let Some(keys) = file.clone().get_keys("Member") {

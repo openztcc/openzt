@@ -11,7 +11,6 @@ use std::{
 use once_cell::sync::Lazy; //TODO: Use std::sync::LazyCell when it becomes stable
 use retour_utils::hook_module;
 use tracing::{error, info};
-
 use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 
 #[derive(Debug)]
@@ -229,8 +228,6 @@ pub fn start_server() {
         }
     }
 }
-
-
 
 pub fn init() -> windows::core::Result<()> {
     zoo_console::init();

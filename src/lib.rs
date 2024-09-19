@@ -1,14 +1,14 @@
 #![feature(let_chains)]
 #![allow(dead_code)]
 
-/// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this 
+/// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this
 /// allowed customization via zoo.ini, but in practice it appears unused.
 mod bfregistry;
 
 /// Hooks into the vanilla game's logging system to re-log messages with the default OpenZT logger.
 mod capture_ztlog;
 
-/// Basic development console, includes a server that listens for a client connection to recieve commands from, 
+/// Basic development console, includes a server that listens for a client connection to recieve commands from,
 /// functions for registering commands with a function callback and hooks so that a command is run every game update
 mod console;
 
@@ -21,10 +21,10 @@ mod resource_manager;
 mod ztui;
 
 /// Assembly patches and functions to fix bugs in the vanilla game.
-/// 
-/// Currently fixes a crash when a maintenance worker tries to fix a 
-/// fence 1 tile away from the edge of the map, and a bug where the 
-/// game crashes if a zoo wall that is one tile away from the edge 
+///
+/// Currently fixes a crash when a maintenance worker tries to fix a
+/// fence 1 tile away from the edge of the map, and a bug where the
+/// game crashes if a zoo wall that is one tile away from the edge
 /// of the map is deleted.
 mod bugfix;
 
@@ -32,12 +32,12 @@ mod bugfix;
 mod ztadvterrainmgr;
 
 /// Reimplementation of vanilla handling of Expansion Packs, including the ability to define custom expansions.
-/// 
+///
 /// Default behaviour adds in an expansion called "Custom Content" which includes all non-vanilla entities.
 /// Expanding the Expansion dropdown is also handled here.
 mod expansions;
 
-/// Reimplementation of the vanilla BFApp::loadString, has functions to add a string to the OpenZT string registry, 
+/// Reimplementation of the vanilla BFApp::loadString, has functions to add a string to the OpenZT string registry,
 /// will fallback to the vanilla BFApp::loadString if the string is not found in the registry.
 mod string_registry;
 
@@ -45,7 +45,7 @@ mod string_registry;
 mod binary_parsing;
 
 /// ZTAF Animation file format parsing, writing and some modification methods.
-/// 
+///
 /// Based on documentation at <https://github.com/jbostoen/ZTStudio/wiki/ZT1-Graphics-Explained>
 mod animation;
 
@@ -69,10 +69,9 @@ mod util;
 #[cfg(feature = "ini")]
 mod settings;
 
+use tracing::info;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
-
-use tracing::info;
 
 // Leaving this here for reimplementation later
 // #[hook_module("zoo.exe")]
@@ -93,9 +92,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             if console_created {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
 
-                tracing_subscriber::fmt()
-                    .with_ansi(enable_ansi)
-                    .init();
+                tracing_subscriber::fmt().with_ansi(enable_ansi).init();
             }
 
             // dll_first_load();

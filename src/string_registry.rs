@@ -69,7 +69,7 @@ pub mod zoo_string {
     use tracing::info;
 
     use super::{is_user_type_id, STRING_REGISTRY_ID_OFFSET};
-    use crate::{util::save_string_to_memory, string_registry::get_string_from_registry};
+    use crate::{string_registry::get_string_from_registry, util::save_string_to_memory};
 
     #[hook(unsafe extern "thiscall" BFApp_loadString, offset = 0x00004e0a)]
     fn bf_app_load_string(this_ptr: u32, string_id: u32, string_buffer: u32) -> u32 {
@@ -118,4 +118,3 @@ pub fn init() {
     }
     add_to_command_register("get_string".to_string(), command_get_string)
 }
-
