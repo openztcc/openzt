@@ -15,7 +15,7 @@ use retour_utils::hook_module;
 use tracing::{error, info};
 
 use crate::{
-    add_to_command_register,
+    console::add_to_command_register,
     animation::Animation,
     bfentitytype::{ZTEntityType, ZTEntityTypeClass},
     console::CommandError,

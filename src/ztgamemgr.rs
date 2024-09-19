@@ -1,6 +1,6 @@
 use tracing::info;
 
-use crate::{add_to_command_register, console::CommandError, util::get_from_memory};
+use crate::{console::{add_to_command_register, CommandError}, util::get_from_memory};
 
 const GLOBAL_ZTGAMEMGR_ADDRESS: u32 = 0x00638048;
 

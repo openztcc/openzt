@@ -3,8 +3,6 @@ use tracing::info;
 use crate::{console::CommandError, load_ini::DebugSettings, util::{get_from_memory, save_to_memory}};
 
 
-
-
 pub fn log_debug_ini_memory_values() {
     let send_debugger: bool = get_from_memory::<bool>(SEND_DEBUGGER_ADDRESS);
     info!("send_debugger: {}", send_debugger);
@@ -190,14 +188,6 @@ pub fn show_settings() -> String {
         show_name,
         show_ai_info
     )
-}
-
-pub fn parse_bool(string: &str) -> Result<bool, String> {
-    match string.trim() {
-        "true" | "1" => Ok(true),
-        "false" | "0" => Ok(false),
-        _ => Err("Invalid input".to_string()),
-    }
 }
 
 fn handle_get_bool_zt_ai_mgr_setting(setting: &str) -> String {

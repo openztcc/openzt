@@ -41,9 +41,6 @@ mod expansions;
 /// will fallback to the vanilla BFApp::loadString if the string is not found in the registry.
 mod string_registry;
 
-//TODO: Combine debug, common and binary_parsing into a util module
-mod common;
-
 /// Helper methods for parsing binary data, including reading and writing binary data to and from buffers.
 mod binary_parsing;
 
@@ -65,20 +62,17 @@ mod version;
 mod mods;
 
 /// Utility functions for working with the game's memory, including reading and writing memory, and patching the game's assembly.
+/// Common structs like ZTString are also defined here
 mod util;
+
+/// Loads settings from the zoo.ini file and commands/functions for reading and writing settings during runtime
+#[cfg(feature = "ini")]
+mod settings;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
-use crate::{
-    console::add_to_command_register,
-    debug_dll::{command_get_setting, command_set_setting, command_show_settings},
-};
-
 use tracing::info;
-
-mod debug_dll;
-mod load_ini;
 
 // Leaving this here for reimplementation later
 // #[hook_module("zoo.exe")]
@@ -114,16 +108,18 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             bugfix::init();
             version::init();
             ztui::init();
+            ztworldmgr::init();
+            bfentitytype::init();
 
-            if cfg!(feature = "ini") {
-                // info!("Feature 'ini' enabled");
-                // if unsafe { zoo_ini::init_detours() }.is_err() {
-                //     error!("Failed to initialize ini detours");
-                // };
-                add_to_command_register("list_settings".to_owned(), command_show_settings);
-                add_to_command_register("get_setting".to_owned(), command_get_setting);
-                add_to_command_register("set_setting".to_owned(), command_set_setting);
-            }
+            // if cfg!(feature = "ini") {
+            //     // info!("Feature 'ini' enabled");
+            //     // if unsafe { zoo_ini::init_detours() }.is_err() {
+            //     //     error!("Failed to initialize ini detours");
+            //     // };
+            //     add_to_command_register("list_settings".to_owned(), command_show_settings);
+            //     add_to_command_register("get_setting".to_owned(), command_get_setting);
+            //     add_to_command_register("set_setting".to_owned(), command_set_setting);
+            // }
 
             if cfg!(feature = "capture_ztlog") {
                 use crate::capture_ztlog;
@@ -134,8 +130,6 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             if cfg!(feature = "experimental") {
                 info!("Feature 'experimental' enabled");
                 ztadvterrainmgr::init();
-                ztworldmgr::init();
-                bfentitytype::init();
                 ztgamemgr::init();
             }
         }

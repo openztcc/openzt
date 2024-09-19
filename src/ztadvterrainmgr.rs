@@ -3,7 +3,7 @@ use std::{fmt, fmt::Display};
 use tracing::info;
 
 use crate::{
-    add_to_command_register,
+    console::add_to_command_register,
     console::CommandError,
     util::{get_from_memory, get_string_from_memory_bounded},
 };
