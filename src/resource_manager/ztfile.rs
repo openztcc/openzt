@@ -5,8 +5,8 @@ use bf_configparser::ini::{Ini, WriteOptions};
 
 use crate::{
     animation::Animation,
-    util::{get_from_memory, get_string_from_memory, save_to_memory},
     resource_manager::{bfresourcemgr::BFResourcePtr, lazyresourcemap::get_file_ptr},
+    util::{get_from_memory, get_string_from_memory, save_to_memory},
 };
 
 #[derive(Debug, Clone)]
@@ -262,8 +262,7 @@ where
         let new_string = cfg.pretty_writes(&write_options);
         file.content_size = new_string.len() as u32;
 
-        let new_c_string = CString::new(new_string)
-            .with_context(|| format!("Error converting ini to CString after modifying {}", file_name))?;
+        let new_c_string = CString::new(new_string).with_context(|| format!("Error converting ini to CString after modifying {}", file_name))?;
         file.data_ptr = new_c_string.into_raw() as u32;
         Ok(())
     })

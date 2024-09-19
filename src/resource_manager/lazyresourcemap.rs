@@ -12,11 +12,11 @@ use tracing::{error, info};
 
 use super::ztd::ZtdArchive;
 use crate::{
-    util::{get_from_memory, get_string_from_memory},
     resource_manager::{
         bfresourcemgr::BFResourcePtr,
         ztfile::{ztfile_to_raw_resource, ZTFile, ZTFileType},
     },
+    util::{get_from_memory, get_string_from_memory},
 };
 
 static LAZY_RESOURCE_MAP: Lazy<Mutex<HashMap<String, LazyResource>>> = Lazy::new(|| Mutex::new(HashMap::new()));

@@ -1,6 +1,6 @@
-use bf_configparser::ini::Ini;
-
 use std::fmt;
+
+use bf_configparser::ini::Ini;
 
 use crate::util::{get_from_memory, save_to_memory};
 
@@ -52,7 +52,11 @@ impl GlobalSetting<bool> {
 
 impl<T: std::fmt::Display> std::fmt::Display for GlobalSetting<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "GlobalSetting: header: {}, key: {}, address: {}, default: {}", self.header, self.key, self.address, self.default)
+        write!(
+            f,
+            "GlobalSetting: header: {}, key: {}, address: {}, default: {}",
+            self.header, self.key, self.address, self.default
+        )
     }
 }
 
@@ -73,7 +77,6 @@ impl MgrSetting<i32> {
         value_or_default(ini.get_parse(self.header, self.key), self.default)
     }
 }
-
 
 impl MgrSetting<bool> {
     fn load_from_ini(&self, ini: &Ini) -> bool {
