@@ -73,15 +73,6 @@ use tracing::info;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
-// Leaving this here for reimplementation later
-// #[hook_module("zoo.exe")]
-// mod zoo_ini {
-//     #[hook(unsafe extern "cdecl" LoadDebugSettingsFromIniHook, offset = 0x00179f4c)]
-//     fn load_debug_settings_from_ini_detour() {
-//         unsafe { LoadDebugSettingsFromIniHook.call(); }
-//     }
-// }
-
 #[no_mangle]
 extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
     match reason {
@@ -109,15 +100,6 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             bfentitytype::init();
             settings::init();
 
-            // if cfg!(feature = "ini") {
-            //     // info!("Feature 'ini' enabled");
-            //     // if unsafe { zoo_ini::init_detours() }.is_err() {
-            //     //     error!("Failed to initialize ini detours");
-            //     // };
-            //     add_to_command_register("list_settings".to_owned(), command_show_settings);
-            //     add_to_command_register("get_setting".to_owned(), command_get_setting);
-            //     add_to_command_register("set_setting".to_owned(), command_set_setting);
-            // }
 
             if cfg!(feature = "capture_ztlog") {
                 use crate::capture_ztlog;

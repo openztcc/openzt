@@ -12,7 +12,7 @@ use bf_configparser::ini::Ini;
 use maplit::hashset;
 use once_cell::sync::Lazy;
 use retour_utils::hook_module;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
     animation::Animation,
@@ -570,7 +570,7 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
 }
 
 fn parse_member_config(path: &str, file_name: &str, file: Ini) -> anyhow::Result<()> {
-    info!("Parsing member config {} {}", path, file_name);
+    debug!("Parsing member config {} {}", path, file_name);
     let filename = Path::new(&file_name.to_ascii_lowercase())
         .file_stem()
         .with_context(|| format!("failed to parse member config {}", file_name))?
@@ -609,7 +609,7 @@ fn is_cc(archive: &str) -> bool {
 }
 
 fn parse_expansion_config(expansion_cfg: &Ini) -> anyhow::Result<()> {
-    info!("Parsing expansion config");
+    debug!("Parsing expansion config");
     let mut id: u32 = expansion_cfg
         .get_parse("expansion", "id")
         .map_err(anyhow::Error::msg)?

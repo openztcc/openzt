@@ -3,7 +3,7 @@ use std::{ffi::CString, path::Path, str, sync::Mutex};
 use bf_configparser::ini::{Ini, WriteOptions};
 use getset::CopyGetters;
 use once_cell::sync::Lazy;
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 use crate::{
     animation::Animation,
@@ -178,7 +178,7 @@ impl Handler {
                         error!("Error getting file: {}", file_name);
                         return;
                     };
-                    info!(
+                    debug!(
                         "Ini Handler {} {} is handling file: {} {}",
                         self.matcher_prefix.as_deref().unwrap_or_default(),
                         self.matcher_suffix.as_deref().unwrap_or_default(),

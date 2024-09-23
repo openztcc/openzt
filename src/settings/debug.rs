@@ -1,13 +1,5 @@
 use super::util::{Address, Setting, GettableSettable};
 
-// TODO: Move all these inline
-const SEND_DEBUGGER_ADDRESS: u32 = 0x00643e44;
-const SEND_LOG_FILE_ADDRESS: u32 = 0x00643e48;
-const SEND_MESSAGE_BOX_ADDRESS: u32 = 0x00643e4a;
-const DELTA_LOG_0_ADDRESS: u32 = 0x00638054;
-const DELTA_LOG_1_ADDRESS: u32 = 0x0064bd7c;
-const LOG_CUTOFF_ADDRESS: u32 = 0x0063804c;
-
 pub const EXE_LOCATION_ADDRESS: u32 = 0x0064BEDC;
 pub const EXE_LOCATION_ADDRESS_2: u32 = 0x0064BED8;
 pub const EXE_LOCATION_ADDRESS_3: u32 = 0x0064A800;
@@ -26,37 +18,37 @@ pub fn get_settings() -> Vec<Box<dyn GettableSettable>> {
 const LOG_CUTTOFF: Setting<i32> = Setting {
     header: "Debug",
     key: "logCutoff",
-    address: Address::Global(LOG_CUTOFF_ADDRESS),
+    address: Address::Global(0x0063804c),
     default: 9,
 };
 const SEND_DEBUGGER: Setting<bool> = Setting {
     header: "Debug",
     key: "sendDebugger",
-    address: Address::Global(SEND_DEBUGGER_ADDRESS),
+    address: Address::Global(0x00643e44),
     default: false,
 };
 const SEND_LOG_FILE: Setting<bool> = Setting {
     header: "Debug",
     key: "sendLogFile",
-    address: Address::Global(SEND_LOG_FILE_ADDRESS),
+    address: Address::Global(0x00643e48),
     default: false,
 };
 const SEND_MESSAGE_BOX: Setting<bool> = Setting {
     header: "Debug",
     key: "sendMessageBox",
-    address: Address::Global(SEND_MESSAGE_BOX_ADDRESS),
+    address: Address::Global(0x00643e4a),
     default: false,
 };
 const DELTA_LOG_0: Setting<bool> = Setting {
     header: "Debug",
     key: "deltaLog0",
-    address: Address::Global(DELTA_LOG_0_ADDRESS),
+    address: Address::Global(0x00638054),
     default: false,
 };
 const DELTA_LOG_1: Setting<bool> = Setting {
     header: "Debug",
     key: "deltaLog1",
-    address: Address::Global(DELTA_LOG_1_ADDRESS),
+    address: Address::Global(0x0064bd7c),
     default: false,
 };
 
