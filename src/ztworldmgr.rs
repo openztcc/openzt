@@ -6,7 +6,7 @@ use tracing::info;
 
 use crate::{
     bfentitytype::{read_zt_entity_type_from_memory, ZTEntityType, ZTSceneryType},
-    console::{add_to_command_register, CommandError},
+    command_console::{add_to_command_register, CommandError},
     util::{get_from_memory, get_string_from_memory, map_from_memory},
 };
 

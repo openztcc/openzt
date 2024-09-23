@@ -10,7 +10,7 @@ mod capture_ztlog;
 
 /// Basic development console, includes a server that listens for a client connection to recieve commands from,
 /// functions for registering commands with a function callback and hooks so that a command is run every game update
-mod console;
+mod command_console;
 
 /// Commands and functions for reading entities and entity types from the ZTWorldMgr class
 mod ztworldmgr;
@@ -87,7 +87,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
             // We init this first so we have a console to log to
-            let console_created = console::init().is_ok();
+            let console_created = command_console::init().is_ok();
 
             if console_created {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
@@ -107,6 +107,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             ztui::init();
             ztworldmgr::init();
             bfentitytype::init();
+            settings::init();
 
             // if cfg!(feature = "ini") {
             //     // info!("Feature 'ini' enabled");

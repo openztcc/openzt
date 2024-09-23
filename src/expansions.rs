@@ -17,7 +17,7 @@ use tracing::{error, info};
 use crate::{
     animation::Animation,
     bfentitytype::{ZTEntityType, ZTEntityTypeClass},
-    console::{add_to_command_register, CommandError},
+    command_console::{add_to_command_register, CommandError},
     resource_manager::{add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage, OPENZT_DIR0},
     string_registry::add_string_to_registry,
     util::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory},

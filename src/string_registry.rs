@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use retour_utils::hook_module;
 use tracing::info;
 
-use crate::console::{add_to_command_register, CommandError};
+use crate::command_console::{add_to_command_register, CommandError};
 
 const STRING_REGISTRY_ID_OFFSET: u32 = 100_000;
 

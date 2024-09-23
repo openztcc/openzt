@@ -1,5 +1,5 @@
 use crate::{
-    console::{add_to_command_register, CommandError},
+    command_console::{add_to_command_register, CommandError},
     resource_manager::{
         bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory},
         lazyresourcemap::get_file_names,

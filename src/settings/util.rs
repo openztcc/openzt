@@ -1,43 +1,46 @@
-use std::fmt;
-
 use bf_configparser::ini::Ini;
 
 use crate::util::{get_from_memory, save_to_memory};
 
 /// A setting that is stored at a specific memory address
-pub struct GlobalSetting<T> {
+pub struct Setting<T> {
     pub header: &'static str,
     pub key: &'static str,
-    pub address: u32,
+    pub address: Address,
     pub default: T,
 }
 
-/// A setting stored inside a ZT*Mgr class
-pub struct MgrSetting<T> {
-    pub header: &'static str,
-    pub key: &'static str,
-    pub address: u32,
-    pub offset: u32,
-    pub default: T,
+pub enum Address {
+    Global(u32),
+    Indirect(u32, u32),
 }
 
-impl<T> GlobalSetting<T> {
+pub trait GettableSettable {
+    fn get(&self) -> String;
+    fn set(&self, value: &str) -> Result<(), String>;
+    fn check(&self, section: &str, key: &str) -> bool;
+    fn name(&self) -> String;
+}
+
+impl<T> Setting<T> {
     fn write(&self, value: T) {
-        save_to_memory::<T>(self.address, value);
+        let address = match self.address {
+            Address::Global(address) => address,
+            Address::Indirect(base, offset) => get_from_memory::<u32>(base) + offset,
+        };
+        save_to_memory::<T>(address, value);
     }
 
     fn read(&self) -> T {
-        get_from_memory::<T>(self.address)
-    }
+        let address = match self.address {
+            Address::Global(address) => address,
+            Address::Indirect(base, offset) => get_from_memory::<u32>(base) + offset,
+        };
+        get_from_memory::<T>(address)
+    } 
 }
 
-impl GlobalSetting<i32> {
-    fn load_from_ini(&self, ini: &Ini) -> i32 {
-        value_or_default(ini.get_parse(self.header, self.key), self.default)
-    }
-}
-
-impl GlobalSetting<bool> {
+impl Setting<bool> {
     fn load_from_ini(&self, ini: &Ini) -> bool {
         match ini.get(self.header, self.key) {
             Some(value) => match value.as_str() {
@@ -48,46 +51,65 @@ impl GlobalSetting<bool> {
             None => self.default,
         }
     }
-}
-
-impl<T: std::fmt::Display> std::fmt::Display for GlobalSetting<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "GlobalSetting: header: {}, key: {}, address: {}, default: {}",
-            self.header, self.key, self.address, self.default
-        )
+    fn load(&self, ini: &Ini) {
+        self.write(self.load_from_ini(ini));
     }
 }
 
-impl<T> MgrSetting<T> {
-    fn write(&self, value: T) {
-        let address = get_from_memory::<u32>(self.address);
-        save_to_memory::<T>(address + self.offset, value);
-    }
-
-    fn read(&self) -> T {
-        let address = get_from_memory::<u32>(self.address);
-        get_from_memory::<T>(address + self.offset)
-    }
-}
-
-impl MgrSetting<i32> {
+impl Setting<i32> {
     fn load_from_ini(&self, ini: &Ini) -> i32 {
         value_or_default(ini.get_parse(self.header, self.key), self.default)
     }
+    fn load(&self, ini: &Ini) {
+        self.write(self.load_from_ini(ini));
+    }
 }
 
-impl MgrSetting<bool> {
-    fn load_from_ini(&self, ini: &Ini) -> bool {
-        match ini.get(self.header, self.key) {
-            Some(value) => match value.as_str() {
-                "true" | "1" => true,
-                "false" | "0" => false,
-                _ => self.default,
+impl GettableSettable for Setting<bool> {
+    fn get(&self) -> String {
+        self.read().to_string()
+    }
+    
+    fn set(&self, value: &str) -> Result<(), String> {
+        self.write(match value {
+            "true" | "1" => true,
+            "false" | "0" => false,
+            _ => return Err("Invalid value for bool setting".to_string()),
+            
+        });
+        Ok(())
+    }
+
+    fn check(&self, section: &str, key: &str) -> bool {
+        self.header == section && (self.key == key || key.is_empty())
+    }
+
+    fn name(&self) -> String {
+        format!("{}:{}", self.header, self.key)
+    }
+}
+
+impl GettableSettable for Setting<i32> {
+    fn get(&self) -> String {
+        self.read().to_string()
+    }
+    
+    fn set(&self, value: &str) -> Result<(), String> {
+        match value.to_owned().parse() {
+            Ok(v) => { 
+                self.write(v);
+                Ok(())
             },
-            None => self.default,
+            Err(_) => Err("Invalid value for i32 setting".to_string()),
         }
+    }
+
+    fn check(&self, section: &str, key: &str) -> bool {
+        self.header == section && (self.key == key || key.is_empty())
+    }
+
+    fn name(&self) -> String {
+        format!("{}:{}", self.header, self.key)
     }
 }
 

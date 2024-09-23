@@ -5,7 +5,7 @@ use retour_utils::hook_module;
 use tracing::info;
 
 use crate::{
-    console::{add_to_command_register, CommandError},
+    command_console::{add_to_command_register, CommandError},
     util::get_from_memory,
 };
 

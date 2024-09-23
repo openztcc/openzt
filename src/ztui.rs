@@ -3,7 +3,7 @@ use std::fmt;
 use tracing::info;
 
 use crate::{
-    console::{add_to_command_register, CommandError},
+    command_console::{add_to_command_register, CommandError},
     util::{get_from_memory, get_string_from_memory_bounded, ZTString},
     ztworldmgr::read_zt_entity_from_memory,
 };

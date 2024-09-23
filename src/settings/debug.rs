@@ -1,4 +1,4 @@
-use super::util::GlobalSetting;
+use super::util::{Address, Setting, GettableSettable};
 
 // TODO: Move all these inline
 const SEND_DEBUGGER_ADDRESS: u32 = 0x00643e44;
@@ -12,44 +12,51 @@ pub const EXE_LOCATION_ADDRESS: u32 = 0x0064BEDC;
 pub const EXE_LOCATION_ADDRESS_2: u32 = 0x0064BED8;
 pub const EXE_LOCATION_ADDRESS_3: u32 = 0x0064A800;
 
-// TODO: Add functions/commands for these settings (maybe
-//  require specifying header and key so can just have a
-//  single function to return all of these? and then just a util function/ settings.rs function
-//  that grabs all of them and finds which setting to try and set/get)
-const LOG_CUTTOFF: GlobalSetting<u32> = GlobalSetting {
+pub fn get_settings() -> Vec<Box<dyn GettableSettable>> {
+    vec![
+        Box::new(LOG_CUTTOFF),
+        Box::new(SEND_DEBUGGER),
+        Box::new(SEND_LOG_FILE),
+        Box::new(SEND_MESSAGE_BOX),
+        Box::new(DELTA_LOG_0),
+        Box::new(DELTA_LOG_1),
+    ]
+}
+
+const LOG_CUTTOFF: Setting<i32> = Setting {
     header: "Debug",
-    key: "LogCutoff",
-    address: LOG_CUTOFF_ADDRESS,
+    key: "logCutoff",
+    address: Address::Global(LOG_CUTOFF_ADDRESS),
     default: 9,
 };
-const SEND_DEBUGGER: GlobalSetting<bool> = GlobalSetting {
+const SEND_DEBUGGER: Setting<bool> = Setting {
     header: "Debug",
     key: "sendDebugger",
-    address: SEND_DEBUGGER_ADDRESS,
+    address: Address::Global(SEND_DEBUGGER_ADDRESS),
     default: false,
 };
-const SEND_LOG_FILE: GlobalSetting<bool> = GlobalSetting {
+const SEND_LOG_FILE: Setting<bool> = Setting {
     header: "Debug",
     key: "sendLogFile",
-    address: SEND_LOG_FILE_ADDRESS,
+    address: Address::Global(SEND_LOG_FILE_ADDRESS),
     default: false,
 };
-const SEND_MESSAGE_BOX: GlobalSetting<bool> = GlobalSetting {
+const SEND_MESSAGE_BOX: Setting<bool> = Setting {
     header: "Debug",
     key: "sendMessageBox",
-    address: SEND_MESSAGE_BOX_ADDRESS,
+    address: Address::Global(SEND_MESSAGE_BOX_ADDRESS),
     default: false,
 };
-const DELTA_LOG_0: GlobalSetting<bool> = GlobalSetting {
+const DELTA_LOG_0: Setting<bool> = Setting {
     header: "Debug",
     key: "deltaLog0",
-    address: DELTA_LOG_0_ADDRESS,
+    address: Address::Global(DELTA_LOG_0_ADDRESS),
     default: false,
 };
-const DELTA_LOG_1: GlobalSetting<bool> = GlobalSetting {
+const DELTA_LOG_1: Setting<bool> = Setting {
     header: "Debug",
     key: "deltaLog1",
-    address: DELTA_LOG_1_ADDRESS,
+    address: Address::Global(DELTA_LOG_1_ADDRESS),
     default: false,
 };
 

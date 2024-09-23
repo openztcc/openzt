@@ -8,7 +8,7 @@ use num_enum::FromPrimitive;
 use tracing::info;
 
 use crate::{
-    console::{add_to_command_register, CommandError},
+    command_console::{add_to_command_register, CommandError},
     expansions::is_member,
     util::{get_from_memory, get_string_from_memory, map_from_memory},
     ztui::get_selected_entity_type_address,
