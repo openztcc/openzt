@@ -39,6 +39,8 @@ pub type IniHandlerFunction = fn(&str, &str, Ini) -> Option<(String, String, Ini
 pub type AnimationHandlerFunction = fn(&str, &str, Animation) -> Option<(String, String, Animation)>;
 pub type RawBytesHandlerFunction = fn(&str, &str, Box<[u8]>) -> Option<(String, String, Box<[u8]>)>;
 
+///Each hander must have a stage and either an ini, animation or raw_bytes handler. Other fields are optional
+/// This is enforced through a typestate pattern
 pub struct HandlerBuilder<const HAS_STAGE: bool, const HAS_HANDLER: bool> {
     matcher_prefix: Option<String>,
     matcher_suffix: Option<String>,
