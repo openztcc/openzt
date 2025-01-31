@@ -12,24 +12,26 @@ opt-level = 1
 opt-level = 3
 
 [dependencies]
-winapi = {version = "0.3.9", features = ["winuser", "std", "memoryapi"]}
-tracing-subscriber = "0.3.16"
-tracing = "0.1.37"
+tracing-subscriber = "0.3.18"
+tracing = "0.1.40"
 retour = {version = "0.3.1", features = ["thiscall-abi"]}
 retour-utils = "0.2.1"
 once_cell = "1.18.0"
-num_enum = "0.7.2"
-walkdir = "2.4.0"
-zip = "2.1.6"
+num_enum = "0.7.3"
+walkdir = "2.5.0"
+zip = "2.2.0"
 bf_configparser = { git = "https://github.com/openztcc/bf-configparser", version = "1.1.1", features = ["indexmap"]}
-anyhow = "1.0.80"
-getset = "0.1.2"
+anyhow = "1.0.89"
+getset = "0.1.3"
 maplit = "1.0.2"
 field_accessor_as_string = { path = "libs/field_accessor_as_string" }
 field_accessor_as_string_trait = { path = "libs/field_accessor_as_string_trait" }
-serde = {version = "1.0.203", features = ["derive"]}
-toml = "0.8.14"
-regex = "1.10.5"
+serde = {version = "1.0.210", features = ["derive"]}
+toml = "0.8.19"
+regex = "1.10.6"
+public = "0.2.2"
+windows = { version = "0.58.0", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices", "Win32_System_Memory", ] }
+enable-ansi-support = "0.2.1"
 
 [lib]
 name = "openzt"
@@ -40,11 +42,8 @@ name = "test"
 path = "src/debug.rs"
 
 [features]
-default = ["bf_registry", "console", "ini", "ztui", "experimental"]
+default = ["experimental", "ini"]
 release = []
-console = []
 ini = []
-bf_registry = []
-zoo_logging = []
-ztui = []
+capture_ztlog = []
 experimental = []

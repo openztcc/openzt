@@ -2,7 +2,11 @@
 
 ## Running OpenZT
 
-Zoo Tycoon already loads dll files that start with `lang`, when developing it can help to run openzt-loader so logs are piped back to a console rather than a text file and to speed up testing by automatically launching the game with a new openzt.dll build. Openzt-loader expects to be in the same parent directory as openzt, you can then run `cargo +nightly run --release --target=i686-pc-windows-msvc -- --listen --resume` this will compile openzt-loader, openzt and run openzt-loader which injects the openzt.dll into Zoo Tycoon (assuming Zoo Tycoon is installed in the default directory on a 64bit windows install)
+There are two ways to run OpenZT. The first is the rename the OpenZT dll to something like `lang301-openzt.dll` and stick it in the same directory as zoo.exe and then run Zoo Tycoon as normal.
+
+The second is to use [OpenZT Loader](https://github.com/openztcc/openzt-loader) which injects and starts Zoo Tycoon for you. With OpenZT and OpenZT-loader in the same parent directory you can run either `run-via-loader.bat` or `run-via-loader-release.bat` to start OpenZT via the loader. You can also use `run-via-loader-pause.bat` to start up OpenZT in a suspended state letting you attach a debugger and then resume.
+
+This second method technically loads the dll earlier than the above, so should be used if a hook is not working as expected with the above first method. Currently all OpenZT features work regardless of method but this may change in the future.
 
 ### Running OpenZT-console
 
@@ -22,7 +26,7 @@ This is the main file that handles initialising other modules and features flags
 ### console.rs
 Handles sending and receiving data to/from [openzt-console](https://github.com/openztcc/openzt-console), other modules can register commands via `add_to_command_register(command_name: String, command_callback: CommandCallback)` where CommandCallback looks like `type CommandCallback = fn(args: Vec<&str>) -> Result<String, &'static str>;`
 
-### resource_mgr.rs
+### resource_mgr
 Handles walking through the directories listed in `zoo.ini` and extracting all files. You can register handler functions based on file prefixes and suffixes via `add_handler(handler: Handler)` and `Handler::new(matcher_prefix: Option<String>, matcher_suffix: Option<String>, handler: HandlerFunction)` where the HandlerFunction is `pub type HandlerFunction = fn(&PathBuf, &mut ZipFile) -> ();`
 You can use a handler and the `add_txt_file_to_map_with_path_override` and `add_raw_bytes_to_map_with_path_override` functions to duplicate files into new resource paths to implement custom functionality (the expansions module uses this techniques to resize the expansion dropdown when the game starts up without resizing the dropdown for other UI elements). 
 
@@ -70,6 +74,8 @@ if cfg!(feature = "bugfix") {
 }
 ```
 
+More complex modules can be split into multiple submodules in a subdirectory, see `/resource_manager/` and `/settings/` as examples, each has a respective `resource_manager.rs` and `settings.rs` file that defines the submodules
+
 ### detours
 You can create a detour as follows, offset is from the start of the function (you will likely need to subtract 0x400000 from a functions address, this is only the case for detours, any other memory access should be done using the full address). `cdecl` can be replaced with `thiscall` or `stdcall`.
 
@@ -89,7 +95,7 @@ pub fn init() {
 
 
 ### Lazy static
-Currently development is ongoing in multiple independent modules, this means we don't have a central struct, instead we have global variables like below
+Currently development is ongoing in multiple independent modules, this means we don't have a central game world struct, instead we have global variables like below
 
 ```rust
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| {
@@ -97,7 +103,9 @@ static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| {
 });
 ```
 The mutex is likely overkill given Zoo Tycoon is single threaded, but makes them threadsafe for future proofing.
-They can be accessed using something like `let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();` 
+They can be accessed using something like `let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();`
+
+In almost all circumstances modules shouldn't access other modules LazyMutexes directly and should use wrapper functions to avoid holding the mutex from longer than neccessary.
 
 ### Calling Zoo Tycoon functions
 Occasionally you'll need to call a ZT function rather than just hooking calls coming from ZT. Note here that we use the full address and not an offset.
@@ -113,18 +121,14 @@ Feature flags can be added under the `[features]` heading in `Cargo.toml`
 
 ```toml
 [features]
-default = ["bf_registry", "console", "ini", "ztui", "bugfix", "experimental"]
-release = ["bf_registry", "ini", "ztui", "bugfix"]
-console = []
+default = ["experimental", "ini"]
+release = ["ini"]
 ini = []
-bf_registry = []
 zoo_logging = []
-ztui = []
-bugfix = []
 experimental = []
 ```
 
-Features that are also listed after `default` are included by default when building. Those listed under `release` are included in release builds. To start with put your code behind the `experimental` feature flag.
+Features that are also listed after `default` are included by default when building. Those listed under `release` are included in release builds. To start with put your code behind the `experimental` feature flag. Generally we move large modules into there own feature flag before eventually removing the feature flag all together once it's tested enough to be considered stable.
 
 To put code behind a feature flag use the `cfg!` macro
 ```rust

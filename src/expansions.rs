@@ -12,16 +12,19 @@ use bf_configparser::ini::Ini;
 use maplit::hashset;
 use once_cell::sync::Lazy;
 use retour_utils::hook_module;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
-    add_to_command_register, animation::Animation, bfentitytype::{ZTEntityType, ZTEntityTypeClass}, console::CommandError, debug_dll::{
-        get_from_memory, get_string_from_memory, get_string_from_memory_bounded,  save_to_memory
-    }, resource_manager::{
-        add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage, OPENZT_DIR0
-    }, string_registry::add_string_to_registry, ztui::{get_random_sex, get_selected_sex, BuyTab, Sex}
+    animation::Animation,
+    bfentitytype::{ZTEntityType, ZTEntityTypeClass},
+    command_console::{add_to_command_register, CommandError},
+    resource_manager::{add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage, OPENZT_DIR0},
+    string_registry::add_string_to_registry,
+    util::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory},
+    ztui::{get_random_sex, get_selected_sex, BuyTab, Sex},
 };
 
+/// List of official ZTD files so we can determine if a given ZTD file is custom content
 static OFFICIAL_FILESET: Lazy<HashSet<&str>> = Lazy::new(|| {
     hashset! {"animals8.ztd",
         "awards5.ztd",
@@ -141,8 +144,8 @@ const EXPANSION_RESOURCE_LYT: &str = "ui/xpac.lyt";
 const EXPANSION_RESOURCE_PAL: &str = "listbk.pal";
 const EXPANSION_RESOURCE_ANIMATION: &str = "listbk.animation";
 
-static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+/// Mutex to store the contents of each `member` set, determined by the `member` section in the `uca`, `ucs`, `ucb`, and `ai` files
+static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
     let mut data_mutex = MEMBER_SETS.lock().unwrap();
@@ -169,30 +172,13 @@ fn get_cc_expansion_name_all() -> String {
 }
 
 fn get_cc_expansion_name(subdir: &str) -> String {
-    CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string()
-        + CUSTOM_CONTENT_EXPANSION_STRING_SUBDIR
-        + subdir
+    CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string() + CUSTOM_CONTENT_EXPANSION_STRING_SUBDIR + subdir
 }
 
-fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
-    let data_mutex = MEMBER_SETS.lock().unwrap();
-    let mut result = String::new();
-
-    for (set_name, members) in data_mutex.iter() {
-        let members_as_string: Vec<String> = members.iter().cloned().collect();
-        result.push_str(&format!(
-            "Set: {} -> Members: {}\n",
-            set_name,
-            members_as_string.join(", ")
-        ));
-    }
-
-    Ok(result)
-}
-
-// There are no accessors for Expansions, ZT accesses expansions by directly iterating over the array, adding to the array also saves ptrs to ZT's memory keeping things in sync
+/// Mutex containing all expansions
 static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
+/// Adds to the expansion mutex and saves to ZT memory
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<()> {
     let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
     if data_mutex.len() >= MAX_EXPANSION_SIZE {
@@ -211,10 +197,7 @@ fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<(
 
 fn get_expansion(expansion_id: u32) -> Option<Expansion> {
     let data_mutex = EXPANSION_ARRAY.lock().unwrap();
-    data_mutex
-        .iter()
-        .find(|expansion| expansion.expansion_id == expansion_id)
-        .cloned()
+    data_mutex.iter().find(|expansion| expansion.expansion_id == expansion_id).cloned()
 }
 
 fn save_mutex() {
@@ -225,8 +208,7 @@ fn save_mutex() {
 fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
     let array_ptr = mutex_guard.as_mut_ptr();
     let array_end_ptr = unsafe { array_ptr.offset(isize::try_from(mutex_guard.len()).unwrap()) };
-    let array_buffer_end_ptr =
-        unsafe { array_ptr.offset(isize::try_from(mutex_guard.capacity()).unwrap()) };
+    let array_buffer_end_ptr = unsafe { array_ptr.offset(isize::try_from(mutex_guard.capacity()).unwrap()) };
     info!(
         "Saving expansions to {:#x} to {:#x}; {:#x}",
         array_ptr as u32, array_end_ptr as u32, array_buffer_end_ptr as u32
@@ -263,11 +245,7 @@ pub struct Expansion {
 
 impl Expansion {
     fn name_string(&self) -> String {
-        get_string_from_memory_bounded(
-            self.name_string_start_ptr,
-            self.name_string_end_ptr,
-            self.name_string_buffer_end_ptr,
-        )
+        get_string_from_memory_bounded(self.name_string_start_ptr, self.name_string_end_ptr, self.name_string_buffer_end_ptr)
     }
 }
 
@@ -337,22 +315,6 @@ impl Display for ExpansionList {
     }
 }
 
-fn command_get_expansions(_args: Vec<&str>) -> Result<String, CommandError> {
-    let mut string_array = Vec::new();
-    for expansion in read_expansions_from_memory() {
-        string_array.push(expansion.to_string());
-    }
-
-    Ok(string_array.join("\n"))
-}
-
-fn command_get_current_expansion(_args: Vec<&str>) -> Result<String, CommandError> {
-    match read_current_expansion() {
-        Some(expansion) => Ok(expansion.to_string()),
-        None => Ok("No current expansion".to_string()),
-    }
-}
-
 #[hook_module("zoo.exe")]
 pub mod custom_expansion {
     use tracing::info;
@@ -363,8 +325,7 @@ pub mod custom_expansion {
     #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
     pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
         // TODO: Put this call and subsequent log behind OpenZT debug flag
-        let result =
-            unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
+        let result = unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
 
         let Some(current_expansion) = read_current_expansion() else {
             return 0;
@@ -376,18 +337,14 @@ pub mod custom_expansion {
             return 0;
         };
 
-        let reimplemented_result =
-            match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
-                true => 1,
-                false => 0,
-            };
+        let reimplemented_result = match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
+            true => 1,
+            false => 0,
+        };
 
         // TODO: Put this log behind OpenZT debug flag
         if result != reimplemented_result {
-            info!(
-                "Filtering mismatch {} {} ({:#x} vs {:#x})",
-                entity, current_buy_tab, result, reimplemented_result
-            );
+            info!("Filtering mismatch {} {} ({:#x} vs {:#x})", entity, current_buy_tab, result, reimplemented_result);
         }
 
         reimplemented_result
@@ -406,12 +363,7 @@ fn initialise_expansions() {
     if let Some(member_hash) = get_members(&get_cc_expansion_name_all())
         && !member_hash.is_empty()
     {
-        add_expansion_with_string_value(
-            0x4000,
-            get_cc_expansion_name_all(),
-            "Custom Content".to_string(),
-            true,
-        );
+        add_expansion_with_string_value(0x4000, get_cc_expansion_name_all(), "Custom Content".to_string(), true);
 
         save_mutex();
     }
@@ -427,67 +379,45 @@ fn initialise_expansions() {
 
 fn resize_expansion_dropdown(number_of_expansions: u32) {
     let number_of_additional_expansions = number_of_expansions as i32 - 4;
-    info!(
-        "Resizing expansion dropdown to fit {} extra expansions",
-        number_of_additional_expansions
-    );
+    info!("Resizing expansion dropdown to fit {} extra expansions", number_of_additional_expansions);
 
     if let Err(err) = modify_ztfile_as_ini(EXPANSION_RESOURCE_LYT, |cfg| {
-        let old_y = cfg
-            .get_parse::<i32>("list", "dy")
-            .unwrap_or(Some(90))
-            .unwrap_or(90);
+        let old_y = cfg.get_parse::<i32>("list", "dy").unwrap_or(Some(90)).unwrap_or(90);
         let new_y = old_y + (number_of_additional_expansions * 30);
         cfg.set("list", "dy", Some(new_y.to_string()));
-        cfg.set(
-            "background",
-            "animation",
-            Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "." + "listbk"),
-        );
+        cfg.set("background", "animation", Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "." + "listbk"));
+        Ok(())
     }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
 
-    let animation_resource_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX.to_string(),  EXPANSION_RESOURCE_ANIMATION);
+    let animation_resource_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_ANIMATION);
 
-    if let Err(err) = modify_ztfile_as_ini(
-        &format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX.to_string(), EXPANSION_RESOURCE_ANI),
-        |cfg| {
-            let old_y0 = cfg
-                .get_parse::<i32>("animation", "y0")
-                .unwrap_or(Some(-34))
-                .unwrap_or(-34);
-            let new_y0 = old_y0 - (number_of_additional_expansions * 10);
-            let old_y1 = cfg
-                .get_parse::<i32>("animation", "y1")
-                .unwrap_or(Some(34))
-                .unwrap_or(34);
-            let new_y1 = old_y1 + (number_of_additional_expansions * 10);
-            cfg.set("animation", "y0", Some(new_y0.to_string()));
-            cfg.set("animation", "y1", Some(new_y1.to_string()));
-            cfg.set("animation", "dir0", Some(OPENZT_DIR0.to_string()));
-            cfg.set("animation", "dir1", Some(animation_resource_string.clone()));
-            cfg.remove_key("animation", "dir2");
-        },
-    ) {
+    if let Err(err) = modify_ztfile_as_ini(&format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_ANI), |cfg| {
+        let old_y0 = cfg.get_parse::<i32>("animation", "y0").unwrap_or(Some(-34)).unwrap_or(-34);
+        let new_y0 = old_y0 - (number_of_additional_expansions * 10);
+        let old_y1 = cfg.get_parse::<i32>("animation", "y1").unwrap_or(Some(34)).unwrap_or(34);
+        let new_y1 = old_y1 + (number_of_additional_expansions * 10);
+        cfg.set("animation", "y0", Some(new_y0.to_string()));
+        cfg.set("animation", "y1", Some(new_y1.to_string()));
+        cfg.set("animation", "dir0", Some(OPENZT_DIR0.to_string()));
+        cfg.set("animation", "dir1", Some(animation_resource_string.clone()));
+        cfg.remove_key("animation", "dir2");
+        Ok(())
+    }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
     }
     info!("Check");
-    let animation_result = modify_ztfile_as_animation(
-        &animation_resource_string,
-        |animation| {
-            for _ in 0..number_of_additional_expansions {
-                if let Err(e) = animation.duplicate_pixel_rows(0, 10, 31) {
-                    info!("Error duplicating pixel rows when modifying animation: {}", e);
-                    return;
-                }
-            }
-            animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
-            animation.set_palette_filename(
-                format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX.to_string(), EXPANSION_RESOURCE_PAL),
-            );
-        },
-    );
+    let animation_result = modify_ztfile_as_animation(&animation_resource_string, |animation| {
+        for _ in 0..number_of_additional_expansions {
+            animation
+                .duplicate_pixel_rows(0, 10, 31)
+                .map_err(|e| anyhow!("Error duplicating pixel rows when modifying animation: {}", e))?;
+        }
+        animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
+        animation.set_palette_filename(format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_PAL));
+        Ok(())
+    });
     if let Err(e) = animation_result {
         info!("Error resizing expansion dropdown animation: {}", e);
     }
@@ -533,10 +463,7 @@ fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &
                 return false;
             }
             // TODO: Make member name a combination of name and class so name double-ups don't cause this issue
-            if entity.class() == &ZTEntityTypeClass::Scenery
-                && entity.zt_type() == "other"
-                && entity.zt_sub_type() == "fountain"
-            {
+            if entity.class() == &ZTEntityTypeClass::Scenery && entity.zt_type() == "other" && entity.zt_sub_type() == "fountain" {
                 return false;
             }
         }
@@ -567,9 +494,7 @@ fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &
             if !entity.is_member("staff".to_string()) {
                 return false;
             }
-            if (matches!(entity.zt_sub_type().as_str(), "m" | "f")
-                && entity.zt_sub_type() != &get_random_sex().unwrap_or(Sex::Male).to_string())
-            {
+            if (matches!(entity.zt_sub_type().as_str(), "m" | "f") && entity.zt_sub_type() != &get_random_sex().unwrap_or(Sex::Male).to_string()) {
                 return false;
             }
         }
@@ -584,17 +509,12 @@ fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &
     if buy_tab != &BuyTab::Path {
         if current_expansion.expansion_id == 0x1 {
             for expansion in get_expansions() {
-                if expansion.expansion_id > 0x1
-                    && entity.is_member(expansion.name_string())
-                    && !entity.is_member("zoo".to_string())
-                {
+                if expansion.expansion_id > 0x1 && entity.is_member(expansion.name_string()) && !entity.is_member("zoo".to_string()) {
                     return false;
                 }
             }
         }
-        if current_expansion.expansion_id > 0x1
-            && !entity.is_member(current_expansion.name_string())
-        {
+        if current_expansion.expansion_id > 0x1 && !entity.is_member(current_expansion.name_string()) {
             return false;
         }
     }
@@ -649,26 +569,13 @@ fn add_expansion_with_string_value(expansion_id: u32, name: String, string_value
     }
 }
 
-fn handle_expansion_config(path: &String, _: &String, file: Ini) -> Option<(String, String, Ini)> {
-    if let Err(e) = parse_expansion_config(&file) {
-        error!("Error parsing expansion config: {} {}", path, e);
-    }
-    None
-}
-
-fn handle_member_parsing(path: &String, file_name: &String, file: Ini) -> Option<(String, String, Ini)> {
-    if let Err(e) = parse_member_config(path, file_name, file) {
-        error!("Error parsing member config: {} {}", path, e)
-    }
-    None
-}
-
-fn parse_member_config(path: &String, file_name: &String, file: Ini) -> anyhow::Result<()> {
+fn parse_member_config(path: &str, file_name: &str, file: Ini) -> anyhow::Result<()> {
+    debug!("Parsing member config {} {}", path, file_name);
     let filename = Path::new(&file_name.to_ascii_lowercase())
         .file_stem()
-        .unwrap()
+        .with_context(|| format!("failed to parse member config {}", file_name))?
         .to_str()
-        .unwrap()
+        .with_context(|| format!("failed to parse member config {}", file_name))?
         .to_string();
 
     // TODO: get_keys shouldn't need a mutable ini
@@ -679,18 +586,14 @@ fn parse_member_config(path: &String, file_name: &String, file: Ini) -> anyhow::
     }
 
     if is_cc(path) {
-        add_member(
-            filename,
-            CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string()
-                + CUSTOM_CONTENT_EXPANSION_STRING_ALL,
-        );
+        add_member(filename, CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string() + CUSTOM_CONTENT_EXPANSION_STRING_ALL);
     }
 
     Ok(())
 }
 
-fn is_cc(archive: &String) -> bool {
-    let path = Path::new(archive);
+fn is_cc(archive: &str) -> bool {
+    let path = Path::new(archive.strip_prefix("zip::").unwrap_or(archive));
     let Some(parent) = path.parent() else {
         return false;
     };
@@ -706,7 +609,7 @@ fn is_cc(archive: &String) -> bool {
 }
 
 fn parse_expansion_config(expansion_cfg: &Ini) -> anyhow::Result<()> {
-    info!("Parsing expansion config");
+    debug!("Parsing expansion config");
     let mut id: u32 = expansion_cfg
         .get_parse("expansion", "id")
         .map_err(anyhow::Error::msg)?
@@ -743,52 +646,135 @@ fn parse_expansion_config(expansion_cfg: &Ini) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_expansion_dropdown_ani(path: &String, file_name: &String, file: Ini) -> Option<(String, String, Ini)> {
-    let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name));
-    let file_path = Path::new(&new_file_string);
-    let Some(file_path_string) = file_path.to_str() else {
-        error!("Error converting file path to string");
-        return None
-    };
-    Some((path.clone(), file_path_string.to_owned(), file))
+fn handle_expansion_config(path: &str, _: &str, file: Ini) -> Option<(String, String, Ini)> {
+    if let Err(e) = parse_expansion_config(&file) {
+        error!("Error parsing expansion config: {} {}", path, e);
+    }
+    None
 }
 
-fn handle_expansion_dropdown_raw_bytes(path: &String, file_name: &String, file: Box<[u8]>) -> Option<(String, String, Box<[u8]>)> {
-    let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name));
+fn handle_member_parsing(path: &str, file_name: &str, file: Ini) -> Option<(String, String, Ini)> {
+    if let Err(e) = parse_member_config(path, file_name, file) {
+        error!("Error parsing member config: {} {}", path, e)
+    }
+    None
+}
+
+fn handle_expansion_dropdown_ani(path: &str, file_name: &str, file: Ini) -> Option<(String, String, Ini)> {
+    let new_file_string = format!(
+        "{}.{}",
+        EXPANSION_OPENZT_RESOURCE_PREFIX,
+        file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name)
+    );
     let file_path = Path::new(&new_file_string);
     let Some(file_path_string) = file_path.to_str() else {
         error!("Error converting file path to string");
         return None;
     };
-    Some((path.clone(), file_path_string.to_owned(), file))
+    Some((path.to_owned(), file_path_string.to_owned(), file))
 }
 
-fn handle_expansion_dropdown_animation(path: &String, _: &String, file: Animation) -> Option<(String, String, Animation)> {
+fn handle_expansion_dropdown_raw_bytes(path: &str, file_name: &str, file: Box<[u8]>) -> Option<(String, String, Box<[u8]>)> {
+    let new_file_string = format!(
+        "{}.{}",
+        EXPANSION_OPENZT_RESOURCE_PREFIX,
+        file_name.strip_prefix(EXPANSION_ZT_RESOURCE_PREFIX).unwrap_or(file_name)
+    );
+    let file_path = Path::new(&new_file_string);
+    let Some(file_path_string) = file_path.to_str() else {
+        error!("Error converting file path to string");
+        return None;
+    };
+    Some((path.to_owned(), file_path_string.to_owned(), file))
+}
+
+fn handle_expansion_dropdown_animation(path: &str, _: &str, file: Animation) -> Option<(String, String, Animation)> {
     let new_file_string = format!("{}.{}", EXPANSION_OPENZT_RESOURCE_PREFIX, EXPANSION_RESOURCE_ANIMATION);
     let file_path = Path::new(&new_file_string);
     let Some(file_path_string) = file_path.to_str() else {
         error!("Error converting file path to string");
         return None;
     };
-    Some((path.clone(), file_path_string.to_owned(), file))
+    Some((path.to_owned(), file_path_string.to_owned(), file))
+}
+
+fn command_get_members(_: Vec<&str>) -> Result<String, CommandError> {
+    let data_mutex = MEMBER_SETS.lock().unwrap();
+    let mut result = String::new();
+
+    for (set_name, members) in data_mutex.iter() {
+        let members_as_string: Vec<String> = members.iter().cloned().collect();
+        result.push_str(&format!("Set: {} -> Members: {}\n", set_name, members_as_string.join(", ")));
+    }
+
+    Ok(result)
+}
+
+fn command_get_expansions(_args: Vec<&str>) -> Result<String, CommandError> {
+    let mut string_array = Vec::new();
+    for expansion in read_expansions_from_memory() {
+        string_array.push(expansion.to_string());
+    }
+
+    Ok(string_array.join("\n"))
+}
+
+fn command_get_current_expansion(_args: Vec<&str>) -> Result<String, CommandError> {
+    match read_current_expansion() {
+        Some(expansion) => Ok(expansion.to_string()),
+        None => Ok("No current expansion".to_string()),
+    }
 }
 
 pub fn init() {
     add_to_command_register("list_expansion".to_string(), command_get_expansions);
     add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
     add_to_command_register("get_members".to_string(), command_get_members);
-    add_handler(Handler::builder().prefix("xpac").suffix("cfg").run_stage(RunStage::BeforeOpenZTMods).ini_handler(handle_expansion_config).build());
-    add_handler(Handler::builder().suffix("uca").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
-    add_handler(Handler::builder().suffix("ucs").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
-    add_handler(Handler::builder().suffix("ucb").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
-    add_handler(Handler::builder().suffix("ai").run_stage(RunStage::AfterFiltering).ini_handler(handle_member_parsing).build());
-    add_handler(Handler::builder()
-                    .prefix(EXPANSION_ZT_RESOURCE_PREFIX)
-                    .run_stage(RunStage::BeforeOpenZTMods)
-                    .ini_handler(handle_expansion_dropdown_ani)
-                    .raw_bytes_handler(handle_expansion_dropdown_raw_bytes)
-                    .animation_handler(handle_expansion_dropdown_animation)
-                    .build());
+    add_handler(
+        Handler::builder()
+            .prefix("xpac")
+            .suffix("cfg")
+            .run_stage(RunStage::BeforeOpenZTMods)
+            .ini_handler(handle_expansion_config)
+            .build(),
+    );
+    add_handler(
+        Handler::builder()
+            .suffix("uca")
+            .run_stage(RunStage::AfterFiltering)
+            .ini_handler(handle_member_parsing)
+            .build(),
+    );
+    add_handler(
+        Handler::builder()
+            .suffix("ucs")
+            .run_stage(RunStage::AfterFiltering)
+            .ini_handler(handle_member_parsing)
+            .build(),
+    );
+    add_handler(
+        Handler::builder()
+            .suffix("ucb")
+            .run_stage(RunStage::AfterFiltering)
+            .ini_handler(handle_member_parsing)
+            .build(),
+    );
+    add_handler(
+        Handler::builder()
+            .suffix("ai")
+            .run_stage(RunStage::AfterFiltering)
+            .ini_handler(handle_member_parsing)
+            .build(),
+    );
+    add_handler(
+        Handler::builder()
+            .prefix(EXPANSION_ZT_RESOURCE_PREFIX)
+            .run_stage(RunStage::BeforeOpenZTMods)
+            .ini_handler(handle_expansion_dropdown_ani)
+            .raw_bytes_handler(handle_expansion_dropdown_raw_bytes)
+            .animation_handler(handle_expansion_dropdown_animation)
+            .build(),
+    );
     if unsafe { custom_expansion::init_detours() }.is_err() {
         error!("Error initialising custom expansion detours");
     };

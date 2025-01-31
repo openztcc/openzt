@@ -1,12 +1,13 @@
-// ztgamemgr module has functions to interact with the live zoo stats such as cash, num animals, species, guests, etc.
-
 use tracing::info;
 
-use crate::{add_to_command_register, console::CommandError, debug_dll::get_from_memory};
+use crate::{
+    command_console::{add_to_command_register, CommandError},
+    util::get_from_memory,
+};
 
 const GLOBAL_ZTGAMEMGR_ADDRESS: u32 = 0x00638048;
 
-// ZTGameMgr struct
+/// ZTGameMgr struct
 #[derive(Debug)]
 #[repr(C)]
 struct ZTGameMgr {
@@ -33,7 +34,8 @@ struct ZTGameMgr {
     pad11: [u8; 0x1400],           // 0x1194
 }
 
-// SYSTEMTIME struct from Windows API
+/// SYSTEMTIME struct from Windows API
+/// TODO: Replace this with the actual SYSTEMTIME struct from the Windows API
 #[derive(Debug, Clone)]
 #[repr(C)]
 struct Systemtime {
@@ -48,7 +50,7 @@ struct Systemtime {
 }
 
 impl ZTGameMgr {
-    // enables or disables dev mode
+    /// enables or disables dev mode
     fn enable_dev_mode(enable: bool) {
         let enable_dev_mode_address = 0x63858A;
         unsafe {
@@ -56,7 +58,7 @@ impl ZTGameMgr {
         }
     }
 
-    // returns the instance of the ZTGameMgr struct
+    /// returns the instance of the ZTGameMgr struct
     fn instance() -> Option<&'static mut ZTGameMgr> {
         unsafe {
             // get the pointer to the ZTGameMgr instance
@@ -73,8 +75,8 @@ impl ZTGameMgr {
     }
 }
 
-// prints the SYSTEMTIME struct in memory in a human-readable format
-// usage: get_date
+/// a command that prints the SYSTEMTIME struct in memory in a human-readable format
+/// usage: `get_date`
 pub fn command_get_date_str(_args: Vec<&str>) -> Result<String, CommandError> {
     let ztgamemgr = ZTGameMgr::instance().ok_or("Failed to get ZTGameMgr instance")?;
     let date = ztgamemgr.date.clone();
@@ -86,30 +88,30 @@ pub fn command_get_date_str(_args: Vec<&str>) -> Result<String, CommandError> {
     ))
 }
 
-// adds cash to the player's account
-// usage: add_cash <amount>
+/// a command that adds cash to the player's account
+/// usage: `add_cash <amount>`
 pub fn command_add_cash(args: Vec<&str>) -> Result<String, CommandError> {
     let ztgamemgr = ZTGameMgr::instance().ok_or("Failed to get ZTGameMgr instance")?;
     ztgamemgr.cash += args[0].parse::<f32>()?;
     Ok(format!("Added ${}", args[0]))
 }
 
-// enables or disables dev mode
-// usage: enable_dev_mode <true/false>
+/// a command that enables or disables dev mode
+/// usage: `enable_dev_mode <true/false>`
 pub fn command_enable_dev_mode(args: Vec<&str>) -> Result<String, CommandError> {
     let enable = args[0].parse()?;
     ZTGameMgr::enable_dev_mode(enable);
     Ok(format!("Dev mode enabled: {}", enable))
 }
 
-// prints various stats about the zoo
-// usage: zoostats
+/// a command that prints various stats about the zoo
+/// usage: `zoostats`
 pub fn command_zoostats(_args: Vec<&str>) -> Result<String, CommandError> {
     let ztgamemgr = ZTGameMgr::instance().ok_or("Failed to get ZTGameMgr instance")?;
     Ok(format!("\nBudget: {}\nAnimals: {}\nSpecies: {}\nTired Guests: {}\nHungry Guests: {}\nThirsty Guests: {}\nGuests Need Restroom: {}\nNum Guests: {}\nZoo Admission Cost: ${}", ztgamemgr.cash, ztgamemgr.num_animals, ztgamemgr.num_species, ztgamemgr.num_tired_guests, ztgamemgr.num_hungry_guests, ztgamemgr.num_thirst_guests, ztgamemgr.num_guests_restroom_need, ztgamemgr.num_guests, ztgamemgr.zoo_admission_cost))
 }
 
-// registers the commands with the command register
+/// registers the commands with the command register
 pub fn init() {
     add_to_command_register("get_date".to_string(), command_get_date_str);
     add_to_command_register("add_cash".to_string(), command_add_cash);

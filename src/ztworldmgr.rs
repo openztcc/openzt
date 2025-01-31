@@ -5,10 +5,9 @@ use num_enum::FromPrimitive;
 use tracing::info;
 
 use crate::{
-    add_to_command_register,
     bfentitytype::{read_zt_entity_type_from_memory, ZTEntityType, ZTSceneryType},
-    console::CommandError,
-    debug_dll::{get_from_memory, get_string_from_memory, map_from_memory},
+    command_console::{add_to_command_register, CommandError},
+    util::{get_from_memory, get_string_from_memory, map_from_memory},
 };
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
@@ -144,12 +143,7 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, Comman
                 string_array.push(format!("\t{:?}: {}", class, count));
                 total += count;
             }
-            summary.push_str(&format!(
-                "{:?}: ({})\n{}\n",
-                current_class,
-                total,
-                string_array.join("\n")
-            ));
+            summary.push_str(&format!("{:?}: ({})\n{}\n", current_class, total, string_array.join("\n")));
             info!("{:?}: ({})\n{}", current_class, total, string_array.join("\n"));
             subtype = HashMap::new();
             current_class = zt_type.class.clone();
@@ -163,11 +157,7 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, Comman
 
 impl fmt::Display for ZTEntity {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Entity Type: {:?}, Name: {}, EntityType {}",
-            self.class, self.name, self.type_class
-        )
+        write!(f, "Entity Type: {:?}, Name: {}, EntityType {}", self.class, self.name, self.type_class)
     }
 }
 
@@ -175,7 +165,11 @@ impl fmt::Display for ZTWorldMgr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let num_entities = (self.entity_array_end - self.entity_array_start) / 0x4;
         let num_entity_types = (self.entity_type_array_end - self.entity_type_array_start) / 0x4;
-        write!(f, "Entity Array Start: {:#x}, Entity Array End: {:#x}, ({}), Entity Type Array Start: {:#x}, Entity Type Array End: {:#x}, ({})", self.entity_array_start, self.entity_array_end, num_entities, self.entity_type_array_start, self.entity_type_array_end, num_entity_types)
+        write!(
+            f,
+            "Entity Array Start: {:#x}, Entity Array End: {:#x}, ({}), Entity Type Array Start: {:#x}, Entity Type Array End: {:#x}, ({})",
+            self.entity_array_start, self.entity_array_end, num_entities, self.entity_type_array_start, self.entity_type_array_end, num_entity_types
+        )
     }
 }
 

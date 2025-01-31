@@ -1,16 +1,16 @@
 // ------------ BFEntityType, Implementation, and Related Functions ------------ //
 use std::{fmt, ops::Deref};
 
+use field_accessor_as_string::FieldAccessorAsString;
+use field_accessor_as_string_trait::FieldAccessorAsStringTrait;
 use getset::{Getters, Setters};
 use num_enum::FromPrimitive;
 use tracing::info;
-use field_accessor_as_string::FieldAccessorAsString;
-use field_accessor_as_string_trait::FieldAccessorAsStringTrait;
 
 use crate::{
-    console::{add_to_command_register, CommandError},
-    debug_dll::{get_from_memory, get_string_from_memory, map_from_memory},
+    command_console::{add_to_command_register, CommandError},
     expansions::is_member,
+    util::{get_from_memory, get_string_from_memory, map_from_memory},
     ztui::get_selected_entity_type_address,
     ztworldmgr,
 };
@@ -20,7 +20,6 @@ pub trait EntityType: FieldAccessorAsStringTrait {
     fn set_config(&mut self, config: &str, value: &str) -> Result<String, CommandError> {
         if !self.is_field(config) {
             return Err(CommandError::new(format!("Invalid field name: {}", config)));
-        
         }
         match self.set_field(config, value) {
             Ok(_) => Ok(format!("Set {} to {}", config, value)),
@@ -173,37 +172,37 @@ impl EntityType for BFEntityType {
 pub struct ZTSceneryType {
     #[deref_field]
     pub bfentitytype: BFEntityType, // bytes: 0x100 - 0x000 = 0x100 = 256 bytes
-    pub purchase_cost: f32,         // 0x100
-    pub name_id: u32,               // 0x104
-    pub help_id: u32,               // 0x108
-    pub habitat: u32,               // 0x10C
-    pub location: u32,              // 0x110
-    pub era: u32,                   // 0x114
-    pub max_food_units: u32,        // 0x118
-    pub stink: bool,                // 0x11C
-    pad3: [u8; 0x120 - 0x11D],      // ----------------------- padding: 3 bytes
-    pub esthetic_weight: u32,       // 0x120
-    pad4: [u8; 0x128 - 0x124],      // ----------------------- padding: 4 bytes
-    pub selectable: bool,           // 0x128
-    pub deletable: bool,            // 0x129
-    pub foliage: bool,              // 0x12A
-    pad6: [u8; 0x12D - 0x12B],      // ----------------------- padding: 2 bytes
-    pub auto_rotate: bool,          // 0x12D
-    pub land: bool,                 // 0x12E
-    pub swims: bool,                // 0x12F
-    pub underwater: bool,           // 0x130
-    pub surface: bool,              // 0x131
-    pub submerge: bool,             // 0x132
-    pub only_swims: bool,           // 0x133
-    pub needs_confirm: bool,        // 0x134
-    pub gawk_only_from_front: bool, // 0x135
-    pub dead_on_land: bool,         // 0x136
-    pub dead_on_flat_water: bool,   // 0x137
-    pub dead_underwater: bool,      // 0x138
-    pub uses_tree_rubble: bool,     // 0x139
+    pub purchase_cost: f32,          // 0x100
+    pub name_id: u32,                // 0x104
+    pub help_id: u32,                // 0x108
+    pub habitat: u32,                // 0x10C
+    pub location: u32,               // 0x110
+    pub era: u32,                    // 0x114
+    pub max_food_units: u32,         // 0x118
+    pub stink: bool,                 // 0x11C
+    pad3: [u8; 0x120 - 0x11D],       // ----------------------- padding: 3 bytes
+    pub esthetic_weight: u32,        // 0x120
+    pad4: [u8; 0x128 - 0x124],       // ----------------------- padding: 4 bytes
+    pub selectable: bool,            // 0x128
+    pub deletable: bool,             // 0x129
+    pub foliage: bool,               // 0x12A
+    pad6: [u8; 0x12D - 0x12B],       // ----------------------- padding: 2 bytes
+    pub auto_rotate: bool,           // 0x12D
+    pub land: bool,                  // 0x12E
+    pub swims: bool,                 // 0x12F
+    pub underwater: bool,            // 0x130
+    pub surface: bool,               // 0x131
+    pub submerge: bool,              // 0x132
+    pub only_swims: bool,            // 0x133
+    pub needs_confirm: bool,         // 0x134
+    pub gawk_only_from_front: bool,  // 0x135
+    pub dead_on_land: bool,          // 0x136
+    pub dead_on_flat_water: bool,    // 0x137
+    pub dead_underwater: bool,       // 0x138
+    pub uses_tree_rubble: bool,      // 0x139
     pub forces_scenery_rubble: bool, // 0x13A
-    pub blocks_los: bool,           // 0x13B
-    pad7: [u8; 0x168 - 0x13C],      // ----------------------- padding: 51 bytes
+    pub blocks_los: bool,            // 0x13B
+    pad7: [u8; 0x168 - 0x13C],       // ----------------------- padding: 51 bytes
 }
 
 impl ZTSceneryType {
@@ -273,55 +272,56 @@ impl Deref for ZTSceneryType {
 struct ZTBuildingType {
     #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x16C = 364 bytes
-    pad0: [u8; 0x16C - 0x168],        // -------------------------- padding: 4 bytes
-    pub i_capacity: i32,              // 0x16C
-    pub toy_satisfaction: i32,        // 0x170
-    pub time_inside: i32,             // 0x174
-    pub default_cost: f32,            // 0x178
-    pub low_cost: f32,                // 0x17C
-    pub med_cost: f32,                // 0x180
-    pub high_cost: f32,               // 0x184
-    pub price_factor: f32,            // 0x188
-    pub upkeep: f32,                  // 0x18C
-    pad1: [u8; 0x194 - 0x190],        // -------------------------- padding: 4 bytes
-    pub hide_user: bool,              // 0x194
-    pub set_letter_facing: bool,      // 0x195
-    pub draw_user: bool,              // 0x196
-    pub hide_cost_change: bool,       // 0x197
-    pub hide_commerce_info: bool,     // 0x198
-    pub hide_regular_info: bool,      // 0x199
-    pub holds_onto_user: bool,        // 0x19A
-    pub user_tracker: bool,           // 0x19B
-    pub idler: bool,                  // 0x19C
-    pub exhibit_viewer: bool,         // 0x19D
-    pad2: [u8; 0x1A0 - 0x19E],        // -------------------------- padding: 2 bytes
-    pub alternate_panel_title: u32,   // 0x1A0
-    pub direct_entrance: bool,        // 0x1A4
-    pub hide_building: bool,          // 0x1A5
-    pub user_stays_outside: bool,     // 0x1A6
-    pub user_teleports_inside: bool,  // 0x1A7
-    pub user_uses_exit: bool,         // 0x1A8
+    pad0: [u8; 0x16C - 0x168],                      // -------------------------- padding: 4 bytes
+    pub i_capacity: i32,                            // 0x16C
+    pub toy_satisfaction: i32,                      // 0x170
+    pub time_inside: i32,                           // 0x174
+    pub default_cost: f32,                          // 0x178
+    pub low_cost: f32,                              // 0x17C
+    pub med_cost: f32,                              // 0x180
+    pub high_cost: f32,                             // 0x184
+    pub price_factor: f32,                          // 0x188
+    pub upkeep: f32,                                // 0x18C
+    pad1: [u8; 0x194 - 0x190],                      // -------------------------- padding: 4 bytes
+    pub hide_user: bool,                            // 0x194
+    pub set_letter_facing: bool,                    // 0x195
+    pub draw_user: bool,                            // 0x196
+    pub hide_cost_change: bool,                     // 0x197
+    pub hide_commerce_info: bool,                   // 0x198
+    pub hide_regular_info: bool,                    // 0x199
+    pub holds_onto_user: bool,                      // 0x19A
+    pub user_tracker: bool,                         // 0x19B
+    pub idler: bool,                                // 0x19C
+    pub exhibit_viewer: bool,                       // 0x19D
+    pad2: [u8; 0x1A0 - 0x19E],                      // -------------------------- padding: 2 bytes
+    pub alternate_panel_title: u32,                 // 0x1A0
+    pub direct_entrance: bool,                      // 0x1A4
+    pub hide_building: bool,                        // 0x1A5
+    pub user_stays_outside: bool,                   // 0x1A6
+    pub user_teleports_inside: bool,                // 0x1A7
+    pub user_uses_exit: bool,                       // 0x1A8
     pub user_uses_entrance_as_emergency_exit: bool, // 0x1A9
-    pad3: [u8; 0x1B8 - 0x1AA],        // -------------------------- padding: 9 bytes
-    pub adult_change: i32,            // 0x1B8
-    pub child_change: i32,            // 0x1BC
-    pub hunger_change: i32,           // 0x1C0
-    pub thirst_change: i32,           // 0x1C4
-    pub bathroom_change: i32,         // 0x1C8
-    pub energy_change: i32,           // 0x1CC
+    pad3: [u8; 0x1B8 - 0x1AA],                      // -------------------------- padding: 9 bytes
+    pub adult_change: i32,                          // 0x1B8
+    pub child_change: i32,                          // 0x1BC
+    pub hunger_change: i32,                         // 0x1C0
+    pub thirst_change: i32,                         // 0x1C4
+    pub bathroom_change: i32,                       // 0x1C8
+    pub energy_change: i32,                         // 0x1CC
 }
 
 impl EntityType for ZTBuildingType {
     // print [Configuration/Floats] section of the configuration
     fn print_config_floats(&self) -> String {
-        format!("{}\n\n[Configuration/Floats]\n\ncDefaultCost: {:.2}\ncLowCost: {:.2}\ncMedCost: {:.2}\ncHighCost: {:.2}\ncPriceFactor: {:.2}\ncUpkeep: {:.2}\n",
-                self.ztscenerytype.print_config_floats(),
-                self.default_cost,
-                self.low_cost,
-                self.med_cost,
-                self.high_cost,
-                self.price_factor,
-                self.upkeep,
+        format!(
+            "{}\n\n[Configuration/Floats]\n\ncDefaultCost: {:.2}\ncLowCost: {:.2}\ncMedCost: {:.2}\ncHighCost: {:.2}\ncPriceFactor: {:.2}\ncUpkeep: {:.2}\n",
+            self.ztscenerytype.print_config_floats(),
+            self.default_cost,
+            self.low_cost,
+            self.med_cost,
+            self.high_cost,
+            self.price_factor,
+            self.upkeep,
         )
     }
 
@@ -381,12 +381,12 @@ impl Deref for ZTBuildingType {
 pub struct ZTFenceType {
     #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
-    pub strength: i32,                // 0x168
-    pub life: i32,                    // 0x16C
-    pub decayed_life: i32,            // 0x170
-    pub decayed_delta: i32,           // 0x174
-    pub break_sound_atten: i32,       // 0x178
-    pub open_sound_atten: i32,        // 0x17C
+    pub strength: i32,          // 0x168
+    pub life: i32,              // 0x16C
+    pub decayed_life: i32,      // 0x170
+    pub decayed_delta: i32,     // 0x174
+    pub break_sound_atten: i32, // 0x178
+    pub open_sound_atten: i32,  // 0x17C
     // break_sound: String, // 0x184
     // open_sound: String, // 0x188
     pad2: [u8; 0x194 - 0x180], // ----------------------- padding: 20 bytes
@@ -476,11 +476,12 @@ impl ZTTankWallType {
     }
 
     fn print_portal_sounds(&self) -> String {
-        format!("\n\n[PortalSounds]\ncPortalOpenSound: {}\ncPortalCloseSound: {}\ncPortalOpenSoundAtten: {}\ncPortalCloseSoundAtten: {}\n\n",
-                self.get_portal_open_sound(),
-                self.portal_open_sound_atten,
-                self.get_portal_close_sound(),
-                self.portal_close_sound_atten,
+        format!(
+            "\n\n[PortalSounds]\ncPortalOpenSound: {}\ncPortalCloseSound: {}\ncPortalOpenSoundAtten: {}\ncPortalCloseSoundAtten: {}\n\n",
+            self.get_portal_open_sound(),
+            self.portal_open_sound_atten,
+            self.get_portal_close_sound(),
+            self.portal_close_sound_atten,
         )
     }
 }
@@ -523,11 +524,7 @@ pub struct ZTFoodType {
 
 impl EntityType for ZTFoodType {
     fn print_config_integers(&self) -> String {
-        format!(
-            "{}\ncKeeperFoodType: {}\n",
-            self.ztscenerytype.print_config_integers(),
-            self.keeper_food_type
-        )
+        format!("{}\ncKeeperFoodType: {}\n", self.ztscenerytype.print_config_integers(), self.keeper_food_type)
     }
 
     fn print_config_floats(&self) -> String {
@@ -557,12 +554,12 @@ impl Deref for ZTFoodType {
 pub struct ZTTankFilterType {
     #[deref_field]
     pub ztscenerytype: ZTSceneryType, // bytes: 0x168 - 0x000 = 0x168 = 360 bytes
-    pub starting_health: i32,         // 0x168
-    pub decayed_health: i32,          // 0x16C
-    pub decay_time: i32,              // 0x170
-    pub filter_delay: i32,            // 0x174
-    pub filter_upkeep: i32,           // 0x178
-    pub filter_clean_amount: i32,     // 0x17C
+    pub starting_health: i32,             // 0x168
+    pub decayed_health: i32,              // 0x16C
+    pub decay_time: i32,                  // 0x170
+    pub filter_delay: i32,                // 0x174
+    pub filter_upkeep: i32,               // 0x178
+    pub filter_clean_amount: i32,         // 0x17C
     pub filter_decayed_clean_amount: i32, // 0x180
     // healthy_sound: String, // 0x184
     // decayed_sound: String, // 0x190
@@ -602,12 +599,13 @@ impl EntityType for ZTTankFilterType {
     }
 
     fn print_config_details(&self) -> String {
-        format!("{}\n\n[FilterSounds]\n\ncHealthySound: {}\ncHealthyAtten: {}\ncDecayedSound: {}\ncDecayedAtten: {}\n\n",
-                self.ztscenerytype.print_config_details(),
-                self.get_healthy_sound(),
-                self.healthy_atten,
-                self.get_decayed_sound(),
-                self.decayed_atten
+        format!(
+            "{}\n\n[FilterSounds]\n\ncHealthySound: {}\ncHealthyAtten: {}\ncDecayedSound: {}\ncDecayedAtten: {}\n\n",
+            self.ztscenerytype.print_config_details(),
+            self.get_healthy_sound(),
+            self.healthy_atten,
+            self.get_decayed_sound(),
+            self.decayed_atten
         )
     }
 
@@ -735,16 +733,17 @@ pub struct BFUnitType {
 
 impl EntityType for BFUnitType {
     fn print_config_integers(&self) -> String {
-        format!("{}\ncSlowRate: {}\ncMediumRate: {}\ncFastRate: {}\ncSlowAnimSpeed: {}\ncMediumAnimSpeed: {}\ncFastAnimSpeed: {}\ncMinHeight: {}\ncMaxHeight: {}\n",
-                self.bfentitytype.print_config_integers(),
-                self.slow_rate,
-                self.medium_rate,
-                self.fast_rate,
-                self.slow_anim_speed,
-                self.medium_anim_speed,
-                self.fast_anim_speed,
-                self.min_height,
-                self.max_height,
+        format!(
+            "{}\ncSlowRate: {}\ncMediumRate: {}\ncFastRate: {}\ncSlowAnimSpeed: {}\ncMediumAnimSpeed: {}\ncFastAnimSpeed: {}\ncMinHeight: {}\ncMaxHeight: {}\n",
+            self.bfentitytype.print_config_integers(),
+            self.slow_rate,
+            self.medium_rate,
+            self.fast_rate,
+            self.slow_anim_speed,
+            self.medium_anim_speed,
+            self.fast_anim_speed,
+            self.min_height,
+            self.max_height,
         )
     }
 
@@ -774,17 +773,17 @@ impl Deref for BFUnitType {
 #[repr(C)]
 pub struct ZTUnitType {
     #[deref_field]
-    pub bfunit_type: BFUnitType,    // bytes: 0x11C - 0x100 = 0x1C = 28 bytes
-    pad0: [u8; 0x12C - 0x11C],      // ----------------------- padding: 16 bytes
-    pub purchase_cost: f32,         // 0x12C
-    pub name_id: i32,               // 0x130
-    pub help_id: i32,               // 0x134
-    pad1: [u8; 0x150 - 0x138],      // ----------------------- padding: 24 bytes
-    pub map_footprint: i32,         // 0x150
-    pub slow_anim_speed_water: u16, // 0x154
+    pub bfunit_type: BFUnitType, // bytes: 0x11C - 0x100 = 0x1C = 28 bytes
+    pad0: [u8; 0x12C - 0x11C],        // ----------------------- padding: 16 bytes
+    pub purchase_cost: f32,           // 0x12C
+    pub name_id: i32,                 // 0x130
+    pub help_id: i32,                 // 0x134
+    pad1: [u8; 0x150 - 0x138],        // ----------------------- padding: 24 bytes
+    pub map_footprint: i32,           // 0x150
+    pub slow_anim_speed_water: u16,   // 0x154
     pub medium_anim_speed_water: u16, // 0x156
-    pub fast_anim_speed_water: u16, // 0x158
-    pad2: [u8; 0x17C - 0x15C],      // ----------------------- padding: 32 bytes
+    pub fast_anim_speed_water: u16,   // 0x158
+    pad2: [u8; 0x17C - 0x15C],        // ----------------------- padding: 32 bytes
     // pub list_image_name: String,    // 0x168 TODO: fix offset for string getters in unittype
     pub swims: bool,               // 0x17C
     pub surface: bool,             // 0x17D
@@ -817,7 +816,7 @@ impl EntityType for ZTUnitType {
                 self.surface as u32,
                 self.underwater as u32,
                 self.only_underwater as u32,
-                self.skip_trick_happiness as u32,
+                self.skip_trick_happiness,
                 self.skip_trick_chance as u32,
         )
     }
@@ -842,71 +841,71 @@ impl EntityType for ZTUnitType {
 pub struct ZTGuestType {
     #[deref_field]
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
-    pad00: [u8; 0x1B4 - 0x188],  // ----------------------- padding: 44 bytes
-    pub hunger_check: i32,       // 0x1B4
-    pub thirsty_check: i32,      // 0x1B8
-    pub bathroom_check: i32,     // 0x1BC
-    pub leave_zoo_check: i32,    // 0x1C0
-    pub buy_souvenir_check: i32, // 0x1C4
-    pub energy_check: i32,       // 0x1C8
-    pub chase_check: i32,        // 0x1CC
-    pub trash_check: i32,        // 0x1D0
-    pub like_animals_check: i32, // 0x1D4
-    pub viewing_area_check: i32, // 0x1D8
-    pub environment_effect_check: i32, // 0x1DC
-    pub saw_animal_reset: i32,   // 0x1E0
-    pad01: [u8; 0x1E8 - 0x1E4],  // ----------------------- padding: 4 bytes
-    pub initial_happiness: i32,  // 0x1E8
-    pad02: [u8; 0x200 - 0x1EC],  // ----------------------- padding: 20 bytes
-    pub max_energy: i32,         // 0x200
-    pad03: [u8; 0x210 - 0x204],  // ----------------------- padding: 12 bytes
-    pub energy_increment: i32,   // 0x210
-    pub energy_threshold: i32,   // 0x214
-    pub angry_energy_change: i32, // 0x218
-    pub hunger_increment: i32,   // 0x21C
-    pub hunger_threshold: i32,   // 0x220
-    pub angry_food_change: i32,  // 0x224
-    pub preferred_food_change: i32, // 0x228
-    pub thirst_increment: i32,   // 0x22C
-    pub thirst_threshold: i32,   // 0x230
-    pub angry_thirst_change: i32, // 0x234
-    pub bathroom_increment: i32, // 0x238
-    pub bathroom_threshold: i32, // 0x23C
-    pub angry_bathroom_change: i32, // 0x240
-    pub price_happy1_change: i32, // 0x244
-    pub price_angry1_change: i32, // 0x248
-    pub leave_chance_low: i32,   // 0x24C
-    pub leave_chance_med: i32,   // 0x250
-    pub leave_chance_high: i32,  // 0x254
-    pub leave_chance_done: i32,  // 0x258
-    pub buy_souvenir_chance_med: i32, // 0x25C
-    pub buy_souvenir_chance_high: i32, // 0x260
-    pub angry_trash_change: i32, // 0x264
-    pub trash_in_tile_threshold: i32, // 0x268
+    pad00: [u8; 0x1B4 - 0x188],                    // ----------------------- padding: 44 bytes
+    pub hunger_check: i32,                         // 0x1B4
+    pub thirsty_check: i32,                        // 0x1B8
+    pub bathroom_check: i32,                       // 0x1BC
+    pub leave_zoo_check: i32,                      // 0x1C0
+    pub buy_souvenir_check: i32,                   // 0x1C4
+    pub energy_check: i32,                         // 0x1C8
+    pub chase_check: i32,                          // 0x1CC
+    pub trash_check: i32,                          // 0x1D0
+    pub like_animals_check: i32,                   // 0x1D4
+    pub viewing_area_check: i32,                   // 0x1D8
+    pub environment_effect_check: i32,             // 0x1DC
+    pub saw_animal_reset: i32,                     // 0x1E0
+    pad01: [u8; 0x1E8 - 0x1E4],                    // ----------------------- padding: 4 bytes
+    pub initial_happiness: i32,                    // 0x1E8
+    pad02: [u8; 0x200 - 0x1EC],                    // ----------------------- padding: 20 bytes
+    pub max_energy: i32,                           // 0x200
+    pad03: [u8; 0x210 - 0x204],                    // ----------------------- padding: 12 bytes
+    pub energy_increment: i32,                     // 0x210
+    pub energy_threshold: i32,                     // 0x214
+    pub angry_energy_change: i32,                  // 0x218
+    pub hunger_increment: i32,                     // 0x21C
+    pub hunger_threshold: i32,                     // 0x220
+    pub angry_food_change: i32,                    // 0x224
+    pub preferred_food_change: i32,                // 0x228
+    pub thirst_increment: i32,                     // 0x22C
+    pub thirst_threshold: i32,                     // 0x230
+    pub angry_thirst_change: i32,                  // 0x234
+    pub bathroom_increment: i32,                   // 0x238
+    pub bathroom_threshold: i32,                   // 0x23C
+    pub angry_bathroom_change: i32,                // 0x240
+    pub price_happy1_change: i32,                  // 0x244
+    pub price_angry1_change: i32,                  // 0x248
+    pub leave_chance_low: i32,                     // 0x24C
+    pub leave_chance_med: i32,                     // 0x250
+    pub leave_chance_high: i32,                    // 0x254
+    pub leave_chance_done: i32,                    // 0x258
+    pub buy_souvenir_chance_med: i32,              // 0x25C
+    pub buy_souvenir_chance_high: i32,             // 0x260
+    pub angry_trash_change: i32,                   // 0x264
+    pub trash_in_tile_threshold: i32,              // 0x268
     pub vandalized_objects_in_tile_threshold: i32, // 0x26C
-    pub animal_in_row_change: i32, // 0x270
-    pub different_species_change: i32, // 0x274
-    pub different_species_threshold: i32, // 0x278
-    pub sick_animal_change: i32, // 0x27C
-    pub crowded_viewing_threshold: i32, // 0x280
-    pub crowded_viewing_change: i32, // 0x284
-    pub preferred_animal_change: i32, // 0x288
-    pub happy_animal_change1: i32, // 0x28C
-    pub happy_animal_change2: i32, // 0x290
-    pub angry_animal_change1: i32, // 0x294
-    pub angry_animal_change2: i32, // 0x298
-    pub angry_animal_change3: i32, // 0x29C
-    pub escaped_animal_change: i32, // 0x2A0
-    pub object_esthetic_threshold: i32, // 0x2A4
-    pub happy_esthetic_change: i32, // 0x2A8
-    pub stand_and_eat_change: i32, // 0x2AC
-    pub stink_threshold: i32,    // 0x2B0
-    pub sick_chance: i32,        // 0x2B4
-    pub sick_change: i32,        // 0x2B8
-    pub mimic_chance: i32,       // 0x2BC
-    pub test_fence_chance: i32,  // 0x2C0
-    pub zap_happiness_hit: i32,  // 0x2C4
-    pub tap_wall_chance: i32,    // 0x2C8
+    pub animal_in_row_change: i32,                 // 0x270
+    pub different_species_change: i32,             // 0x274
+    pub different_species_threshold: i32,          // 0x278
+    pub sick_animal_change: i32,                   // 0x27C
+    pub crowded_viewing_threshold: i32,            // 0x280
+    pub crowded_viewing_change: i32,               // 0x284
+    pub preferred_animal_change: i32,              // 0x288
+    pub happy_animal_change1: i32,                 // 0x28C
+    pub happy_animal_change2: i32,                 // 0x290
+    pub angry_animal_change1: i32,                 // 0x294
+    pub angry_animal_change2: i32,                 // 0x298
+    pub angry_animal_change3: i32,                 // 0x29C
+    pub escaped_animal_change: i32,                // 0x2A0
+    pub object_esthetic_threshold: i32,            // 0x2A4
+    pub happy_esthetic_change: i32,                // 0x2A8
+    pub stand_and_eat_change: i32,                 // 0x2AC
+    pub stink_threshold: i32,                      // 0x2B0
+    pub sick_chance: i32,                          // 0x2B4
+    pub sick_change: i32,                          // 0x2B8
+    pub mimic_chance: i32,                         // 0x2BC
+    pub test_fence_chance: i32,                    // 0x2C0
+    pub zap_happiness_hit: i32,                    // 0x2C4
+    pub tap_wall_chance: i32,                      // 0x2C8
 }
 
 impl EntityType for ZTGuestType {
@@ -1003,113 +1002,113 @@ impl Deref for ZTGuestType {
 #[repr(C)]
 pub struct ZTAnimalType {
     #[deref_field]
-    pub ztunit_type: ZTUnitType,   // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
-    pad00: [u8; 0x1D8 - 0x188],    // ----------------------- padding: 72 bytes
-    pub box_footprint_x: i32,      // 0x1D8
-    pub box_footprint_y: i32,      // 0x1DC
-    pub box_footprint_z: i32,      // 0x1E0
-    pub family: i32,               // 0x1E4
-    pub genus: i32,                // 0x1E8
-    pad01: [u8; 0x1F0 - 0x1EC],    // ----------------------- padding: 4 bytes
-    pub habitat: i32,              // 0x1F0
-    pub location: i32,             // 0x1F4
-    pub era: i32,                  // 0x1F8
-    pub breath_threshold: i32,     // 0x1FC
-    pub breath_increment: i32,     // 0x200
-    pad02: [u8; 0x20C - 0x204],    // ----------------------- padding: 8 bytes
-    pub hunger_threshold: i32,     // 0x20C
-    pub hungry_health_change: i32, // 0x210
-    pub hunger_increment: i32,     // 0x214
-    pub food_unit_value: i32,      // 0x218
-    pub keeper_food_units_eaten: i32, // 0x21C
-    pub needed_food: i32,          // 0x220
-    pub no_food_change: i32,       // 0x224
-    pub initial_happiness: i32,    // 0x228
-    pad04: [u8; 0x234 - 0x22C],    // ----------------------- padding: 12 bytes
-    pub max_hits: i32,             // 0x234
-    pad004: [u8; 0x23C - 0x238],   // ----------------------- padding: 4 bytes
-    pub pct_hits: i32,             // 0x23C
-    pad05: [u8; 0x248 - 0x240],    // ----------------------- padding: 8 bytes
-    pub max_energy: i32,           // 0x248
-    pad07: [u8; 0x250 - 0x24C],    // ----------------------- padding: 4 bytes
-    pub max_dirty: i32,            // 0x250
-    pub min_dirty: i32,            // 0x254
-    pub sick_change: i32,          // 0x258
-    pub other_animal_sick_change: i32, // 0x25C
-    pub sick_chance: i32,          // 0x260
-    pub sick_random_chance: i32,   // 0x264
-    pub crowd: i32,                // 0x268
-    pub crowd_happiness_change: i32, // 0x26C
-    pub zap_happiness_change: i32, // 0x270
-    pub captivity: i32,            // 0x274
-    pub reproduction_chance: i32,  // 0x278
-    pub reproduction_interval: i32, // 0x27C
-    pub mating_type: i32,          // 0x280
-    pub offspring: i32,            // 0x284
-    pub keeper_frequency: i32,     // 0x288
-    pad08: [u8; 0x290 - 0x28C],    // ----------------------- padding: 4 bytes
+    pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
+    pad00: [u8; 0x1D8 - 0x188],         // ----------------------- padding: 72 bytes
+    pub box_footprint_x: i32,           // 0x1D8
+    pub box_footprint_y: i32,           // 0x1DC
+    pub box_footprint_z: i32,           // 0x1E0
+    pub family: i32,                    // 0x1E4
+    pub genus: i32,                     // 0x1E8
+    pad01: [u8; 0x1F0 - 0x1EC],         // ----------------------- padding: 4 bytes
+    pub habitat: i32,                   // 0x1F0
+    pub location: i32,                  // 0x1F4
+    pub era: i32,                       // 0x1F8
+    pub breath_threshold: i32,          // 0x1FC
+    pub breath_increment: i32,          // 0x200
+    pad02: [u8; 0x20C - 0x204],         // ----------------------- padding: 8 bytes
+    pub hunger_threshold: i32,          // 0x20C
+    pub hungry_health_change: i32,      // 0x210
+    pub hunger_increment: i32,          // 0x214
+    pub food_unit_value: i32,           // 0x218
+    pub keeper_food_units_eaten: i32,   // 0x21C
+    pub needed_food: i32,               // 0x220
+    pub no_food_change: i32,            // 0x224
+    pub initial_happiness: i32,         // 0x228
+    pad04: [u8; 0x234 - 0x22C],         // ----------------------- padding: 12 bytes
+    pub max_hits: i32,                  // 0x234
+    pad004: [u8; 0x23C - 0x238],        // ----------------------- padding: 4 bytes
+    pub pct_hits: i32,                  // 0x23C
+    pad05: [u8; 0x248 - 0x240],         // ----------------------- padding: 8 bytes
+    pub max_energy: i32,                // 0x248
+    pad07: [u8; 0x250 - 0x24C],         // ----------------------- padding: 4 bytes
+    pub max_dirty: i32,                 // 0x250
+    pub min_dirty: i32,                 // 0x254
+    pub sick_change: i32,               // 0x258
+    pub other_animal_sick_change: i32,  // 0x25C
+    pub sick_chance: i32,               // 0x260
+    pub sick_random_chance: i32,        // 0x264
+    pub crowd: i32,                     // 0x268
+    pub crowd_happiness_change: i32,    // 0x26C
+    pub zap_happiness_change: i32,      // 0x270
+    pub captivity: i32,                 // 0x274
+    pub reproduction_chance: i32,       // 0x278
+    pub reproduction_interval: i32,     // 0x27C
+    pub mating_type: i32,               // 0x280
+    pub offspring: i32,                 // 0x284
+    pub keeper_frequency: i32,          // 0x288
+    pad08: [u8; 0x290 - 0x28C],         // ----------------------- padding: 4 bytes
     pub not_enough_keepers_change: i32, // 0x290
-    pub social: i32,               // 0x294
-    pub habitat_size: i32,         // 0x298
-    pub number_animals_min: i32,   // 0x29C
-    pub number_animals_max: i32,   // 0x2A0
-    pad09: [u8; 0x2AC - 0x2A4],    // ----------------------- padding: 8 bytes
-    pub number_min_change: i32,    // 0x2AC
-    pub number_max_change: i32,    // 0x2B0
-    pad10: [u8; 0x2BC - 0x2B4],    // ----------------------- padding: 8 bytes
-    pub habitat_preference: i32,   // 0x2BC
-    pad11: [u8; 0x31C - 0x2C0],    // ----------------------- padding: 92 bytes
-    pub baby_born_change: i32,     // 0x31C
-    pad12: [u8; 0x320 - 0x320],    // ----------------------- padding: 4 bytes
-    pub energy_increment: i32,     // 0x320
-    pub energy_threshold: i32,     // 0x324
-    pub dirty_increment: i32,      // 0x328
-    pub dirty_threshold: i32,      // 0x32C
-    pad13: [u8; 0x330 - 0x330],    // ----------------------- padding: 4 bytes
-    pub sick_time: i32,            // 0x330
-    pad14: [u8; 0x344 - 0x334],    // ----------------------- padding: 16 bytes
-    pub baby_to_adult: i32,        // 0x344
-    pad15: [u8; 0x348 - 0x348],    // ----------------------- padding: 4 bytes
-    pub other_food: i32,           // 0x348
-    pub tree_pref: i32,            // 0x34C
-    pub rock_pref: i32,            // 0x350
-    pub space_pref: i32,           // 0x354
-    pub elevation_pref: i32,       // 0x358
-    pub depth_min: i32,            // 0x35C
-    pub depth_max: i32,            // 0x360
-    pub depth_change: i32,         // 0x364
-    pub salinity_change: i32,      // 0x368
-    pub salinity_health_change: i32, // 0x36C
-    pad16: [u8; 0x378 - 0x370],    // ----------------------- padding: 8 bytes
+    pub social: i32,                    // 0x294
+    pub habitat_size: i32,              // 0x298
+    pub number_animals_min: i32,        // 0x29C
+    pub number_animals_max: i32,        // 0x2A0
+    pad09: [u8; 0x2AC - 0x2A4],         // ----------------------- padding: 8 bytes
+    pub number_min_change: i32,         // 0x2AC
+    pub number_max_change: i32,         // 0x2B0
+    pad10: [u8; 0x2BC - 0x2B4],         // ----------------------- padding: 8 bytes
+    pub habitat_preference: i32,        // 0x2BC
+    pad11: [u8; 0x31C - 0x2C0],         // ----------------------- padding: 92 bytes
+    pub baby_born_change: i32,          // 0x31C
+    pad12: [u8; 0x320 - 0x320],         // ----------------------- padding: 4 bytes
+    pub energy_increment: i32,          // 0x320
+    pub energy_threshold: i32,          // 0x324
+    pub dirty_increment: i32,           // 0x328
+    pub dirty_threshold: i32,           // 0x32C
+    pad13: [u8; 0x330 - 0x330],         // ----------------------- padding: 4 bytes
+    pub sick_time: i32,                 // 0x330
+    pad14: [u8; 0x344 - 0x334],         // ----------------------- padding: 16 bytes
+    pub baby_to_adult: i32,             // 0x344
+    pad15: [u8; 0x348 - 0x348],         // ----------------------- padding: 4 bytes
+    pub other_food: i32,                // 0x348
+    pub tree_pref: i32,                 // 0x34C
+    pub rock_pref: i32,                 // 0x350
+    pub space_pref: i32,                // 0x354
+    pub elevation_pref: i32,            // 0x358
+    pub depth_min: i32,                 // 0x35C
+    pub depth_max: i32,                 // 0x360
+    pub depth_change: i32,              // 0x364
+    pub salinity_change: i32,           // 0x368
+    pub salinity_health_change: i32,    // 0x36C
+    pad16: [u8; 0x378 - 0x370],         // ----------------------- padding: 8 bytes
     pub happy_reproduce_threshold: i32, // 0x378
-    pad17: [u8; 0x37C - 0x37C],    // ----------------------- padding: 4 bytes
-    pub building_use_chance: i32,  // 0x37C
-    pub no_mate_change: i32,       // 0x380
-    pub time_death: i32,           // 0x384
-    pub death_chance: i32,         // 0x388
-    pub dirt_chance: i32,          // 0x38C
-    pub water_needed: i32,         // 0x390
-    pub underwater_needed: i32,    // 0x394
-    pub land_needed: i32,          // 0x398
-    pub enter_water_chance: i32,   // 0x39C
-    pub enter_tank_chance: i32,    // 0x3A0
-    pub enter_land_chance: i32,    // 0x3A4
-    pub drink_water_chance: i32,   // 0x3A8
-    pub chase_animal_chance: i32,  // 0x3AC
-    pub climbs_cliffs: i32,        // 0x3B0
-    pub bash_strength: i32,        // 0x3B4
-    pub attractiveness: i32,       // 0x3B8
-    pad18: [u8; 0x3C8 - 0x3BC],    // ----------------------- padding: 8 bytes
-    pub keeper_food_type: i32,     // 0x3C8
-    pub is_climber: bool,          // 0x3CC
-    pub is_jumper: bool,           // 0x3CD
-    pub small_zoodoo: bool,        // 0x3CE
-    pub dino_zoodoo: bool,         // 0x3CF
-    pub giant_zoodoo: bool,        // 0x3D0
-    pub is_special_animal: bool,   // 0x3D1
-    pub need_shelter: bool,        // 0x3D2
-    pub need_toys: bool,           // 0x3D3
-    pub babies_attack: bool,       // 0x3D4
+    pad17: [u8; 0x37C - 0x37C],         // ----------------------- padding: 4 bytes
+    pub building_use_chance: i32,       // 0x37C
+    pub no_mate_change: i32,            // 0x380
+    pub time_death: i32,                // 0x384
+    pub death_chance: i32,              // 0x388
+    pub dirt_chance: i32,               // 0x38C
+    pub water_needed: i32,              // 0x390
+    pub underwater_needed: i32,         // 0x394
+    pub land_needed: i32,               // 0x398
+    pub enter_water_chance: i32,        // 0x39C
+    pub enter_tank_chance: i32,         // 0x3A0
+    pub enter_land_chance: i32,         // 0x3A4
+    pub drink_water_chance: i32,        // 0x3A8
+    pub chase_animal_chance: i32,       // 0x3AC
+    pub climbs_cliffs: i32,             // 0x3B0
+    pub bash_strength: i32,             // 0x3B4
+    pub attractiveness: i32,            // 0x3B8
+    pad18: [u8; 0x3C8 - 0x3BC],         // ----------------------- padding: 8 bytes
+    pub keeper_food_type: i32,          // 0x3C8
+    pub is_climber: bool,               // 0x3CC
+    pub is_jumper: bool,                // 0x3CD
+    pub small_zoodoo: bool,             // 0x3CE
+    pub dino_zoodoo: bool,              // 0x3CF
+    pub giant_zoodoo: bool,             // 0x3D0
+    pub is_special_animal: bool,        // 0x3D1
+    pub need_shelter: bool,             // 0x3D2
+    pub need_toys: bool,                // 0x3D3
+    pub babies_attack: bool,            // 0x3D4
 }
 
 impl EntityType for ZTAnimalType {
@@ -1183,9 +1182,9 @@ impl EntityType for ZTAnimalType {
         self.time_death,
         self.death_chance,
         self.dirt_chance,
-        self.water_needed as i32,
-        self.underwater_needed as i32,
-        self.land_needed as i32,
+        self.water_needed,
+        self.underwater_needed,
+        self.land_needed,
         self.enter_water_chance,
         self.enter_tank_chance,
         self.enter_land_chance,
@@ -1235,11 +1234,11 @@ impl Deref for ZTAnimalType {
 pub struct ZTStaffType {
     #[deref_field]
     pub ztunit_type: ZTUnitType, // bytes: 0x188 - 0x100 = 0x88 = 136 bytes
-    pad01: [u8; 0x1B4 - 0x188],  // ----------------------- padding: 44 bytes
-    pub work_check: i32,         // 0x1B4
-    pub chase_check: i32,        // 0x1B8
-    pad02: [u8; 0x1BC - 0x1BC],  // ----------------------- padding: 4 bytes
-    pub monthly_cost: f32,       // 0x1BC
+    pad01: [u8; 0x1B4 - 0x188], // ----------------------- padding: 44 bytes
+    pub work_check: i32,        // 0x1B4
+    pub chase_check: i32,       // 0x1B8
+    pad02: [u8; 0x1BC - 0x1BC], // ----------------------- padding: 4 bytes
+    pub monthly_cost: f32,      // 0x1BC
     // pub training_icon_name: string ptr, // 0x1D8 TODO: implement string ptr as function getter
     pad03: [u8; 0x1E8 - 0x1C0], // ----------------------- padding: 24 bytes
     pub duties_text_id: i32,    // 0x1E8
@@ -1248,12 +1247,13 @@ pub struct ZTStaffType {
 
 impl EntityType for ZTStaffType {
     fn print_config_integers(&self) -> String {
-        format!("{}\ncWorkCheck: {}\ncChaseCheck: {}\ncDutiesTextID: {}\ncWeaponRange: {}\n",
-        self.ztunit_type.print_config_integers(),
-        self.work_check,
-        self.chase_check,
-        self.duties_text_id,
-        self.weapon_range,
+        format!(
+            "{}\ncWorkCheck: {}\ncChaseCheck: {}\ncDutiesTextID: {}\ncWeaponRange: {}\n",
+            self.ztunit_type.print_config_integers(),
+            self.work_check,
+            self.chase_check,
+            self.duties_text_id,
+            self.weapon_range,
         )
     }
 
@@ -1285,9 +1285,9 @@ impl Deref for ZTStaffType {
 pub struct ZTMaintType {
     #[deref_field]
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
-    pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
-    pub clean_trash_radius: i32,   // 0x1F4
-    pub fix_fence_modifier: i32,   // 0x1F8
+    pad01: [u8; 0x1F4 - 0x1F0],           // ----------------------- padding: 4 bytes
+    pub clean_trash_radius: i32,          // 0x1F4
+    pub fix_fence_modifier: i32,          // 0x1F8
     pub clear_invalid_list_interval: i32, // 0x1FC
 }
 
@@ -1333,7 +1333,7 @@ impl Deref for ZTMaintType {
 pub struct ZTHelicopterType {
     #[deref_field]
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
-    pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
+    pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
     // pub loop_sound_name: i32, // 0x1F4 TODO: implement string ptr as function getter
     pad02: [u8; 0x1F8 - 0x1F4], // ----------------------- padding: 4 bytes
     pub loop_sound_atten: i32,  // 0x1F8
@@ -1341,11 +1341,7 @@ pub struct ZTHelicopterType {
 
 impl EntityType for ZTHelicopterType {
     fn print_config_integers(&self) -> String {
-        format!(
-            "{}\ncLoopSoundAtten: {}\n",
-            self.ztstaff_type.print_config_integers(),
-            self.loop_sound_atten,
-        )
+        format!("{}\ncLoopSoundAtten: {}\n", self.ztstaff_type.print_config_integers(), self.loop_sound_atten,)
     }
 
     fn print_config_floats(&self) -> String {
@@ -1376,25 +1372,26 @@ impl Deref for ZTHelicopterType {
 pub struct ZTGuideType {
     #[deref_field]
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
-    pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
-    pub inform_guest_time: i32,    // 0x1F4
-    pub tour_guide_bonus: i32,     // 0x1F8
-    pub crowd_check: i32,          // 0x1FC
-    pub crowd_radius: i32,         // 0x200
-    pub follow_chance: i32,        // 0x204
-    pub max_group_size: i32,       // 0x208
+    pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
+    pub inform_guest_time: i32, // 0x1F4
+    pub tour_guide_bonus: i32,  // 0x1F8
+    pub crowd_check: i32,       // 0x1FC
+    pub crowd_radius: i32,      // 0x200
+    pub follow_chance: i32,     // 0x204
+    pub max_group_size: i32,    // 0x208
 }
 
 impl EntityType for ZTGuideType {
     fn print_config_integers(&self) -> String {
-        format!("{}\ncInformGuestTime: {}\ncTourGuideBonus: {}\ncCrowdCheck: {}\ncCrowdRadius: {}\ncFollowChance: {}\ncMaxGroupSize: {}\n",
-                self.ztstaff_type.print_config_integers(),
-        self.inform_guest_time,
-        self.tour_guide_bonus,
-        self.crowd_check,
-        self.crowd_radius,
-        self.follow_chance,
-        self.max_group_size,
+        format!(
+            "{}\ncInformGuestTime: {}\ncTourGuideBonus: {}\ncCrowdCheck: {}\ncCrowdRadius: {}\ncFollowChance: {}\ncMaxGroupSize: {}\n",
+            self.ztstaff_type.print_config_integers(),
+            self.inform_guest_time,
+            self.tour_guide_bonus,
+            self.crowd_check,
+            self.crowd_radius,
+            self.follow_chance,
+            self.max_group_size,
         )
     }
 
@@ -1426,11 +1423,11 @@ impl Deref for ZTGuideType {
 pub struct ZTKeeperType {
     #[deref_field]
     pub ztstaff_type: ZTStaffType, // bytes: 0x1F0 - 0x1B4 = 0x3C = 60 bytes
-    pad01: [u8; 0x1F4 - 0x1F0],    // ----------------------- padding: 4 bytes
-    pub food_units_second: i32,    // 0x1F4
-    pub clean_time: i32,           // 0x1F8
-    pub heal_units_second: i32,    // 0x1FC
-    pub food_per_tile: i32,        // 0x200
+    pad01: [u8; 0x1F4 - 0x1F0], // ----------------------- padding: 4 bytes
+    pub food_units_second: i32, // 0x1F4
+    pub clean_time: i32,        // 0x1F8
+    pub heal_units_second: i32, // 0x1FC
+    pub food_per_tile: i32,     // 0x200
     // pub sickly_animal_pct: i32, // 0x6386F8
     pub clean_tank_pct: i32, // 0x204
     pub clean_tank_threshold: i32, // 0x208
@@ -1453,16 +1450,17 @@ impl ZTKeeperType {
 
 impl EntityType for ZTKeeperType {
     fn print_config_integers(&self) -> String {
-        format!("{}\ncFoodUnitsSecond: {}\ncCleanTime: {}\ncHealUnitsSecond: {}\ncFoodPerTile: {}\ncCleanTankPct: {}\ncCleanTankThreshold: {}\n", //cDirt: {}\n", //cSicklyAnimalPct: {}\n",
+        format!(
+            "{}\ncFoodUnitsSecond: {}\ncCleanTime: {}\ncHealUnitsSecond: {}\ncFoodPerTile: {}\ncCleanTankPct: {}\ncCleanTankThreshold: {}\n", //cDirt: {}\n", //cSicklyAnimalPct: {}\n",
             self.ztstaff_type.print_config_integers(),
-        self.food_units_second,
-        self.clean_time,
-        self.heal_units_second,
-        self.food_per_tile,
-        self.clean_tank_pct,
-        self.clean_tank_threshold,
-        // self.dirt,
-        //self.get_sickly_animal_pct(),
+            self.food_units_second,
+            self.clean_time,
+            self.heal_units_second,
+            self.food_per_tile,
+            self.clean_tank_pct,
+            self.clean_tank_threshold,
+            // self.dirt,
+            //self.get_sickly_animal_pct(),
         )
     }
 
@@ -1521,23 +1519,24 @@ impl Deref for BFOverlayType {
 pub struct ZTAmbientType {
     #[deref_field]
     pub bfoverlay_type: BFOverlayType, // bytes: 0x100 - 0x0 = 0x100 = 256 bytes
-    pub name_id: i32, // 0x100
-    pub help_id: i32, // 0x104
-    pub speed: i32, // 0x108
+    pub name_id: i32,   // 0x100
+    pub help_id: i32,   // 0x104
+    pub speed: i32,     // 0x108
     pub frequency: i32, // 0x10C
     pub sound_loop: bool, // 0x110
-    // pub sound_name: i32, // 0x111 TODO: implement string ptr with ZTString
+                        // pub sound_name: i32, // 0x111 TODO: implement string ptr with ZTString
 }
 
 impl EntityType for ZTAmbientType {
     fn print_config_integers(&self) -> String {
-        format!("{}\ncNameID: {}\ncHelpID: {}\ncSpeed: {}\ncFrequency: {}\ncSoundLoop: {}\n",
-        self.bfoverlay_type.print_config_integers(),
-        self.name_id,
-        self.help_id,
-        self.speed,
-        self.frequency,
-        self.sound_loop as i32,
+        format!(
+            "{}\ncNameID: {}\ncHelpID: {}\ncSpeed: {}\ncFrequency: {}\ncSoundLoop: {}\n",
+            self.bfoverlay_type.print_config_integers(),
+            self.name_id,
+            self.help_id,
+            self.speed,
+            self.frequency,
+            self.sound_loop as i32,
         )
     }
 
@@ -1576,10 +1575,7 @@ fn command_sel_type(args: Vec<&str>) -> Result<String, CommandError> {
         Ok(entity_type.print_config_details())
     } else if args[0] == "-v" {
         // if -v flag is used, print the entity type configuration and other details
-        info!(
-            "Printing configuration for entity type at address {:#x}",
-            entity_type_address as u32
-        );
+        info!("Printing configuration for entity type at address {:#x}", entity_type_address);
         // print the entity type configuration for the selected entity type
         Ok(entity_type.print_config())
     } else if args.len() == 2 {
@@ -1730,7 +1726,11 @@ pub fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZTEntityType 
 
 impl fmt::Display for ZTEntityType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Class String: {:#x}, Class: {:?}, ZT Type: {}, ZT Sub Type: {}, ptr {:#x}, config_file_ptr {:#x}", self.class_string, self.class, self.zt_type, self.zt_sub_type, self.ptr, self.bf_config_file_ptr)
+        write!(
+            f,
+            "Class String: {:#x}, Class: {:?}, ZT Type: {}, ZT Sub Type: {}, ptr {:#x}, config_file_ptr {:#x}",
+            self.class_string, self.class, self.zt_type, self.zt_sub_type, self.ptr, self.bf_config_file_ptr
+        )
     }
 }
 
@@ -1745,10 +1745,7 @@ pub fn command_make_sel(args: Vec<&str>) -> Result<String, CommandError> {
         }
         let entity_type = map_from_memory::<ZTSceneryType>(entity_type_ptr);
         if entity_type.selectable {
-            return Ok(format!(
-                "Entity type {} is already selectable",
-                entity_type.bfentitytype.get_type_name()
-            ));
+            return Ok(format!("Entity type {} is already selectable", entity_type.bfentitytype.get_type_name()));
         }
         entity_type.selectable = true;
         Ok(format!("Entity type {} is now selectable", entity_type.bfentitytype.get_type_name()))

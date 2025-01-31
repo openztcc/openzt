@@ -3,9 +3,8 @@ use std::{fmt, fmt::Display};
 use tracing::info;
 
 use crate::{
-    add_to_command_register,
-    console::CommandError,
-    debug_dll::{get_from_memory, get_string_from_memory},
+    command_console::{add_to_command_register, CommandError},
+    util::{get_from_memory, get_string_from_memory_bounded},
 };
 
 const GLOBAL_ZTADVTERRAINMGR_ADDRESS: u32 = 0x00638058;
@@ -37,13 +36,10 @@ impl From<ZTAdvTerrainMgr_raw> for ZTAdvTerrainMgr {
         let mut bf_terrain_type_info_array = Vec::new();
         let mut current_bf_terrain_type_info_address = raw.bf_terrain_type_info_array_start;
         while current_bf_terrain_type_info_address < raw.bf_terrain_type_info_array_end {
-            bf_terrain_type_info_array
-                .push(read_bfterraintypeinfo_from_memory(current_bf_terrain_type_info_address));
+            bf_terrain_type_info_array.push(read_bfterraintypeinfo_from_memory(current_bf_terrain_type_info_address));
             current_bf_terrain_type_info_address += BFTERRAINTYPEINFO_SIZE as u32;
         }
-        ZTAdvTerrainMgr {
-            bf_terrain_type_info_array,
-        }
+        ZTAdvTerrainMgr { bf_terrain_type_info_array }
     }
 }
 
@@ -51,7 +47,7 @@ impl Display for BFTerrainTypeInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "BFTerrainTypeInfo {{ vtable: {:#x} {} {} {} {} {} {} {} {} icon_string: {} }}",
+            "BFTerrainTypeInfo {{ vtable: {:#x} type_id: {} cost: {} blend: {} water: {} ?: {:#x} ?: {} ?: {} help_id: {} icon_string: {} }}",
             self.vtable,
             self.type_id,
             self.cost,
@@ -61,7 +57,7 @@ impl Display for BFTerrainTypeInfo {
             self.unknown_u32_6,
             self.unknown_u32_7,
             self.help_id,
-            get_string_from_memory(self.icon_string_start)
+            get_string_from_memory_bounded(self.icon_string_start, self.icon_string_end, self.icon_string_buffer_end)
         )
     }
 }

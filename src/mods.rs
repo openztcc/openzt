@@ -33,7 +33,7 @@ impl From<std::num::ParseIntError> for ParseError {
     }
 }
 
-#[derive(Deserialize, Debug, Getters)]
+#[derive(Deserialize, Debug, Getters, Clone)]
 #[get = "pub"]
 pub struct Meta {
     name: String,
@@ -80,9 +80,7 @@ impl FromStr for Version {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split('.').collect();
         if parts.len() != 3 {
-            return Err(ParseError::new(
-                format!("Invalid version string: {} (expected 'x.y.z' e.g '1.0.0')", s)
-            ));
+            return Err(ParseError::new(format!("Invalid version string: {} (expected 'x.y.z' e.g '1.0.0')", s)));
         }
 
         Ok(Version {
@@ -209,7 +207,7 @@ mod mod_loading_tests {
         assert_eq!(meta.description, "a mod full of fun");
         assert_eq!(meta.authors, vec!["Finn".to_string()]);
         assert_eq!(meta.mod_id, "finn.my_fun_mod");
-        assert_eq!(meta.version, Version{major: 1, minor: 0, patch: 0});
+        assert_eq!(meta.version, Version { major: 1, minor: 0, patch: 0 });
         assert_eq!(meta.version.minor, 0);
         assert_eq!(meta.version.patch, 0);
         assert_eq!(meta.link, Some("https://mywebsite.com/myfunmod".to_string()));
@@ -218,7 +216,7 @@ mod mod_loading_tests {
         let dep = meta.dependencies[0].clone();
         assert_eq!(dep.mod_id, "finn.my_other_mod");
         assert_eq!(dep.name, "my other mod");
-        assert_eq!(dep.min_version.unwrap(), Version{major: 1, minor: 1, patch: 2});
+        assert_eq!(dep.min_version.unwrap(), Version { major: 1, minor: 1, patch: 2 });
         assert!(dep.optional);
         assert_eq!(dep.ordering, super::Ordering::Before);
     }
@@ -230,7 +228,7 @@ mod mod_loading_tests {
         assert_eq!(meta.description, "a mod full of fun");
         assert_eq!(meta.authors, vec!["Finn".to_string()]);
         assert_eq!(meta.mod_id, "finn.my_fun_mod");
-        assert_eq!(meta.version, Version{major: 1, minor: 0, patch: 0});
+        assert_eq!(meta.version, Version { major: 1, minor: 0, patch: 0 });
         assert_eq!(meta.version.minor, 0);
         assert_eq!(meta.version.patch, 0);
         assert_eq!(meta.link, Some("https://mywebsite.com/myfunmod".to_string()));
