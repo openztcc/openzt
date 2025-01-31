@@ -4,7 +4,7 @@ use tracing::info;
 
 use crate::{
     command_console::{add_to_command_register, CommandError},
-    util::{get_from_memory, get_string_from_memory_bounded, ZTString},
+    util::{get_from_memory, get_string_from_memory_bounded, ZTBufferString},
     ztworldmgr::read_zt_entity_from_memory,
 };
 
@@ -244,9 +244,9 @@ pub struct UIElement {
     vftable: u32,
     unknown_u32_1: u32,
     unknown_u32_2: u32,
-    unknown_string_1: ZTString,
-    string_content: ZTString,
-    element_name: ZTString,
+    unknown_string_1: ZTBufferString,
+    string_content: ZTBufferString,
+    element_name: ZTBufferString,
     // 25 unknown u32s
     padding: [u8; 76],
     state: UIState,

@@ -214,8 +214,12 @@ fn parse_simple_cfg(file: &Ini, section_name: &str) -> Vec<String> {
     if let Some(section) = file.get_map().unwrap_or_default().get(section_name) {
         for (_, value) in section.iter() {
             if let Some(value) = value {
-                if value.len() == 1 {
-                    results.push(value[0].clone());
+                // If there are multiple values, we take the last one, this occurs only once in vanilla ZT and the values are equal.
+                //  Unclear what happens in vanilla ZT if the values are different.
+                match value.len().cmp(&1) {
+                    std::cmp::Ordering::Equal => results.push(value[0].clone()),
+                    std::cmp::Ordering::Greater => results.push(value[value.len() - 1].clone()),
+                    _ => {}
                 }
             };
         }

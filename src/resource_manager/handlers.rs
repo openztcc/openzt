@@ -25,9 +25,9 @@ pub fn get_handlers() -> Vec<Handler> {
 }
 
 ///Indicates when the handler should be called
-/// BeforeOpenZTMods means they are run on any files in but before any OpenZT mods are loaded
+/// BeforeOpenZTMods means they are run on any files found, but before any OpenZT mods are loaded (OpenZT mods can modify or add files)
 /// AfterOpenZTMods is the same as above but after OpenZT mods are loaded
-/// AfterFiltering is run on files that are referenced in *.cfg files only
+/// AfterFiltering is only run on files that are referenced in *.cfg files
 #[derive(Clone, PartialEq, Copy)]
 pub enum RunStage {
     BeforeOpenZTMods,
@@ -278,7 +278,9 @@ impl Handler {
 
         // TODO: Use "zip::./openzt.ztd" as archive?
         if let Some((new_archive_name, new_file_name, ztfile)) = new_file {
-            add_ztfile(Path::new(&new_archive_name), new_file_name, ztfile)
+            if let Err(e) = add_ztfile(Path::new(&new_archive_name), new_file_name, ztfile) {
+                error!("Error adding file to archive: {}", e);
+            }
         }
     }
 }

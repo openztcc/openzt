@@ -16,7 +16,7 @@ use crate::{
         bfresourcemgr::BFResourcePtr,
         ztfile::{ztfile_to_raw_resource, ZTFile, ZTFileType},
     },
-    util::{get_from_memory, get_string_from_memory},
+    util::{get_from_memory, ZTString},
 };
 
 static LAZY_RESOURCE_MAP: Lazy<Mutex<HashMap<String, LazyResource>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -149,8 +149,8 @@ impl LazyResourceMap {
                     .raw_data(file_buffer)
                     .build();
                 let data = ztfile_to_raw_resource(&archive_name, resource.filename.clone(), ztfile)?;
-                resource.backing = ResourceBacking::LoadedZipFile { archive: archive.clone(), data };
-                (Some(archive_name.clone()), data)
+                resource.backing = ResourceBacking::LoadedZipFile { archive: archive.clone(), data: data.2 };
+                (Some(archive_name.clone()), data.2)
             }
             ResourceBacking::LoadedZipFile { archive, data } => {
                 let binding = archive.lock().unwrap();
@@ -215,7 +215,7 @@ pub fn get_file(file_name: &str) -> Option<(String, Box<[u8]>)> {
             let tmp_slice = unsafe { slice::from_raw_parts(resource_ptr.data_ptr as *const _, resource_ptr.content_size as usize) };
             let mut new_slice = vec![0; resource_ptr.content_size as usize];
             new_slice.copy_from_slice(tmp_slice);
-            Some((get_string_from_memory(resource_ptr.bf_zip_name_ptr), new_slice.into_boxed_slice()))
+            Some((resource_ptr.bf_zip_name.copy_to_string(), new_slice.into_boxed_slice()))
         }
         Ok(None) => {
             info!("File not found: {}", file_name);
@@ -236,57 +236,12 @@ pub fn get_num_resources() -> usize {
     LazyResourceMap::len()
 }
 
-pub fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) {
-    let Some(ztd_path) = path.to_str() else {
-        error!("Failed to convert path to string: {}", path.display());
-        return;
-    };
-    let mut ztd_path = ztd_path.to_string();
-    ztd_path = ztd_path.replace('\\', "/").replace("./", "zip::./");
-    let lowercase_filename = file_name.to_lowercase();
-
-    let bf_zip_name_ptr = match CString::new(ztd_path.clone()) {
-        Ok(c_string) => c_string.into_raw() as u32,
-        Err(e) => {
-            error!("Error converting zip name to CString: {} -> {}", ztd_path, e);
-            return;
-        }
-    };
-    let bf_resource_name_ptr = match CString::new(lowercase_filename.clone()) {
-        Ok(c_string) => c_string.into_raw() as u32,
-        Err(e) => {
-            error!("Error converting resource name to CString: {} -> {}", lowercase_filename, e);
-            return;
-        }
-    };
-
-    match ztfile {
-        ZTFile::Text(data, file_type, length) => {
-            let ptr = data.into_raw() as u32;
-            let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
-                num_refs: 100, // We set this very high to prevent the game from unloading the resource
-                bf_zip_name_ptr,
-                bf_resource_name_ptr,
-                data_ptr: ptr,
-                content_size: length,
-            }));
-
-            LazyResourceMap::insert_custom(lowercase_filename.clone(), file_type, resource_ptr as u32);
-        }
-        ZTFile::RawBytes(data, file_type, length) => {
-            let ptr = data.as_ptr() as u32;
-            std::mem::forget(data);
-            let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
-                num_refs: 100, // We set this very high to prevent the game from unloading the resource
-                bf_zip_name_ptr,
-                bf_resource_name_ptr,
-                data_ptr: ptr,
-                content_size: length,
-            }));
-
-            LazyResourceMap::insert_custom(lowercase_filename.clone(), file_type, resource_ptr as u32);
-        }
-    }
+pub fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) -> anyhow::Result<()> {
+    let ztd_path = path.to_str() 
+        .with_context(|| format!("Failed to convert path to string: {}", path.display()))?;
+    let (file_name, type_, data) = ztfile_to_raw_resource(ztd_path, file_name, ztfile)?;
+    LazyResourceMap::insert_custom(file_name, type_, data);
+    Ok(())
 }
 
 pub fn add_lazy(file_name: String, archive: Arc<Mutex<ZtdArchive>>) {

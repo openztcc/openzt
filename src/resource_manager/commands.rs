@@ -6,7 +6,7 @@ use crate::{
         openzt_mods::{get_location_habitat_ids, get_mod_ids},
     },
     string_registry::get_string_from_registry,
-    util::get_string_from_memory,
+    util::ZTString,
 };
 
 pub fn init_commands() {
@@ -49,12 +49,12 @@ fn command_list_resources(_args: Vec<&str>) -> Result<String, CommandError> {
         let bf_resource_dir = bf_resource_dir_content.dir;
         result_string.push_str(&format!(
             "{} ({})\n",
-            get_string_from_memory(bf_resource_dir.dir_name_string_start),
-            bf_resource_dir.num_child_files
+            bf_resource_dir.dir_name.copy_to_string(),
+            bf_resource_dir.num_child_files,
         ));
         let bf_resource_zips = bf_resource_dir_content.zips;
         for bf_resource_zip in bf_resource_zips {
-            result_string.push_str(&format!("{}\n", get_string_from_memory(bf_resource_zip.zip_name_string_start)));
+            result_string.push_str(&format!("{}\n", bf_resource_zip.zip_name.copy_to_string()));
         }
     }
     Ok(result_string)

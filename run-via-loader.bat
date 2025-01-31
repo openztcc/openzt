@@ -1,5 +1,6 @@
 @echo off
 
+@REM TODO: build with specific nightly toolchain
 echo Building openzt dll
 cargo +nightly build --lib --target=i686-pc-windows-msvc
 

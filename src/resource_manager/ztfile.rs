@@ -6,7 +6,7 @@ use bf_configparser::ini::{Ini, WriteOptions};
 use crate::{
     animation::Animation,
     resource_manager::{bfresourcemgr::BFResourcePtr, lazyresourcemap::get_file_ptr},
-    util::{get_from_memory, get_string_from_memory, save_to_memory},
+    util::{get_from_memory, save_to_memory, ZTString},
 };
 
 #[derive(Debug, Clone)]
@@ -93,7 +93,7 @@ impl TryFrom<&Path> for ZTFileType {
 
 impl From<BFResourcePtr> for ZTFile {
     fn from(bf_resource_ptr: BFResourcePtr) -> Self {
-        let filename = get_string_from_memory(bf_resource_ptr.bf_resource_name_ptr);
+        let filename = bf_resource_ptr.bf_resource_name.copy_to_string();
         let file_extension = Path::new(&filename).extension().unwrap_or_default().to_str().unwrap_or_default();
         let file_size = bf_resource_ptr.content_size;
         let data = bf_resource_ptr.data_ptr;
@@ -288,49 +288,42 @@ where
     })
 }
 
-pub fn ztfile_to_raw_resource(path: &str, file_name: String, ztfile: ZTFile) -> anyhow::Result<u32> {
+pub fn ztfile_to_raw_resource(path: &str, file_name: String, ztfile: ZTFile) -> anyhow::Result<(String, ZTFileType, u32)> {
     let mut ztd_path = path.to_string();
     ztd_path = ztd_path.replace('\\', "/").replace("./", "zip::./");
     let lowercase_filename = file_name.to_lowercase();
 
-    let bf_zip_name_ptr = match CString::new(ztd_path.clone()) {
-        Ok(c_string) => c_string.into_raw() as u32,
-        Err(e) => {
-            return Err(anyhow!("Error converting zip name to CString: {} -> {}", ztd_path, e));
-        }
-    };
-    let bf_resource_name_ptr = match CString::new(lowercase_filename.clone()) {
-        Ok(c_string) => c_string.into_raw() as u32,
-        Err(e) => {
-            return Err(anyhow!("Error converting resource name to CString: {} -> {}", lowercase_filename, e));
-        }
-    };
+    let bf_zip_name = CString::new(ztd_path.clone())
+        .with_context(|| format!("Error converting zip name to CString: {}", ztd_path))?;
+
+    let bf_resource_name = CString::new(lowercase_filename.clone())
+        .with_context(|| format!("Error converting resource name to CString: {}", lowercase_filename))?;
 
     match ztfile {
-        ZTFile::Text(data, _, length) => {
+        ZTFile::Text(data, type_, length) => {
             let ptr = data.into_raw() as u32;
             let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
                 num_refs: 100, // We set this very high to prevent the game from unloading the resource
-                bf_zip_name_ptr,
-                bf_resource_name_ptr,
+                bf_zip_name: bf_zip_name.into(),
+                bf_resource_name: bf_resource_name.into(),
                 data_ptr: ptr,
                 content_size: length,
             }));
 
-            Ok(resource_ptr as _)
+            Ok((lowercase_filename, type_, resource_ptr as _))
         }
-        ZTFile::RawBytes(data, _, length) => {
+        ZTFile::RawBytes(data, type_, length) => {
             let ptr = data.as_ptr() as u32;
             std::mem::forget(data);
             let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
                 num_refs: 100, // We set this very high to prevent the game from unloading the resource
-                bf_zip_name_ptr,
-                bf_resource_name_ptr,
+                bf_zip_name: bf_zip_name.into(),
+                bf_resource_name: bf_resource_name.into(),
                 data_ptr: ptr,
                 content_size: length,
             }));
 
-            Ok(resource_ptr as _)
+        Ok((lowercase_filename, type_, resource_ptr as _))
         }
     }
 }

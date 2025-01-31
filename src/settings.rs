@@ -31,7 +31,7 @@ fn command_set_setting(args: Vec<&str>) -> Result<String, CommandError> {
     if args[0].is_empty() || args[1].is_empty() || args[2].is_empty() {
         return Err("Empty arguments".into());
     }
-    let Some(setting) = ai::get_settings().into_iter().chain(debug::get_settings().into_iter())
+    let Some(setting) = ai::get_settings().into_iter().chain(debug::get_settings())
         .find_map(|setting| {
             if setting.check(args[0], args[1]) {
                 Some(setting)

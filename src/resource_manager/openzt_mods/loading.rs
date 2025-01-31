@@ -195,7 +195,7 @@ fn load_icon_definition(
         .type_(ZTFileType::Palette)
         .raw_data(icon_file_palette.clone())
         .build();
-    add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name.clone(), palette_ztfile);
+    add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name.clone(), palette_ztfile)?;
 
     let mut animation = Animation::parse(icon_file)?;
     animation.set_palette_filename(palette_file_name.clone());
@@ -237,7 +237,7 @@ fn load_icon_definition(
         .cstring_data(new_c_string)
         .build();
 
-    add_ztfile(Path::new("zip::./openzt.ztd"), file_name, ztfile);
+    add_ztfile(Path::new("zip::./openzt.ztd"), file_name, ztfile)?;
 
     let animation_file_name = openzt_full_resource_id_path(base_resource_id, ZTFileType::Animation);
     let animation_ztfile = ZTFile::builder()
@@ -247,7 +247,7 @@ fn load_icon_definition(
         .raw_data(new_icon_file)
         .build();
 
-    add_ztfile(Path::new("zip::./openzt.ztd"), animation_file_name.clone(), animation_ztfile);
+    add_ztfile(Path::new("zip::./openzt.ztd"), animation_file_name.clone(), animation_ztfile)?;
 
     let palette_file_name = openzt_full_resource_id_path(base_resource_id, ZTFileType::Palette);
     let palette_ztfile = ZTFile::builder()
@@ -256,7 +256,7 @@ fn load_icon_definition(
         .type_(ZTFileType::Palette)
         .raw_data(icon_file_palette.clone())
         .build();
-    add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name, palette_ztfile);
+    add_ztfile(Path::new("zip::./openzt.ztd"), palette_file_name, palette_ztfile)?;
 
     Ok(())
 }

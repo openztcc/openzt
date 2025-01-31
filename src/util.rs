@@ -1,4 +1,4 @@
-use std::{fmt, mem::transmute, path::PathBuf, ptr};
+use std::{ffi::{c_char, CString, CStr}, fmt, mem::transmute, path::PathBuf, ptr, marker};
 
 use tracing::debug;
 #[cfg(target_os = "windows")]
@@ -93,32 +93,44 @@ pub fn save_string_to_memory(address: u32, string: &str) {
     save_to_memory::<u8>(char_address, 0);
 }
 
-#[derive(Debug)]
+
+// TODO: What else should we have here? 
+// TODO: Impl for ZTString (rename this), ZTShortString and a simple cstr/*const c_char wrapper?
+// TODO: Should implement helper methods for any struct that implements ZTString, this should just be the minimum interface requried
+pub trait ZTString {
+    fn len(&self) -> usize;
+    fn capacity(&self) -> usize;
+    fn replace(&mut self, new_string: String) -> anyhow::Result<()>;
+    fn get_cstr(&self) -> &CStr;
+    fn copy_to_string(&self) -> String;
+}
+
+#[derive(Debug, Clone)]
 #[repr(C)]
-pub struct ZTString {
+pub struct ZTBufferString {
     start_ptr: u32,
     end_ptr: u32,
     buffer_end_ptr: u32,
 }
 
-impl fmt::Display for ZTString {
+impl fmt::Display for ZTBufferString {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", get_string_from_memory_bounded(self.start_ptr, self.end_ptr, self.buffer_end_ptr))
+        write!(f, "{}", self.copy_to_string())
     }
 }
 
-impl ZTString {
-    pub fn len(&self) -> usize {
+impl ZTString for ZTBufferString {
+    fn len(&self) -> usize {
         (self.end_ptr - self.start_ptr) as usize
     }
 
-    pub fn capacity(&self) -> usize {
+    fn capacity(&self) -> usize {
         (self.buffer_end_ptr - self.start_ptr) as usize
     }
 
-    pub fn replace(&mut self, new_string: String) -> Result<(), String> {
+    fn replace(&mut self, new_string: String) -> anyhow::Result<()> {
         if new_string.len() + 1 > self.capacity() {
-            Err("New string is too long".to_string())
+            Err(anyhow::anyhow!("New string is too long"))
         } else {
             let new_end_ptr = self.start_ptr + new_string.len() as u32;
             save_string_to_memory(self.start_ptr, &new_string);
@@ -126,22 +138,134 @@ impl ZTString {
             Ok(())
         }
     }
+
+    fn get_cstr(&self) -> &CStr {
+        unsafe { CStr::from_ptr(self.start_ptr as *const c_char) }
+    }
+
+    fn copy_to_string(&self) -> String {
+        get_string_from_memory_bounded(self.start_ptr, self.end_ptr, self.buffer_end_ptr)
+    }
 }
 
-// TODO: Fix, should take ptr? Or get ptr from ZTString? Should defs be a save() impl on ZTString
-// pub fn set_ztstring(ztstring: ZTString, new_string: String) -> Result<(), String> {
-//     if new_string.len() + 1 > ztstring.capacity() {
-//         Err("New string is too long".to_string())
-//     } else {
-//         let new_end_ptr = ztstring.start_ptr + new_string.len() as u32;
-//         save_string_to_memory(ztstring.start_ptr, &new_string);
-//         save_to_memory(address, value)
-//         Ok(())
-//     }
-// }
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct ZTBoundedString {
+    start_ptr: u32,
+    end_ptr: u32,
+}
 
-impl Into<String> for ZTString {
-    fn into(self) -> String {
-        get_string_from_memory_bounded(self.start_ptr, self.end_ptr, self.buffer_end_ptr)
+impl ZTString for ZTBoundedString {
+    fn len(&self) -> usize {
+        (self.end_ptr - self.start_ptr) as usize
+    }
+
+    fn capacity(&self) -> usize {
+        self.len()
+    }
+
+    fn replace(&mut self, new_string: String) -> anyhow::Result<()> {
+        if new_string.len() + 1 != self.capacity() {
+            Err(anyhow::anyhow!("New string is too long"))
+        } else {
+            let new_end_ptr = self.start_ptr + new_string.len() as u32;
+            save_string_to_memory(self.start_ptr, &new_string);
+            self.end_ptr = new_end_ptr;
+            Ok(())
+        }
+    }
+
+    fn get_cstr(&self) -> &CStr {
+        unsafe { CStr::from_ptr(self.start_ptr as *const c_char) }
+    }
+
+    fn copy_to_string(&self) -> String {
+        get_string_from_memory_bounded(self.start_ptr, self.end_ptr, self.end_ptr)
+    }
+}
+
+impl fmt::Display for ZTBoundedString {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.copy_to_string())
+    }
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct ZTStringPtr {
+    ptr: *const c_char,
+}
+
+impl ZTString for ZTStringPtr {
+    fn len(&self) -> usize {
+        unsafe { CStr::from_ptr(self.ptr).to_bytes().len() }
+    }
+
+    fn capacity(&self) -> usize {
+        self.len()
+    }
+
+    fn replace(&mut self, _new_string: String) -> anyhow::Result<()> {
+        // TODO: We could probably implement this, by getting the current length of the string and making sure the new string is the exact same size
+        Err(anyhow::anyhow!("Cannot replace string without bounds"))
+    }
+
+    fn get_cstr(&self) -> &CStr {
+        unsafe { CStr::from_ptr(self.ptr) }
+    }
+
+    fn copy_to_string(&self) -> String {
+        unsafe { CStr::from_ptr(self.ptr).to_str().unwrap().to_string() }
+    }
+}
+
+impl fmt::Display for ZTStringPtr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.copy_to_string())
+    }
+}
+
+impl From<CString> for ZTStringPtr {
+    fn from(c_string: CString) -> Self {
+        ZTStringPtr {
+            ptr: c_string.into_raw(),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct ZTArray<T> {
+    // ptr: *const T,
+    start_ptr: u32,
+    end_ptr: u32,
+    buffer_end_ptr: u32,
+    _marker: marker::PhantomData<T>,
+    // _marker: marker::PhantomData<&'a T>,
+}
+
+impl<T> ZTArray<T> {
+    fn len(&self) -> usize {
+        (self.end_ptr - self.start_ptr) as usize
+    }
+
+    fn capacity(&self) -> usize {
+        (self.buffer_end_ptr - self.start_ptr) as usize
+    }
+
+    fn get(&self, index: usize) -> T {
+        get_from_memory::<T>(self.start_ptr + (index as u32) * std::mem::size_of::<T>() as u32)
+    }
+
+    fn set(&self, index: usize, value: T) {
+        save_to_memory(self.start_ptr + (index as u32) * std::mem::size_of::<T>() as u32, value);
+    }
+
+    fn get_vec(&self) -> Vec<T> {
+        let mut vec = Vec::new();
+        for i in 0..self.len() {
+            vec.push(self.get(i));
+        }
+        vec
     }
 }

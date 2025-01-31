@@ -12,6 +12,12 @@ if %ERRORLEVEL% neq 0 (
 
 REM Copy the file to the destination
 copy "target\i686-pc-windows-msvc\release\openzt.dll" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\lang301-openzt.dll"
+REM Check copy succeeded
+if %ERRORLEVEL% neq 0 (
+    echo Copy failed.
+    pause
+    exit /b
+)
 
 REM Run the zoo.exe executable
 start "Zoo Tycoon" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"

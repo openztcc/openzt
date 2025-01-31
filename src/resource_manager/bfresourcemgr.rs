@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter, Result};
 use public::public;
 use tracing::{error, info};
 
-use crate::util::{get_from_memory, get_string_from_memory};
+use crate::util::{get_from_memory, ZTBoundedString, ZTString, ZTStringPtr};
 
 const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
 
@@ -11,7 +11,7 @@ const GLOBAL_BFRESOURCEMGR_ADDRESS: u32 = 0x006380C0;
 #[derive(Debug)]
 #[repr(C)]
 struct BFResourceMgr {
-    resource_array_start: u32,
+    resource_array_start: u32, //ZTArray<BFResourceDir>
     resource_array_end: u32,
     resource_array_buffer_end: u32,
     unknown_u32_1: u32,
@@ -25,8 +25,7 @@ struct BFResourceMgr {
 struct BFResourceDir {
     class: u32,
     unknown_u32_1: u32,
-    dir_name_string_start: u32,
-    dir_name_string_end: u32,
+    dir_name: ZTBoundedString,
     unknown_u32_2: u32,
     num_child_files: u32,
     unknown_u32_3: u32,
@@ -40,7 +39,7 @@ struct BFResourceZip {
     unknown_u32_1: u32,
     unknown_u32_2: u32,
     unknown_u32_3: u32,
-    zip_name_string_start: u32,
+    zip_name: ZTStringPtr,
     contents_tree: u32, //? contents end?
 }
 
@@ -64,8 +63,8 @@ struct BFResource {
 #[repr(C)]
 struct BFResourcePtr {
     num_refs: u32,
-    bf_zip_name_ptr: u32,
-    bf_resource_name_ptr: u32,
+    bf_zip_name: ZTStringPtr,
+    bf_resource_name: ZTStringPtr,
     data_ptr: u32,
     content_size: u32,
 }
@@ -83,27 +82,11 @@ impl Display for BFResourcePtr {
             f,
             "BFResourcePtr {{ num_refs: {:#x}, bf_zip_name: {}, bf_resource_name: {}, data_ptr: {:#x}, content_size: {:#x} }}",
             self.num_refs,
-            get_string_from_memory(self.bf_zip_name_ptr),
-            get_string_from_memory(self.bf_resource_name_ptr),
+            self.bf_zip_name.copy_to_string(),
+            self.bf_resource_name.copy_to_string(),
             self.data_ptr,
             self.content_size
         )
-    }
-}
-
-trait Name {
-    fn name(&self) -> String;
-}
-
-impl Name for BFResourceDir {
-    fn name(&self) -> String {
-        get_string_from_memory(self.dir_name_string_start)
-    }
-}
-
-impl Name for BFResourceZip {
-    fn name(&self) -> String {
-        get_string_from_memory(self.zip_name_string_start)
     }
 }
 
@@ -161,7 +144,7 @@ impl Display for BFResourceMgr {
 
 impl Display for BFResourceDir {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        let dir_name_string = get_string_from_memory(self.dir_name_string_start);
+        let dir_name_string = self.dir_name.copy_to_string();
         write!(
             f,
             "BFResourceDir {{ class: 0x{:X}, unknown_u32_1: 0x{:X}, dir_name: {}, num_bfr_zip: 0x{:X}, unknown_u32_2: 0x{:X} }}",
@@ -172,7 +155,7 @@ impl Display for BFResourceDir {
 
 impl Display for BFResourceZip {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        let zip_name_string = get_string_from_memory(self.zip_name_string_start);
+        let zip_name_string = self.zip_name.copy_to_string();
         write!(
             f,
             "BFResourceZip {{ class: 0x{:X}, unknown_u32_1: 0x{:X}, unknown_u32_2: 0x{:X}, unknown_u32_3: 0x{:X}, zip_name: {}, contents_tree: 0x{:X} }}",
