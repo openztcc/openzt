@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
 use retour_utils::hook_module;
 use tracing::info;
 
@@ -11,6 +12,31 @@ const STRING_REGISTRY_ID_OFFSET: u32 = 100_000;
 const GLOBAL_BFAPP: u32 = 0x00638148;
 
 static STRING_REGISTRY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+static STRING_OVERRIDES: Lazy<Mutex<HashMap<u32, String>>> = Lazy::new(|| {
+    Mutex::new(DEFAULT_OVERRIDES.iter().map(|(id, string_override)| (*id, string_override.to_string())).collect())
+});
+
+const DEFAULT_OVERRIDES: &'static [(u32, &'static str)] = &[
+    (3383, "Swamp"),
+    (33383, "Swampy terrain"),
+];
+
+pub fn add_override_string_to_registry(string_id: u32, string_val: String) {
+    let mut data_mutex = STRING_OVERRIDES.lock().unwrap();
+    info!(
+        "Added override string to registry: {} -> {}",
+        string_id,
+        string_val.clone()
+    );
+    data_mutex.insert(string_id, string_val);
+}
+
+pub fn get_override_string_from_registry(string_id: u32) -> Option<String> {
+    // info!("Getting override string from registry: {}", string_id);
+    let data_mutex = STRING_OVERRIDES.lock().unwrap();
+    data_mutex.get(&string_id).cloned()
+}
 
 pub fn add_string_to_registry(string_val: String) -> u32 {
     let mut data_mutex = STRING_REGISTRY.lock().unwrap();
@@ -68,7 +94,7 @@ fn command_get_string(args: Vec<&str>) -> Result<String, CommandError> {
 pub mod zoo_string {
     use tracing::info;
 
-    use super::{is_user_type_id, STRING_REGISTRY_ID_OFFSET};
+    use super::{is_user_type_id, STRING_REGISTRY_ID_OFFSET, get_override_string_from_registry};
     use crate::{string_registry::get_string_from_registry, util::save_string_to_memory};
 
     #[hook(unsafe extern "thiscall" BFApp_loadString, offset = 0x00004e0a)]
@@ -82,6 +108,10 @@ pub mod zoo_string {
                 save_string_to_memory(string_buffer, &string);
                 return string.len() as u32 + 1;
             }
+        }
+        if let Some(override_string) = get_override_string_from_registry(string_id) {
+            save_string_to_memory(string_buffer, &override_string);
+            return override_string.len() as u32 + 1;
         }
         unsafe { BFApp_loadString.call(this_ptr, string_id, string_buffer) }
     }

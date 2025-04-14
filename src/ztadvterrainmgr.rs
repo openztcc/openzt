@@ -4,7 +4,7 @@ use tracing::info;
 
 use crate::{
     command_console::{add_to_command_register, CommandError},
-    util::{get_from_memory, get_string_from_memory_bounded},
+    util::{get_from_memory, ZTBufferString},
 };
 
 const GLOBAL_ZTADVTERRAINMGR_ADDRESS: u32 = 0x00638058;
@@ -17,7 +17,7 @@ struct ZTAdvTerrainMgr_raw {
     unknown_u32_1: u32,
     unknown_u32_2: u32,
     unknown_u32_3: u32,
-    bf_terrain_type_info_array_start: u32,
+    bf_terrain_type_info_array_start: u32, // TODO: Use ZTArray
     bf_terrain_type_info_array_end: u32,
     bf_terrain_type_info_buffer_end: u32,
     // Total size is 0x1dc
@@ -57,7 +57,7 @@ impl Display for BFTerrainTypeInfo {
             self.unknown_u32_6,
             self.unknown_u32_7,
             self.help_id,
-            get_string_from_memory_bounded(self.icon_string_start, self.icon_string_end, self.icon_string_buffer_end)
+            self.icon_string,
         )
     }
 }
@@ -74,9 +74,7 @@ struct BFTerrainTypeInfo {
     unknown_u32_6: u32,
     unknown_u32_7: u32,
     help_id: u32,
-    icon_string_start: u32,
-    icon_string_end: u32,
-    icon_string_buffer_end: u32,
+    icon_string: ZTBufferString,
 }
 
 fn read_ztadvterrainmgr_raw_from_memory() -> ZTAdvTerrainMgr_raw {

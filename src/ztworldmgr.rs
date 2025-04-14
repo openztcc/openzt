@@ -15,21 +15,21 @@ const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 #[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
 #[repr(u32)]
 pub enum ZTEntityClass {
-    Food = 0x630544,
-    Path = 0x63049c,
-    Fences = 0x63034c,
-    Building = 0x6307e4,
-    Animal = 0x630268,
-    Guest = 0x62e330,
-    Scenery = 0x6303f4,
-    Keeper = 0x62e7d8,
-    MaintenanceWorker = 0x62e704,
-    TourGuide = 0x62e8ac,
-    Drt = 0x62e980,
-    Ambient = 0x62e1e8,
-    Rubble = 0x63073c,
-    TankWall = 0x6305ec,
-    TankFilter = 0x630694,
+    Food = 0x62dd08,
+    Path = 0x62da88,
+    Fences = 0x62d808,
+    Building = 0x62e0b0,
+    Animal = 0x62ff54,
+    Guest = 0x630f88,
+    Scenery = 0x62d950,
+    Keeper = 0x62f3e4,
+    MaintenanceWorker = 0x62ea54,
+    TourGuide = 0x62f714,
+    Drt = 0x62f0b4,
+    Ambient = 0x62d6ec,
+    Rubble = 0x62df78,
+    TankWall = 0x62dbc0,
+    TankFilter = 0x62de40,
     #[num_enum(default)]
     Unknown = 0x0,
 }
@@ -70,7 +70,7 @@ pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
 
     ZTEntity {
         class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr)),
-        type_class: read_zt_entity_type_from_memory(get_from_memory::<u32>(inner_class_ptr)),
+        type_class: read_zt_entity_type_from_memory(inner_class_ptr),
         name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
     }
 }

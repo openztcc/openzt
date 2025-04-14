@@ -206,7 +206,7 @@ impl ZTString for ZTStringPtr {
     }
 
     fn replace(&mut self, _new_string: String) -> anyhow::Result<()> {
-        // TODO: We could probably implement this, by getting the current length of the string and making sure the new string is the exact same size
+        // TODO: We could probably implement this, by getting the current length of the string and making sure the new string is the exact same size? Or padding with spaces if smaller?
         Err(anyhow::anyhow!("Cannot replace string without bounds"))
     }
 
@@ -240,6 +240,8 @@ struct ZTArray<T> {
     start_ptr: u32,
     end_ptr: u32,
     buffer_end_ptr: u32,
+    // Rust doesn't allow us to have a struct that is generic over T without referencing it, 
+    //  because we're just storing pointers to an array of type T we use PhantomData to tell the compiler that we're using T
     _marker: marker::PhantomData<T>,
     // _marker: marker::PhantomData<&'a T>,
 }
