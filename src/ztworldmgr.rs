@@ -34,6 +34,7 @@ pub enum ZTEntityClass {
     Unknown = 0x0,
 }
 
+// TODO: Make this look like other structs with proper offsets and padding
 #[derive(Debug, Getters)]
 #[get = "pub"]
 #[repr(C)]
@@ -41,6 +42,8 @@ pub struct ZTEntity {
     class: ZTEntityClass,
     type_class: ZTEntityType, // TODO: Change to &ZTEntityType at some point?
     name: String,
+    pos1: u32,
+    pos2: u32,
 }
 
 impl ZTEntity {
@@ -49,9 +52,23 @@ impl ZTEntity {
     }
 }
 
+impl fmt::Display for ZTEntity {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Entity Type: {:?}, Name: {}, EntityType {} ({},{}) ({},{})",
+            self.class, self.name, self.type_class, self.pos1, self.pos2, self.pos1 >> 6, self.pos2 >> 6
+        )
+    }
+}
+
 #[derive(Debug)]
 #[repr(C)]
 struct ZTWorldMgr {
+    // First 0x117 are BFWorldMgr
+    // 0x34 -> Map x size
+    // 0x38 -> Map y size
+    // 0x40 -> Array of *BFTile
     entity_array_start: u32,
     entity_array_end: u32,
     entity_type_array_start: u32,
@@ -72,6 +89,8 @@ pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
         class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr)),
         type_class: read_zt_entity_type_from_memory(inner_class_ptr),
         name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
+        pos1: get_from_memory::<u32>(zt_entity_ptr + 0x114),
+        pos2: get_from_memory::<u32>(zt_entity_ptr + 0x118),
     }
 }
 
@@ -153,12 +172,6 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, Comman
         *count += 1;
     }
     Ok(summary)
-}
-
-impl fmt::Display for ZTEntity {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Entity Type: {:?}, Name: {}, EntityType {}", self.class, self.name, self.type_class)
-    }
 }
 
 impl fmt::Display for ZTWorldMgr {

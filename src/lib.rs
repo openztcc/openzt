@@ -55,6 +55,14 @@ mod bfentitytype;
 /// ztgamemgr module has commands to interact with the live zoo stats such as cash, num animals, species, guests, etc. via the vanilla ZTGameMgr class.
 mod ztgamemgr;
 
+/// ztmapview is the main view in zoo tycoon, all map interaction is done through this class.
+mod ztmapview;
+
+/// zthabitatmgr module has commands to interact with habitats/exhibits/tanks via the vanilla ZTHabitatMgr class.
+mod zthabitatmgr;
+
+mod experimental;
+
 /// Patches in the current OpenZT build version into the game's version string.
 mod version;
 
@@ -109,6 +117,9 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 // info!("Feature 'experimental' enabled");
                 ztadvterrainmgr::init();
                 ztgamemgr::init();
+                experimental::init();
+                ztmapview::init();
+                zthabitatmgr::init();
             }
         }
         DLL_PROCESS_DETACH => {

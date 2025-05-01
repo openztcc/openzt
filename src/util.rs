@@ -235,7 +235,7 @@ impl From<CString> for ZTStringPtr {
 
 #[derive(Debug)]
 #[repr(C)]
-struct ZTArray<T> {
+pub struct ZTArray<T> {
     // ptr: *const T,
     start_ptr: u32,
     end_ptr: u32,
@@ -247,23 +247,27 @@ struct ZTArray<T> {
 }
 
 impl<T> ZTArray<T> {
-    fn len(&self) -> usize {
-        (self.end_ptr - self.start_ptr) as usize
+    pub fn len(&self) -> usize {
+        ((self.end_ptr - self.start_ptr) / 4) as usize
     }
 
-    fn capacity(&self) -> usize {
-        (self.buffer_end_ptr - self.start_ptr) as usize
+    pub fn capacity(&self) -> usize {
+        ((self.buffer_end_ptr - self.start_ptr) / 4) as usize
     }
 
-    fn get(&self, index: usize) -> T {
-        get_from_memory::<T>(self.start_ptr + (index as u32) * std::mem::size_of::<T>() as u32)
+    pub fn get_ptr(&self, index: usize) -> u32 {
+        get_from_memory(self.start_ptr + (index * 4) as u32)
     }
 
-    fn set(&self, index: usize, value: T) {
-        save_to_memory(self.start_ptr + (index as u32) * std::mem::size_of::<T>() as u32, value);
+    pub fn get(&self, index: usize) -> T {
+        get_from_memory::<T>(get_from_memory(self.start_ptr + (index * 4) as u32))
     }
 
-    fn get_vec(&self) -> Vec<T> {
+    pub fn set(&self, index: usize, value: T) {
+        save_to_memory(get_from_memory(self.start_ptr + (index * 4) as u32), value);
+    }
+
+    pub fn get_vec(&self) -> Vec<T> {
         let mut vec = Vec::new();
         for i in 0..self.len() {
             vec.push(self.get(i));
