@@ -2,17 +2,19 @@ use nt_time::{FileTime, time::OffsetDateTime};
 use tracing::info;
 use std::fmt;
 
+use getset::{Getters, Setters};
+
 use crate::{
     command_console::{add_to_command_register, CommandError},
     util::{get_from_memory, ZTArray, ZTBoundedString, ZTString},
 };
 
-const GLOBAL_ZTHABITATMGR_ADDRESS: u32 = 0x0063805c;
+pub const GLOBAL_ZTHABITATMGR_ADDRESS: u32 = 0x0063805c;
 
 /// ZTHabitatMgr struct
 #[derive(Debug)]
 #[repr(C)]
-struct ZTHabitatMgr {
+pub struct ZTHabitatMgr {
     vtable: u32,                     // 0x000
     pad1: [u8; 0x04],                // ----------------------- padding: 4 bytes
     map_size_x: u32,                 // 0x008
@@ -21,9 +23,6 @@ struct ZTHabitatMgr {
     zoo_entrance_y: u32,             // 0x014
     pad2: [u8; 0x04],                // ----------------------- padding: 4 bytes
     exhibit_array: ZTArray<ZTHabitat>, // 0x01c (0xc bytes)
-    // exhibit_array_start: u32,        // 0x01c //TODO: Use ZTArray
-    // exhibit_array_end: u32,          // 0x020
-    // exhibit_array_buffer_end: u32,       // 0x024
     other_array_start: u32,        // 0x028 //TODO: Use ZTArray; Seems to be some kind of mapping from BFTile to ZTHabitat or a ZTHabitat index
     other_array_end: u32,          // 0x02c
     other_array_buffer_end: u32,       // 0x030
@@ -35,7 +34,41 @@ impl ZTHabitatMgr {
     // fn get_tank(tile: &BFTile) -> Option<ZTHabitat> {
         
     // }
+
+    pub fn get_habitat_by_tile(&self, tile: &BFTile) -> Option<ZTHabitat> {
+        self.get_habitat(tile.x, tile.y)
+    }
+
+    pub fn get_habitat(&self, pos_x: u32, pos_y: u32) -> Option<ZTHabitat> {
+        let base_ptr = self.other_array_start;
+        let offset_1 = pos_x * 0xc;
+        let intermediate_ptr = get_from_memory::<u32>(base_ptr + offset_1);
+
+
+        let offset_2 = pos_y * 0x28;
+        let ptr = get_from_memory::<u32>(intermediate_ptr + offset_2);
+
+        // TODO: Check vtable ptr and return ZTHabitat or ZTTankExhibit?
+
+        if ptr != 0 {
+            return Some(get_from_memory::<ZTHabitat>(ptr));
+        }
+
+        None
+        
+    }
 }
+
+// int index1 = temp_entity->field_0x34;
+// int offset1 = index1 * 0xC;  // 12 bytes per entry
+// void* basePointer = GLOBAL_ZTHabitatMgr->mbr_0x28;
+// int* intermediatePtr = (int*)(basePointer + offset1);
+
+
+// int index2 = temp_entity->field_0x38;
+// int offset2 = index2 * 0x28;  // 40 bytes per entry
+// ZTHabitat** habitatPtrPtr = (ZTHabitat**)(*intermediatePtr + offset2);
+// ZTHabitat* this_01 = *habitatPtrPtr;
 
 impl fmt::Display for ZTHabitatMgr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -44,14 +77,11 @@ impl fmt::Display for ZTHabitatMgr {
         write!(f, "  map_size_y: {},\n", self.map_size_y)?;
         write!(f, "  zoo_entrance_x: {},\n", self.zoo_entrance_x)?;
         write!(f, "  zoo_entrance_y: {},\n", self.zoo_entrance_y)?;
-        // write!(f, " exhibit_array_start: {:#x},\n", self.exhibit_array)?;
-        // write!(f, " exhibit_array_end: {:#x},\n", self.exhibit_array)?;
-        // write!(f, " exhibit_array_buffer_end: {:#x},\n", self.exhibit_array)?;
-        write!(f, " exhibit_array length: {},\n", self.exhibit_array.len())?;
-        write!(f, " other_array_start: {:#x},\n", self.other_array_start)?;
-        write!(f, " other_array_end: {:#x} ({}),\n", self.other_array_end, self.other_array_end - self.other_array_start)?;
-        write!(f, " other_array_buffer_end: {:#x} ({}),\n", self.other_array_buffer_end, self.other_array_buffer_end - self.other_array_start)?;
-        write!(f, " popularity_scale_factor: {},\n", self.popularity_scale_factor)?;
+        write!(f, "  exhibit_array length: {},\n", self.exhibit_array.len())?;
+        write!(f, "  other_array_start: {:#x},\n", self.other_array_start)?;
+        write!(f, "  other_array_end: {:#x} ({}),\n", self.other_array_end, (self.other_array_end - self.other_array_start) / 12)?;
+        write!(f, "  other_array_buffer_end: {:#x} ({}),\n", self.other_array_buffer_end, (self.other_array_buffer_end - self.other_array_start) /12)?;
+        write!(f, "  popularity_scale_factor: {},\n", self.popularity_scale_factor)?;
         write!(f, "}}")
     }
 }
@@ -60,31 +90,10 @@ pub fn read_zt_habitat_mgr_from_memory() -> ZTHabitatMgr {
     get_from_memory::<ZTHabitatMgr>(get_from_memory(GLOBAL_ZTHABITATMGR_ADDRESS))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 #[repr(C)]
-struct ZTHabitat{
-    // vtable: u32,                     // 0x000
-    // pad1: [u8; 0x0c],                // ----------------------- padding: 12 bytes
-    // entrance_x: u32,                 // 0x010 ?? May be a mistake
-    // entrance_y: u32,                 // 0x014 ?? May be a mistake
-    // pad2: [u8; 0x78],                // ----------------------- padding: 120 bytes
-    // entrance_rotation: u32,          // 0x090
-    // pad3: [u8; 0x5c],                // ----------------------- padding: 92 bytes
-    // unknown_ptr: u32,                // 0x0ec
-    // pad4: [u8; 0x04],                // ----------------------- padding: 4 bytes
-    // unknown_ptr2: u32,               // 0x0f4
-    // unknown_ptr3: u32,               // 0x0f8
-    // current_donations: u32,          // 0x0fc
-    // last_donations: u32,             // 0x100
-    // total_donations: u32,            // 0x104
-    // current_upkeep: u32,             // 0x108
-    // last_upkeep: u32,                // 0x10c
-    // total_upkeep: u32,               // 0x110
-    // unknown_ptr4: u32,               // 0x114
-    // unknown_ptr5: u32,               // 0x118
-    // unknown_ptr6: u32,               // 0x11c
-    // created_timestamp: u32,          // 0x120
-
+#[get = "pub"]
+pub struct ZTHabitat{
     vtable: u32,                     // 0x000
     zt_show_info_ptr: u32,            // 0x004
     pad1: [u8; 0x38],                // ----------------------- padding: 60 bytes
@@ -108,6 +117,24 @@ struct ZTHabitat{
     unknown_nt_time: FileTime,          // 0x128
     pad5: [u8; 0x24],                // ----------------------- padding: 36 bytes
     exhibit_name: ZTBoundedString
+}
+
+impl ZTHabitat {
+    pub fn get_gate_tile_in(&self) -> Option<BFTile> {
+        if self.exhibit_tile_ptr == 0 {
+            return None;
+        }
+        let tile = get_from_memory::<BFTile>(self.exhibit_tile_ptr);
+
+        // Get ZTHabitatMgr
+        // Get Habitat for entrance tile
+        // Check if equal to this habitat (compare entrance tile and rotation? exhibit tile too?)
+        //       return Some(tile)
+        // Get ZTWorldMgr
+        // Get BFMap (ZTWorldMgr + 0x8)
+        // Call BFMap::get_neighbor(tile, self.entrance_rotation)
+        None
+    }
 }
 
 impl fmt::Display for ZTHabitat {
