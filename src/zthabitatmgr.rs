@@ -126,14 +126,24 @@ impl ZTHabitat {
         }
         let tile = get_from_memory::<BFTile>(self.exhibit_tile_ptr);
 
-        // Get ZTHabitatMgr
-        // Get Habitat for entrance tile
-        // Check if equal to this habitat (compare entrance tile and rotation? exhibit tile too?)
-        //       return Some(tile)
+        let zthm = read_zt_habitat_mgr_from_memory();
+        if zthm::get_habitat_by_tile(&tile) == self {
+            return Some(tile);
+        }
+        let ztwm = read_zt_world_mgr_from_global();
         // Get ZTWorldMgr
         // Get BFMap (ZTWorldMgr + 0x8)
         // Call BFMap::get_neighbor(tile, self.entrance_rotation)
         None
+    }
+}
+
+impl PartialEq for ZTHabitat {
+    fn eq(&self, other: &Self) -> bool {
+        self.exhibit_tile_ptr == other.exhibit_tile_ptr &&
+        self.entrance_rotation == other.entrance_rotation &&
+        self.entrance_tile_ptr == other.entrance_tile_ptr &&
+        self.exhibit_name == other.exhibit_name
     }
 }
 

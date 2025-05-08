@@ -66,6 +66,8 @@ impl fmt::Display for ZTEntity {
 #[repr(C)]
 struct ZTWorldMgr {
     // First 0x117 are BFWorldMgr
+    // 0x8 -> 0x64 within BFWorldMgr are BFMap
+    // 0x8 -> BFMap
     // 0x34 -> Map x size
     // 0x38 -> Map y size
     // 0x40 -> Array of *BFTile
@@ -73,6 +75,13 @@ struct ZTWorldMgr {
     entity_array_end: u32,
     entity_type_array_start: u32,
     entity_type_array_end: u32,
+}
+
+impl ZTWorldMgr {
+    pub func get_neighbour(&self, bftile: &BFTile, direction: u32) -> Option<BFTile> {
+        // 
+        None
+    }
 }
 
 pub fn init() {
@@ -247,3 +256,7 @@ pub fn get_entity_type_by_id(id: u32) -> u32 {
     }
     0
 }
+
+// struct BFMap {
+//     padding: [u8; 0x5c],
+// }

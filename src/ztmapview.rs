@@ -54,7 +54,7 @@ impl fmt::Display for BFTile {
 #[hook_module("zoo.exe")]
 pub mod zoo_ztmapview {
     use tracing::info;
-    use crate::zthabitatmgr::{ZTHabitatMgr, GLOBAL_ZTHABITATMGR_ADDRESS};
+    use crate::zthabitatmgr::{ZTHabitatMgr, read_zt_habitat_mgr_from_memory};
     use crate::ztworldmgr::read_zt_entity_from_memory;
     use crate::util::get_from_memory;
     use crate::ztmapview::BFTile;
@@ -91,7 +91,7 @@ pub mod zoo_ztmapview {
         let pos1: u32 = get_from_memory(tile + 0x34);
         let pos2: u32 = get_from_memory(tile + 0x38);
 
-        let habitatmgr = get_from_memory::<ZTHabitatMgr>(get_from_memory(GLOBAL_ZTHABITATMGR_ADDRESS));
+        let habitatmgr = read_zt_habitat_mgr_from_memory();
         if let Some(habitat) = unsafe { habitatmgr.get_habitat(pos1, pos2) } {
             info!("Habitat: {}", habitat);
         }
@@ -122,7 +122,7 @@ pub struct ZTMapView {
 
 impl ZTMapView {
     pub fn check_tank_placement(&self, temp_entity: &ZTEntity, tile: &BFTile, response_ptr: *mut u32) -> u32 {
-        let habitatmgr = get_from_memory::<ZTHabitatMgr>(get_from_memory(GLOBAL_ZTHABITATMGR_ADDRESS));
+        let habitatmgr = read_zt_habitat_mgr_from_memory();
         let Some(habitat) = habitatmgr.get_habitat(pos1, pos2) else {
             return 1;
         };
