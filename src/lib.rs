@@ -1,4 +1,4 @@
-#![feature(let_chains)]
+#![feature(let_chains)] // Remove when upgrading to Rust 1.88 2024 edition
 #![allow(dead_code)]
 
 /// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this

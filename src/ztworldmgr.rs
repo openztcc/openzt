@@ -9,6 +9,8 @@ use crate::{
     command_console::{add_to_command_register, CommandError},
     util::{get_from_memory, get_string_from_memory, map_from_memory},
 };
+use crate::util::{ZTArray, ZTBoundedString, ZTString, ZTStringPtr};
+use crate::ztmapview::BFTile;
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 
@@ -39,12 +41,37 @@ pub enum ZTEntityClass {
 #[get = "pub"]
 #[repr(C)]
 pub struct ZTEntity {
+    // Technically the first 0x154 bytes are BFEntity, need
     class: ZTEntityClass,
     type_class: ZTEntityType, // TODO: Change to &ZTEntityType at some point?
     name: String,
     pos1: u32,
     pos2: u32,
 }
+
+#[derive(Debug, Getters)]
+#[get = "pub"]
+#[repr(C)]
+pub struct BFEntity {
+    vtable: u32,
+    padding: [u8; 0x104],
+    name: ZTBoundedString,
+    pos1: u32,
+    pos2: u32,
+    padding2: [u8; 0xc],
+    inner_class_ptr: u32,
+}
+
+// let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
+// 
+// ZTEntity {
+// class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr)),
+// type_class: read_zt_entity_type_from_memory(inner_class_ptr),
+// name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
+// pos1: get_from_memory::<u32>(zt_entity_ptr + 0x114),
+// pos2: get_from_memory::<u32>(zt_entity_ptr + 0x118),
+// }
+
 
 impl ZTEntity {
     pub fn is_member(&self, member: String) -> bool {
@@ -62,28 +89,74 @@ impl fmt::Display for ZTEntity {
     }
 }
 
+struct BFTilePtr {
+    ptr: u32,
+    padding: [u8; 0x8], // TODO: This might just be a linked list, hence the 0xc size so a more generic datatype might be useful
+}
+
 #[derive(Debug)]
 #[repr(C)]
 struct ZTWorldMgr {
-    // First 0x117 are BFWorldMgr
-    // 0x8 -> 0x64 within BFWorldMgr are BFMap
-    // 0x8 -> BFMap
-    // 0x34 -> Map x size
-    // 0x38 -> Map y size
-    // 0x40 -> Array of *BFTile
+    padding_1: [u8; 0x34],
+    map_x_size: u32,
+    map_y_size: u32,
+    tile_array: ZTArray<BFTilePtr>,
+    padding_2: [u8; 0x3c],
     entity_array_start: u32,
     entity_array_end: u32,
+    entity_array_buffer_end: u32,
+    padding_3: [u8; 0x10],
     entity_type_array_start: u32,
     entity_type_array_end: u32,
+    entity_type_array_buffer_end: u32,
+}
+
+#[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
+#[repr(u32)]
+pub enum Direction {
+    West = 0,
+    NorthWest = 1,
+    North = 2,
+    NorthEast = 3,
+    East = 4,
+    SouthEast = 5,
+    South = 6,
+    SouthWest = 7,
 }
 
 impl ZTWorldMgr {
-    pub func get_neighbour(&self, bftile: &BFTile, direction: u32) -> Option<BFTile> {
-        // 
-        None
+    pub fn get_neighbour(&self, bftile: &BFTile, direction: Direction) -> Option<BFTile> {
+        let x_offset = match direction {
+            Direction::West => 0,
+            Direction::NorthWest => 1,
+            Direction::North => 1,
+            Direction::NorthEast => 1,
+            Direction::East => 0,
+            Direction::SouthEast => -1,
+            Direction::South => -1,
+            Direction::SouthWest => -1,
+        };
+        let y_offset = match direction {
+            Direction::West => -1,
+            Direction::NorthWest => -1,
+            Direction::North => 0,
+            Direction::NorthEast => 1,
+            Direction::East => 1,
+            Direction::SouthEast => 1,
+            Direction::South => 0,
+            Direction::SouthWest => -1,
+        };
+
+        let x = bftile.x as i32 + x_offset;
+        let y = bftile.y as i32 + y_offset;
+
+        if x < 0 || x > self.map_x_size as i32 || y < 0 || y > self.map_y_size as i32 {
+            return None;
+        }
+
+        Some(get_from_memory::<BFTile>(self.tile_array[y * self.map_x_size + x]))
     }
 }
-
 pub fn init() {
     add_to_command_register("list_entities".to_owned(), command_get_zt_world_mgr_entities);
     add_to_command_register("list_types".to_owned(), command_get_zt_world_mgr_types);
@@ -105,16 +178,7 @@ pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
 
 fn read_zt_world_mgr_from_global() -> ZTWorldMgr {
     let zt_world_mgr_ptr = get_from_memory::<u32>(GLOBAL_ZTWORLDMGR_ADDRESS);
-    read_zt_world_mgr_from_memory(zt_world_mgr_ptr)
-}
-
-fn read_zt_world_mgr_from_memory(zt_world_mgr_ptr: u32) -> ZTWorldMgr {
-    ZTWorldMgr {
-        entity_array_start: get_from_memory::<u32>(zt_world_mgr_ptr + 0x80),
-        entity_array_end: get_from_memory::<u32>(zt_world_mgr_ptr + 0x84),
-        entity_type_array_start: get_from_memory::<u32>(zt_world_mgr_ptr + 0x98),
-        entity_type_array_end: get_from_memory::<u32>(zt_world_mgr_ptr + 0x9c),
-    }
+    get_from_memory::<ZTWorldMgr>(zt_world_mgr_ptr)
 }
 
 fn log_zt_world_mgr(zt_world_mgr: &ZTWorldMgr) {

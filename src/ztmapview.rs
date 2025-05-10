@@ -4,8 +4,8 @@ use tracing::info;
 use retour_utils::hook_module;
 
 use crate::{bfentitytype::ZTEntityTypeClass, util::get_from_memory};
-
-
+use crate::zthabitatmgr::read_zt_habitat_mgr_from_memory;
+use crate::ztworldmgr::ZTEntity;
 // use crate::{
 //     util::get_from_memory,
 // };
@@ -41,8 +41,9 @@ use crate::{bfentitytype::ZTEntityTypeClass, util::get_from_memory};
 #[repr(C)]
 pub struct BFTile {
     padding: [u8; 0x34],
-    x: u32, // 0x034
-    y: u32, // 0x038
+    pub x: u32, // 0x034
+    pub y: u32, // 0x038
+    // TODO: Pad out to full size
 }
 
 impl fmt::Display for BFTile {
@@ -57,7 +58,7 @@ pub mod zoo_ztmapview {
     use crate::zthabitatmgr::{ZTHabitatMgr, read_zt_habitat_mgr_from_memory};
     use crate::ztworldmgr::read_zt_entity_from_memory;
     use crate::util::get_from_memory;
-    use crate::ztmapview::BFTile;
+    use crate::ztmapview::{BFTile, ZTMapView};
 
     // use crate::{
     //     bfregistry::{add_to_registry, get_from_registry},
@@ -87,17 +88,13 @@ pub mod zoo_ztmapview {
         let entity = read_zt_entity_from_memory(temp_entity);
 
         let bf_tile = get_from_memory::<BFTile>(tile);
-
-        let pos1: u32 = get_from_memory(tile + 0x34);
-        let pos2: u32 = get_from_memory(tile + 0x38);
-
-        let habitatmgr = read_zt_habitat_mgr_from_memory();
-        if let Some(habitat) = unsafe { habitatmgr.get_habitat(pos1, pos2) } {
-            info!("Habitat: {}", habitat);
-        }
+        
+        let zt_map_view = get_from_memory::<ZTMapView>(_this);
+        
+        let reimplemented_result = zt_map_view.check_tank_placement(&entity, &bf_tile, response_ptr);
+        info!("ZTMapView::checkTankPlacement {} -> {}", reimplemented_result, unsafe{*response_ptr});
 
         let result = unsafe { ZTMapView_check_tank_placement.call(_this, temp_entity, tile, response_ptr) };
-        // info!("ZTMapView::checkTankPlacement called with params: {}, {}, {}, {}", _this, temp_entity, tile, response_ptr);
         info!("ZTMapView::checkTankPlacement {}, {:p} -> {}", result, response_ptr, unsafe{*response_ptr});
         result
         // 1
@@ -122,12 +119,11 @@ pub struct ZTMapView {
 
 impl ZTMapView {
     pub fn check_tank_placement(&self, temp_entity: &ZTEntity, tile: &BFTile, response_ptr: *mut u32) -> u32 {
-        let habitatmgr = read_zt_habitat_mgr_from_memory();
-        let Some(habitat) = habitatmgr.get_habitat(pos1, pos2) else {
+        let habitat_mgr = read_zt_habitat_mgr_from_memory();
+        let Some(habitat) = habitat_mgr.get_habitat(tile.x, tile.y) else {
             return 1;
         };
-        info!("Habitat: {}", habitat);
-        let entity_class = temp_entity::get_type_class();
+        let entity_class = temp_entity.get_type_class();
         if entity_class != ZTEntityTypeClass::Keeper {
             let t = habitat.get_gate_tile_in();
         }

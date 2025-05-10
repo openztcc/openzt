@@ -14,6 +14,7 @@ use crate::{
     ztui::get_selected_entity_type_address,
     ztworldmgr,
 };
+use crate::util::ZTBoundedString;
 
 pub trait EntityType: FieldAccessorAsStringTrait {
     // allows setting the configuration of the entity type
@@ -72,7 +73,13 @@ pub struct BFEntityType {
     pub show: bool,                   // 0x06F
     pub hit_threshold: u32,           // 0x070
     pub avoid_edges: bool,            // 0x074
-    pad10: [u8; 0x0B4 - 0x075],       // ----------------------- padding: 47 bytes
+    // TODO: Add to display impl and test these bits, if they work replace usage of ZTEntityType with BFEntityType
+    pad8: [u8; 0x080 - 0x075],        // ----------------------- padding: 11 bytes
+    pub bf_config_file_ptr: u32,        // 0x080
+    pad9: [u8; 0x098 - 0x084],        // ----------------------- padding: 20 bytes
+    pub zt_type: ZTBoundedString,     // 0x098
+    pub zt_sub_type: ZTBoundedString, // 0x0A4
+    pad10: [u8; 0x0B4 - 0x0B0],       // ----------------------- padding: 4 bytes
     pub footprintx: i32,              // 0x0B4
     pub footprinty: i32,              // 0x0B8
     pub footprintz: i32,              // 0x0BC
@@ -167,6 +174,11 @@ impl EntityType for BFEntityType {
 
 // ------------ ZTSceneryType, Implementation, and Related Functions ------------ //
 
+// TODO: Need to confirm if any of the below should be in BFEntityType, should look into BFUnitType struct to figure out what is common
+// According to Ghidra BFEntityType is 0x144 bytes, with ZTScenery being an extra 0x20 bytes? -> MacOS has BEEntityType at
+// Should be able to use the Type init functions to get very accurate sizes and to confirm what strings correspond to what memory locations
+// Can also figure out some of the gaps using *Type::loadCharacteristics()
+// Does BF/ZTUnitType also load purchase cost, name id etc?
 #[derive(Debug, Getters, Setters, FieldAccessorAsString)]
 #[repr(C)]
 pub struct ZTSceneryType {
@@ -1675,6 +1687,7 @@ pub enum ZTEntityTypeClass {
     Unknown = 0x0,
 }
 
+// TODO: Convert into struct with offsets that can be read straight from memory, should also be called BFEntity
 #[derive(Debug, Getters)]
 #[get = "pub"]
 pub struct ZTEntityType {
