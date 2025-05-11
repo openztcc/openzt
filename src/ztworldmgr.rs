@@ -167,7 +167,7 @@ pub mod hooks_ztworldmgr {
     //00432236 int __thiscall OOAnalyzer::BFMap::getNeighbor(BFMap *this,BFTile *param_1,EDirection param_2)
     use super::*;
 
-    #[hook(unsafe extern "thiscall" BFMap_get_neighbour, offset = 0x00432236)]
+    #[hook(unsafe extern "thiscall" BFMap_get_neighbour, offset = 0x00032236)]
     fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
         info!("BFMap::getNeighbor called with params: {:#x}, {:#x}, {:?}", _this, bftile, direction);
         let result = unsafe { BFMap_get_neighbour.call(_this, bftile, direction) };
