@@ -1,0 +1,52 @@
+[package]
+name = "openzt"
+version = "0.1.0-alpha"
+edition = "2021"
+# default-target = "i686-pc-windows-msvc"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 3
+
+[dependencies]
+tracing-subscriber = "0.3.18"
+tracing = "0.1.40"
+retour = {version = "0.3.1", features = ["thiscall-abi"]}
+retour-utils = "0.2.1"
+once_cell = "1.18.0"
+num_enum = "0.7.3"
+walkdir = "2.5.0"
+zip = "2.3.0"
+bf_configparser = { git = "https://github.com/openztcc/bf-configparser", version = "1.1.1", features = ["indexmap"]}
+anyhow = "1.0.89"
+getset = "0.1.3"
+maplit = "1.0.2"
+field_accessor_as_string = { path = "libs/field_accessor_as_string" }
+field_accessor_as_string_trait = { path = "libs/field_accessor_as_string_trait" }
+serde = {version = "1.0.210", features = ["derive"]}
+toml = "0.8.19"
+regex = "1.10.6"
+public = "0.2.2"
+windows = { version = "0.58.0", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices", "Win32_System_Memory", ] }
+enable-ansi-support = "0.2.1"
+mlua = { version = "0.10", features = ["lua54", "vendored"] }
+
+[lib]
+name = "openzt"
+crate-type = ["cdylib"]
+proc-macro = true
+lua_macros = { path = "../lua_macros" }
+
+[[bin]]
+name = "test"
+path = "src/debug.rs"
+
+[features]
+default = ["experimental", "ini"]
+release = []
+ini = []
+capture_ztlog = []
+experimental = []
