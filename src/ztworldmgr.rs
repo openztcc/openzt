@@ -3,6 +3,7 @@ use std::{collections::HashMap, fmt};
 use getset::Getters;
 use num_enum::FromPrimitive;
 use tracing::info;
+use retour_utils::hook_module;
 
 use crate::{
     bfentitytype::{read_zt_entity_type_from_memory, ZTEntityType, ZTSceneryType},
@@ -89,6 +90,7 @@ impl fmt::Display for ZTEntity {
     }
 }
 
+#[derive(Debug)]
 struct BFTilePtr {
     ptr: u32,
     padding: [u8; 0x8], // TODO: This might just be a linked list, hence the 0xc size so a more generic datatype might be useful
@@ -96,7 +98,7 @@ struct BFTilePtr {
 
 #[derive(Debug)]
 #[repr(C)]
-struct ZTWorldMgr {
+pub struct ZTWorldMgr {
     padding_1: [u8; 0x34],
     map_x_size: u32,
     map_y_size: u32,
@@ -111,9 +113,11 @@ struct ZTWorldMgr {
     entity_type_array_buffer_end: u32,
 }
 
+// TODO: Move to a more general crate
 #[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
 #[repr(u32)]
 pub enum Direction {
+    #[default]
     West = 0,
     NorthWest = 1,
     North = 2,
@@ -126,7 +130,7 @@ pub enum Direction {
 
 impl ZTWorldMgr {
     pub fn get_neighbour(&self, bftile: &BFTile, direction: Direction) -> Option<BFTile> {
-        let x_offset = match direction {
+        let x_offset: i32 = match direction {
             Direction::West => 0,
             Direction::NorthWest => 1,
             Direction::North => 1,
@@ -136,7 +140,7 @@ impl ZTWorldMgr {
             Direction::South => -1,
             Direction::SouthWest => -1,
         };
-        let y_offset = match direction {
+        let y_offset: i32 = match direction {
             Direction::West => -1,
             Direction::NorthWest => -1,
             Direction::North => 0,
@@ -147,21 +151,50 @@ impl ZTWorldMgr {
             Direction::SouthWest => -1,
         };
 
-        let x = bftile.x as i32 + x_offset;
-        let y = bftile.y as i32 + y_offset;
+        let x: i32 = bftile.x as i32 + x_offset;
+        let y: i32 = bftile.y as i32 + y_offset;
 
         if x < 0 || x > self.map_x_size as i32 || y < 0 || y > self.map_y_size as i32 {
             return None;
         }
 
-        Some(get_from_memory::<BFTile>(self.tile_array[y * self.map_x_size + x]))
+        Some(get_from_memory::<BFTile>(self.tile_array.get((y * self.map_x_size as i32 + x).try_into().unwrap()).ptr))
     }
 }
+
+#[hook_module("zoo.exe")]
+pub mod hooks_ztworldmgr {
+    //00432236 int __thiscall OOAnalyzer::BFMap::getNeighbor(BFMap *this,BFTile *param_1,EDirection param_2)
+    use super::*;
+
+    #[hook(unsafe extern "thiscall" BFMap_get_neighbour, offset = 0x00432236)]
+    fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
+        info!("BFMap::getNeighbor called with params: {:#x}, {:#x}, {:?}", _this, bftile, direction);
+        let result = unsafe { BFMap_get_neighbour.call(_this, bftile, direction) };
+        let ztwm = get_from_memory::<ZTWorldMgr>(_this - 0x8);
+        let bftile = get_from_memory::<BFTile>(bftile);
+        let direction = Direction::from(direction);
+        let reimplemented_result = ztwm.get_neighbour(&bftile, direction);
+        if let Some(neighbour) = reimplemented_result && result != 0 {
+            let result_bf_tile = get_from_memory::<BFTile>(result);
+            if result_bf_tile.x != neighbour.x || result_bf_tile.y != neighbour.y {
+                info!("BFMap::getNeighbor result: {} {} -> {} {}", result_bf_tile.x, result_bf_tile.y, neighbour.x, neighbour.y);
+            }
+        } else {
+            info!("BFMap::getNeighbor result: None; original result: {:#x}", result);
+        }
+
+        result
+
+    }    
+}
+
 pub fn init() {
     add_to_command_register("list_entities".to_owned(), command_get_zt_world_mgr_entities);
     add_to_command_register("list_types".to_owned(), command_get_zt_world_mgr_types);
     add_to_command_register("get_zt_world_mgr".to_owned(), command_get_zt_world_mgr);
     add_to_command_register("get_types_summary".to_owned(), command_zt_world_mgr_types_summary);
+    unsafe { hooks_ztworldmgr::init_detours().unwrap() };
 }
 
 pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
@@ -176,7 +209,7 @@ pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
     }
 }
 
-fn read_zt_world_mgr_from_global() -> ZTWorldMgr {
+pub fn read_zt_world_mgr_from_global() -> ZTWorldMgr {
     let zt_world_mgr_ptr = get_from_memory::<u32>(GLOBAL_ZTWORLDMGR_ADDRESS);
     get_from_memory::<ZTWorldMgr>(zt_world_mgr_ptr)
 }

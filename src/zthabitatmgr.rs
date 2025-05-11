@@ -7,6 +7,8 @@ use getset::{Getters, Setters};
 use crate::{
     command_console::{add_to_command_register, CommandError},
     util::{get_from_memory, ZTArray, ZTBoundedString, ZTString},
+    ztworldmgr::{read_zt_world_mgr_from_global, ZTWorldMgr, Direction},
+    ztmapview::BFTile,
 };
 
 pub const GLOBAL_ZTHABITATMGR_ADDRESS: u32 = 0x0063805c;
@@ -47,6 +49,8 @@ impl ZTHabitatMgr {
 
         let offset_2 = pos_y * 0x28;
         let ptr = get_from_memory::<u32>(intermediate_ptr + offset_2);
+
+        info!("Habitat ptr: {:#x}", ptr);
 
         // TODO: Check vtable ptr and return ZTHabitat or ZTTankExhibit?
 
@@ -97,7 +101,7 @@ pub struct ZTHabitat{
     vtable: u32,                     // 0x000
     zt_show_info_ptr: u32,            // 0x004
     pad1: [u8; 0x38],                // ----------------------- padding: 60 bytes
-    exhibit_tile_ptr: u32,          // 0x040
+    exhibit_tile_ptr: u32,          // 0x040 // Seems incorrect?
     pad2: [u8; 0x48],                // ----------------------- padding: 72 bytes
     entrance_tile_ptr: u32,          // 0x08c
     entrance_rotation: u32,          // 0x090
@@ -121,16 +125,20 @@ pub struct ZTHabitat{
 
 impl ZTHabitat {
     pub fn get_gate_tile_in(&self) -> Option<BFTile> {
-        if self.exhibit_tile_ptr == 0 {
+        if self.entrance_tile_ptr == 0 {
             return None;
         }
-        let tile = get_from_memory::<BFTile>(self.exhibit_tile_ptr);
+        info!("ZTHabitat: {}", self);
+        info!("Entrance tile ptr: {:#x}", self.entrance_tile_ptr);
+        let tile = get_from_memory::<BFTile>(self.entrance_tile_ptr);
+        info!("Entrance tile: {}", tile);
 
         let zthm = read_zt_habitat_mgr_from_memory();
-        if zthm::get_habitat_by_tile(&tile) == self {
+        if let Some(gate_habitat) = zthm.get_habitat_by_tile(&tile) && gate_habitat == *self {
             return Some(tile);
         }
         let ztwm = read_zt_world_mgr_from_global();
+        ztwm.get_neighbour(&tile, Direction::from(self.entrance_rotation));
         // Get ZTWorldMgr
         // Get BFMap (ZTWorldMgr + 0x8)
         // Call BFMap::get_neighbor(tile, self.entrance_rotation)
@@ -143,7 +151,7 @@ impl PartialEq for ZTHabitat {
         self.exhibit_tile_ptr == other.exhibit_tile_ptr &&
         self.entrance_rotation == other.entrance_rotation &&
         self.entrance_tile_ptr == other.entrance_tile_ptr &&
-        self.exhibit_name == other.exhibit_name
+        self.exhibit_name.copy_to_string() == other.exhibit_name.copy_to_string()
     }
 }
 

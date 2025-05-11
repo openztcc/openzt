@@ -123,12 +123,14 @@ impl ZTMapView {
         let Some(habitat) = habitat_mgr.get_habitat(tile.x, tile.y) else {
             return 1;
         };
-        let entity_class = temp_entity.get_type_class();
-        if entity_class != ZTEntityTypeClass::Keeper {
+        let entity_class = temp_entity.type_class().class();
+        if entity_class != &ZTEntityTypeClass::Keeper {
             let t = habitat.get_gate_tile_in();
         }
         // match  {
         //     ZTEntityTypeClass::ZTKeeper
         // }
+
+        0
     }
 }
