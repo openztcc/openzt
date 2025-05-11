@@ -37,6 +37,8 @@ mlua = { version = "0.10", features = ["lua54", "vendored"] }
 [lib]
 name = "openzt"
 crate-type = ["cdylib"]
+proc-macro = true
+lua_macros = { path = "../lua_macros" }
 
 [[bin]]
 name = "test"
