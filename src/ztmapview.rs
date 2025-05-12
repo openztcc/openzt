@@ -1,9 +1,10 @@
 use core::fmt;
-
+use num_enum::FromPrimitive;
 use tracing::info;
 use retour_utils::hook_module;
 
 use crate::{bfentitytype::ZTEntityTypeClass, util::get_from_memory};
+use crate::util::save_to_memory;
 use crate::zthabitatmgr::read_zt_habitat_mgr_from_memory;
 use crate::ztworldmgr::ZTEntity;
 // use crate::{
@@ -65,22 +66,6 @@ pub mod zoo_ztmapview {
     //     util::{get_from_memory, get_string_from_memory},
     // };
 
-    // #[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
-    // #[repr(u32)]
-    // enum errorSringId {
-        const OBJECT_TOO_CLOSE_TO_LADDER_OR_PLATFORM: u32 = 0x2942; // Objects cannot be placed too close to the ladder or platform of the tank.
-        const OBJECT_CANNOT_BE_PLACED_IN_TANK: u32 = 0x293f; // This object can not be placed in a tank.
-        const OBJECT_MUST_BE_PLACED_IN_A_DEEPER_TANK: u32 = 0x2940; // This object must be placed in a deeper tank.
-        const EGGS_MUST_BE_PLACED_ON_LAND: u32 = 0x294a; // Eggs must be placed on land.
-        const ANIMAL_MUST_BE_PLACED_IN_A_TANK_WITH_WATER: u32 = 0x293a; // This animal must be placed in a tank with water in it.
-        const ANIMAL_MUST_BE_PLACED_ON_LAND: u32 = 0x2939; // This animal doesn't swim in tanks and must be placed in a land exhibit.
-        const STAFF_CANNOT_BE_PLACED_IN_TANK: u32 = 0x2943; // This staff member can not be placed in a tank.
-        const SHOW_OBJECT_MUST_BE_PLACED_IN_SHOW_TANK: u32= 0x293e; // Show objects can only be placed in show exhibits.
-        const OBJECT_CANNOT_BE_PLACED_AGAINST_TANK_WALL: u32 = 0x2967; // This object cannot be placed next to a tank wall.
-        const OBJECT_CANNOT_BE_PLACED_IN_SHOW_TANK: u32 = 0x2941; // Only show toys and animals that can do tricks can be placed in show tanks.
-
-    // }
-
     //004df688
     #[hook(unsafe extern "thiscall" ZTMapView_check_tank_placement, offset = 0x000df688)]
     // fn check_tank_placement(ZTMapView *other_this, BFEntity *param_2, BFTile *param_3, int *param_4)
@@ -117,20 +102,39 @@ pub struct ZTMapView {
     pad: [u8; 0x5ec] // Not currently using this struct, so just padding it out to the size of the class
 }
 
+#[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
+#[repr(u32)]
+pub enum ErrorStringId {
+    ObjectTooCloseToLadderOrPlatform = 0x2942, // Objects cannot be placed too close to the ladder or platform of the tank.
+    ObjectCannotBePlacedInTank = 0x293f, // This object can not be placed in a tank.
+    ObjectMustBePlacedInADeeperTank = 0x2940, // This object must be placed in a deeper tank.
+    EggsMustBePlacedOnLand = 0x294a, // Eggs must be placed on land.
+    AnimalMustBePlacedInATankWithWater = 0x293a, // This animal must be placed in a tank with water in it.
+    AnimalMustBePlacedOnLand = 0x2939, // This animal doesn't swim in tanks and must be placed in a land exhibit.
+    StaffCannotBePlacedInTank = 0x2943, // This staff member can not be placed in a tank.
+    ShowObjectMustBePlacedInShowTank = 0x293e, // Show objects can only be placed in show exhibits.
+    ObjectCannotBePlacedAgainstTankWall = 0x2967, // This object cannot be placed next to a tank wall.
+    ObjectCannotBePlacedInShowTank = 0x2941, // Only show toys and animals that can do tricks can be placed in show tanks.
+}
+
 impl ZTMapView {
-    pub fn check_tank_placement(&self, temp_entity: &ZTEntity, tile: &BFTile, response_ptr: *mut u32) -> u32 {
+    pub fn check_tank_placement(&self, temp_entity: &ZTEntity, tile: &BFTile) -> Result<(), ErrorStringId> {
         let habitat_mgr = read_zt_habitat_mgr_from_memory();
         let Some(habitat) = habitat_mgr.get_habitat(tile.x, tile.y) else {
-            return 1;
+            return Ok(());
         };
         let entity_class = temp_entity.type_class().class();
         if entity_class != &ZTEntityTypeClass::Keeper {
-            let t = habitat.get_gate_tile_in();
+            if let Some(t) = habitat.get_gate_tile_in() {
+                if temp_entity.is_on_tile(t) {
+                    return return Err(ErrorStringId::ObjectTooCloseToLadderOrPlatform);
+                }
+            }
         }
         // match  {
         //     ZTEntityTypeClass::ZTKeeper
         // }
 
-        0
+        Ok(())
     }
 }

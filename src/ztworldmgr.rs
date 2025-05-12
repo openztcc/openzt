@@ -37,12 +37,12 @@ pub enum ZTEntityClass {
     Unknown = 0x0,
 }
 
-// TODO: Make this look like other structs with proper offsets and padding
+// TODO: Make this look like other structs with proper offsets and padding -> 
 #[derive(Debug, Getters)]
 #[get = "pub"]
 #[repr(C)]
 pub struct ZTEntity {
-    // Technically the first 0x154 bytes are BFEntity, need
+    // Technically, the first 0x154 bytes are BFEntity, should grab what Eric started doing in his PR and embed BFEntity here
     class: ZTEntityClass,
     type_class: ZTEntityType, // TODO: Change to &ZTEntityType at some point?
     name: String,
@@ -171,7 +171,7 @@ pub mod hooks_ztworldmgr {
     fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
         info!("BFMap::getNeighbor called with params: {:#x}, {:#x}, {:?}", _this, bftile, direction);
         let result = unsafe { BFMap_get_neighbour.call(_this, bftile, direction) };
-        let ztwm = get_from_memory::<ZTWorldMgr>(_this - 0x8);
+        let ztwm = get_from_memory::<ZTWorldMgr>(GLOBAL_ZTWORLDMGR_ADDRESS);
         let bftile = get_from_memory::<BFTile>(bftile);
         let direction = Direction::from(direction);
         let reimplemented_result = ztwm.get_neighbour(&bftile, direction);

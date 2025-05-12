@@ -138,11 +138,7 @@ impl ZTHabitat {
             return Some(tile);
         }
         let ztwm = read_zt_world_mgr_from_global();
-        ztwm.get_neighbour(&tile, Direction::from(self.entrance_rotation));
-        // Get ZTWorldMgr
-        // Get BFMap (ZTWorldMgr + 0x8)
-        // Call BFMap::get_neighbor(tile, self.entrance_rotation)
-        None
+        ztwm.get_neighbour(&tile, Direction::from(self.entrance_rotation))
     }
 }
 
