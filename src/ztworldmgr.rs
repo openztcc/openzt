@@ -10,7 +10,7 @@ use crate::{
     command_console::{add_to_command_register, CommandError},
     util::{get_from_memory, get_string_from_memory, map_from_memory},
 };
-use crate::util::{ZTArray, ZTBoundedString, ZTString, ZTStringPtr};
+use crate::util::{ZTArray, ZTBoundedString, ZTString, ZTStringPtr, ZTBufferString};
 use crate::ztmapview::BFTile;
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
@@ -50,17 +50,33 @@ pub struct ZTEntity {
     pos2: u32,
 }
 
+impl ZTEntity {
+    pub fn is_on_tile(&self, tile: &BFTile) -> bool {
+        // BFEntity::getFootprint
+    }
+}
+
 #[derive(Debug, Getters)]
 #[get = "pub"]
 #[repr(C)]
 pub struct BFEntity {
     vtable: u32,
     padding: [u8; 0x104],
-    name: ZTBoundedString,
-    pos1: u32,
-    pos2: u32,
-    padding2: [u8; 0xc],
-    inner_class_ptr: u32,
+    name: ZTBufferString,   // 0x108
+    x_coord: u32,           // 0x114
+    y_coord: u32,           // 0x118   
+    z_coord: u32,           // 0x11c
+    padding2: [u8; 0x8],    // ----- padding: 4 bytes
+    inner_class_ptr: u32,   // 0x128
+    rotation: u32,          // 0x12c
+    padding3: [u8; 0x18],    // ----- padding: 28 bytes
+    snap_to_ground: u8, // 0x140
+    selected: u8, // 0x141
+    unknown_flag: u8, // 0x142
+    unknown_flag2: u8, // 0x143 // Picked up?
+    draw_dithered: u8, // 0x144
+    unknown_flag4: u8, // 0x145 // If != 0; Draw selection graphic
+    stop_at_end: u8, // 0x146
 }
 
 // let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
