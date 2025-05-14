@@ -26,6 +26,7 @@ getset = "0.1.3"
 maplit = "1.0.2"
 field_accessor_as_string = { path = "libs/field_accessor_as_string" }
 field_accessor_as_string_trait = { path = "libs/field_accessor_as_string_trait" }
+mlua_userdata = { path = "libs/mlua_userdata" }
 serde = {version = "1.0.210", features = ["derive"]}
 toml = "0.8.19"
 regex = "1.10.6"

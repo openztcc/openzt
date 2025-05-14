@@ -560,6 +560,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mluauserdata"
+version = "0.1.0"
+dependencies = [
+ "mlua",
+]
+
+[[package]]
 name = "mmap-fixed-fixed"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -642,6 +649,7 @@ dependencies = [
  "getset",
  "maplit",
  "mlua",
+ "mluauserdata",
  "num_enum",
  "once_cell",
  "public",
