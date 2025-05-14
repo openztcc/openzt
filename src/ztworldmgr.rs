@@ -66,18 +66,25 @@ pub struct BFEntity {
     x_coord: u32,           // 0x114
     y_coord: u32,           // 0x118   
     z_coord: u32,           // 0x11c
-    padding2: [u8; 0x8],    // ----- padding: 4 bytes
+    height_above_terrain: u32, // 0x120
+    padding2: [u8; 0x4],    // ----- padding: 4 bytes
     inner_class_ptr: u32,   // 0x128
     rotation: u32,          // 0x12c
-    padding3: [u8; 0x18],    // ----- padding: 28 bytes
+    padding3: [u8; 0x14],    // ----- padding: 28 bytes
+    unknown_flag1: u8,    // 0x13c // isRemoved
+    unknown_flag2: u8,    // 0x13d // isRemovedUndo
+    unknown_flag3: u8,    // 0x13e
+    visible: u8,    // 0x13f 
     snap_to_ground: u8, // 0x140
     selected: u8, // 0x141
-    unknown_flag: u8, // 0x142
-    unknown_flag2: u8, // 0x143 // Picked up?
+    unknown_flag4: u8, // 0x142 // Moving? Programmatically?
+    unknown_flag5: u8, // 0x143 // Picked up?
     draw_dithered: u8, // 0x144
-    unknown_flag4: u8, // 0x145 // If != 0; Draw selection graphic
+    unknown_flag6: u8, // 0x145 // If != 0; Draw selection graphic
     stop_at_end: u8, // 0x146
 }
+
+// ZTAnimal -> 0x3a6 = animalDying
 
 // let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
 // 
