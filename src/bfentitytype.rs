@@ -3,6 +3,7 @@ use std::{fmt, ops::Deref};
 
 use field_accessor_as_string::FieldAccessorAsString;
 use field_accessor_as_string_trait::FieldAccessorAsStringTrait;
+use mlua_userdata::MluaEntityFields;
 use getset::{Getters, Setters};
 use num_enum::FromPrimitive;
 use tracing::info;
@@ -41,7 +42,21 @@ pub trait EntityType: FieldAccessorAsStringTrait {
     }
 }
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+pub struct EntityRef<T> {
+    pub ptr: *mut T,
+}
+
+impl<T> EntityRef<T> {
+    pub fn get(&self) -> &T {
+        unsafe { &*self.ptr }
+    }
+
+    pub fn get_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.ptr }
+    }
+}
+
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct BFEntityType {
     vtable: u32,                      // 0x000
@@ -167,7 +182,7 @@ impl EntityType for BFEntityType {
 
 // ------------ ZTSceneryType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTSceneryType {
     #[deref_field]
@@ -267,7 +282,7 @@ impl Deref for ZTSceneryType {
 }
 
 // ------------ ZTBuildingType, Implementation, and Related Functions ------------ //
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 struct ZTBuildingType {
     #[deref_field]
@@ -376,7 +391,7 @@ impl Deref for ZTBuildingType {
 
 // ------------ ZTFenceType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTFenceType {
     #[deref_field]
@@ -453,7 +468,7 @@ impl Deref for ZTFenceType {
 
 // ------------ ZTTankWallType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTTankWallType {
     #[deref_field]
@@ -513,7 +528,7 @@ impl Deref for ZTTankWallType {
 
 // ------------ ZTFoodType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTFoodType {
     #[deref_field]
@@ -549,7 +564,7 @@ impl Deref for ZTFoodType {
 
 // ------------ ZTTankeFilterType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTTankFilterType {
     #[deref_field]
@@ -627,7 +642,7 @@ impl Deref for ZTTankFilterType {
 
 // ------------ ZTPathType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTPathType {
     #[deref_field]
@@ -664,7 +679,7 @@ impl Deref for ZTPathType {
 
 // ------------ ZTRubbleType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTRubbleType {
     #[deref_field]
@@ -715,7 +730,7 @@ impl Deref for ZTRubbleType {
 
 // ------------ BFUnitType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct BFUnitType {
     #[deref_field]
@@ -769,7 +784,7 @@ impl Deref for BFUnitType {
 
 // ------------ ZTUnitType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTUnitType {
     #[deref_field]
@@ -836,7 +851,7 @@ impl EntityType for ZTUnitType {
 
 // ------------ ZTGuestType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTGuestType {
     #[deref_field]
@@ -998,7 +1013,7 @@ impl Deref for ZTGuestType {
 
 // ------------ ZTAnimalType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTAnimalType {
     #[deref_field]
@@ -1229,7 +1244,7 @@ impl Deref for ZTAnimalType {
 
 // ------------ ZTStaffType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTStaffType {
     #[deref_field]
@@ -1280,7 +1295,7 @@ impl Deref for ZTStaffType {
 
 // ------------ ZTMaintType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTMaintType {
     #[deref_field]
@@ -1328,7 +1343,7 @@ impl Deref for ZTMaintType {
 // TODO: DRT staff are not selectable in-game, so this struct needs a bit more testing to ensure it works as expected.
 // For now, assumptions are that the offets are correct and the struct is implemented correctly.
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTHelicopterType {
     #[deref_field]
@@ -1367,7 +1382,7 @@ impl Deref for ZTHelicopterType {
 
 // ------------ ZTGuideType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTGuideType {
     #[deref_field]
@@ -1418,7 +1433,7 @@ impl Deref for ZTGuideType {
 
 // ------------ ZTKeeperType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTKeeperType {
     #[deref_field]
@@ -1479,7 +1494,7 @@ impl EntityType for ZTKeeperType {
 
 // ------------ BFOverlayType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct BFOverlayType {
     #[deref_field]
@@ -1514,7 +1529,7 @@ impl Deref for BFOverlayType {
 
 // ------------ ZTAmbientType, Implementation, and Related Functions ------------ //
 
-#[derive(Debug, Getters, Setters, FieldAccessorAsString)]
+#[derive(Debug, Getters, Setters,  FieldAccessorAsString, MluaEntityFields)]
 #[repr(C)]
 pub struct ZTAmbientType {
     #[deref_field]
