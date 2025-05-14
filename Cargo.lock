@@ -560,10 +560,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "mluauserdata"
+name = "mlua_userdata"
 version = "0.1.0"
 dependencies = [
  "mlua",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -649,7 +652,7 @@ dependencies = [
  "getset",
  "maplit",
  "mlua",
- "mluauserdata",
+ "mlua_userdata",
  "num_enum",
  "once_cell",
  "public",

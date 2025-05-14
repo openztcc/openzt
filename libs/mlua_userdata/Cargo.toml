@@ -1,7 +1,13 @@
+[lib]
+proc-macro = true
+
 [package]
-name = "mluauserdata"
+name = "mlua_userdata"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 mlua = { version = "0.10", features = ["lua54", "vendored"] }
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
+proc-macro2 = "1.0"

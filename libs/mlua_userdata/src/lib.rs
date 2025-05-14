@@ -1,5 +1,6 @@
+// lib.rs (in your procedural macro crate)
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{parse_macro_input, DeriveInput, Data, Fields, Attribute};
 
 #[proc_macro_derive(MluaEntityFields)]
@@ -7,7 +8,7 @@ pub fn derive_mlua_entity_fields(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = input.ident;
 
-    // struct needs to have named fields
+    // Expect struct with named fields
     let fields = match input.data {
         Data::Struct(data_struct) => match data_struct.fields {
             Fields::Named(fields_named) => fields_named.named,
@@ -16,13 +17,13 @@ pub fn derive_mlua_entity_fields(input: TokenStream) -> TokenStream {
         _ => unimplemented!("Only structs are supported"),
     };
 
-    // skip fields with #[mlua(skip)]
+    // Only include pub fields, and allow #[mlua(skip)] opt-out
     let filtered_fields = fields.clone().into_iter().filter(|f| {
         f.vis.to_token_stream().to_string() == "pub"
             && !f.attrs.iter().any(|a| is_mlua_skip(a))
     });
 
-    // generate getters and setters for each field
+    // For each field, generate getter and setter calling this.get() / get_mut()
     let getters = filtered_fields.clone().map(|f| {
         let fname = &f.ident;
         let fname_str = fname.as_ref().unwrap().to_string();
@@ -43,7 +44,7 @@ pub fn derive_mlua_entity_fields(input: TokenStream) -> TokenStream {
         }
     });
 
-    // dynamically add methods
+    // Inject dynamic set_config/get_config methods
     let dyn_methods = quote! {
         fn add_methods<M: mlua::UserDataMethods<'lua, Self>>(methods: &mut M) {
             methods.add_method_mut("set_value", |_, this, (key, val): (String, String)| {
@@ -56,7 +57,6 @@ pub fn derive_mlua_entity_fields(input: TokenStream) -> TokenStream {
         }
     };
 
-    // generate the impl block for lua::UserData
     TokenStream::from(quote! {
         impl<'lua> mlua::UserData for EntityRef<#name>
         where
@@ -72,7 +72,10 @@ pub fn derive_mlua_entity_fields(input: TokenStream) -> TokenStream {
     })
 }
 
-// helper for skip
 fn is_mlua_skip(attr: &Attribute) -> bool {
-    attr.path().is_ident("mlua") && attr.tokens.to_string().contains("skip")
+    if !attr.path().is_ident("mlua") {
+        return false;
+    }
+
+    attr.meta.to_token_stream().to_string().contains("skip")
 }
