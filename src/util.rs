@@ -246,6 +246,13 @@ pub struct ZTArray<T> {
     // _marker: marker::PhantomData<&'a T>,
 }
 
+impl<T> fmt::Display for ZTArray<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ZTArray {{ start_ptr: {:#x}, end_ptr: {:#x}, buffer_end_ptr: {:#x} }} -> len({})", self.start_ptr, self.end_ptr, self.buffer_end_ptr, self.len())
+    }
+}
+
+
 impl<T> ZTArray<T> {
     pub fn len(&self) -> usize {
         ((self.end_ptr - self.start_ptr) / 4) as usize
