@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt};
 
 use getset::Getters;
 use num_enum::FromPrimitive;
-use tracing::info;
+use tracing::{error, info};
 use retour_utils::hook_module;
 
 use crate::{
@@ -195,7 +195,7 @@ impl ZTWorldMgr {
         let x: i32 = bftile.x as i32 + x_offset;
         let y: i32 = bftile.y as i32 + y_offset;
 
-        if x < 0 || x > self.map_x_size as i32 || y < 0 || y > self.map_y_size as i32 {
+        if x < 0 || x >= self.map_x_size as i32 || y < 0 || y >= self.map_y_size as i32 {
             return None;
         }
 
@@ -210,22 +210,32 @@ pub mod hooks_ztworldmgr {
 
     #[hook(unsafe extern "thiscall" BFMap_get_neighbour, offset = 0x00032236)]
     fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
-        info!("BFMap::getNeighbor called with params: {:#x}, {:#x}, {:?}", _this, bftile, direction);
+        // info!("BFMap::getNeighbor called with params: {:#x}, {:#x}, {:?}", _this, bftile, direction);
         let result = unsafe { BFMap_get_neighbour.call(_this, bftile, direction) };
-        let ztwm = get_from_memory::<ZTWorldMgr>(GLOBAL_ZTWORLDMGR_ADDRESS);
+        let ztwm = read_zt_world_mgr_from_global();
         let bftile = get_from_memory::<BFTile>(bftile);
         let direction = Direction::from(direction);
         let reimplemented_result = ztwm.get_neighbour(&bftile, direction);
-        if let Some(neighbour) = reimplemented_result && result != 0 {
-            let result_bf_tile = get_from_memory::<BFTile>(result);
-            info!("BFMap::getNeighbor result: {:#x} -> {}", result, result_bf_tile);
-            info!("BFMap::getNeighbor reimplemented result: {}", neighbour);
-            if result_bf_tile.x != neighbour.x || result_bf_tile.y != neighbour.y {
-                info!("BFMap::getNeighbor result: {} {} -> {} {}", result_bf_tile.x, result_bf_tile.y, neighbour.x, neighbour.y);
+        // TODO: Remove below checks once we are confident in the reimplementation
+        if let Some(neighbour) = reimplemented_result  {
+            if result != 0 {
+                let result_bf_tile = get_from_memory::<BFTile>(result);
+                // info!("BFMap::getNeighbor result: {:#x} -> {}", result, result_bf_tile);
+                // info!("BFMap::getNeighbor reimplemented result: {}", neighbour);
+                if result_bf_tile.x != neighbour.x || result_bf_tile.y != neighbour.y {
+                    error!("BFMap::getNeighbor result: {} {} -> {} {}", result_bf_tile.x, result_bf_tile.y, neighbour.x, neighbour.y);
+                }
+            } else {
+                error!("BFMap::getNeighbor result: None; reimplemented result: {} {}", neighbour.x, neighbour.y);
             }
-        } else {
-            info!("BFMap::getNeighbor result: None; original result: {:#x}", result);
+            
+        } else if result != 0 {
+            let result_bf_tile = get_from_memory::<BFTile>(result);
+            error!("BFMap::getNeighbor result: None; original result: {:#x} -> {:#x} ({} {})", result, get_from_memory::<u32>(result), result_bf_tile.x, result_bf_tile.y);
         }
+        // if result != reimplemented_result {
+        //     error!("BFMap::getNeighbor result: {:#x} -> {:#x}", result, reimplemented_result);
+        // }
 
         result
 
