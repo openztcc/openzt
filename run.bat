@@ -1,7 +1,7 @@
 @echo off
 
 REM Run cargo build with specified arguments
-cargo +nightly-2024-05-02-i686-pc-windows-msvc build --lib --release --target=i686-pc-windows-msvc %*
+cargo +nightly build --lib --release --target=i686-pc-windows-msvc %*
 
 REM Check if the build succeeded
 if %ERRORLEVEL% neq 0 (
