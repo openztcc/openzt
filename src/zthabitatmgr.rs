@@ -128,10 +128,10 @@ impl ZTHabitat {
         if self.entrance_tile_ptr == 0 {
             return None;
         }
-        info!("ZTHabitat: {}", self);
-        info!("Entrance tile ptr: {:#x}", self.entrance_tile_ptr);
+        // info!("ZTHabitat: {}", self);
+        // info!("Entrance tile ptr: {:#x}", self.entrance_tile_ptr);
         let tile = get_from_memory::<BFTile>(self.entrance_tile_ptr);
-        info!("Entrance tile: {}", tile);
+        // info!("Entrance tile: {}", tile);
 
         let zthm = read_zt_habitat_mgr_from_memory();
         if let Some(gate_habitat) = zthm.get_habitat_by_tile(&tile) && gate_habitat == *self {

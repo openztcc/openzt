@@ -53,6 +53,7 @@ pub struct ZTEntity {
 impl ZTEntity {
     pub fn is_on_tile(&self, tile: &BFTile) -> bool {
         // BFEntity::getFootprint
+        false
     }
 }
 
@@ -125,15 +126,32 @@ pub struct ZTWorldMgr {
     padding_1: [u8; 0x34],
     map_x_size: u32,
     map_y_size: u32,
-    tile_array: ZTArray<BFTilePtr>,
-    padding_2: [u8; 0x3c],
+    padding_2: [u8; 0x4],
+    tile_array: u32,
+    padding_3: [u8; 0x3c],
     entity_array_start: u32,
     entity_array_end: u32,
     entity_array_buffer_end: u32,
-    padding_3: [u8; 0x10],
+    padding_4: [u8; 0x10],
     entity_type_array_start: u32,
     entity_type_array_end: u32,
     entity_type_array_buffer_end: u32,
+}
+
+impl fmt::Display for ZTWorldMgr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "ZTWorldMgr {{ map_x_size: {}, map_y_size: {}, tile_array: {:#x}, entity_array_start: {:#x}, entity_array_end: {:#x}, entity_type_array_start: {:#x}, entity_type_array_end: {:#x} }}",
+            self.map_x_size,
+            self.map_y_size,
+            self.tile_array,
+            self.entity_array_start,
+            self.entity_array_end,
+            self.entity_type_array_start,
+            self.entity_type_array_end,
+        )
+    }
 }
 
 // TODO: Move to a more general crate
@@ -181,7 +199,7 @@ impl ZTWorldMgr {
             return None;
         }
 
-        Some(get_from_memory::<BFTile>(self.tile_array.get((y * self.map_x_size as i32 + x).try_into().unwrap()).ptr))
+        Some(get_from_memory::<BFTile>(self.tile_array + (((y as u32 * self.map_x_size) + x as u32) * 0x8c_u32)))
     }
 }
 
@@ -200,6 +218,8 @@ pub mod hooks_ztworldmgr {
         let reimplemented_result = ztwm.get_neighbour(&bftile, direction);
         if let Some(neighbour) = reimplemented_result && result != 0 {
             let result_bf_tile = get_from_memory::<BFTile>(result);
+            info!("BFMap::getNeighbor result: {:#x} -> {}", result, result_bf_tile);
+            info!("BFMap::getNeighbor reimplemented result: {}", neighbour);
             if result_bf_tile.x != neighbour.x || result_bf_tile.y != neighbour.y {
                 info!("BFMap::getNeighbor result: {} {} -> {} {}", result_bf_tile.x, result_bf_tile.y, neighbour.x, neighbour.y);
             }
@@ -301,18 +321,6 @@ fn command_zt_world_mgr_types_summary(_args: Vec<&str>) -> Result<String, Comman
         *count += 1;
     }
     Ok(summary)
-}
-
-impl fmt::Display for ZTWorldMgr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let num_entities = (self.entity_array_end - self.entity_array_start) / 0x4;
-        let num_entity_types = (self.entity_type_array_end - self.entity_type_array_start) / 0x4;
-        write!(
-            f,
-            "Entity Array Start: {:#x}, Entity Array End: {:#x}, ({}), Entity Type Array Start: {:#x}, Entity Type Array End: {:#x}, ({})",
-            self.entity_array_start, self.entity_array_end, num_entities, self.entity_type_array_start, self.entity_type_array_end, num_entity_types
-        )
-    }
 }
 
 fn get_zt_world_mgr_entities(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntity> {

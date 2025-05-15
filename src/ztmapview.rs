@@ -44,7 +44,7 @@ pub struct BFTile {
     padding: [u8; 0x34],
     pub x: u32, // 0x034
     pub y: u32, // 0x038
-    // TODO: Pad out to full size
+    padding_2: [u8; 0x50], // Full size 0x8c
 }
 
 impl fmt::Display for BFTile {
@@ -76,8 +76,11 @@ pub mod zoo_ztmapview {
         
         let zt_map_view = get_from_memory::<ZTMapView>(_this);
         
-        let reimplemented_result = zt_map_view.check_tank_placement(&entity, &bf_tile, response_ptr);
-        info!("ZTMapView::checkTankPlacement {} -> {}", reimplemented_result, unsafe{*response_ptr});
+        if let Err(reimplemented_result) = zt_map_view.check_tank_placement(&entity, &bf_tile) {
+            info!("ZTMapView::checkTankPlacement 1 -> {:?}", reimplemented_result);
+        } else {
+            info!("ZTMapView::checkTankPlacement 0 -> 0");
+        }
 
         let result = unsafe { ZTMapView_check_tank_placement.call(_this, temp_entity, tile, response_ptr) };
         info!("ZTMapView::checkTankPlacement {}, {:p} -> {}", result, response_ptr, unsafe{*response_ptr});
@@ -105,6 +108,8 @@ pub struct ZTMapView {
 #[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
 #[repr(u32)]
 pub enum ErrorStringId {
+    #[default]
+    UnknownError = 0x0000, // Unknown error
     ObjectTooCloseToLadderOrPlatform = 0x2942, // Objects cannot be placed too close to the ladder or platform of the tank.
     ObjectCannotBePlacedInTank = 0x293f, // This object can not be placed in a tank.
     ObjectMustBePlacedInADeeperTank = 0x2940, // This object must be placed in a deeper tank.
@@ -126,8 +131,8 @@ impl ZTMapView {
         let entity_class = temp_entity.type_class().class();
         if entity_class != &ZTEntityTypeClass::Keeper {
             if let Some(t) = habitat.get_gate_tile_in() {
-                if temp_entity.is_on_tile(t) {
-                    return return Err(ErrorStringId::ObjectTooCloseToLadderOrPlatform);
+                if temp_entity.is_on_tile(&t) {
+                    return Err(ErrorStringId::ObjectTooCloseToLadderOrPlatform);
                 }
             }
         }
