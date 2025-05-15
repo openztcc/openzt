@@ -2,7 +2,7 @@ use std::{ffi::CString, path::Path, str, sync::Mutex};
 
 use bf_configparser::ini::{Ini, WriteOptions};
 use getset::CopyGetters;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tracing::{error, info, debug};
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-static RESOURCE_HANDLER_ARRAY: Lazy<Mutex<Vec<Handler>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static RESOURCE_HANDLER_ARRAY: LazyLock<Mutex<Vec<Handler>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 pub fn add_handler(handler: Handler) {
     let mut data_mutex = RESOURCE_HANDLER_ARRAY.lock().unwrap();

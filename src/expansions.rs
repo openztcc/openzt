@@ -10,7 +10,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use bf_configparser::ini::Ini;
 use maplit::hashset;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use retour_utils::hook_module;
 use tracing::{debug, error, info};
 
@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// List of official ZTD files so we can determine if a given ZTD file is custom content
-static OFFICIAL_FILESET: Lazy<HashSet<&str>> = Lazy::new(|| {
+static OFFICIAL_FILESET: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     hashset! {"animals8.ztd",
         "awards5.ztd",
         "config5.ztd",
@@ -145,7 +145,7 @@ const EXPANSION_RESOURCE_PAL: &str = "listbk.pal";
 const EXPANSION_RESOURCE_ANIMATION: &str = "listbk.animation";
 
 /// Mutex to store the contents of each `member` set, determined by the `member` section in the `uca`, `ucs`, `ucb`, and `ai` files
-static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static MEMBER_SETS: LazyLock<Mutex<HashMap<String, HashSet<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
     let mut data_mutex = MEMBER_SETS.lock().unwrap();
@@ -176,7 +176,7 @@ fn get_cc_expansion_name(subdir: &str) -> String {
 }
 
 /// Mutex containing all expansions
-static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static EXPANSION_ARRAY: LazyLock<Mutex<Vec<Expansion>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 /// Adds to the expansion mutex and saves to ZT memory
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<()> {

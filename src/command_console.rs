@@ -8,7 +8,7 @@ use std::{
     thread,
 };
 
-use once_cell::sync::Lazy; //TODO: Use std::sync::LazyCell when it becomes stable
+use std::sync::LazyLock; //TODO: Use std::sync::LazyCell when it becomes stable
 use retour_utils::hook_module;
 use tracing::{error, info};
 use windows::Win32::System::Console::{AllocConsole, FreeConsole};
@@ -95,11 +95,11 @@ pub mod zoo_console {
 
 type CommandCallback = fn(args: Vec<&str>) -> Result<String, CommandError>;
 
-static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, CommandCallback>>> = Lazy::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
+static COMMAND_REGISTRY: LazyLock<Mutex<HashMap<String, CommandCallback>>> = LazyLock::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
 
-static COMMAND_RESULTS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<String>::new()));
+static COMMAND_RESULTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::<String>::new()));
 
-static COMMAND_QUEUE: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<String>::new()));
+static COMMAND_QUEUE: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::<String>::new()));
 
 pub fn add_to_command_register(command_name: String, command_callback: CommandCallback) {
     info!("Registring command {} to registry", command_name);

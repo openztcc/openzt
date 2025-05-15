@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Mutex};
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use retour_utils::hook_module;
 use tracing::info;
 
@@ -9,7 +9,7 @@ use crate::{
     util::get_from_memory,
 };
 
-static BF_REGISTRY: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static BF_REGISTRY: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn command_list_registry(_args: Vec<&str>) -> Result<String, CommandError> {
     Ok(list_registry()?)

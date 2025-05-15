@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashMap;
 use retour_utils::hook_module;
 use tracing::info;
@@ -11,9 +11,9 @@ const STRING_REGISTRY_ID_OFFSET: u32 = 100_000;
 
 const GLOBAL_BFAPP: u32 = 0x00638148;
 
-static STRING_REGISTRY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static STRING_REGISTRY: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
-static STRING_OVERRIDES: Lazy<Mutex<HashMap<u32, String>>> = Lazy::new(|| {
+static STRING_OVERRIDES: LazyLock<Mutex<HashMap<u32, String>>> = LazyLock::new(|| {
     Mutex::new(DEFAULT_OVERRIDES.iter().map(|(id, string_override)| (*id, string_override.to_string())).collect())
 });
 

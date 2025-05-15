@@ -98,7 +98,7 @@ pub fn init() {
 Currently development is ongoing in multiple independent modules, this means we don't have a central game world struct, instead we have global variables like below
 
 ```rust
-static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| {
+static EXPANSION_ARRAY: LazyLock<Mutex<Vec<Expansion>>> = LazyLock::new(|| {
     Mutex::new(Vec::new())
 });
 ```

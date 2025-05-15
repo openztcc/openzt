@@ -93,8 +93,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
                 tracing_subscriber::fmt().with_ansi(enable_ansi).init();
             }
 
-            // dll_first_load();
-            // info!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved);
+            info!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved);
 
             // Initialize stable modules
             resource_manager::init();
@@ -109,12 +108,12 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
 
             if cfg!(feature = "capture_ztlog") {
                 use crate::capture_ztlog;
-                // info!("Feature 'capture_ztlog' enabled");
+                info!("Feature 'capture_ztlog' enabled");
                 capture_ztlog::init();
             }
 
             if cfg!(feature = "experimental") {
-                // info!("Feature 'experimental' enabled");
+                info!("Feature 'experimental' enabled");
                 ztadvterrainmgr::init();
                 ztgamemgr::init();
                 experimental::init();
@@ -123,16 +122,15 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             }
         }
         DLL_PROCESS_DETACH => {
-            // info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);
+            // DO NOT TRY AND LOG HERE, IT WILL CAUSE A CRASH
         }
         DLL_THREAD_ATTACH => {
-            info!("DllMain: DLL_THREAD_ATTACH: {}, {} {}", module, reason, _reserved);
+            // DO NOT TRY AND LOG HERE, IT WILL CAUSE A CRASH
         }
         DLL_THREAD_DETACH => {
-            // info!("DllMain: DLL_THREAD_DETACH: {}, {} {}", module, reason, _reserved);
+            // DO NOT TRY AND LOG HERE, IT WILL CAUSE A CRASH
         }
         _ => {
-            // info!("DllMain: Unknown: {}, {} {}", module, reason, _reserved);
         }
     }
     1

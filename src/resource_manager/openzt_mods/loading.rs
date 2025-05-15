@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use bf_configparser::ini::{Ini, WriteOptions};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tracing::info;
 
 use crate::{
@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// Used to ensure mod_ids don't clash, a mod will not load if an id is already in this map
-static MOD_ID_SET: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static MOD_ID_SET: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
 /// Tries to add a new mod id to the set, returns false if the mod_id already exists
 pub fn add_new_mod_id(mod_id: &str) -> bool {
