@@ -115,12 +115,6 @@ impl fmt::Display for ZTEntity {
 }
 
 #[derive(Debug)]
-struct BFTilePtr {
-    ptr: u32,
-    padding: [u8; 0x8], // TODO: This might just be a linked list, hence the 0xc size so a more generic datatype might be useful
-}
-
-#[derive(Debug)]
 #[repr(C)]
 pub struct ZTWorldMgr {
     padding_1: [u8; 0x34],
@@ -171,6 +165,14 @@ pub enum Direction {
 
 impl ZTWorldMgr {
     pub fn get_neighbour(&self, bftile: &BFTile, direction: Direction) -> Option<BFTile> {
+        if let Some(index) = self.inner_get_neighbour(bftile, direction) {
+            let bftile = get_from_memory::<BFTile>(index);
+            return Some(bftile);
+        }
+        None
+    }
+
+    fn inner_get_neighbour(&self, bftile: &BFTile, direction: Direction) -> Option<u32> {
         let x_offset: i32 = match direction {
             Direction::West => 0,
             Direction::NorthWest => 1,
@@ -199,7 +201,7 @@ impl ZTWorldMgr {
             return None;
         }
 
-        Some(get_from_memory::<BFTile>(self.tile_array + (((y as u32 * self.map_x_size) + x as u32) * 0x8c_u32)))
+        Some(self.tile_array + (((y as u32 * self.map_x_size) + x as u32) * 0x8c_u32))
     }
 }
 
@@ -215,30 +217,7 @@ pub mod hooks_ztworldmgr {
         let ztwm = read_zt_world_mgr_from_global();
         let bftile = get_from_memory::<BFTile>(bftile);
         let direction = Direction::from(direction);
-        let reimplemented_result = ztwm.get_neighbour(&bftile, direction);
-        // TODO: Remove below checks once we are confident in the reimplementation
-        if let Some(neighbour) = reimplemented_result  {
-            if result != 0 {
-                let result_bf_tile = get_from_memory::<BFTile>(result);
-                // info!("BFMap::getNeighbor result: {:#x} -> {}", result, result_bf_tile);
-                // info!("BFMap::getNeighbor reimplemented result: {}", neighbour);
-                if result_bf_tile.x != neighbour.x || result_bf_tile.y != neighbour.y {
-                    error!("BFMap::getNeighbor result: {} {} -> {} {}", result_bf_tile.x, result_bf_tile.y, neighbour.x, neighbour.y);
-                }
-            } else {
-                error!("BFMap::getNeighbor result: None; reimplemented result: {} {}", neighbour.x, neighbour.y);
-            }
-            
-        } else if result != 0 {
-            let result_bf_tile = get_from_memory::<BFTile>(result);
-            error!("BFMap::getNeighbor result: None; original result: {:#x} -> {:#x} ({} {})", result, get_from_memory::<u32>(result), result_bf_tile.x, result_bf_tile.y);
-        }
-        // if result != reimplemented_result {
-        //     error!("BFMap::getNeighbor result: {:#x} -> {:#x}", result, reimplemented_result);
-        // }
-
-        result
-
+        ztwm.inner_get_neighbour(&bftile, direction).unwrap_or_default()
     }    
 }
 

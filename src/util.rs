@@ -4,6 +4,7 @@ use tracing::debug;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS};
 
+// TODO: Test replacing most uses of get_from_memory with map_from_memory : Unclear if we need mem::forget each reference afterwards?
 pub fn map_from_memory<T>(address: u32) -> &'static mut T {
     unsafe { transmute::<u32, &mut T>(address) }
 }
