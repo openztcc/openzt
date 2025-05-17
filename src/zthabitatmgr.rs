@@ -221,6 +221,27 @@ fn command_get_zt_habitats(_args: Vec<&str>) -> Result<String, CommandError> {
     Ok(result_string)
 }
 
+#[hook_module("zoo.exe")]
+pub mod hooks_zthabitatmgr {
+    use super::*;
+
+    // 00410349 BFTile * __thiscall OOAnalyzer::ZTHabitat::getGateTileIn(ZTHabitat *this)
+    #[hook(unsafe extern "thiscall" ZTHabitat_get_gate_tile_in, offset = 0x00010349)]
+    fn get_gate_tile_in(_this: u32) -> u32 {
+        let habitat = get_from_memory::<ZTHabitat>(_this);
+        match habitat.get_gate_tile_in() {
+            Some(tile) => {
+                read_zt_world_mgr_from_global().get_ptr_from_bftile(&tile)
+            }
+            None => {
+                0
+            }
+        }
+    }
+
+    
+}
+
 pub fn init() {
     add_to_command_register("get_zthabitatmgr".to_owned(), command_get_zt_habitat_mgr);
     add_to_command_register("list_exhibits".to_string(), command_get_zt_habitats);

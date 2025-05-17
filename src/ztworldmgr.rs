@@ -165,14 +165,6 @@ pub enum Direction {
 
 impl ZTWorldMgr {
     pub fn get_neighbour(&self, bftile: &BFTile, direction: Direction) -> Option<BFTile> {
-        if let Some(index) = self.inner_get_neighbour(bftile, direction) {
-            let bftile = get_from_memory::<BFTile>(index);
-            return Some(bftile);
-        }
-        None
-    }
-
-    fn inner_get_neighbour(&self, bftile: &BFTile, direction: Direction) -> Option<u32> {
         let x_offset: i32 = match direction {
             Direction::West => 0,
             Direction::NorthWest => 1,
@@ -201,7 +193,13 @@ impl ZTWorldMgr {
             return None;
         }
 
-        Some(self.tile_array + (((y as u32 * self.map_x_size) + x as u32) * 0x8c_u32))
+        Some(get_from_memory::<BFTile>(self.tile_array + (((y as u32 * self.map_x_size) + x as u32) * 0x8c_u32)))
+    }
+
+    pub fn get_ptr_from_bftile(&self, bftile: &BFTile) -> u32 {
+        let x = bftile.x;
+        let y = bftile.y;
+        self.tile_array + ((y * self.map_x_size + x) * 0x8c)
     }
 }
 
@@ -213,11 +211,18 @@ pub mod hooks_ztworldmgr {
     #[hook(unsafe extern "thiscall" BFMap_get_neighbour, offset = 0x00032236)]
     fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
         // info!("BFMap::getNeighbor called with params: {:#x}, {:#x}, {:?}", _this, bftile, direction);
-        let result = unsafe { BFMap_get_neighbour.call(_this, bftile, direction) };
+        // let result = unsafe { BFMap_get_neighbour.call(_this, bftile, direction) };
         let ztwm = read_zt_world_mgr_from_global();
         let bftile = get_from_memory::<BFTile>(bftile);
         let direction = Direction::from(direction);
-        ztwm.inner_get_neighbour(&bftile, direction).unwrap_or_default()
+        match ztwm.get_neighbour(&bftile, direction) {
+            Some(neighbour) => {
+                ztwm.get_ptr_from_bftile(&neighbour)
+            }
+            None => {
+                0
+            }
+        }
     }    
 }
 
