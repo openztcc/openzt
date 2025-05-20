@@ -79,7 +79,7 @@ pub struct BFEntityType {
     pad9: [u8; 0x098 - 0x084],        // ----------------------- padding: 20 bytes
     pub zt_type: ZTBoundedString,     // 0x098
     pub zt_sub_type: ZTBoundedString, // 0x0A4
-    pad10: [u8; 0x0B4 - 0x0B0],       // ----------------------- padding: 4 bytes
+    pad10: [u8; 0x0B4 - 0x0A8],       // ----------------------- padding: 4 bytes
     pub footprintx: i32,              // 0x0B4
     pub footprinty: i32,              // 0x0B8
     pub footprintz: i32,              // 0x0BC

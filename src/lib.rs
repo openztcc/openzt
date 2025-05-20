@@ -66,6 +66,7 @@ mod experimental;
 /// Patches in the current OpenZT build version into the game's version string.
 mod version;
 
+// TODO: Move this to resource_manager/openzt_mods
 /// OpenZT mod structs
 mod mods;
 

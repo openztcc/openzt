@@ -6,12 +6,13 @@ use tracing::{error, info};
 use retour_utils::hook_module;
 
 use crate::{
-    bfentitytype::{read_zt_entity_type_from_memory, ZTEntityType, ZTSceneryType},
+    bfentitytype::{read_zt_entity_type_from_memory, BFEntityType, ZTEntityType, ZTSceneryType},
     command_console::{add_to_command_register, CommandError},
     util::{get_from_memory, get_string_from_memory, map_from_memory},
 };
 use crate::util::{ZTArray, ZTBoundedString, ZTString, ZTStringPtr, ZTBufferString};
 use crate::ztmapview::BFTile;
+use crate::bfentitytype::ZTEntityTypeClass;
 
 const GLOBAL_ZTWORLDMGR_ADDRESS: u32 = 0x00638040;
 
@@ -50,12 +51,22 @@ pub struct ZTEntity {
     pos2: u32,
 }
 
-impl ZTEntity {
-    pub fn is_on_tile(&self, tile: &BFTile) -> bool {
-        // BFEntity::getFootprint
-        false
+#[repr(C)]
+pub struct Footprint {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+impl fmt::Display for Footprint {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Footprint {{ x: {}, y: {}, z: {} }}", self.x, self.y, self.z)
     }
 }
+
+// zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
+// zt_sub_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0xa4)),
+// bf_config_file_ptr: get_from_memory::<u32>(zt_entity_type_ptr + 0x80),
 
 #[derive(Debug, Getters)]
 #[get = "pub"]
@@ -68,10 +79,10 @@ pub struct BFEntity {
     y_coord: u32,           // 0x118   
     z_coord: u32,           // 0x11c
     height_above_terrain: u32, // 0x120
-    padding2: [u8; 0x4],    // ----- padding: 4 bytes
+    padding4: [u8; 0x4],    // ----- padding: 4 bytes
     inner_class_ptr: u32,   // 0x128
-    rotation: u32,          // 0x12c
-    padding3: [u8; 0x14],    // ----- padding: 28 bytes
+    rotation: i32,          // 0x12c
+    padding5: [u8; 0x14],    // ----- padding: 28 bytes
     unknown_flag1: u8,    // 0x13c // isRemoved
     unknown_flag2: u8,    // 0x13d // isRemovedUndo
     unknown_flag3: u8,    // 0x13e
@@ -83,6 +94,43 @@ pub struct BFEntity {
     draw_dithered: u8, // 0x144
     unknown_flag6: u8, // 0x145 // If != 0; Draw selection graphic
     stop_at_end: u8, // 0x146
+}
+
+impl BFEntity {
+    pub fn entity_type_class(&self) -> ZTEntityTypeClass {
+        ZTEntityTypeClass::from(self.inner_class_ptr)
+    }
+
+    pub fn entity_type(&self) -> BFEntityType {
+        get_from_memory(self.inner_class_ptr)
+    }
+
+    pub fn is_on_tile(&self, tile: &BFTile) -> bool {
+        // BFEntity::getBlockRect
+        // BFEntity::getFootprint
+        false
+    }
+
+    // pub fn get_blocking_rect(&self) -> (i32, i32, i32, i32) {
+        
+    // }
+
+    pub fn get_footprint(&self) -> Footprint {
+        let entity_type = self.entity_type();
+        if self.rotation % 4 == 0 {
+            return Footprint {
+                x: entity_type.footprintx,
+                y: entity_type.footprinty,
+                z: entity_type.footprintz,
+            };
+        } else {
+            return Footprint {
+                x: entity_type.footprinty,
+                y: entity_type.footprintx,
+                z: entity_type.footprintz,
+            };
+        }
+    }
 }
 
 // ZTAnimal -> 0x3a6 = animalDying
@@ -148,7 +196,7 @@ impl fmt::Display for ZTWorldMgr {
     }
 }
 
-// TODO: Move to a more general crate
+// TODO: Move to util or better named crate
 #[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
 #[repr(u32)]
 pub enum Direction {
@@ -205,7 +253,8 @@ impl ZTWorldMgr {
 
 #[hook_module("zoo.exe")]
 pub mod hooks_ztworldmgr {
-    //00432236 int __thiscall OOAnalyzer::BFMap::getNeighbor(BFMap *this,BFTile *param_1,EDirection param_2)
+    use crate::util::save_to_memory;
+
     use super::*;
 
     #[hook(unsafe extern "thiscall" BFMap_get_neighbour, offset = 0x00032236)]
@@ -224,6 +273,18 @@ pub mod hooks_ztworldmgr {
             }
         }
     }    
+
+    // 0x0040f916 int * __thiscall OOAnalyzer::BFEntity::getFootprint(BFEntity *this,undefined4 *param_1)
+    #[hook(unsafe extern "thiscall" BFEntity_get_footprint, offset = 0x0000f916)]
+    fn bfentity_get_footprint(_this: u32, param_1: u32, param_2: u32) -> u32 {
+        let entity = get_from_memory::<BFEntity>(_this);
+        let footprint = entity.get_footprint();
+        save_to_memory(param_1, footprint.x);
+        save_to_memory(param_1 + 0x4, footprint.y);
+        save_to_memory(param_1 + 0x8, footprint.z);
+
+        param_1
+    }
 }
 
 pub fn init() {

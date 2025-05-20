@@ -6,7 +6,7 @@ use retour_utils::hook_module;
 use crate::{bfentitytype::ZTEntityTypeClass, util::get_from_memory};
 use crate::util::save_to_memory;
 use crate::zthabitatmgr::read_zt_habitat_mgr_from_memory;
-use crate::ztworldmgr::ZTEntity;
+use crate::ztworldmgr::{BFEntity, ZTEntity};
 // use crate::{
 //     util::get_from_memory,
 // };
@@ -70,7 +70,7 @@ pub mod zoo_ztmapview {
     #[hook(unsafe extern "thiscall" ZTMapView_check_tank_placement, offset = 0x000df688)]
     // fn check_tank_placement(ZTMapView *other_this, BFEntity *param_2, BFTile *param_3, int *param_4)
     fn check_tank_placement(_this: u32, temp_entity: u32, tile: u32, response_ptr: *mut u32) -> u32 {
-        let entity = read_zt_entity_from_memory(temp_entity);
+        let entity = get_from_memory(temp_entity);
 
         let bf_tile = get_from_memory::<BFTile>(tile);
         
@@ -123,13 +123,13 @@ pub enum ErrorStringId {
 }
 
 impl ZTMapView {
-    pub fn check_tank_placement(&self, temp_entity: &ZTEntity, tile: &BFTile) -> Result<(), ErrorStringId> {
+    pub fn check_tank_placement(&self, temp_entity: &BFEntity, tile: &BFTile) -> Result<(), ErrorStringId> {
         let habitat_mgr = read_zt_habitat_mgr_from_memory();
         let Some(habitat) = habitat_mgr.get_habitat(tile.x, tile.y) else {
             return Ok(());
         };
-        let entity_class = temp_entity.type_class().class();
-        if entity_class != &ZTEntityTypeClass::Keeper {
+        let entity_class = temp_entity.entity_type_class();
+        if entity_class != ZTEntityTypeClass::Keeper {
             if let Some(t) = habitat.get_gate_tile_in() {
                 if temp_entity.is_on_tile(&t) {
                     return Err(ErrorStringId::ObjectTooCloseToLadderOrPlatform);

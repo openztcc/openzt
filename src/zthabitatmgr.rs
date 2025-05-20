@@ -1,6 +1,7 @@
 use nt_time::{FileTime, time::OffsetDateTime};
 use tracing::info;
 use std::fmt;
+use retour_utils::hook_module;
 
 use getset::{Getters, Setters};
 
