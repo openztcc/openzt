@@ -64,6 +64,14 @@ impl fmt::Display for Footprint {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Rectangle {
+    pub min_x: i32,
+    pub min_y: i32,
+    pub max_x: i32,
+    pub max_y: i32,
+}
+
 // zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
 // zt_sub_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0xa4)),
 // bf_config_file_ptr: get_from_memory::<u32>(zt_entity_type_ptr + 0x80),
@@ -111,9 +119,45 @@ impl BFEntity {
         false
     }
 
-    // pub fn get_blocking_rect(&self) -> (i32, i32, i32, i32) {
+
+    // TODO: This should be a trait? get_footprint is a trait?
+    pub fn get_blocking_rect(&self) -> Rectangle {
+        // Transient entities don't block anything
+        if self.entity_type().is_transient {
+            return Rectangle::default(); // Zero rectangle
+        }
         
-    // }
+        // Get the base footprint size via the vtable
+        // let get_footprint = self.vtable + 0x24;
+        // let mut footprint = self.get_footprint();
+
+        let footprint = self.vtable_get_footprint();
+        
+        // // Adjust dimensions if entity is rotated 90 or 270 degrees
+        // // This is a simplification of the original rotation handling
+        // if self.rotation % 180 != 0 {
+        //     // Swap width and height for 90° or 270° rotations
+        //     std::mem::swap(&mut footprint.width, &mut footprint.height);
+        // }
+        
+        // Calculate half-dimensions for easier rectangle construction
+        let half_width = (footprint.x * 32) / 2;  // Scaling factor preserved from original
+        let half_height = (footprint.y * 32) / 2;
+        
+        // Construct and return the rectangle
+        Rectangle {
+            min_x: self.x_coord as i32 - half_width,
+            min_y: self.y_coord as i32 - half_height,
+            max_x: self.x_coord as i32 + half_width,
+            max_y: self.y_coord as i32 + half_height,
+        }
+    }
+
+    fn vtable_get_footprint(&self) -> Footprint {
+        let get_footprint_fn: fn() -> u32 = unsafe { std::mem::transmute(self.vtable + 0x24) };
+        let footprint_ptr = get_footprint_fn();
+        get_from_memory::<Footprint>(footprint_ptr)
+    }
 
     pub fn get_footprint(&self) -> Footprint {
         let entity_type = self.entity_type();
@@ -174,7 +218,7 @@ pub struct ZTWorldMgr {
     entity_array_start: u32,
     entity_array_end: u32,
     entity_array_buffer_end: u32,
-    padding_4: [u8; 0x10],
+    padding_4: [u8; 0xc],
     entity_type_array_start: u32,
     entity_type_array_end: u32,
     entity_type_array_buffer_end: u32,
@@ -330,6 +374,29 @@ fn command_get_zt_world_mgr_entities(_args: Vec<&str>) -> Result<String, Command
     Ok(string_array.join("\n"))
 }
 
+fn command_get_entity_unique_vtable_entries(args: Vec<&str>) -> Result<String, CommandError> {
+    if args.len() != 1 {
+        return Err(CommandError::InvalidArguments);
+    }
+    let zt_world_mgr = read_zt_world_mgr_from_global();
+    let entities = get_zt_world_mgr_entities(&zt_world_mgr);
+    let entity_name_to_func_addr_map = entities
+        // .iter()
+        // .filter(|entity| entity.name == args[0])
+        // .map(|entity| {
+        //     let vtable = entity.type_class.vtable;
+        //     let func_addr = get_from_memory::<u32>(vtable + 0x24);
+        //     (entity.name.clone(), func_addr)
+        // })
+        // .collect::<Vec<_>>();
+
+
+
+    // let entity_type = get_entity_type_by_id(args[0].parse::<u32>().unwrap());
+    // info!("Found entity type {}", entity_type);
+    // Ok(entity_type.to_string())
+}
+
 fn command_get_zt_world_mgr_types(_args: Vec<&str>) -> Result<String, CommandError> {
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let types = get_zt_world_mgr_types(&zt_world_mgr);
@@ -399,7 +466,7 @@ fn get_zt_world_mgr_types(zt_world_mgr: &ZTWorldMgr) -> Vec<ZTEntityType> {
     let mut entity_types: Vec<ZTEntityType> = Vec::new();
     let mut i = entity_type_array_start;
     while i < entity_type_array_end {
-        info!("Reading entity at {:#x}; end {:#x}", i, entity_type_array_end);
+        info!("Reading entity at {:#x} -> {:#x}", i, get_from_memory::<u32>(i));
         let zt_entity_type = read_zt_entity_type_from_memory(get_from_memory::<u32>(i));
         entity_types.push(zt_entity_type);
         i += 0x4;
