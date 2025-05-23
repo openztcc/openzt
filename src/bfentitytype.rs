@@ -1691,7 +1691,7 @@ pub enum ZTEntityTypeClass {
 #[derive(Debug, Getters)]
 #[get = "pub"]
 pub struct ZTEntityType {
-    pub ptr: u32,
+    pub vtable: u32,
     pub class_string: u32,
     pub class: ZTEntityTypeClass,
     pub zt_type: String,
@@ -1728,7 +1728,7 @@ pub fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZTEntityType 
     let class = ZTEntityTypeClass::from(class_string);
 
     ZTEntityType {
-        ptr: zt_entity_type_ptr,
+        vtable: zt_entity_type_ptr,
         class_string,
         class,
         zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
@@ -1742,7 +1742,7 @@ impl fmt::Display for ZTEntityType {
         write!(
             f,
             "Class String: {:#x}, Class: {:?}, ZT Type: {}, ZT Sub Type: {}, ptr {:#x}, config_file_ptr {:#x}",
-            self.class_string, self.class, self.zt_type, self.zt_sub_type, self.ptr, self.bf_config_file_ptr
+            self.class_string, self.class, self.zt_type, self.zt_sub_type, self.vtable, self.bf_config_file_ptr
         )
     }
 }

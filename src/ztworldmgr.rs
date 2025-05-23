@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt};
-
+use std::str::FromStr;
 use getset::Getters;
+use itertools::Itertools;
 use num_enum::FromPrimitive;
 use tracing::{error, info};
 use retour_utils::hook_module;
@@ -43,6 +44,7 @@ pub enum ZTEntityClass {
 #[get = "pub"]
 #[repr(C)]
 pub struct ZTEntity {
+    vtable: u32,
     // Technically, the first 0x154 bytes are BFEntity, should grab what Eric started doing in his PR and embed BFEntity here
     class: ZTEntityClass,
     type_class: ZTEntityType, // TODO: Change to &ZTEntityType at some point?
@@ -320,7 +322,7 @@ pub mod hooks_ztworldmgr {
 
     // 0x0040f916 int * __thiscall OOAnalyzer::BFEntity::getFootprint(BFEntity *this,undefined4 *param_1)
     #[hook(unsafe extern "thiscall" BFEntity_get_footprint, offset = 0x0000f916)]
-    fn bfentity_get_footprint(_this: u32, param_1: u32, param_2: u32) -> u32 {
+    fn bfentity_get_footprint(_this: u32, param_1: u32, _: u32) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         let footprint = entity.get_footprint();
         save_to_memory(param_1, footprint.x);
@@ -343,6 +345,7 @@ pub fn read_zt_entity_from_memory(zt_entity_ptr: u32) -> ZTEntity {
     let inner_class_ptr = get_from_memory::<u32>(zt_entity_ptr + 0x128);
 
     ZTEntity {
+        vtable: get_from_memory::<u32>(zt_entity_ptr),
         class: ZTEntityClass::from(get_from_memory::<u32>(zt_entity_ptr)),
         type_class: read_zt_entity_type_from_memory(inner_class_ptr),
         name: get_string_from_memory(get_from_memory::<u32>(zt_entity_ptr + 0x108)),
@@ -376,25 +379,32 @@ fn command_get_zt_world_mgr_entities(_args: Vec<&str>) -> Result<String, Command
 
 fn command_get_entity_unique_vtable_entries(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 1 {
-        return Err(CommandError::InvalidArguments);
+        return Err(CommandError::new("Vtable offset required".to_string()));
     }
+    
+    let vtable_offset = match args[0].strip_prefix("0x") {
+        Some(hex_str) => {
+            u32::from_str_radix(hex_str, 16)?
+        }
+        None => {
+            u32::from_str(args[0])?
+        }
+    };
+    
     let zt_world_mgr = read_zt_world_mgr_from_global();
     let entities = get_zt_world_mgr_entities(&zt_world_mgr);
-    let entity_name_to_func_addr_map = entities
-        // .iter()
-        // .filter(|entity| entity.name == args[0])
-        // .map(|entity| {
-        //     let vtable = entity.type_class.vtable;
-        //     let func_addr = get_from_memory::<u32>(vtable + 0x24);
-        //     (entity.name.clone(), func_addr)
-        // })
-        // .collect::<Vec<_>>();
 
+    let mut result = String::new();
+    
+    entities
+        .iter()
+        .map(|entity| (entity.name.clone(), entity.vtable + vtable_offset))
+        .unique_by(|t| t.1)
+        .for_each(|(_name, vfunc_ptr)| {
+            result.push_str(&format!("{} -> {:#x}\n", _name, get_from_memory::<u32>(vfunc_ptr)));
+        });
 
-
-    // let entity_type = get_entity_type_by_id(args[0].parse::<u32>().unwrap());
-    // info!("Found entity type {}", entity_type);
-    // Ok(entity_type.to_string())
+    Ok(result)
 }
 
 fn command_get_zt_world_mgr_types(_args: Vec<&str>) -> Result<String, CommandError> {

@@ -247,6 +247,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "either"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+
+[[package]]
 name = "enable-ansi-support"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -379,6 +385,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0c10553d664a4d0bcff9f4215d0aac67a639cc68ef660840afe309b807bc9f5"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
 ]
 
 [[package]]
@@ -577,11 +592,10 @@ dependencies = [
  "field_accessor_as_string",
  "field_accessor_as_string_trait",
  "getset",
- "log",
+ "itertools",
  "maplit",
  "nt-time",
  "num_enum",
- "once_cell",
  "public",
  "regex",
  "retour",
