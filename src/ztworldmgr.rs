@@ -136,6 +136,7 @@ impl BFEntity {
 
 
     pub fn get_blocking_rect(&self) -> Rectangle {
+        // TODO: We shouldn't need the first check
         // Transient entities don't block anything
         if self.inner_class_ptr == 0 || self.entity_type().is_transient {
             return Rectangle::default(); // Zero rectangle
@@ -364,6 +365,7 @@ pub mod hooks_ztworldmgr {
     // 0x0042721a u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1,int param_2)
     #[hook(unsafe extern "thiscall" BFEntity_get_blocking_rect, offset = 0x0002721a)]
     fn bfentity_get_blocking_rect(_this: u32, param_1: u32) -> u32 {
+        //TODO: Remove superfluous logging and the alrge if, should be handled in the get_blocking_rect implementation
         info!("Actual: {:#x} -> {:#x}", _this, get_from_memory::<u32>(_this));
         let entity_ptr = get_from_memory::<u32>(_this);
         let result = unsafe {
