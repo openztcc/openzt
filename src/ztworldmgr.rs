@@ -129,36 +129,34 @@ impl BFEntity {
     }
 
     pub fn is_on_tile(&self, tile: &BFTile) -> bool {
-        // BFEntity::getBlockRect
-        // BFEntity::getFootprint
+        let Some(entity_tile) = self.get_tile() else {
+            error!("BFEntity::is_on_tile: Entity {} has no tile", self.name);
+            return false;
+        };
+        if entity_tile == *tile {
+            return true;
+        }
+        
+        let rect = self.get_blocking_rect();
+        // BFMap::tileToWorld (put on ZTWorldMgr) -> BFTile::getLocalElevation
         false
     }
-
 
     pub fn get_blocking_rect(&self) -> Rectangle {
         // TODO: We shouldn't need the first check
         // Transient entities don't block anything
-        if self.inner_class_ptr == 0 || self.entity_type().is_transient {
+        if self.inner_class_ptr == 0 || self.entity_type().is_transient || self.entity_type_class() == ZTEntityTypeClass::Path {
             return Rectangle::default(); // Zero rectangle
         }
         
         let mut footprint = self.vtable_get_footprint();
         
         if self.rotation % 2 != 0 {
-            info!("SWAP");
-            // let temp = footprint.x;
-            // footprint.x = footprint.y;
-            // footprint.y = temp;
-            // Try this?
             let max = max(footprint.x, footprint.y);
             footprint.x = max;
             footprint.y = max;
         }
-        // if self.rotation % 180 != 0 {
-        //     // Swap width and height for 90° or 270° rotations
-        //     std::mem::swap(&mut footprint.width, &mut footprint.height);
-        // }
-        
+
         // Calculate half-dimensions for easier rectangle construction
         let half_width = (footprint.x * 32) / 2;  // Scaling factor preserved from original
         let half_height = (footprint.y * 32) / 2;
@@ -173,22 +171,11 @@ impl BFEntity {
     }
 
     fn vtable_get_footprint(&self) -> Footprint {
-        info!("Vtable: {:#x} -> {:p}", get_from_memory::<u32>(self.vtable + 0x94), self);
-        // let unsafe_copy = get_from_memory::<BFEntity>(self as *const BFEntity as u32);
-        // info!("Unsafe copy: {} vs {}", unsafe_copy.inner_class_ptr, self.inner_class_ptr);
-        // return Footprint::default()
         let function_address = get_from_memory::<u32>(self.vtable + 0x94);
-        info!("Get Footprint Function address: {:#x}", function_address);
-        let get_footprint_fn = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(this: &BFEntity, param_1: &Footprint, param_2: u32) -> u32>(function_address) };
+        let get_footprint_fn = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(this: &BFEntity, param_1: &mut Footprint, param_2: u32) -> u32>(function_address) };
         let mut result_footprint = Footprint::default();
-        // let mut result_footprint = [0_u32; 3];
-        // info!("Calling get_footprint_fn with self: {:p}, get_footprint_fn: {:?}", get_footprint_fn, result_footprint);
-        let footprint_ptr = get_footprint_fn(self, &result_footprint, 0_u32);
-        info!("Footprint pointer: {:#x}", footprint_ptr);
-        // let footprint_ptr = get_footprint_fn(self as *const BFEntity as u32, &result_footprint, 0);
-        // let footprint_ptr = get_footprint_fn(helper);
+        let footprint_ptr = get_footprint_fn(self, &mut result_footprint, 0);
         get_from_memory::<Footprint>(footprint_ptr)
-        // return Footprint::default()
     }
 
     pub fn get_footprint(&self) -> Footprint {
@@ -206,6 +193,10 @@ impl BFEntity {
                 z: entity_type.footprintz,
             };
         }
+    }
+    
+    pub fn get_tile(&self) -> Option<BFTile> {
+        read_zt_world_mgr_from_global().get_tile_from_coords(self.x_coord, self.y_coord)
     }
 }
 
@@ -325,6 +316,15 @@ impl ZTWorldMgr {
         let y = bftile.y;
         self.tile_array + ((y * self.map_x_size + x) * 0x8c)
     }
+    
+    pub fn get_tile_from_coords(&self, x_coord: u32, y_coord: u32) -> Option<BFTile> {
+        let x = x_coord >> 6; // Convert to tile coordinates
+        let y = y_coord >> 6; // Convert to tile coordinates
+        if x >= self.map_x_size || y >= self.map_y_size {
+            return None;
+        }
+        Some(get_from_memory::<BFTile>(self.tile_array + ((y * self.map_x_size + x) * 0x8c)))
+    }
 }
 
 #[hook_module("zoo.exe")]
@@ -335,8 +335,6 @@ pub mod hooks_ztworldmgr {
 
     #[hook(unsafe extern "thiscall" BFMap_get_neighbour, offset = 0x00032236)]
     fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
-        // info!("BFMap::getNeighbor called with params: {:#x}, {:#x}, {:?}", _this, bftile, direction);
-        // let result = unsafe { BFMap_get_neighbour.call(_this, bftile, direction) };
         let ztwm = read_zt_world_mgr_from_global();
         let bftile = get_from_memory::<BFTile>(bftile);
         let direction = Direction::from(direction);
@@ -350,81 +348,32 @@ pub mod hooks_ztworldmgr {
         }
     }    
 
-    // // 0x0040f916 int * __thiscall OOAnalyzer::BFEntity::getFootprint(BFEntity *this,undefined4 *param_1)
-    // #[hook(unsafe extern "thiscall" BFEntity_get_footprint, offset = 0x0000f916)]
-    // fn bfentity_get_footprint(_this: u32, param_1: u32, _param_2: u32) -> u32 {
-    //     let entity = get_from_memory::<BFEntity>(_this);
-    //     let footprint = entity.get_footprint();
-    //     save_to_memory(param_1, footprint.x);
-    //     save_to_memory(param_1 + 0x4, footprint.y);
-    //     save_to_memory(param_1 + 0x8, footprint.z);
+    // 0x0040f916 int * __thiscall OOAnalyzer::BFEntity::getFootprint(BFEntity *this,undefined4 *param_1)
+    #[hook(unsafe extern "thiscall" BFEntity_get_footprint, offset = 0x0000f916)]
+    fn bfentity_get_footprint(_this: u32, param_1: u32, _param_2: u32) -> u32 {
+        let entity = get_from_memory::<BFEntity>(_this);
+        let footprint = entity.get_footprint();
+        save_to_memory(param_1, footprint.x);
+        save_to_memory(param_1 + 0x4, footprint.y);
+        save_to_memory(param_1 + 0x8, footprint.z);
 
-    //     param_1
-    // }
+        param_1
+    }
 
-    // 0x0042721a u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1,int param_2)
+    // 0x0042721a u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
     #[hook(unsafe extern "thiscall" BFEntity_get_blocking_rect, offset = 0x0002721a)]
     fn bfentity_get_blocking_rect(_this: u32, param_1: u32) -> u32 {
-        //TODO: Remove superfluous logging and the alrge if, should be handled in the get_blocking_rect implementation
-        info!("Actual: {:#x} -> {:#x}", _this, get_from_memory::<u32>(_this));
-        let entity_ptr = get_from_memory::<u32>(_this);
-        let result = unsafe {
-            BFEntity_get_blocking_rect.call(_this, param_1)
-        };
-        if entity_ptr < 0x400000 {
-            if 0 != get_from_memory(result) || 0 != get_from_memory(result + 0x4)
-                || 0 != get_from_memory(result + 0x8) || 0 != get_from_memory(result + 0xc) {
-                error!("BFEntity::getBlockingRect returned unexpected rectangle: {:#?}", result);
-                return result;
-            }
-            save_to_memory(param_1, 0);
-            save_to_memory(param_1 + 0x4, 0);
-            save_to_memory(param_1 + 0x8, 0);
-            save_to_memory(param_1 + 0xc, 0);
-            param_1
-        } else {
-            let result = unsafe {
-                BFEntity_get_blocking_rect.call(_this, param_1)
-            };
-            let entity = get_from_memory::<BFEntity>(_this);
-            // info!("BFEntity {}", entity);
-            let rect = entity.get_blocking_rect();
-            // info!("Reimplemented {:?}", rect);
-            // save_to_memory(param_1, rect.min_x);
-            // save_to_memory(param_1 + 0x4, rect.min_y);
-            // save_to_memory(param_1 + 0x8, rect.max_x);
-            // save_to_memory(param_1 + 0xc, rect.max_y);
-            // param
-            
-            let result_rect = get_from_memory::<Rectangle>(result);
-            if result_rect.max_x != rect.max_x
-                || result_rect.max_y != rect.max_y
-                || result_rect.min_x != rect.min_x
-                || result_rect.min_y != rect.min_y {
-                error!("BFEntity::getBlockingRect returned unexpected rectangle: {:#?} instead of {:#?}", result_rect, rect);
-            }
-            result
-            // get_from_memory::<u32>(_this)
-        }
+        let entity = get_from_memory::<BFEntity>(_this);
+        save_to_memory(param_1, entity.get_blocking_rect());
+        param_1
+    }
 
-        // }
-        // let rect = entity.get_blocking_rect();
-        // info!("Reimplemented {:?}", rect);
-        
-        // let result_rect = get_from_memory::<Rectangle>(result);
-        // if result_rect.max_x != rect.max_x
-        //     || result_rect.max_y != rect.max_y
-        //     || result_rect.min_x != rect.min_x
-        //     || result_rect.min_y != rect.min_y {
-        //     error!("BFEntity::getBlockingRect returned unexpected rectangle: {:#?} instead of {:#?}", result_rect, rect);
-        // }
-        // save_to_memory(param_1, rect.min_x);
-        // save_to_memory(param_1 + 0x4, rect.min_y);
-        // save_to_memory(param_1 + 0x8, rect.max_x);
-        // save_to_memory(param_1 + 0xc, rect.max_y);
-
-        // param_1
-        // result
+    // 0x004fbbee u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
+    #[hook(unsafe extern "thiscall" BFEntity_get_blocking_rect_ztpath, offset = 0x000fbbee)]
+    fn bfentity_get_blocking_rect_ztpath(_this: u32, param_1: u32) -> u32 {
+        let entity = get_from_memory::<BFEntity>(_this);
+        save_to_memory(param_1, entity.get_blocking_rect());
+        param_1
     }
 }
 
