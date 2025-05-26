@@ -39,7 +39,7 @@ impl ZTHabitatMgr {
     // }
 
     pub fn get_habitat_by_tile(&self, tile: &BFTile) -> Option<ZTHabitat> {
-        self.get_habitat(tile.x, tile.y)
+        self.get_habitat(tile.pos.x, tile.pos.y)
     }
 
     pub fn get_habitat(&self, pos_x: u32, pos_y: u32) -> Option<ZTHabitat> {

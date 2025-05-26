@@ -54,27 +54,28 @@ pub struct ZTEntity {
     pos2: u32,
 }
 
+// Move to util or use existing implementation
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Footprint {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
+pub struct Vec3 {
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
 }
 
-impl fmt::Display for Footprint {
+impl fmt::Display for Vec3 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Footprint {{ x: {}, y: {}, z: {} }}", self.x, self.y, self.z)
+        write!(f, "Vec3 {{ x: {}, y: {}, z: {} }}", self.x, self.y, self.z)
     }
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Rectangle {
-    pub min_x: i32,
-    pub min_y: i32,
-    pub max_x: i32,
-    pub max_y: i32,
+    pub min_x: u32,
+    pub min_y: u32,
+    pub max_x: u32,
+    pub max_y: u32,
 }
 
 // zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
@@ -163,31 +164,31 @@ impl BFEntity {
         
         // Construct and return the rectangle
         Rectangle {
-            min_x: self.x_coord as i32 - half_width,
-            min_y: self.y_coord as i32 - half_height,
-            max_x: self.x_coord as i32 + half_width,
-            max_y: self.y_coord as i32 + half_height,
+            min_x: self.x_coord - half_width,
+            min_y: self.y_coord - half_height,
+            max_x: self.x_coord + half_width,
+            max_y: self.y_coord + half_height,
         }
     }
 
-    fn vtable_get_footprint(&self) -> Footprint {
+    fn vtable_get_footprint(&self) -> Vec3 {
         let function_address = get_from_memory::<u32>(self.vtable + 0x94);
-        let get_footprint_fn = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(this: &BFEntity, param_1: &mut Footprint, param_2: u32) -> u32>(function_address) };
-        let mut result_footprint = Footprint::default();
+        let get_footprint_fn = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(this: &BFEntity, param_1: &mut Vec3, param_2: u32) -> u32>(function_address) };
+        let mut result_footprint = Vec3::default();
         let footprint_ptr = get_footprint_fn(self, &mut result_footprint, 0);
-        get_from_memory::<Footprint>(footprint_ptr)
+        get_from_memory::<Vec3>(footprint_ptr)
     }
 
-    pub fn get_footprint(&self) -> Footprint {
+    pub fn get_footprint(&self) -> Vec3 {
         let entity_type = self.entity_type();
         if self.rotation % 4 == 0 {
-            return Footprint {
+            return Vec3 {
                 x: entity_type.footprintx,
                 y: entity_type.footprinty,
                 z: entity_type.footprintz,
             };
         } else {
-            return Footprint {
+            return Vec3 {
                 x: entity_type.footprinty,
                 y: entity_type.footprintx,
                 z: entity_type.footprintz,
@@ -278,6 +279,10 @@ pub enum Direction {
     SouthWest = 7,
 }
 
+const TILE_SIZE: u32 = 0x40; // 64 pixels per tile
+const TILE_STRUCT_SIZE: usize = 0x8c; // Size of BFTile struct
+const ELEVATION_SCALE: u32 = 0x10; // 16 units per elevation level
+
 impl ZTWorldMgr {
     pub fn get_neighbour(&self, bftile: &BFTile, direction: Direction) -> Option<BFTile> {
         let x_offset: i32 = match direction {
@@ -301,20 +306,20 @@ impl ZTWorldMgr {
             Direction::SouthWest => -1,
         };
 
-        let x: i32 = bftile.x as i32 + x_offset;
-        let y: i32 = bftile.y as i32 + y_offset;
+        let x: u32 = bftile.pos.x.checked_add_signed(x_offset)?;
+        let y: u32 = bftile.pos.y.checked_add_signed(y_offset)?;
 
-        if x < 0 || x >= self.map_x_size as i32 || y < 0 || y >= self.map_y_size as i32 {
+        if x >= self.map_x_size || y >= self.map_y_size {
             return None;
         }
 
-        Some(get_from_memory::<BFTile>(self.tile_array + (((y as u32 * self.map_x_size) + x as u32) * 0x8c_u32)))
+        Some(get_from_memory::<BFTile>(self.tile_array + (((y * self.map_x_size) + x) * 0x8c_u32)))
     }
 
     pub fn get_ptr_from_bftile(&self, bftile: &BFTile) -> u32 {
-        let x = bftile.x;
-        let y = bftile.y;
-        self.tile_array + ((y * self.map_x_size + x) * 0x8c)
+        let x = bftile.pos.x;
+        let y = bftile.pos.y;
+        (self.tile_array + ((y * self.map_x_size + x) * 0x8c)).try_into().unwrap()
     }
     
     pub fn get_tile_from_coords(&self, x_coord: u32, y_coord: u32) -> Option<BFTile> {
@@ -324,6 +329,30 @@ impl ZTWorldMgr {
             return None;
         }
         Some(get_from_memory::<BFTile>(self.tile_array + ((y * self.map_x_size + x) * 0x8c)))
+    }
+
+    pub fn tile_to_world(&self, tile_pos: Vec3, local_pos: Vec3) -> Vec3 {
+        let tile_x = tile_pos.x;
+        let tile_y = tile_pos.y;
+        
+        // Get the tile at the specified position, if it exists and is within bounds
+        let tile = self.get_tile_from_coords(tile_x as u32, tile_y as u32);
+        
+        // Calculate elevation based on tile data
+        let world_z = match tile {
+            Some(tile_ref) => {
+                let local_elevation = tile_ref.get_local_elevation(local_pos);
+                local_elevation + tile_ref.pos.z * ELEVATION_SCALE
+            }
+            None => 0,
+        };
+        
+        // Convert tile coordinates to world coordinates
+        Vec3 {
+            x: tile_x * TILE_SIZE + local_pos.x,
+            y: tile_y * TILE_SIZE + local_pos.y,
+            z: world_z,
+        }
     }
 }
 
@@ -374,6 +403,24 @@ pub mod hooks_ztworldmgr {
         let entity = get_from_memory::<BFEntity>(_this);
         save_to_memory(param_1, entity.get_blocking_rect());
         param_1
+    }
+
+    //0040f26c int * __thiscall OOAnalyzer::BFMap::tileToWorld(BFMap *this,BFPos *param_1,BFPos *param_2,int *param_3)
+    #[hook(unsafe extern "thiscall" BFMap_tile_to_world, offset = 0x0000f26c)]
+    fn bfmap_tile_to_world(_this: u32, param_1: u32, param_2: u32, param_3: u32) -> u32 {
+        let result = unsafe { BFMap_tile_to_world.call(_this, param_1, param_2, param_3) };
+        let input_vec = get_from_memory::<Vec3>(param_2);
+        let input_vec_2 = get_from_memory::<Vec3>(param_3);
+        let result_vec = get_from_memory::<Vec3>(result);
+        info!("BFMap::tileToWorld result: {} {} -> {}", input_vec, input_vec_2, result_vec);
+        result
+        // let ztwm = read_zt_world_mgr_from_global();
+        // let bftile = get_from_memory::<BFTile>(param_1);
+        // let world_pos = ztwm.get_ptr_from_bftile(&bftile);
+        // save_to_memory(param_2, world_pos);
+        // save_to_memory(param_3, bftile.x);
+        // save_to_memory(param_3 + 0x4, bftile.y);
+        // param_3
     }
 }
 

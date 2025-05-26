@@ -6,7 +6,7 @@ use retour_utils::hook_module;
 use crate::{bfentitytype::ZTEntityTypeClass, util::get_from_memory};
 use crate::util::save_to_memory;
 use crate::zthabitatmgr::read_zt_habitat_mgr_from_memory;
-use crate::ztworldmgr::{BFEntity, ZTEntity};
+use crate::ztworldmgr::{BFEntity, ZTEntity, Vec3};
 // use crate::{
 //     util::get_from_memory,
 // };
@@ -42,20 +42,19 @@ use crate::ztworldmgr::{BFEntity, ZTEntity};
 #[repr(C)]
 pub struct BFTile {
     padding: [u8; 0x34],
-    pub x: u32, // 0x034
-    pub y: u32, // 0x038
-    padding_2: [u8; 0x50], // Full size 0x8c
+    pub pos: Vec3, // 0x034 + 0xc
+    padding_2: [u8; 0x4c], // Full size 0x8c
 }
 
 impl PartialEq for BFTile {
     fn eq(&self, other: &Self) -> bool {
-        self.x == other.x && self.y == other.y
+        self.pos.x == other.pos.x && self.pos.y == other.pos.y
     }
 }
 
 impl fmt::Display for BFTile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "BFTile {{ x: {}, y: {} }}", self.x, self.y)
+        write!(f, "BFTile {{ x: {}, y: {} }}", self.pos.x, self.pos.y)
     }
 }
 
@@ -131,7 +130,7 @@ pub enum ErrorStringId {
 impl ZTMapView {
     pub fn check_tank_placement(&self, temp_entity: &BFEntity, tile: &BFTile) -> Result<(), ErrorStringId> {
         let habitat_mgr = read_zt_habitat_mgr_from_memory();
-        let Some(habitat) = habitat_mgr.get_habitat(tile.x, tile.y) else {
+        let Some(habitat) = habitat_mgr.get_habitat(tile.pos.x, tile.pos.y) else {
             return Ok(());
         };
         let entity_class = temp_entity.entity_type_class();
