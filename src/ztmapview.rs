@@ -47,6 +47,12 @@ pub struct BFTile {
     padding_2: [u8; 0x50], // Full size 0x8c
 }
 
+impl PartialEq for BFTile {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
 impl fmt::Display for BFTile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "BFTile {{ x: {}, y: {} }}", self.x, self.y)
