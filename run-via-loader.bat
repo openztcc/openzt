@@ -12,6 +12,6 @@ if %errorlevel% neq 0 (
 
 del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\lang301-openzt.dll"
 
-"../openzt-loader/target/i686-pc-windows-msvc/release/openzt-loader.exe" --dll-path="target/i686-pc-windows-msvc/debug/openzt.dll" --listen --resume
+"../openzt-loader/target/i686-pc-windows-msvc/release/openzt-loader.exe" --dll-path="target/i686-pc-windows-msvc/debug/openzt.dll" --resume
 
 pause

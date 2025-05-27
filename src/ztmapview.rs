@@ -6,7 +6,7 @@ use retour_utils::hook_module;
 use crate::{bfentitytype::ZTEntityTypeClass, util::get_from_memory};
 use crate::util::save_to_memory;
 use crate::zthabitatmgr::read_zt_habitat_mgr_from_memory;
-use crate::ztworldmgr::{BFEntity, ZTEntity, Vec3};
+use crate::ztworldmgr::{BFEntity, ZTEntity, IVec3};
 // use crate::{
 //     util::get_from_memory,
 // };
@@ -42,8 +42,14 @@ use crate::ztworldmgr::{BFEntity, ZTEntity, Vec3};
 #[repr(C)]
 pub struct BFTile {
     padding: [u8; 0x34],
-    pub pos: Vec3, // 0x034 + 0xc
-    padding_2: [u8; 0x4c], // Full size 0x8c
+    pub pos: IVec3, // 0x034 + 0xc
+    padding_2: [u8; 0x40],
+    unknown_byte_1: u8, // 0x080
+    pub unknown_byte_2: u8, // 0x081
+    unknown_byte_3: u8, // 0x082
+    unknown_byte_4: u8, // 0x083
+    unknown_byte_5: u8, // 0x084
+    padding_3: [u8; 0x8], // Full size 0x8c
 }
 
 impl PartialEq for BFTile {
@@ -58,11 +64,136 @@ impl fmt::Display for BFTile {
     }
 }
 
+impl BFTile {
+    pub fn get_local_elevation(&self, pos: IVec3) -> i32 {
+    // Helper function to perform integer division by 64
+    // Equivalent to: 16 * val / 64
+    fn scale_and_divide(val: i32) -> i32 {
+        16 * val / 64
+    }
+
+    // Helper function for negative scaling with proper rounding
+    // Equivalent to: ((((-16 * val) >> 31) & 0x3F) - 16 * val) >> 6
+    fn negative_scale_and_divide(val: i32) -> i32 {
+        let neg_scaled = -16 * val;
+        ((neg_scaled >> 31) & 0x3f + neg_scaled) >> 6
+    }
+
+    let x = pos.x;
+    let y = pos.y;
+
+    match self.unknown_byte_2 {
+        0x1 => {
+            if 64 - x > y {
+                // LABEL_12: return 16 * (-x) / 64 - 16 * y / 64
+                scale_and_divide(-x) - scale_and_divide(y)
+            } else {
+                -16
+            }
+        }
+
+        0x4 => {
+            if x >= y {
+                0
+            } else {
+                scale_and_divide(y) - scale_and_divide(x)
+            }
+        }
+
+        0x5 => negative_scale_and_divide(x),
+
+        0x10 => {
+            if 64 - x >= y {
+                0
+            } else {
+                scale_and_divide(y) + scale_and_divide(x) - 16
+            }
+        }
+
+        0x11 => {
+            if 64 - x <= y {
+                scale_and_divide(y) + scale_and_divide(x) - 32
+            } else {
+                // LABEL_12: return 16 * (-x) / 64 - 16 * y / 64
+                scale_and_divide(-x) - scale_and_divide(y)
+            }
+        }
+
+        0x14 => scale_and_divide(y),
+
+        0x15 => {
+            if x <= y {
+                0
+            } else {
+                scale_and_divide(y) - scale_and_divide(x)
+            }
+        }
+
+        0x19 => scale_and_divide(y) - scale_and_divide(x),
+
+        0x40 => {
+            if x <= y {
+                0
+            } else {
+                // LABEL_17: return 16 * x / 64 - 16 * y / 64
+                scale_and_divide(x) - scale_and_divide(y)
+            }
+        }
+
+        0x41 => negative_scale_and_divide(y),
+
+        0x44 => {
+            if x >= y {
+                // LABEL_17: return 16 * x / 64 - 16 * y / 64
+                scale_and_divide(x) - scale_and_divide(y)
+            } else {
+                scale_and_divide(y) - scale_and_divide(x)
+            }
+        }
+
+        0x45 => {
+            if 64 - x >= y {
+                0
+            } else {
+                negative_scale_and_divide(x) - scale_and_divide(y) + 16
+            }
+        }
+
+        0x46 => scale_and_divide(-x) - scale_and_divide(y),
+
+        0x50 => scale_and_divide(x),
+
+        0x51 => {
+            if x >= y {
+                0
+            } else {
+                // LABEL_17: return 16 * x / 64 - 16 * y / 64
+                scale_and_divide(x) - scale_and_divide(y)
+            }
+        }
+
+        0x54 => {
+            if 64 - x > y {
+                scale_and_divide(x) + scale_and_divide(y)
+            } else {
+                16
+            }
+        }
+
+        0x64 => scale_and_divide(x) + scale_and_divide(y), // Note: was 100 in original, but 0x64 = 100
+
+        0x91 => scale_and_divide(x) - scale_and_divide(y),
+
+        _ => 0,
+    }
+    }
+}
+
 #[hook_module("zoo.exe")]
 pub mod zoo_ztmapview {
-    use tracing::info;
+    use tracing::{error, info};
     use crate::zthabitatmgr::{ZTHabitatMgr, read_zt_habitat_mgr_from_memory};
-    use crate::ztworldmgr::read_zt_entity_from_memory;
+    use crate::ztworldmgr::{read_zt_entity_from_memory, IVec3};
     use crate::util::get_from_memory;
     use crate::ztmapview::{BFTile, ZTMapView};
 
@@ -98,6 +229,17 @@ pub mod zoo_ztmapview {
     //     info!("BFUIMgr::displayMessage called with params: {}, {}, {}, {}, {}, {}", param_1, param_2, param_3, param_4, param_5, param_6);
     //     unsafe { BFUIMgr_display_message.call(_this_prt, param_1, param_2, param_3, param_4, param_5, param_6) };
     // }
+
+    // 0040f24d int __thiscall OOAnalyzer::BFTile::getLocalElevation(BFTile *this,BFPos *param_1)
+    #[hook(unsafe extern "thiscall" BFTile_get_local_elevation, offset = 0x000f24d)]
+    fn get_local_elevation(_this: u32, pos: u32) -> i32 {
+        let tile = get_from_memory::<BFTile>(_this);
+        let pos_vec = get_from_memory::<IVec3>(pos);
+        tile.get_local_elevation(pos_vec)
+    }
+
+
+
 }
 
 pub fn init() {

@@ -80,12 +80,12 @@ pub struct BFEntityType {
     pub zt_type: ZTBoundedString,     // 0x098
     pub zt_sub_type: ZTBoundedString, // 0x0A4
     pad10: [u8; 0x0B4 - 0x0A8],       // ----------------------- padding: 4 bytes
-    pub footprintx: u32,              // 0x0B4
-    pub footprinty: u32,              // 0x0B8
-    pub footprintz: u32,              // 0x0BC
-    pub placement_footprintx: u32,    // 0x0C0
-    pub placement_footprinty: u32,    // 0x0C4
-    pub placement_footprintz: u32,    // 0x0C8
+    pub footprintx: i32,              // 0x0B4
+    pub footprinty: i32,              // 0x0B8
+    pub footprintz: i32,              // 0x0BC
+    pub placement_footprintx: i32,    // 0x0C0
+    pub placement_footprinty: i32,    // 0x0C4
+    pub placement_footprintz: i32,    // 0x0C8
     pub available_at_startup: bool,   // 0x0CC
     pad11: [u8; 0x100 - 0x0CD],       // ----------------------- padding: 35 bytes
 }
