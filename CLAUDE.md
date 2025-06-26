@@ -120,3 +120,6 @@ let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::t
 5. **Resource Handlers**: Register handlers for file types via `resource_manager::add_handler()`
 
 6. **Testing**: Manual testing required - no automated game testing framework exists
+
+## Code Comments
+Avoid adding comments that merely restate what the code is doing or that reference the development process (e.g., "BUG:", "TODO:" unless they're meant to stay). Comments should add value by explaining complex logic or design decisions, not narrate the obvious or temporary state of the code.
