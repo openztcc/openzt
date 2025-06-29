@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use bf_configparser::ini::Ini;
+use openzt_configparser::ini::Ini;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use tracing::{error, info};

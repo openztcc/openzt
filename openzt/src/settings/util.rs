@@ -1,4 +1,4 @@
-use bf_configparser::ini::Ini;
+use openzt_configparser::ini::Ini;
 
 use crate::util::{get_from_memory, save_to_memory};
 

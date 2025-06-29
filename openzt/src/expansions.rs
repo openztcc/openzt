@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use bf_configparser::ini::Ini;
+use openzt_configparser::ini::Ini;
 use maplit::hashset;
 use once_cell::sync::Lazy;
 use retour_utils::hook_module;

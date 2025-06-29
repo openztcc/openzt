@@ -9,7 +9,7 @@ pub fn init_hooks() {
 
 #[hook_module("zoo.exe")]
 mod zoo_resource_mgr {
-    use bf_configparser::ini::Ini;
+    use openzt_configparser::ini::Ini;
     use tracing::info;
 
     use crate::{

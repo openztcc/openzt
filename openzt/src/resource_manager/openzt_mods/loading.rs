@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use bf_configparser::ini::{Ini, WriteOptions};
+use openzt_configparser::ini::{Ini, WriteOptions};
 use once_cell::sync::Lazy;
 use tracing::info;
 

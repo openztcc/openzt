@@ -1,7 +1,7 @@
 use std::{ffi::CString, fmt, path::Path, slice, str};
 
 use anyhow::{anyhow, Context};
-use bf_configparser::ini::{Ini, WriteOptions};
+use openzt_configparser::ini::{Ini, WriteOptions};
 
 use crate::{
     animation::Animation,

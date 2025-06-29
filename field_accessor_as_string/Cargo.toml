@@ -1,7 +1,10 @@
 [package]
 name = "field_accessor_as_string"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [lib]
 proc-macro = true

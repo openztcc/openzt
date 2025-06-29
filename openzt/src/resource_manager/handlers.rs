@@ -1,6 +1,6 @@
 use std::{ffi::CString, path::Path, str, sync::Mutex};
 
-use bf_configparser::ini::{Ini, WriteOptions};
+use openzt_configparser::ini::{Ini, WriteOptions};
 use getset::CopyGetters;
 use once_cell::sync::Lazy;
 use tracing::{error, info, debug};
