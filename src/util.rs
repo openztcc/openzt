@@ -13,6 +13,11 @@ pub fn get_from_memory<T>(address: u32) -> T {
     unsafe { ptr::read(address as *const T) }
 }
 
+pub fn checked_get_from_memory<T: Checkable>(address: u32) -> anyhow::Result<T> {
+    T::check(address)?;
+    Ok(unsafe { ptr::read(address as *const T) })
+}
+
 pub fn save_to_memory<T>(address: u32, value: T) {
     unsafe { ptr::write(address as *mut T, value) };
 }
@@ -282,4 +287,8 @@ impl<T> ZTArray<T> {
         }
         vec
     }
+}
+
+pub trait Checkable {
+    fn check(ptr: u32) -> anyhow::Result<()>;
 }

@@ -42,7 +42,7 @@ impl ZTHabitatMgr {
         self.get_habitat(tile.pos.x, tile.pos.y)
     }
 
-    // TODO: Should return Option<ZTExhbit> where ZTExhibit is a enum of ZTHabitat or ZTTankExhibit
+    // TODO: Should return Option<ZTExhibit> where ZTExhibit is a enum of ZTHabitat or ZTTankExhibit
     pub fn get_habitat(&self, pos_x: i32, pos_y: i32) -> Option<ZTHabitat> {
         let base_ptr = self.other_array_start;
         let offset_1 = pos_x as u32 * 0xc;
@@ -51,8 +51,6 @@ impl ZTHabitatMgr {
 
         let offset_2 = pos_y as u32 * 0x28;
         let ptr = get_from_memory::<u32>(intermediate_ptr + offset_2);
-
-        info!("Habitat ptr: {:#x}", ptr);
 
         // TODO: Check vtable ptr and return ZTHabitat or ZTTankExhibit?
 

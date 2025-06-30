@@ -424,6 +424,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
 }
 
 fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &ZTEntityType) -> bool {
+    // TODO: ZTEntityType should also be considered when filtering, not just members
     match buy_tab {
         BuyTab::Animal => {
             if !entity.is_member("animals".to_string()) {
@@ -481,7 +482,7 @@ fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &
             }
         }
         BuyTab::Foliage => {
-            if !entity.is_member("foliage".to_string()) {
+            if !entity.is_member("foliage".to_string()) || entity.class == ZTEntityTypeClass::Food {
                 return false;
             }
         }

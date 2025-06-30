@@ -78,6 +78,15 @@ pub struct Rectangle {
     pub max_y: i32,
 }
 
+impl Rectangle {
+    fn contains_point(&self, point: &IVec3) -> bool {
+        point.x >= self.min_x 
+            && point.x <= self.max_x 
+            && point.y >= self.min_y 
+            && point.y <= self.max_y
+    }
+}
+
 // zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),
 // zt_sub_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0xa4)),
 // bf_config_file_ptr: get_from_memory::<u32>(zt_entity_type_ptr + 0x80),
@@ -122,13 +131,15 @@ impl fmt::Display for BFEntity {
 
 impl BFEntity {
     pub fn entity_type_class(&self) -> ZTEntityTypeClass {
-        ZTEntityTypeClass::from(self.inner_class_ptr)
+        // info!("Getting inner_class_ptr: {:#x} -> {:#x}", self.inner_class_ptr, get_from_memory::<u32>(self.inner_class_ptr));
+        ZTEntityTypeClass::from(get_from_memory::<u32>(self.inner_class_ptr))
     }
 
     pub fn entity_type(&self) -> BFEntityType {
         get_from_memory(self.inner_class_ptr)
     }
 
+    // TODO: Hook this and check that it works
     pub fn is_on_tile(&self, tile: &BFTile) -> bool {
         let Some(entity_tile) = self.get_tile() else {
             error!("BFEntity::is_on_tile: Entity {} has no tile", self.name);
@@ -139,8 +150,8 @@ impl BFEntity {
         }
         
         let rect = self.get_blocking_rect();
-        // BFMap::tileToWorld (put on ZTWorldMgr) -> BFTile::getLocalElevation
-        false
+        let tile_size = IVec3 { x: 0x20, y: 0x20, z: 0 };
+        rect.contains_point(&read_zt_world_mgr_from_global().tile_to_world(tile.pos, tile_size))
     }
 
     pub fn get_blocking_rect(&self) -> Rectangle {
@@ -328,6 +339,7 @@ impl ZTWorldMgr {
         Some(get_from_memory::<BFTile>(self.tile_array + ((y * self.map_x_size + x) * 0x8c)))
     }
 
+    // TODO: Should borrow both of these IVec3s instead of taking ownership
     pub fn tile_to_world(&self, tile_pos: IVec3, local_pos: IVec3) -> IVec3 {
         let tile_x = tile_pos.x;
         let tile_y = tile_pos.y;
@@ -412,6 +424,20 @@ pub mod hooks_ztworldmgr {
         save_to_memory(param_1, world_pos);
         param_1
     }
+
+    // TODO: Remove this when check_tank_placement is fully implemented
+    // 004e16f1 bool __thiscall OOAnalyzer::BFEntity::isOnTile(BFEntity *this,BFTile *param_1)
+    #[hook(unsafe extern "thiscall" BFEntity_is_on_tile, offset = 0x000e16f1)]
+    fn bfentity_is_on_tile(_this: u32, param_1: u32) -> bool {
+        let result = unsafe { BFEntity_is_on_tile.call(_this, param_1) };
+        let entity = get_from_memory::<BFEntity>(_this);
+        let tile = get_from_memory::<BFTile>(param_1);
+        let reimimplented_result = entity.is_on_tile(&tile);
+        if result != reimimplented_result {
+            error!("BFEntity::is_on_tile: Detour result ({}) does not match reimplemented result ({}) for entity {}", result, reimimplented_result, entity.name);
+        }
+        reimimplented_result
+    }
 }
 
 pub fn init() {
@@ -421,6 +447,7 @@ pub fn init() {
     add_to_command_register("get_zt_world_mgr".to_owned(), command_get_zt_world_mgr);
     add_to_command_register("get_types_summary".to_owned(), command_zt_world_mgr_types_summary);
     add_to_command_register("get_entity_vtable_entry".to_owned(), command_get_entity_unique_vtable_entries);
+    add_to_command_register("get_entity_type_vtable_entry".to_owned(), command_get_entity_type_unique_vtable_entries);
     unsafe { hooks_ztworldmgr::init_detours().unwrap() };
 }
 
@@ -474,6 +501,7 @@ fn command_get_zt_world_mgr_entities_2(_args: Vec<&str>) -> Result<String, Comma
     Ok(string_array.join("\n"))
 }
 
+// TODO: Both below commands should use a static list of EntityVtables and EntityTypeVtables (or just make a command in Ghidra?)
 fn command_get_entity_unique_vtable_entries(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 1 {
         return Err(CommandError::new("Vtable offset required".to_string()));
@@ -496,6 +524,36 @@ fn command_get_entity_unique_vtable_entries(args: Vec<&str>) -> Result<String, C
     entities
         .iter()
         .map(|entity| (entity.type_class.class.clone(), entity.vtable + vtable_offset))
+        .unique_by(|t| t.1)
+        .for_each(|(type_name, vfunc_ptr)| {
+            result.push_str(&format!("{:?} -> {:#x}\n", type_name, get_from_memory::<u32>(vfunc_ptr)));
+        });
+
+    Ok(result)
+}
+
+fn command_get_entity_type_unique_vtable_entries(args: Vec<&str>) -> Result<String, CommandError> {
+    if args.len() != 1 {
+        return Err(CommandError::new("Vtable offset required".to_string()));
+    }
+    
+    let vtable_offset = match args[0].strip_prefix("0x") {
+        Some(hex_str) => {
+            u32::from_str_radix(hex_str, 16)?
+        }
+        None => {
+            u32::from_str(args[0])?
+        }
+    };
+    
+    let zt_world_mgr = read_zt_world_mgr_from_global();
+    let entities = get_zt_world_mgr_types(&zt_world_mgr);
+
+    let mut result = String::new();
+    
+    entities
+        .iter()
+        .map(|entity_type| (entity_type.class.clone(), entity_type.vtable + vtable_offset))
         .unique_by(|t| t.1)
         .for_each(|(type_name, vfunc_ptr)| {
             result.push_str(&format!("{:?} -> {:#x}\n", type_name, get_from_memory::<u32>(vfunc_ptr)));

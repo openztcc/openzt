@@ -10,7 +10,7 @@ use tracing::info;
 use crate::{
     command_console::{add_to_command_register, CommandError},
     expansions::is_member,
-    util::{get_from_memory, get_string_from_memory, map_from_memory},
+    util::{get_from_memory, get_string_from_memory, map_from_memory, Checkable},
     ztui::get_selected_entity_type_address,
     ztworldmgr,
 };
@@ -275,6 +275,16 @@ impl Deref for ZTSceneryType {
     type Target = BFEntityType;
     fn deref(&self) -> &Self::Target {
         &self.bfentitytype
+    }
+}
+
+impl Checkable for ZTSceneryType {
+    fn check(ptr: u32) -> anyhow::Result<()> {
+        let entity_type_vtable = ZTEntityTypeClass::from(get_from_memory::<u32>(ptr));
+        if !zt_entity_type_class_is(&entity_type_vtable, &ZTEntityTypeClass::Scenery) {
+            return Err(anyhow::anyhow!("Incompatible entity type: expected ZTEntityTypeClass::Scenery, found {:?}", entity_type_vtable));
+        }
+        anyhow::Ok(())
     }
 }
 
@@ -1608,6 +1618,93 @@ fn print_info_image_name(entity_type: &BFEntityType, config: &mut String) {
     }
 }
 
+// enum ZTEntityType {
+//     Animal(ZTAnimalType),
+//     Ambient(ZTAmbientType),
+//     Guest(ZTGuestType),
+//     Fence(ZTFenceType),
+//     TourGuide(ZTGuideType),
+//     Building(ZTBuildingType),
+//     Scenery(ZTSceneryType),
+//     Food(ZTFoodType),
+//     TankFilter(ZTTankFilterType),
+//     Path(ZTPathType),
+//     Rubble(ZTRubbleType),
+//     TankWall(ZTTankWallType),
+//     Keeper(ZTKeeperType),
+//     MaintenanceWorker(ZTMaintType),
+//     Drt(ZTHelicopterType),
+//     BFOverlay(BFOverlayType),
+//     BFUnit(BFUnitType),
+//     ZTUnit(ZTUnitType),
+//     Staff(ZTStaffType),
+//     BFEntity(BFEntityType),
+//     Unknown,
+// }
+
+// pub fn get_as_entity_type(ptr: u32) -> ZTEntityType {
+//     let entity_type_vtable: u32 = get_from_memory(address);
+//     ZTEntityType = match ZTEntityTypeClass::from(entity_type_vtable) {
+//         ZTEntityTypeClass::Animal => ZTEntityType::Animal(get_from_memory::<ZTAnimalType>(address)),
+//         ZTEntityTypeClass::Ambient => ZTEntityType::Ambient(get_from_memory::<ZTAmbientType>(address)),
+//         ZTEntityTypeClass::Guest => ZTEntityType::Guest(get_from_memory::<ZTGuestType>(address)),
+//         ZTEntityTypeClass::Fence => ZTEntityType::Fence(get_from_memory::<ZTFenceType>(address)),
+//         ZTEntityTypeClass::TourGuide => ZTEntityType::TourGuide(get_from_memory::<ZTGuideType>(address)),
+//         ZTEntityTypeClass::Building => ZTEntityType::Building(get_from_memory::<ZTBuildingType>(address)),
+//         ZTEntityTypeClass::Scenery => ZTEntityType::Scenery(get_from_memory::<ZTSceneryType>(address)),
+//         ZTEntityTypeClass::Food => ZTEntityType::Food(get_from_memory::<ZTFoodType>(address)),
+//         ZTEntityTypeClass::TankFilter => ZTEntityType::TankFilter(get_from_memory::<ZTTankFilterType>(address)),
+//         ZTEntityTypeClass::Path => ZTEntityType::Path(get_from_memory::<ZTPathType>(address)),
+//         ZTEntityTypeClass::Rubble => ZTEntityType::Rubble(get_from_memory::<ZTRubbleType>(address)),
+//         ZTEntityTypeClass::TankWall => ZTEntityType::TankWall(get_from_memory::<ZTTankWallType>(address)),
+//         ZTEntityTypeClass::Keeper => ZTEntityType::Keeper(get_from_memory::<ZTKeeperType>(address)),
+//         ZTEntityTypeClass::MaintenanceWorker => ZTEntityType::MaintenanceWorker(get_from_memory::<ZTMaintType>(address)),
+//         ZTEntityTypeClass::Drt => ZTEntityType::Drt(get_from_memory::<ZTHelicopterType>(address)),
+//         ZTEntityTypeClass::BFOverlay => ZTEntityType::BFOverlay(get_from_memory::<BFOverlayType>(address)),
+//         ZTEntityTypeClass::BFUnit => ZTEntityType::BFUnit(get_from_memory::<BFUnitType>(address)),
+//         ZTEntityTypeClass::ZTUnit => ZTEntityType::ZTUnit(get_from_memory::<ZTUnitType>(address)),
+//         ZTEntityTypeClass::Staff => ZTEntityType::Staff(get_from_memory::<ZTStaffType>(address)),
+//         ZTEntityTypeClass::BFEntity => ZTEntityType::BFEntity(get_from_memory::<BFEntityType>(address)),
+//         ZTEntityTypeClass::Unknown => ZTEntityType::Unknown,
+//     }
+// }
+
+// pub fn get_as_specific_entity_type<T: ZTEntityTypeClass>(ptr: u32) -> Result<ZTEntityType, String> {
+//     let entity_type_vtable = ZTEntityTypeClass::from(get_from_memory(ptr));
+//     if !is(entity_type_vtable, T) {
+//         return Err(format!("Incompatible entity type: expected {:?}, found {:?}", T, entity_type_vtable));
+//     }
+
+//     let result = match T {
+//         ZTEntityTypeClass::Animal => ZTEntityType::Animal(get_from_memory::<ZTAnimalType>(address)),
+//         ZTEntityTypeClass::Ambient => ZTEntityType::Ambient(get_from_memory::<ZTAmbientType>(address)),
+//         ZTEntityTypeClass::Guest => ZTEntityType::Guest(get_from_memory::<ZTGuestType>(address)),
+//         ZTEntityTypeClass::Fence => ZTEntityType::Fence(get_from_memory::<ZTFenceType>(address)),
+//         ZTEntityTypeClass::TourGuide => ZTEntityType::TourGuide(get_from_memory::<ZTGuideType>(address)),
+//         ZTEntityTypeClass::Building => ZTEntityType::Building(get_from_memory::<ZTBuildingType>(address)),
+//         ZTEntityTypeClass::Scenery => ZTEntityType::Scenery(get_from_memory::<ZTSceneryType>(address)),
+//         ZTEntityTypeClass::Food => ZTEntityType::Food(get_from_memory::<ZTFoodType>(address)),
+//         ZTEntityTypeClass::TankFilter => ZTEntityType::TankFilter(get_from_memory::<ZTTankFilterType>(address)),
+//         ZTEntityTypeClass::Path => ZTEntityType::Path(get_from_memory::<ZTPathType>(address)),
+//         ZTEntityTypeClass::Rubble => ZTEntityType::Rubble(get_from_memory::<ZTRubbleType>(address)),
+//         ZTEntityTypeClass::TankWall => ZTEntityType::TankWall(get_from_memory::<ZTTankWallType>(address)),
+//         ZTEntityTypeClass::Keeper => ZTEntityType::Keeper(get_from_memory::<ZTKeeperType>(address)),
+//         ZTEntityTypeClass::MaintenanceWorker => ZTEntityType::MaintenanceWorker(get_from_memory::<ZTMaintType>(address)),
+//         ZTEntityTypeClass::Drt => ZTEntityType::Drt(get_from_memory::<ZTHelicopterType>(address)),
+//         ZTEntityTypeClass::BFOverlay => ZTEntityType::BFOverlay(get_from_memory::<BFOverlayType>(address)),
+//         ZTEntityTypeClass::BFUnit => ZTEntityType::BFUnit(get_from_memory::<BFUnitType>(address)),
+//         ZTEntityTypeClass::ZTUnit => ZTEntityType::ZTUnit(get_from_memory::<ZTUnitType>(address)),
+//         ZTEntityTypeClass::Staff => ZTEntityType::Staff(get_from_memory::<ZTStaffType>(address)),
+//         ZTEntityTypeClass::BFEntity => ZTEntityType::BFEntity(get_from_memory::<BFEntityType>(address)),
+//         ZTEntityTypeClass::Unknown => {
+//             return Err("Unknown entity type".to_string());
+//         }
+//     };
+//     Ok(result)
+
+// }
+    
+
 // This returns a dynamic trait object, which lets us call the methods of the entity type without knowing the exact type
 fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> {
     // create a copied instance of the entity type
@@ -1616,7 +1713,7 @@ fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> {
         ZTEntityTypeClass::Animal => Box::new(get_from_memory::<ZTAnimalType>(address)),
         ZTEntityTypeClass::Ambient => Box::new(get_from_memory::<ZTUnitType>(address)),
         ZTEntityTypeClass::Guest => Box::new(get_from_memory::<ZTGuestType>(address)),
-        ZTEntityTypeClass::Fences => Box::new(get_from_memory::<ZTFenceType>(address)),
+        ZTEntityTypeClass::Fence => Box::new(get_from_memory::<ZTFenceType>(address)),
         ZTEntityTypeClass::TourGuide => Box::new(get_from_memory::<ZTGuideType>(address)),
         ZTEntityTypeClass::Building => Box::new(get_from_memory::<ZTBuildingType>(address)),
         ZTEntityTypeClass::Scenery => Box::new(get_from_memory::<ZTSceneryType>(address)),
@@ -1628,21 +1725,26 @@ fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> {
         ZTEntityTypeClass::Keeper => Box::new(get_from_memory::<ZTKeeperType>(address)),
         ZTEntityTypeClass::MaintenanceWorker => Box::new(get_from_memory::<ZTMaintType>(address)),
         ZTEntityTypeClass::Drt => Box::new(get_from_memory::<ZTHelicopterType>(address)),
+        ZTEntityTypeClass::BFOverlay => Box::new(get_from_memory::<BFOverlayType>(address)),
+        ZTEntityTypeClass::BFUnit => Box::new(get_from_memory::<BFUnitType>(address)),
+        ZTEntityTypeClass::ZTUnit => Box::new(get_from_memory::<ZTUnitType>(address)),
+        ZTEntityTypeClass::Staff => Box::new(get_from_memory::<ZTStaffType>(address)),
+        ZTEntityTypeClass::BFEntity => Box::new(get_from_memory::<BFEntityType>(address)),
         ZTEntityTypeClass::Unknown => return Err("Unknown entity type".to_string()),
-    };
-    Ok(entity)
-}
+        };
+        Ok(entity)
+    }
 
-fn map_bfentitytype(address: u32) -> Result<&'static mut dyn EntityType, String> {
-    // create a copied instance of the entity type
-    info!("Mapping entity type at address {:#x}", address);
-    let entity_type_vtable: u32 = get_from_memory(address);
-    info!("Entity type vtable: {:#x}", entity_type_vtable);
-    let entity: &mut dyn EntityType = match ZTEntityTypeClass::from(entity_type_vtable) {
+    fn map_bfentitytype(address: u32) -> Result<&'static mut dyn EntityType, String> {
+        // create a copied instance of the entity type
+        info!("Mapping entity type at address {:#x}", address);
+        let entity_type_vtable: u32 = get_from_memory(address);
+        info!("Entity type vtable: {:#x}", entity_type_vtable);
+        let entity: &mut dyn EntityType = match ZTEntityTypeClass::from(entity_type_vtable) {
         ZTEntityTypeClass::Animal => map_from_memory::<ZTAnimalType>(address),
-        ZTEntityTypeClass::Ambient => map_from_memory::<ZTUnitType>(address),
+        ZTEntityTypeClass::Ambient => map_from_memory::<ZTAmbientType>(address),
         ZTEntityTypeClass::Guest => map_from_memory::<ZTGuestType>(address),
-        ZTEntityTypeClass::Fences => map_from_memory::<ZTFenceType>(address),
+        ZTEntityTypeClass::Fence => map_from_memory::<ZTFenceType>(address),
         ZTEntityTypeClass::TourGuide => map_from_memory::<ZTGuideType>(address),
         ZTEntityTypeClass::Building => map_from_memory::<ZTBuildingType>(address),
         ZTEntityTypeClass::Scenery => map_from_memory::<ZTSceneryType>(address),
@@ -1654,16 +1756,21 @@ fn map_bfentitytype(address: u32) -> Result<&'static mut dyn EntityType, String>
         ZTEntityTypeClass::Keeper => map_from_memory::<ZTKeeperType>(address),
         ZTEntityTypeClass::MaintenanceWorker => map_from_memory::<ZTMaintType>(address),
         ZTEntityTypeClass::Drt => map_from_memory::<ZTHelicopterType>(address),
+        ZTEntityTypeClass::BFOverlay => map_from_memory::<BFOverlayType>(address),
+        ZTEntityTypeClass::BFUnit => map_from_memory::<BFUnitType>(address),
+        ZTEntityTypeClass::ZTUnit => map_from_memory::<ZTUnitType>(address),
+        ZTEntityTypeClass::Staff => map_from_memory::<ZTStaffType>(address),
+        ZTEntityTypeClass::BFEntity => map_from_memory::<BFEntityType>(address),
         ZTEntityTypeClass::Unknown => return Err("Unknown entity type".to_string()),
-    };
-    Ok(entity)
-}
+        };
+        Ok(entity)
+    }
 
-// initializes the custom command
-pub fn init() {
-    add_to_command_register("sel_type".to_string(), command_sel_type);
-    add_to_command_register("make_sel".to_owned(), command_make_sel);
-}
+    // initializes the custom command
+    pub fn init() {
+        add_to_command_register("sel_type".to_string(), command_sel_type);
+        add_to_command_register("make_sel".to_owned(), command_make_sel);
+    }
 
 #[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
 #[repr(u32)]
@@ -1671,7 +1778,7 @@ pub enum ZTEntityTypeClass {
     Animal = 0x630268,
     Ambient = 0x62e1e8,
     Guest = 0x62e330,
-    Fences = 0x63034c,
+    Fence = 0x63034c,
     TourGuide = 0x62e8ac,
     Building = 0x6307e4,
     Scenery = 0x6303f4,
@@ -1683,8 +1790,39 @@ pub enum ZTEntityTypeClass {
     Keeper = 0x62e7d8,
     MaintenanceWorker = 0x62e704,
     Drt = 0x62e980,
+    BFOverlay = 0x62e58c,
+    BFUnit = 0x62e4d8,
+    ZTUnit = 0x62e404,
+    Staff = 0x62e630,
+    BFEntity = 0x62e28c,
     #[num_enum(default)]
     Unknown = 0x0,
+}
+
+pub fn zt_entity_type_class_is(original_class: &ZTEntityTypeClass, class: &ZTEntityTypeClass) -> bool {
+    match class {
+        ZTEntityTypeClass::Animal => *original_class == ZTEntityTypeClass::Animal,
+        ZTEntityTypeClass::Ambient => *original_class == ZTEntityTypeClass::Ambient,
+        ZTEntityTypeClass::Guest => *original_class == ZTEntityTypeClass::Guest,
+        ZTEntityTypeClass::Fence => matches!(*original_class, ZTEntityTypeClass::Fence | ZTEntityTypeClass::TankWall),
+        ZTEntityTypeClass::TourGuide => *original_class == ZTEntityTypeClass::TourGuide,
+        ZTEntityTypeClass::Building => *original_class == ZTEntityTypeClass::Building,
+        ZTEntityTypeClass::Scenery => matches!(*original_class, ZTEntityTypeClass::Scenery | ZTEntityTypeClass::Food | ZTEntityTypeClass::Path | ZTEntityTypeClass::Rubble | ZTEntityTypeClass::TankFilter | ZTEntityTypeClass::TankWall | ZTEntityTypeClass::Building | ZTEntityTypeClass::Fence),
+        ZTEntityTypeClass::Food => *original_class == ZTEntityTypeClass::Food,
+        ZTEntityTypeClass::TankFilter => *original_class == ZTEntityTypeClass::TankFilter,
+        ZTEntityTypeClass::Path => *original_class == ZTEntityTypeClass::Path,
+        ZTEntityTypeClass::Rubble => *original_class == ZTEntityTypeClass::Rubble,
+        ZTEntityTypeClass::TankWall => *original_class == ZTEntityTypeClass::TankWall,
+        ZTEntityTypeClass::Keeper => *original_class == ZTEntityTypeClass::Keeper,
+        ZTEntityTypeClass::MaintenanceWorker => *original_class == ZTEntityTypeClass::MaintenanceWorker,
+        ZTEntityTypeClass::Drt => *original_class == ZTEntityTypeClass::Drt,
+        ZTEntityTypeClass::Unknown => false,
+        ZTEntityTypeClass::BFOverlay => matches!(*original_class, ZTEntityTypeClass::BFOverlay | ZTEntityTypeClass::Ambient),
+        ZTEntityTypeClass::BFUnit => matches!(*original_class, ZTEntityTypeClass::BFUnit | ZTEntityTypeClass::ZTUnit | ZTEntityTypeClass::Staff | ZTEntityTypeClass::Keeper | ZTEntityTypeClass::MaintenanceWorker | ZTEntityTypeClass::Drt | ZTEntityTypeClass::TourGuide | ZTEntityTypeClass::Guest | ZTEntityTypeClass::Animal),
+        ZTEntityTypeClass::ZTUnit => matches!(*original_class, ZTEntityTypeClass::ZTUnit | ZTEntityTypeClass::Staff | ZTEntityTypeClass::Keeper | ZTEntityTypeClass::MaintenanceWorker | ZTEntityTypeClass::Drt | ZTEntityTypeClass::TourGuide | ZTEntityTypeClass::Guest | ZTEntityTypeClass::Animal),
+        ZTEntityTypeClass::Staff => matches!(*original_class, ZTEntityTypeClass::Staff | ZTEntityTypeClass::Keeper | ZTEntityTypeClass::MaintenanceWorker | ZTEntityTypeClass::Drt | ZTEntityTypeClass::TourGuide),
+        ZTEntityTypeClass::BFEntity => matches!(*original_class, ZTEntityTypeClass::BFEntity | ZTEntityTypeClass::BFUnit | ZTEntityTypeClass::ZTUnit | ZTEntityTypeClass::Staff | ZTEntityTypeClass::Keeper | ZTEntityTypeClass::MaintenanceWorker | ZTEntityTypeClass::Drt | ZTEntityTypeClass::TourGuide | ZTEntityTypeClass::Guest | ZTEntityTypeClass::Animal | ZTEntityTypeClass::Scenery | ZTEntityTypeClass::Food | ZTEntityTypeClass::Path | ZTEntityTypeClass::Rubble | ZTEntityTypeClass::TankFilter | ZTEntityTypeClass::TankWall | ZTEntityTypeClass::Building | ZTEntityTypeClass::Fence | ZTEntityTypeClass::BFOverlay | ZTEntityTypeClass::Ambient),
+    }
 }
 
 // TODO: Convert into struct with offsets that can be read straight from memory, should also be called BFEntity
@@ -1704,7 +1842,7 @@ impl ZTEntityType {
         match self.class {
             ZTEntityTypeClass::Animal
             | ZTEntityTypeClass::Guest
-            | ZTEntityTypeClass::Fences
+            | ZTEntityTypeClass::Fence
             | ZTEntityTypeClass::TourGuide
             | ZTEntityTypeClass::TankFilter
             | ZTEntityTypeClass::TankWall
@@ -1718,7 +1856,12 @@ impl ZTEntityType {
             | ZTEntityTypeClass::Rubble
             | ZTEntityTypeClass::Ambient => is_member(&self.zt_sub_type, &member),
 
-            ZTEntityTypeClass::Unknown => false,
+            ZTEntityTypeClass::Unknown
+            | ZTEntityTypeClass::BFOverlay
+            | ZTEntityTypeClass::BFUnit
+            | ZTEntityTypeClass::ZTUnit
+            | ZTEntityTypeClass::Staff
+            | ZTEntityTypeClass::BFEntity => false,
         }
     }
 }
@@ -1728,7 +1871,7 @@ pub fn read_zt_entity_type_from_memory(zt_entity_type_ptr: u32) -> ZTEntityType 
     let class = ZTEntityTypeClass::from(class_string);
 
     ZTEntityType {
-        vtable: zt_entity_type_ptr,
+        vtable: class_string,
         class_string,
         class,
         zt_type: get_string_from_memory(get_from_memory::<u32>(zt_entity_type_ptr + 0x98)),

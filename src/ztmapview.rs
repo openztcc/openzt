@@ -3,10 +3,10 @@ use num_enum::FromPrimitive;
 use tracing::info;
 use retour_utils::hook_module;
 
-use crate::{bfentitytype::ZTEntityTypeClass, util::get_from_memory};
-use crate::util::save_to_memory;
+use crate::bfentitytype::{ZTEntityTypeClass, ZTSceneryType, zt_entity_type_class_is};
+use crate::util::{get_from_memory, checked_get_from_memory, save_to_memory};
 use crate::zthabitatmgr::read_zt_habitat_mgr_from_memory;
-use crate::ztworldmgr::{BFEntity, ZTEntity, IVec3};
+use crate::ztworldmgr::{BFEntity, ZTEntity, IVec3, read_zt_entity_from_memory};
 // use crate::{
 //     util::get_from_memory,
 // };
@@ -195,7 +195,7 @@ pub mod zoo_ztmapview {
     use crate::zthabitatmgr::{ZTHabitatMgr, read_zt_habitat_mgr_from_memory};
     use crate::ztworldmgr::{read_zt_entity_from_memory, IVec3};
     use crate::util::get_from_memory;
-    use crate::ztmapview::{BFTile, ZTMapView};
+    use crate::ztmapview::{BFTile, ZTMapView, ErrorStringId};
 
     // use crate::{
     //     bfregistry::{add_to_registry, get_from_registry},
@@ -205,21 +205,28 @@ pub mod zoo_ztmapview {
     //004df688
     #[hook(unsafe extern "thiscall" ZTMapView_check_tank_placement, offset = 0x000df688)]
     // fn check_tank_placement(ZTMapView *other_this, BFEntity *param_2, BFTile *param_3, int *param_4)
-    fn check_tank_placement(_this: u32, temp_entity: u32, tile: u32, response_ptr: *mut u32) -> u32 {
-        let entity = get_from_memory(temp_entity);
+    fn check_tank_placement(_this: u32, temp_entity_ptr: u32, tile: u32, response_ptr: *mut u32) -> u32 {
+        let result = unsafe { ZTMapView_check_tank_placement.call(_this, temp_entity_ptr, tile, response_ptr) };
+
+        // let entity = get_from_memory(temp_entity);
 
         let bf_tile = get_from_memory::<BFTile>(tile);
         
         let zt_map_view = get_from_memory::<ZTMapView>(_this);
         
-        if let Err(reimplemented_result) = zt_map_view.check_tank_placement(&entity, &bf_tile) {
-            info!("ZTMapView::checkTankPlacement 1 -> {:?}", reimplemented_result);
+        if let Err(reimplemented_result) = zt_map_view.check_tank_placement(temp_entity_ptr, &bf_tile) {
+            if reimplemented_result == ErrorStringId::from(unsafe{*response_ptr}) {
+                info!("ZTMapView::checkTankPlacement success {:?}", reimplemented_result);
+            } else {
+                info!("Fail {:?}", ErrorStringId::from(unsafe{*response_ptr}));
+            }
+            // info!("ZTMapView::checkTankPlacement 1 -> {:?}", reimplemented_result);
+
         } else {
             info!("ZTMapView::checkTankPlacement 0 -> 0");
         }
 
-        let result = unsafe { ZTMapView_check_tank_placement.call(_this, temp_entity, tile, response_ptr) };
-        info!("ZTMapView::checkTankPlacement {}, {:p} -> {}", result, response_ptr, unsafe{*response_ptr});
+        // info!("ZTMapView::checkTankPlacement {}, {:p} -> {:#x}", result, response_ptr, unsafe{*response_ptr});
         result
         // 1
     }
@@ -237,9 +244,6 @@ pub mod zoo_ztmapview {
         let pos_vec = get_from_memory::<IVec3>(pos);
         tile.get_local_elevation(pos_vec)
     }
-
-
-
 }
 
 pub fn init() {
@@ -270,17 +274,31 @@ pub enum ErrorStringId {
 }
 
 impl ZTMapView {
-    pub fn check_tank_placement(&self, temp_entity: &BFEntity, tile: &BFTile) -> Result<(), ErrorStringId> {
+    pub fn check_tank_placement(&self, temp_entity_ptr: u32, tile: &BFTile) -> Result<(), ErrorStringId> {
+        info!("Entity Ptr {:#x} -> {:#x}", temp_entity_ptr, get_from_memory::<u32>(temp_entity_ptr));
+        let temp_entity: BFEntity = get_from_memory(temp_entity_ptr);
         let habitat_mgr = read_zt_habitat_mgr_from_memory();
         let Some(habitat) = habitat_mgr.get_habitat(tile.pos.x, tile.pos.y) else {
+            info!("No habitat found at tile position: {:?}", tile.pos);
             return Ok(());
         };
-        let entity_class = temp_entity.entity_type_class();
-        if entity_class != ZTEntityTypeClass::Keeper {
+        let entity_type_class = temp_entity.entity_type_class();
+        info!("Checking tank placement for entity type class: {:?}", entity_type_class);
+        if !zt_entity_type_class_is(&entity_type_class, &ZTEntityTypeClass::Keeper) {
+            info!("Not keeper, checking gate tile");
             if let Some(t) = habitat.get_gate_tile_in() {
                 if temp_entity.is_on_tile(&t) {
                     return Err(ErrorStringId::ObjectTooCloseToLadderOrPlatform);
                 }
+            }
+        }
+        if zt_entity_type_class_is(&entity_type_class, &ZTEntityTypeClass::Scenery) {
+            let Ok(scenery_entity) = checked_get_from_memory::<ZTSceneryType>(temp_entity_ptr) else {
+                panic!("Failed to get ZTSceneryType from memory for entity at ptr: {:#x}", temp_entity_ptr);
+            };
+
+            if !scenery_entity.underwater || !scenery_entity.surface {
+                return Err(ErrorStringId::ObjectCannotBePlacedInTank);
             }
         }
         // match  {
