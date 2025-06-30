@@ -4,122 +4,116 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OpenZT is a DLL for injection into Zoo Tycoon (2001) that extends and modifies game functionality. It's written in Rust and uses function hooking/detouring to intercept game functions and direct memory manipulation.
+OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It provides mod support, bug fixes, and feature enhancements through function detouring and memory manipulation.
 
-**Key Architecture Points:**
-- **Target**: Windows 32-bit (`i686-pc-windows-msvc`) using nightly Rust toolchain
-- **Library Type**: `cdylib` (C-compatible dynamic library)
-- **Injection Methods**: Either rename to `lang301-openzt.dll` in game directory or use OpenZT Loader
-- **Module Pattern**: Features split into modules with init functions behind feature flags
+**Target**: 32-bit Windows (`i686-pc-windows-msvc`) using nightly Rust
+**Output**: `openzt.dll` (injected into the running game via the openzt-loader executable)
 
-## Commands
+## Critical Rules
+
+1. **NEVER commit Zoo Tycoon assets, code, configs, or decompiled content** - This is a clean-room reimplementation
+2. **New features start behind `experimental` feature flag** in Cargo.toml
+3. **All structs must use `#[repr(C)]`** for memory layout compatibility
+
+## Development Commands
 
 ### Build Commands
 ```bash
 # Debug build
-cargo build
+cargo +nightly build --lib --target=i686-pc-windows-msvc
 
 # Release build  
-cargo build --release
+cargo +nightly build --lib --release --target=i686-pc-windows-msvc
 
-# Build with specific features
-cargo build --features "experimental,ini,capture_ztlog"
+# Documentation
+cargo +nightly rustdoc --manifest-path openzt/Cargo.toml --lib --target i686-pc-windows-msvc --open -- --document-private-items
 ```
 
-### Running OpenZT
+### Running/Testing
 ```bash
-# Via loader (debug)
-./run-via-loader.bat
+# Via loader (preferred)
+run-via-loader.bat           # Debug
+run-via-loader-release.bat   # Release
+run-via-loader-pause.bat     # Suspended for debugger
 
-# Via loader (release)
-./run-via-loader-release.bat
-
-# Via loader (suspended for debugger)
-./run-via-loader-pause.bat
+# Console (after OpenZT is running)
+cd openzt-console && cargo run
 ```
 
-### Development Commands
-```bash
-# Format code
-cargo fmt
+## Architecture Patterns
 
-# Check formatting
-cargo fmt --check
+### Module Structure
+- **Entry point**: `lib.rs` calls `init()` functions behind feature flags
+- **Module pattern**: Each feature module has an `init()` function called from `lib.rs`
+- **Feature flags**: Defined in `Cargo.toml` - new features use `experimental` flag
 
-# Lint with clippy
-cargo clippy --all-features --all-targets -- -D warnings
-
-# Run tests
-cargo test --all
-
-# Check build
-cargo check --all-targets
-
-# Generate and open documentation
-./open-docs.bat
-```
-
-## Architecture
-
-### Core Modules
-- **`lib.rs`**: Main entry point, initializes modules based on feature flags
-- **`resource_manager/`**: Intercepts and modifies game resource loading
-- **`console.rs`**: Socket communication with openzt-console
-- **`string_registry.rs`**: Custom string management for game UI
-- **`expansions.rs`**: Handles game expansion packs
-- **`ztui.rs`**: UI modifications and hooks
-
-### Key Patterns
-
-**Struct Definition** - All structs must use `#[repr(C)]`:
+### Memory Management
 ```rust
-#[derive(Debug)]
+// Global state pattern
+use once_cell::sync::Lazy;
+static GLOBAL_STATE: Lazy<Mutex<MyState>> = Lazy::new(|| Mutex::new(MyState::default()));
+
+// Struct definitions
 #[repr(C)]
-pub struct UIElement {
-    vftable: u32,
-    // fields...
+#[derive(Debug)]
+struct GameStruct {
+    field: u32,
 }
 ```
 
-**Detours/Hooks** - Use retour crate with offsets:
+### Function Detouring
 ```rust
-#[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
-pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
-    unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) }
+// Detour setup (subtract 0x400000 from Ghidra addresses)
+static_detour! {
+    static MY_DETOUR: unsafe extern "stdcall" fn(u32) -> u32;
 }
+
+// Calling game functions
+let game_fn: unsafe extern "stdcall" fn(u32) -> u32 = 
+    std::mem::transmute(0x12345678); // Full address
 ```
 
-**Global State** - Use Lazy<Mutex<T>> for thread safety:
+### Resource Handling
 ```rust
-static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| {
-    Mutex::new(Vec::new())
-});
+// Register resource handlers in init()
+resource_manager::add_handler("bfb", Box::new(BfbHandler));
 ```
 
-**Calling ZT Functions** - Use full addresses (not offsets):
-```rust
-let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
-```
+## Workspace Structure
 
-## Critical Rules
+- **`openzt/`**: Main DLL crate with game hooks and features
+- **`openzt-loader/`**: DLL injection executable
+- **`openzt-console/`**: Socket-based runtime console
+- **`openzt-configparser/`**: Custom INI parser for Zoo Tycoon configs
+- **`field_accessor_as_string*/`**: Derive macro crates
 
-1. **NO Zoo Tycoon Assets**: Never commit any Zoo Tycoon code, assets, or configs. This is a complete reimplementation.
+## Key Features
 
-2. **Feature Flags**: New features start behind `experimental` flag:
-   - Default features: `["experimental", "ini"]`
-   - Release features: `["ini"]`
-   - Test stability before removing flag
+### Core Systems
+- **Resource Management**: Custom file loading/modification via `resource_mgr/`
+- **String Registry**: Game text injection via `string_registry.rs`  
+- **Console**: Runtime command execution via socket connection
+- **Settings**: Enhanced INI configuration loading
+- **Expansion Packs**: Custom expansion support
 
-3. **Module Init Pattern**: All modules must have init() function called from lib.rs behind feature flag
+### Development Features
+- **Feature flags**: `default = ["experimental", "ini"]`, `release = []`
+- **Conditional compilation**: Most features behind flags for testing
+- **Hot-swappable**: DLL can be reloaded during development
 
-4. **Memory Safety**: 
-   - Use `get_from_memory` and `save_to_memory` for struct access
-   - Always use Mutex for global state
-   - Careful with raw pointers and transmutes
+## Testing
 
-5. **Resource Handlers**: Register handlers for file types via `resource_manager::add_handler()`
+No automated game testing framework exists. Manual testing required:
 
-6. **Testing**: Manual testing required - no automated game testing framework exists
+1. Build the DLL
+2. Test via loader OR manual installation
+3. Verify features work in-game
+4. Test console commands if applicable
+5. Check for game crashes or memory issues
 
-## Code Comments
-Avoid adding comments that merely restate what the code is doing or that reference the development process (e.g., "BUG:", "TODO:" unless they're meant to stay). Comments should add value by explaining complex logic or design decisions, not narrate the obvious or temporary state of the code.
+## Code Quality
+
+- Avoid obvious comments that restate code
+- Document complex game memory layouts and reverse engineering discoveries
+- Use meaningful variable names for game offsets and structures
+- Follow existing patterns for detour setup and global state management

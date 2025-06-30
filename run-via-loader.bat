@@ -1,6 +1,5 @@
 @echo off
 
-@REM TODO: build with specific nightly toolchain
 echo Building openzt dll
 cargo +nightly build --lib --target=i686-pc-windows-msvc
 
@@ -12,6 +11,7 @@ if %errorlevel% neq 0 (
 
 del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\lang301-openzt.dll"
 
-"../openzt-loader/target/i686-pc-windows-msvc/release/openzt-loader.exe" --dll-path="target/i686-pc-windows-msvc/debug/openzt.dll" --listen --resume
+echo Building and running openzt loader
+cargo +nightly run --manifest-path openzt-loader/Cargo.toml -- --dll-path="target/i686-pc-windows-msvc/debug/openzt.dll" --listen --resume
 
 pause
