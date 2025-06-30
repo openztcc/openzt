@@ -1,0 +1,7 @@
+error: unexpected end of input, expected string literal
+ --> tests/build-tests/require_module_name.rs:3:1
+  |
+3 | #[hook_module]
+  | ^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hook_module` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,0 +1,18 @@
+[package]
+name = "retour-utils-impl"
+version = "0.2.0"
+license = "BSD-2-Clause"
+description = "Macro crate for `retour-utils`"
+keywords = ["detour", "hook", "function", "redirect", "macros"]
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full", "fold"]}
+quote = "1.0"
+proc-macro2 = "1.0"
+proc-macro-crate = "1.3"
