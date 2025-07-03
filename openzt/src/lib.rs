@@ -72,44 +72,16 @@ use tracing::info;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
-#[unsafe(no_mangle)]
+use retour_utils::hook_module;
+
+#[no_mangle]
 extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
-            // We init this first so we have a console to log to
-            let console_created = command_console::init().is_ok();
 
-            if console_created {
-                let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
-
-                tracing_subscriber::fmt().with_ansi(enable_ansi).init();
-            }
-
-            // dll_first_load();
-            // info!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved);
-
-            // Initialize stable modules
-            resource_manager::init();
-            expansions::init();
-            string_registry::init();
-            bugfix::init();
-            version::init();
-            ztui::init();
-            ztworldmgr::init();
-            bfentitytype::init();
-            settings::init();
-
-            if cfg!(feature = "capture_ztlog") {
-                use crate::capture_ztlog;
-                // info!("Feature 'capture_ztlog' enabled");
-                capture_ztlog::init();
-            }
-
-            if cfg!(feature = "experimental") {
-                // info!("Feature 'experimental' enabled");
-                ztadvterrainmgr::init();
-                ztgamemgr::init();
-            }
+            // Initialize a hook into the WinMain function, where we can perform further initialization
+            // We just unwrap here as this is a critical initialization step, and we want to panic if it fails.
+            unsafe { zoo_init::init_detours().unwrap() }
         }
         DLL_PROCESS_DETACH => {
             // info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);
@@ -125,4 +97,51 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
         }
     }
     1
+}
+
+#[hook_module("zoo.exe")]
+mod zoo_init {
+    use super::*;
+
+    #[hook(unsafe extern "stdcall" WinMain, offset = 0x0001a8bc)]
+    fn win_main(hInstance: u32, hPrevInstance: u32, lpCmdLine: u32, nShowCm: u32) -> u32 {
+        info!("###################### WinMain: {} {} {} {}", hInstance, hPrevInstance, lpCmdLine, nShowCm);
+        match command_console::init() {
+            Ok(_) => {
+                let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
+                tracing_subscriber::fmt().with_ansi(enable_ansi).init();
+            },
+            Err(e) => {
+                info!("Failed to initialize console: {}", e);
+                return 0; // Return 0 to indicate failure
+            }
+        }
+
+        // dll_first_load();
+        // info!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved);
+
+        // Initialize stable modules
+        resource_manager::init();
+        expansions::init();
+        string_registry::init();
+        bugfix::init();
+        version::init();
+        ztui::init();
+        ztworldmgr::init();
+        bfentitytype::init();
+        settings::init();
+
+        if cfg!(feature = "capture_ztlog") {
+            use crate::capture_ztlog;
+            // info!("Feature 'capture_ztlog' enabled");
+            capture_ztlog::init();
+        }
+
+        if cfg!(feature = "experimental") {
+            // info!("Feature 'experimental' enabled");
+            ztadvterrainmgr::init();
+            ztgamemgr::init();
+        }
+        unsafe { WinMain.call(hInstance, hPrevInstance, lpCmdLine, nShowCm) }
+    }
 }

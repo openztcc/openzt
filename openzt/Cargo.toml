@@ -3,8 +3,8 @@ name = "openzt"
 version = "0.1.0-alpha"
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
 repository.workspace = true
+license.workspace = true
 # default-target = "i686-pc-windows-msvc"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -15,9 +15,9 @@ opt-level = 1
 opt-level = 3
 
 [dependencies]
-tracing-subscriber = "0.3.18"
-tracing = "0.1.40"
-# TODO: Figure out how to use retour-rs with generic-detours so we don't need nightly and can use addresses by function
+tracing-subscriber = "0.3.19"
+tracing = "0.1.41"
+# TODO: Figure out how to use retour-rs with generic-detours so we don't need nightly and can use addresses by variables
 # retour = {path = "../vendor/retour-rs", version = "0.3.1", features = ["thiscall-abi"]}
 retour = {version = "0.3.1", features = ["thiscall-abi"]}
 # retour-utils = "0.2.1"
@@ -33,10 +33,10 @@ maplit = "1.0.2"
 field_accessor_as_string = { path = "../field_accessor_as_string" }
 field_accessor_as_string_trait = { path = "../field_accessor_as_string_trait" }
 serde = {version = "1.0.210", features = ["derive"]}
-toml = "0.8.19"
+toml = "0.8.23"
 regex = "1.10.6"
 public = "0.2.2"
-windows = { version = "0.58.0", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices", "Win32_System_Memory", ] }
+windows = { version = "0.61.3", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices", "Win32_System_Memory"] }
 enable-ansi-support = "0.2.1"
 
 [dev-dependencies]
