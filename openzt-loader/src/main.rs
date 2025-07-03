@@ -44,7 +44,7 @@ fn main() {
 
     const CREATE_FLAGS: u32 = CREATE_SUSPENDED | DETACHED_PROCESS;
     // const ZOO_PATH: &str = "C:\\Program Files (x86)\\Microsoft Games\\Zoo Tycoon\\zoo.exe";
-    let command: OwnedProcess = match Command::new(zoo_path).creation_flags(CREATE_FLAGS).spawn() {
+    let command: OwnedProcess = match Command::new(args.zoo_path).creation_flags(CREATE_FLAGS).spawn() {
         Ok(command) => command.into(),
         Err(e) => panic!("Failed to spawn process: {e}"),
     };
