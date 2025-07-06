@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 
+mod rpc_hooks;
+
 use tracing::{error, info};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::{SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}, Console::{AllocConsole, FreeConsole}};
 
-use lrpc::*;
 
 use retour_utils::hook_module;
 
@@ -64,21 +65,32 @@ fn init_console() -> windows::core::Result<()> {
 
 #[hook_module("zoo.exe")]
 mod zoo_main {
-    use tracing::info;
 
-    #[hook(unsafe extern "stdcall" WinMain, offset = 0x0001a8bc)]
-    fn win_main(hInstance: u32, hPrevInstance: u32, lpCmdLine: u32, nShowCm: u32) -> u32 {
-        info!("###### WinMain: {} {} {} {}", hInstance, hPrevInstance, lpCmdLine, nShowCm);
-        let result = unsafe { WinMain.call(hInstance, hPrevInstance, lpCmdLine, nShowCm) };
-        result
-    }
+    use crate::rpc_hooks::{show_int, hello_world};
 
+    // We do our initialization slightly later than openzt because we pause here, so we want dll resources to already be initialized.
     #[hook(unsafe extern "thiscall" LoadLangDLLs, offset = 0x00137333)]
     fn load_lang_dlls(this: u32) -> u32 {
-        info!("LoadLangDLLs called with this: {}", this);
+        // info!("LoadLangDLLs called with this: {}", this);
         // Call the original function
         let result = unsafe { LoadLangDLLs.call(this) };
         // Do any additional processing if needed
-        result
+
+        let mut srv_fun = lrpc::Fun::new();
+
+        // srv_fun.regist("hello_world", show_int as fn(i32));
+        srv_fun.regist("show_int", show_int);
+        srv_fun.regist("hello_world", hello_world);
+
+        // lrpc::service(srv_fun, "0.0.0.0:9009");
+
+        // std::thread::sleep(std::time::Duration::from_secs(10));
+
+        std::thread::spawn(move || {
+            lrpc::service(srv_fun, "0.0.0.0:9009");
+            // std::thread::sleep(std::time::Duration::from_secs(600));
+        });
+        std::thread::sleep(std::time::Duration::from_secs(600));
+        std::process::exit(0);
     }
 }
