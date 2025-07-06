@@ -1,0 +1,20 @@
+[package]
+name = "openzt-configparser"
+version = "1.1.1"
+authors = ["finnhartshorn+bfconfigparser@gmail.com"]
+description = "A simple library for parsing and writing configuration files based on INI like file formats used in Zoo Tycoon (2001)."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# TODO: Remove tokio and refactor out async
+[dependencies]
+indexmap = { version = "2.2.6", optional = true }
+tokio = { version = "1.35.1", optional = true, features = ["fs"] }
+
+[dev-dependencies]
+tokio = { version = "1.35.1", features = ["fs", "macros", "rt-multi-thread"] }
+
+[features]
+async-std = ["tokio"]

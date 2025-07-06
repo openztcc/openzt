@@ -1,60 +1,31 @@
-[package]
-name = "openzt"
-version = "0.1.0-alpha"
-edition = "2021" # Test on the latest edition, will need to wrap all Repr(c) with unsafe and likely other changes
-# default-target = "i686-pc-windows-msvc"
+cargo-features = ["edition2024"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = [
+    # core
+    "openzt",
 
-[profile.dev]
-opt-level = 1
-[profile.dev.package."*"]
-opt-level = 3
-[profile.release-minified]
-inherits = "release"
-lto = true
-strip = true
-codegen-units = 1
+    # derive macro
+    "field_accessor_as_string",
+    "field_accessor_as_string_trait",
 
-[dependencies]
-tracing-subscriber = "0.3.19"
-tracing = "0.1.41"
-retour = {version = "0.3.1", features = ["thiscall-abi"]} # Test with v0.4.0-alpha.3 can we do without nightly now?
-retour-utils = "0.2.1"
-num_enum = "0.7.3"
-walkdir = "2.5.0"
-zip = "=2.3.0" # TODO: Update to latest
-bf_configparser = { git = "https://github.com/openztcc/bf-configparser", version = "1.1.1", features = ["indexmap"]}
-anyhow = "1.0.98"
-getset = "0.1.5"
-maplit = "1.0.2"
-field_accessor_as_string = { path = "libs/field_accessor_as_string" }
-field_accessor_as_string_trait = { path = "libs/field_accessor_as_string_trait" }
-serde = {version = "1.0.219", features = ["derive"]}
-toml = "0.8.22"
-regex = "1.11.1"
-public = "0.2.2"
-windows = { version = "0.61.1", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices", "Win32_System_Memory", ] }
-enable-ansi-support = "0.2.1"
-nt-time = "=0.10.6"
-itertools = "0.14.0"
+    # # ecosystem
+    "openzt-loader",
+    "openzt-console",
+    "openzt-configparser",
+    "openzt-test-rpc",
+    # "openzt-animations",
 
-[lib]
-name = "openzt"
-crate-type = ["cdylib"]
+    # # vendor
+    # "vendor/retour-rs",
+    "vendor/retour-utils",
+    "vendor/retour-utils/impl", 
+]
+exclude = ["outside-workspace"]
+resolver = "3"
 
-[[bin]]
-name = "test"
-path = "src/debug_dll.rs"
-
-[features]
-default = ["experimental", "ini"]
-release = []
-ini = []
-capture_ztlog = []
-experimental = []
-
-[workspace.metadata.cross.target.i686-pc-windows-msvc]
-image = "ghcr.io/cross-rs/i686-pc-windows-msvc-cross:local"
-#[workspace.metadata.cross.build]
-#pre-build = ["ls"]
+[workspace.package]
+edition = "2021"
+rust-version = "1.80.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/openztcc/openzt"

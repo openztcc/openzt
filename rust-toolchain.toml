@@ -1,2 +1,3 @@
 [toolchain]
-targets = ["nightly-i686-pc-windows-msvc"]
+channel = "nightly-2024-05-02"
+targets = ["i686-pc-windows-msvc"]
