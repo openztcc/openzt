@@ -82,15 +82,8 @@ mod zoo_main {
         srv_fun.regist("show_int", show_int);
         srv_fun.regist("hello_world", hello_world);
 
-        // lrpc::service(srv_fun, "0.0.0.0:9009");
 
-        // std::thread::sleep(std::time::Duration::from_secs(10));
-
-        std::thread::spawn(move || {
-            lrpc::service(srv_fun, "0.0.0.0:9009");
-            // std::thread::sleep(std::time::Duration::from_secs(600));
-        });
-        std::thread::sleep(std::time::Duration::from_secs(600));
+        lrpc::service(srv_fun, "0.0.0.0:9009");
         std::process::exit(0);
     }
 }
