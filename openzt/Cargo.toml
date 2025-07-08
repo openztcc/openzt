@@ -38,6 +38,8 @@ regex = "1.10.6"
 public = "0.2.2"
 windows = { version = "0.61.3", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices", "Win32_System_Memory"] }
 enable-ansi-support = "0.2.1"
+itertools = "0.14.0"
+nt-time = "0.10.6"
 
 [dev-dependencies]
 openzt-loader = { version = "0.1.0", path = "../openzt-loader" }
