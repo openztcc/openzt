@@ -8,8 +8,9 @@ use tracing::{error, info};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::{SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}, Console::{AllocConsole, FreeConsole}};
 
-use std::sync::LazyLock;
 use std::collections::HashSet;
+use std::marker::PhantomData;
+use std::sync::LazyLock;
 
 // pub static LOCATIONS_HABITATS_RESOURCE_MAP: LazyLock<HashSet<GenericDetour<Any>>> = LazyLock::new(|| HashSet::new());
 
@@ -92,8 +93,11 @@ mod zoo_main {
     use crate::rpc_hooks::{show_int, hello_world};
     use retour::static_detour;
 
+    use crate::LOAD_LANG_DLLS;
+
     fn load_lang_dlls(this: u32) -> u32 {
         info!("LoadLangDLLs called with this: {}", this);
+        info!("Function at {}", LOAD_LANG_DLLS.address);
         // Call the original function
         let _result = unsafe { LoadLangDLLs.call(this) };
 
@@ -140,6 +144,10 @@ mod zoo_main {
     }
 }
 
+//const LOAD_LANG_DLLS: FunctionDef = FunctionDef::<unsafe extern "thiscall" fn(u32) -> u32>{0x00537333}
+//const LOAD_LANG_DLLS = FunctionDef::<unsafe extern "thiscall" fn(u32) -> u32>{address: 0x00537333, function_type: PhantomData}
+const LOAD_LANG_DLLS: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> = FunctionDef{address: 0x00537333, function_type: PhantomData};
+
 
 // static_detour! {
 //     static Test: fn(i32) -> i32;
@@ -157,25 +165,26 @@ mod zoo_main {
 
 struct FunctionDef<T> {
     pub address: u32,
-    pub function: T,
+    //pub function: T,
+    function_type: PhantomData<T>,
 }
 
 struct DetourWrapper<T> where T: retour::Function{
     pub detour: GenericDetour<T>,
 }
 
-trait Tobble {
-    fn enable(&mut self) -> Result<(), retour::Error>;
-    fn disable(&mut self) -> Result<(), retour::Error>;
+trait Toggle {
+    unsafe fn enable(&mut self) -> Result<(), retour::Error>;
+    unsafe fn disable(&mut self) -> Result<(), retour::Error>;
     fn is_enabled(&self) -> bool;
 }
 
-impl<T> Tobble for FunctionDef<T> {
-    fn enable(&mut self) -> Result<(), retour::Error> {
+impl<T> Toggle for DetourWrapper<T> where T: retour::Function {
+    unsafe fn enable(&mut self) -> Result<(), retour::Error> {
         self.detour.enable()
     }
 
-    fn disable(&mut self) -> Result<(), retour::Error> {
+    unsafe fn disable(&mut self) -> Result<(), retour::Error> {
         self.detour.disable()
     }
 
@@ -183,3 +192,4 @@ impl<T> Tobble for FunctionDef<T> {
         self.detour.is_enabled()
     }
 }
+
