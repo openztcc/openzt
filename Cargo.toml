@@ -19,7 +19,7 @@ members = [
     # # vendor
     # "vendor/retour-rs",
     "vendor/retour-utils",
-    "vendor/retour-utils/impl", 
+    "vendor/retour-utils/impl", "openzt-detour-macro", 
 ]
 exclude = ["outside-workspace"]
 resolver = "3"

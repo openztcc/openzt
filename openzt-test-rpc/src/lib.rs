@@ -144,24 +144,16 @@ mod zoo_main {
     }
 }
 
-//const LOAD_LANG_DLLS: FunctionDef = FunctionDef::<unsafe extern "thiscall" fn(u32) -> u32>{0x00537333}
-//const LOAD_LANG_DLLS = FunctionDef::<unsafe extern "thiscall" fn(u32) -> u32>{address: 0x00537333, function_type: PhantomData}
 const LOAD_LANG_DLLS: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> = FunctionDef{address: 0x00537333, function_type: PhantomData};
 
+//static LOAD_LANG_DLLS_DETOUR: LazyLock<GenericDetour<unsafe extern "thiscall" fn(u32) -> u32>> = LazyLock::new(|| {
+//    unsafe { LOAD_LANG_DLLS.detour(detour_target).unwrap() }
+//});
 
-// static_detour! {
-//     static Test: fn(i32) -> i32;
-// }
-
-//   #[allow(non_upper_case_globals)]
-// static Test: ::retour::StaticDetour<fn(i32) -> i32> = {
-//         #[inline(never)]
-//         #[allow(unused_unsafe)]
-//         fn __ffi_detour(__arg_0: i32) -> i32 {
-//             #[allow(unused_unsafe)] (Test.__detour())(__arg_0)
-//     }
-//     ::retour::StaticDetour::__new(__ffi_detour)
-// };
+//unsafe extern "thiscall" fn detour_target(_: u32) -> u32 {
+//    info!("Detour success");
+//    1
+//}
 
 struct FunctionDef<T> {
     pub address: u32,
@@ -169,27 +161,23 @@ struct FunctionDef<T> {
     function_type: PhantomData<T>,
 }
 
-struct DetourWrapper<T> where T: retour::Function{
-    pub detour: GenericDetour<T>,
-}
-
-trait Toggle {
-    unsafe fn enable(&mut self) -> Result<(), retour::Error>;
-    unsafe fn disable(&mut self) -> Result<(), retour::Error>;
-    fn is_enabled(&self) -> bool;
-}
-
-impl<T> Toggle for DetourWrapper<T> where T: retour::Function {
-    unsafe fn enable(&mut self) -> Result<(), retour::Error> {
-        self.detour.enable()
-    }
-
-    unsafe fn disable(&mut self) -> Result<(), retour::Error> {
-        self.detour.disable()
-    }
-
-    fn is_enabled(&self) -> bool {
-        self.detour.is_enabled()
+impl<T> FunctionDef<T> where T: retour::Function {
+    pub unsafe fn detour(self, target: T) -> Result<GenericDetour<T>, retour::Error> {
+        GenericDetour::<T>::new(::retour::Function::from_ptr(self.address as *const ()), target)
     }
 }
 
+use openzt_detour_macro::{detour_mod, detour};
+
+#[detour_mod]
+mod detour_zoo_main {
+    use tracing::info;
+    use crate::LOAD_LANG_DLLS;
+
+    // TODO: Will probs need a fix this so it works with a crate/mod prefix?
+    #[detour(LOAD_LANG_DLLS)]
+    unsafe extern "thiscall" fn detour_target(_: u32) -> u32 {
+        info!("Detour success");
+        1
+    }
+}
