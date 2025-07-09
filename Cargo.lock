@@ -913,6 +913,13 @@ name = "openzt-console"
 version = "0.1.0"
 
 [[package]]
+name = "openzt-detour"
+version = "0.1.0"
+dependencies = [
+ "retour",
+]
+
+[[package]]
 name = "openzt-detour-macro"
 version = "0.1.0"
 dependencies = [
@@ -938,6 +945,7 @@ version = "0.1.0"
 dependencies = [
  "enable-ansi-support",
  "lrpc",
+ "openzt-detour",
  "openzt-detour-macro",
  "retour",
  "retour-utils 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",

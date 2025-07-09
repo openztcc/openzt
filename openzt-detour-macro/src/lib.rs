@@ -66,13 +66,14 @@ pub fn detour_mod(_attr: TokenStream, input: TokenStream) -> TokenStream {
                     detour_name.span()
                 );
                 parse_quote! {
-                    #detour_static_name.enable().unwrap();
+                    #detour_static_name.enable()?;
                 }
             }).collect();
             
             let init_fn: syn::Item = parse_quote! {
-                pub unsafe fn init_detours() {
+                pub unsafe fn init_detours() -> ::retour::Result<()> {
                     #(#enables)*
+                    Ok(())
                 }
             };
             
