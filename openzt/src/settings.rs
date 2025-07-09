@@ -1,6 +1,6 @@
 use crate::command_console::{CommandError, add_to_command_register};
 use tracing::error;
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 
 mod ai;
 mod debug;
@@ -62,13 +62,14 @@ fn command_list_settings(args: Vec<&str>) -> Result<String, CommandError> {
         .ok_or(format!("Setting {} {} not found", args[0], args[1]).into())
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 mod zoo_ini_loading {
     use tracing::info;
+    use openzt_detour::LOAD_DEBUG_SETTINGS_FROM_INI;
 
-    #[hook(unsafe extern "cdecl" LoadDebugSettingsFromIniHook, offset = 0x00179f4c)]
-    fn load_debug_settings_from_ini_detour() -> u32 {
-        let result = unsafe { LoadDebugSettingsFromIniHook.call() };
+    #[detour(LOAD_DEBUG_SETTINGS_FROM_INI)]
+    unsafe extern "cdecl" fn load_debug_settings_from_ini_detour() -> u32 {
+        let result = unsafe { LOAD_DEBUG_SETTINGS_FROM_INI_DETOUR.call() };
         info!("######################LoadDebugSettingsFromIniHook: {}", result);
         result
     }

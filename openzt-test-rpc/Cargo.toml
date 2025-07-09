@@ -12,8 +12,6 @@ lrpc = "1.1.0"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 windows =  { version = "0.61.3", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices"]}
-# retour-utils = { path = "../vendor/retour-utils", version = "0.2.1"}
-retour-utils = "0.2.1"
 retour = { version = "0.3.1", features = ["thiscall-abi"] }
 openzt-detour = { path = "../openzt-detour", version = "0.1.0" }
 openzt-detour-macro = { path = "../openzt-detour-macro", version = "0.1.0" }

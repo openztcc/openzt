@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context};
 use openzt_configparser::ini::Ini;
 use maplit::hashset;
 use std::sync::LazyLock;
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 use tracing::{debug, error, info};
 
 use crate::{
@@ -315,17 +315,18 @@ impl Display for ExpansionList {
     }
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 pub mod custom_expansion {
     use tracing::info;
+    use openzt_detour::{ZTUI_GENERAL_ENTITYTYPEISDISPLAYED, ZTUI_EXPANSIONSELECT_SETUP};
 
     use super::{initialise_expansions, read_current_expansion};
     use crate::{bfentitytype::read_zt_entity_type_from_memory, ztui::get_current_buy_tab};
 
-    #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
-    pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
+    #[detour(ZTUI_GENERAL_ENTITYTYPEISDISPLAYED)]
+    pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
         // TODO: Put this call and subsequent log behind OpenZT debug flag
-        let result = unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
+        let result = unsafe { ZTUI_GENERAL_ENTITYTYPEISDISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
 
         let Some(current_expansion) = read_current_expansion() else {
             return 0;
@@ -350,9 +351,9 @@ pub mod custom_expansion {
         reimplemented_result
     }
 
-    #[hook(unsafe extern "stdcall" ZTUI_expansionselect_setup, offset=0x001291fb)]
-    pub fn ztui_expansionselect_setup() {
-        unsafe { ZTUI_expansionselect_setup.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
+    #[detour(ZTUI_EXPANSIONSELECT_SETUP)]
+    pub unsafe extern "stdcall" fn ztui_expansionselect_setup() {
+        unsafe { ZTUI_EXPANSIONSELECT_SETUP_DETOUR.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
 
         initialise_expansions();
     }

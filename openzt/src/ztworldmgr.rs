@@ -5,7 +5,7 @@ use getset::Getters;
 use itertools::Itertools;
 use num_enum::FromPrimitive;
 use tracing::{error, info};
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 
 use crate::{
     bfentitytype::{read_zt_entity_type_from_memory, BFEntityType, ZTEntityType, ZTSceneryType},
@@ -365,14 +365,15 @@ impl ZTWorldMgr {
     }
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 pub mod hooks_ztworldmgr {
     use crate::util::save_to_memory;
+    use openzt_detour::*;
 
     use super::*;
 
-    #[hook(unsafe extern "thiscall" BFMap_get_neighbour, offset = 0x00032236)]
-    fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
+    #[detour(BFMAP_GET_NEIGHBOUR)]
+    unsafe extern "thiscall" fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
         let ztwm = read_zt_world_mgr_from_global();
         let bftile = get_from_memory::<BFTile>(bftile);
         let direction = Direction::from(direction);
@@ -387,8 +388,8 @@ pub mod hooks_ztworldmgr {
     }    
 
     // 0x0040f916 int * __thiscall OOAnalyzer::BFEntity::getFootprint(BFEntity *this,undefined4 *param_1)
-    #[hook(unsafe extern "thiscall" BFEntity_get_footprint, offset = 0x0000f916)]
-    fn bfentity_get_footprint(_this: u32, param_1: u32, _param_2: u32) -> u32 {
+    #[detour(BFENTITY_GET_FOOTPRINT)]
+    unsafe extern "thiscall" fn bfentity_get_footprint(_this: u32, param_1: u32, _param_2: u32) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         let footprint = entity.get_footprint();
         save_to_memory(param_1, footprint.x);
@@ -399,24 +400,24 @@ pub mod hooks_ztworldmgr {
     }
 
     // 0x0042721a u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
-    #[hook(unsafe extern "thiscall" BFEntity_get_blocking_rect, offset = 0x0002721a)]
-    fn bfentity_get_blocking_rect(_this: u32, param_1: u32) -> u32 {
+    #[detour(BFENTITY_GET_BLOCKING_RECT)]
+    unsafe extern "thiscall" fn bfentity_get_blocking_rect(_this: u32, param_1: u32) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         save_to_memory(param_1, entity.get_blocking_rect());
         param_1
     }
 
     // 0x004fbbee u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
-    #[hook(unsafe extern "thiscall" BFEntity_get_blocking_rect_ztpath, offset = 0x000fbbee)]
-    fn bfentity_get_blocking_rect_ztpath(_this: u32, param_1: u32) -> u32 {
+    #[detour(BFENTITY_GET_BLOCKING_RECT_ZTPATH)]
+    unsafe extern "thiscall" fn bfentity_get_blocking_rect_ztpath(_this: u32, param_1: u32) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         save_to_memory(param_1, entity.get_blocking_rect());
         param_1
     }
 
     // // 0040f26c BFPos * __thiscall OOAnalyzer::BFMap::tileToWorld(BFMap *this,BFPos *param_1,BFPos *param_2,BFPos *param_3)
-    #[hook(unsafe extern "thiscall" BFMap_tile_to_world, offset = 0x0000f26c)]
-    fn bfmap_tile_to_world(_this: u32, param_1: u32, param_2: u32, param_3: u32) -> u32 {
+    #[detour(BFMAP_TILE_TO_WORLD)]
+    unsafe extern "thiscall" fn bfmap_tile_to_world(_this: u32, param_1: u32, param_2: u32, param_3: u32) -> u32 {
         let ztwm = read_zt_world_mgr_from_global();
         let tile_pos = get_from_memory::<IVec3>(param_2);
         let local_pos = get_from_memory::<IVec3>(param_3);
@@ -427,9 +428,9 @@ pub mod hooks_ztworldmgr {
 
     // TODO: Remove this when check_tank_placement is fully implemented
     // 004e16f1 bool __thiscall OOAnalyzer::BFEntity::isOnTile(BFEntity *this,BFTile *param_1)
-    #[hook(unsafe extern "thiscall" BFEntity_is_on_tile, offset = 0x000e16f1)]
-    fn bfentity_is_on_tile(_this: u32, param_1: u32) -> bool {
-        let result = unsafe { BFEntity_is_on_tile.call(_this, param_1) };
+    #[detour(BFENTITY_IS_ON_TILE)]
+    unsafe extern "thiscall" fn bfentity_is_on_tile(_this: u32, param_1: u32) -> bool {
+        let result = unsafe { BFENTITY_IS_ON_TILE_DETOUR.call(_this, param_1) };
         let entity = get_from_memory::<BFEntity>(_this);
         let tile = get_from_memory::<BFTile>(param_1);
         let reimimplented_result = entity.is_on_tile(&tile);

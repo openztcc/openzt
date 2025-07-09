@@ -1,7 +1,7 @@
 use nt_time::{FileTime, time::OffsetDateTime};
 use tracing::info;
 use std::fmt;
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 
 use getset::{Getters, Setters};
 
@@ -221,13 +221,14 @@ fn command_get_zt_habitats(_args: Vec<&str>) -> Result<String, CommandError> {
     Ok(result_string)
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 pub mod hooks_zthabitatmgr {
     use super::*;
+    use openzt_detour::ZTHABITAT_GET_GATE_TILE_IN;
 
     // 00410349 BFTile * __thiscall OOAnalyzer::ZTHabitat::getGateTileIn(ZTHabitat *this)
-    #[hook(unsafe extern "thiscall" ZTHabitat_get_gate_tile_in, offset = 0x00010349)]
-    fn get_gate_tile_in(_this: u32) -> u32 {
+    #[detour(ZTHABITAT_GET_GATE_TILE_IN)]
+    unsafe extern "thiscall" fn get_gate_tile_in(_this: u32) -> u32 {
         let habitat = get_from_memory::<ZTHabitat>(_this);
         match habitat.get_gate_tile_in() {
             Some(tile) => {
@@ -245,4 +246,8 @@ pub mod hooks_zthabitatmgr {
 pub fn init() {
     add_to_command_register("get_zthabitatmgr".to_owned(), command_get_zt_habitat_mgr);
     add_to_command_register("list_exhibits".to_string(), command_get_zt_habitats);
+    
+    if let Err(e) = unsafe { hooks_zthabitatmgr::init_detours() } {
+        info!("Error initialising zthabitatmgr detours: {}", e);
+    }
 }

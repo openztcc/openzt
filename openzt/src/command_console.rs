@@ -9,7 +9,7 @@ use std::{
 };
 
 use std::sync::LazyLock; //TODO: Use std::sync::LazyCell when it becomes stable
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 use tracing::{error, info};
 use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 
@@ -68,16 +68,17 @@ impl From<&str> for CommandError {
     }
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 pub mod zoo_console {
     use tracing::error;
+    use openzt_detour::ZTAPP_UPDATEGAME;
 
     use super::{add_to_command_register, call_next_command, command_list_commands, start_server};
 
-    #[hook(unsafe extern "thiscall" ZTApp_updateGame, offset = 0x0001a6d1)]
-    fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
+    #[detour(ZTAPP_UPDATEGAME)]
+    unsafe extern "thiscall" fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
         call_next_command();
-        unsafe { ZTApp_updateGame.call(_this_ptr, param_2) }
+        unsafe { ZTAPP_UPDATEGAME_DETOUR.call(_this_ptr, param_2) }
     }
 
     pub fn init() {

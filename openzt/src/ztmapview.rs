@@ -1,7 +1,7 @@
 use core::fmt;
 use num_enum::FromPrimitive;
 use tracing::info;
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 
 use crate::bfentitytype::{ZTEntityTypeClass, ZTSceneryType, zt_entity_type_class_is};
 use crate::util::{get_from_memory, checked_get_from_memory, save_to_memory};
@@ -189,13 +189,14 @@ impl BFTile {
     }
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 pub mod zoo_ztmapview {
     use tracing::{error, info};
     use crate::zthabitatmgr::{ZTHabitatMgr, read_zt_habitat_mgr_from_memory};
     use crate::ztworldmgr::{read_zt_entity_from_memory, IVec3};
     use crate::util::get_from_memory;
     use crate::ztmapview::{BFTile, ZTMapView, ErrorStringId};
+    use openzt_detour::{ZTMAPVIEW_CHECK_TANK_PLACEMENT, BFTILE_GET_LOCAL_ELEVATION};
 
     // use crate::{
     //     bfregistry::{add_to_registry, get_from_registry},
@@ -203,10 +204,10 @@ pub mod zoo_ztmapview {
     // };
 
     //004df688
-    #[hook(unsafe extern "thiscall" ZTMapView_check_tank_placement, offset = 0x000df688)]
+    #[detour(ZTMAPVIEW_CHECK_TANK_PLACEMENT)]
     // fn check_tank_placement(ZTMapView *other_this, BFEntity *param_2, BFTile *param_3, int *param_4)
-    fn check_tank_placement(_this: u32, temp_entity_ptr: u32, tile: u32, response_ptr: *mut u32) -> u32 {
-        let result = unsafe { ZTMapView_check_tank_placement.call(_this, temp_entity_ptr, tile, response_ptr) };
+    unsafe extern "thiscall" fn check_tank_placement(_this: u32, temp_entity_ptr: u32, tile: u32, response_ptr: *mut u32) -> u32 {
+        let result = unsafe { ZTMAPVIEW_CHECK_TANK_PLACEMENT_DETOUR.call(_this, temp_entity_ptr, tile, response_ptr) };
 
         // let entity = get_from_memory(temp_entity);
 
@@ -238,8 +239,8 @@ pub mod zoo_ztmapview {
     // }
 
     // 0040f24d int __thiscall OOAnalyzer::BFTile::getLocalElevation(BFTile *this,BFPos *param_1)
-    #[hook(unsafe extern "thiscall" BFTile_get_local_elevation, offset = 0x000f24d)]
-    fn get_local_elevation(_this: u32, pos: u32) -> i32 {
+    #[detour(BFTILE_GET_LOCAL_ELEVATION)]
+    unsafe extern "thiscall" fn get_local_elevation(_this: u32, pos: u32) -> i32 {
         let tile = get_from_memory::<BFTile>(_this);
         let pos_vec = get_from_memory::<IVec3>(pos);
         tile.get_local_elevation(pos_vec)

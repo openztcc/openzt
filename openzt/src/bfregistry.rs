@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Mutex};
 
 use std::sync::LazyLock;
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 use tracing::info;
 
 use crate::{
@@ -56,27 +56,28 @@ pub fn read_bf_registry() {
     }
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 mod zoo_bf_registry {
     use crate::{
         bfregistry::{add_to_registry, get_from_registry},
         util::{get_from_memory, get_string_from_memory},
     };
+    use openzt_detour::{BFREGISTRY_PRTGET, BFREGISTRY_ADD, BFREGISTRY_ADDUI};
 
-    #[hook(unsafe extern "thiscall" BFRegistry_prtGetHook, offset = 0x000bdd22)]
-    fn prt_get(_this_prt: u32, class_name: u32, _delimeter_maybe: u8) -> u32 {
+    #[detour(BFREGISTRY_PRTGET)]
+    unsafe extern "thiscall" fn prt_get(_this_prt: u32, class_name: u32, _delimeter_maybe: u8) -> u32 {
         get_from_registry(get_string_from_memory(get_from_memory::<u32>(class_name))).unwrap()
     }
 
-    #[hook(unsafe extern "cdecl" BFRegistry_AddHook, offset = 0x001770e5)]
-    fn add_to_bfregistry(param_1: u32, param_2: u32) -> u32 {
+    #[detour(BFREGISTRY_ADD)]
+    unsafe extern "cdecl" fn add_to_bfregistry(param_1: u32, param_2: u32) -> u32 {
         let param_1_string = get_string_from_memory(get_from_memory::<u32>(param_1));
         add_to_registry(&param_1_string, param_2);
         0x638001
     }
 
-    #[hook(unsafe extern "cdecl" BFRegistry_AddUIHook, offset = 0x001774bf)]
-    fn add_to_bfregistry_ui(param_1: u32, param_2: u32) -> u32 {
+    #[detour(BFREGISTRY_ADDUI)]
+    unsafe extern "cdecl" fn add_to_bfregistry_ui(param_1: u32, param_2: u32) -> u32 {
         let param_1_string = get_string_from_memory(get_from_memory::<u32>(param_1));
         add_to_registry(&param_1_string, param_2);
         0x638001

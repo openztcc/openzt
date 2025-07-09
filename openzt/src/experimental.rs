@@ -1,5 +1,5 @@
 use tracing::info;
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 
 // use crate::{
 //     util::get_from_memory,
@@ -10,9 +10,10 @@ use retour_utils::hook_module;
 // void __thiscall BFUIMgr::displayMessage(void *this,uint param_1,int param_2,BFTile *param_3,BFEntity *param_4,bool param_5, bool param_6)
 
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 pub mod zoo_experimental {
     use tracing::info;
+    use openzt_detour::BFUIMGR_DISPLAY_MESSAGE;
 
     use crate::util::get_from_memory;
     // use crate::{
@@ -20,10 +21,10 @@ pub mod zoo_experimental {
     //     util::{get_from_memory, get_string_from_memory},
     // };
 
-    #[hook(unsafe extern "thiscall" BFUIMgr_display_message, offset = 0x0009ccc3)]
-    fn prt_get(_this_prt: u32, param_1: u32, param_2: i32, param_3: u32, param_4: u32, param_5: bool, param_6: bool) {
+    #[detour(BFUIMGR_DISPLAY_MESSAGE)]
+    unsafe extern "thiscall" fn prt_get(_this_prt: u32, param_1: u32, param_2: i32, param_3: u32, param_4: u32, param_5: bool, param_6: bool) {
         info!("BFUIMgr::displayMessage called with params: {}, {}, {}, {}, {}, {}", param_1, param_2, param_3, param_4, param_5, param_6);
-        unsafe { BFUIMgr_display_message.call(_this_prt, param_1, param_2, param_3, param_4, param_5, param_6) };
+        unsafe { BFUIMGR_DISPLAY_MESSAGE_DETOUR.call(_this_prt, param_1, param_2, param_3, param_4, param_5, param_6) };
     }
 
     // // 0x431c3e : void __thiscall FUN_00431c3e(void *this,int *param_1,int *param_2,char param_3,int **param_4)

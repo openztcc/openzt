@@ -14,11 +14,11 @@ members = [
     "openzt-console",
     "openzt-configparser",
     "openzt-test-rpc",
-    # "openzt-animations",
-
-    # # vendor
     "openzt-detour-macro",
     "openzt-detour", 
+
+    # # TODO:	
+    # "openzt-animations",
 ]
 exclude = ["outside-workspace"]
 resolver = "3"

@@ -81,7 +81,7 @@ use tracing::info;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
 
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 
 #[no_mangle]
 extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
@@ -108,14 +108,15 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
     1
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 mod zoo_init {
     use super::*;
+    use openzt_detour::WINMAIN;
 
     // Note(finn): We hook the WinMain function to perform some later initialization steps. Starting
     //  the console starts a new thead which is not recommended in the DllMain function.
-    #[hook(unsafe extern "stdcall" WinMain, offset = 0x0001a8bc)]
-    fn win_main(hInstance: u32, hPrevInstance: u32, lpCmdLine: u32, nShowCm: u32) -> u32 {
+    #[detour(WINMAIN)]
+    unsafe extern "stdcall" fn win_main(hInstance: u32, hPrevInstance: u32, lpCmdLine: u32, nShowCm: u32) -> u32 {
         info!("###################### WinMain: {} {} {} {}", hInstance, hPrevInstance, lpCmdLine, nShowCm);
         match command_console::init() {
             Ok(_) => {
@@ -154,6 +155,6 @@ mod zoo_init {
             ztmapview::init();
             zthabitatmgr::init();
         }
-        unsafe { WinMain.call(hInstance, hPrevInstance, lpCmdLine, nShowCm) }
+        unsafe { WINMAIN_DETOUR.call(hInstance, hPrevInstance, lpCmdLine, nShowCm) }
     }
 }

@@ -77,14 +77,25 @@ if cfg!(feature = "bugfix") {
 More complex modules can be split into multiple submodules in a subdirectory, see `/resource_manager/` and `/settings/` as examples, each has a respective `resource_manager.rs` and `settings.rs` file that defines the submodules
 
 ### detours
-You can create a detour as follows, offset is from the start of the function (you will likely need to subtract 0x400000 from a functions address, this is only the case for detours, any other memory access should be done using the full address). `cdecl` can be replaced with `thiscall` or `stdcall`.
+You can create a detour as follows. First, define the function signature and address as a constant in the `openzt-detour` crate (address = Ghidra offset + 0x400000). Then use the `#[detour_mod]` attribute on your module and `#[detour(CONSTANT_NAME)]` on your function. The calling convention (`cdecl`, `thiscall`, `stdcall`) should match the original function.
 
 ```rust
-pub mod custom_expansion {
+// In openzt-detour/src/lib.rs
+pub const ZTUI_GENERAL_ENTITYTYPEISDISPLAYED: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u8> = 
+    FunctionDef{address: 0x004e8cc8, function_type: PhantomData};
 
-    #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
-    pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
-        unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };  // This calls the original function
+// In your module
+use openzt_detour_macro::detour_mod;
+use openzt_detour::ZTUI_GENERAL_ENTITYTYPEISDISPLAYED;
+
+#[detour_mod]
+pub mod custom_expansion {
+    use super::*;
+
+    #[detour(ZTUI_GENERAL_ENTITYTYPEISDISPLAYED)]
+    unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
+        // This calls the original function using the generated _DETOUR static
+        unsafe { ZTUI_GENERAL_ENTITYTYPEISDISPLAYED_DETOUR.call(bf_entity, param_1, param_2) }
     }
 }
 
