@@ -13,7 +13,7 @@ mod capture_ztlog;
 mod command_console;
 
 /// Commands and functions for reading entities and entity types from the ZTWorldMgr class
-mod ztworldmgr;
+pub mod ztworldmgr;
 
 mod resource_manager;
 
@@ -56,7 +56,7 @@ mod bfentitytype;
 mod ztgamemgr;
 
 /// ztmapview is the main view in zoo tycoon, all map interaction is done through this class.
-mod ztmapview;
+pub mod ztmapview;
 
 /// zthabitatmgr module has commands to interact with habitats/exhibits/tanks via the vanilla ZTHabitatMgr class.
 mod zthabitatmgr;

@@ -51,7 +51,7 @@ fn init_console() -> windows::core::Result<()> {
 mod detour_zoo_main {
     use tracing::{error, info};
     use openzt_detour::LOAD_LANG_DLLS;
-    use crate::rpc_hooks::{show_int, hello_world};
+    use super::init_srv;
 
     // TODO: Fix this so it works with a crate/mod prefix
     #[detour(LOAD_LANG_DLLS)]
@@ -59,11 +59,6 @@ mod detour_zoo_main {
         info!("Detour success");
 
         let _result = unsafe { LOAD_LANG_DLLS_DETOUR.call(this) };
-
-        let mut srv_fun = lrpc::Fun::new();
-
-        srv_fun.regist("show_int", show_int);
-        srv_fun.regist("hello_world", hello_world);
 
         // Get port from environment variable, default to 9009
         let port = std::env::var("OPENZT_RPC_PORT").unwrap_or_else(|_| "9009".to_string());
@@ -85,7 +80,7 @@ mod detour_zoo_main {
                 tx.send(Ok(())).unwrap();
                 
                 // Now start the actual RPC server (this will block forever)
-                lrpc::service(srv_fun, &addr_clone);
+                lrpc::service(init_srv(), &addr_clone);
             }
             Err(e) => {
                 tx.send(Err(e)).unwrap();
@@ -125,4 +120,15 @@ mod detour_zoo_main {
         // Return the original result from the detoured function
         _result
     }
+}
+
+use crate::rpc_hooks::{show_int, hello_world};
+
+fn init_srv() -> lrpc::Fun {
+    let mut srv_fun = lrpc::Fun::new();
+
+    srv_fun.regist("show_int", show_int);
+    srv_fun.regist("hello_world", hello_world);
+
+    srv_fun
 }
