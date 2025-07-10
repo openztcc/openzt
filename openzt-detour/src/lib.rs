@@ -46,7 +46,7 @@ pub const BFREGISTRY_ADDUI: FunctionDef<unsafe extern "cdecl" fn(u32, u32) -> u3
 pub const ZTAPP_UPDATEGAME: FunctionDef<unsafe extern "thiscall" fn(u32, u32)> = FunctionDef{address: 0x0041a6d1, function_type: PhantomData};
 
 // Expansions
-pub const ZTUI_GENERAL_ENTITYTYPEISDISPLAYED: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u8> = FunctionDef{address: 0x004e8cc8, function_type: PhantomData};
+pub const ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u8> = FunctionDef{address: 0x004e8cc8, function_type: PhantomData};
 pub const ZTUI_EXPANSIONSELECT_SETUP: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x005291fb, function_type: PhantomData};
 
 // Experimental
@@ -59,10 +59,10 @@ pub const LOAD_DEBUG_SETTINGS_FROM_INI: FunctionDef<unsafe extern "cdecl" fn() -
 pub const BFRESOURCE_ATTEMPT: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u8> = FunctionDef{address: 0x00403891, function_type: PhantomData};
 pub const BFRESOURCE_PREPARE: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u8> = FunctionDef{address: 0x004047f4, function_type: PhantomData};
 pub const BFRESOURCEMGR_CONSTRUCTOR: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> = FunctionDef{address: 0x0052903f, function_type: PhantomData};
-pub const ZTUI_GENERAL_GETINFOIMAGENAME: FunctionDef<unsafe extern "cdecl" fn(u32) -> u32> = FunctionDef{address: 0x004f85d2, function_type: PhantomData};
+pub const ZTUI_GENERAL_GET_INFO_IMAGE_NAME: FunctionDef<unsafe extern "cdecl" fn(u32) -> u32> = FunctionDef{address: 0x004f85d2, function_type: PhantomData};
 
 // Version
-pub const BFVERSIONINFO_GETVERSIONSTRING: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x004bdfd4, function_type: PhantomData};
+pub const BFVERSIONINFO_GET_VERSION_STRING: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x004bdfd4, function_type: PhantomData};
 
 // Logging
 pub const ZOOLOGGING_LOG: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32, u8, u32, u32, u32)> = FunctionDef{address: 0x00401363, function_type: PhantomData};

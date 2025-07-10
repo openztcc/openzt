@@ -11,7 +11,7 @@ pub fn init_hooks() {
 mod zoo_resource_mgr {
     use openzt_configparser::ini::Ini;
     use tracing::info;
-    use openzt_detour::{BFRESOURCE_ATTEMPT, BFRESOURCE_PREPARE, BFRESOURCEMGR_CONSTRUCTOR, ZTUI_GENERAL_GETINFOIMAGENAME};
+    use openzt_detour::{BFRESOURCE_ATTEMPT, BFRESOURCE_PREPARE, BFRESOURCEMGR_CONSTRUCTOR, ZTUI_GENERAL_GET_INFO_IMAGE_NAME};
 
     use crate::{
         resource_manager::{
@@ -113,11 +113,11 @@ mod zoo_resource_mgr {
         return_value
     }
 
-    #[detour(ZTUI_GENERAL_GETINFOIMAGENAME)]
+    #[detour(ZTUI_GENERAL_GET_INFO_IMAGE_NAME)]
     unsafe extern "cdecl" fn zoo_ui_general_get_info_image_name(id: u32) -> u32 {
         match get_location_or_habitat_by_id(id) {
             Some(resource_ptr) => resource_ptr,
-            None => unsafe { ZTUI_GENERAL_GETINFOIMAGENAME_DETOUR.call(id) },
+            None => unsafe { ZTUI_GENERAL_GET_INFO_IMAGE_NAME_DETOUR.call(id) },
         }
     }
 }

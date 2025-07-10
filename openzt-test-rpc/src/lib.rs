@@ -77,22 +77,20 @@ mod detour_zoo_main {
         let (tx, rx) = std::sync::mpsc::channel();
         let addr_clone = addr.clone();
         
-        std::thread::spawn(move || {
-            // Attempt to bind to the port first
-            match std::net::TcpListener::bind(&addr_clone) {
-                Ok(listener) => {
-                    // Successfully bound, close the test listener
-                    drop(listener);
-                    tx.send(Ok(())).unwrap();
-                    
-                    // Now start the actual RPC server (this will block forever)
-                    lrpc::service(srv_fun, &addr_clone);
-                }
-                Err(e) => {
-                    tx.send(Err(e)).unwrap();
-                }
+        // Attempt to bind to the port first
+        match std::net::TcpListener::bind(&addr_clone) {
+            Ok(listener) => {
+                // Successfully bound, close the test listener
+                drop(listener);
+                tx.send(Ok(())).unwrap();
+                
+                // Now start the actual RPC server (this will block forever)
+                lrpc::service(srv_fun, &addr_clone);
             }
-        });
+            Err(e) => {
+                tx.send(Err(e)).unwrap();
+            }
+        }
         
         // Wait for the startup result
         match rx.recv_timeout(std::time::Duration::from_secs(5)) {

@@ -318,15 +318,15 @@ impl Display for ExpansionList {
 #[detour_mod]
 pub mod custom_expansion {
     use tracing::info;
-    use openzt_detour::{ZTUI_GENERAL_ENTITYTYPEISDISPLAYED, ZTUI_EXPANSIONSELECT_SETUP};
+    use openzt_detour::{ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED, ZTUI_EXPANSIONSELECT_SETUP};
 
     use super::{initialise_expansions, read_current_expansion};
     use crate::{bfentitytype::read_zt_entity_type_from_memory, ztui::get_current_buy_tab};
 
-    #[detour(ZTUI_GENERAL_ENTITYTYPEISDISPLAYED)]
+    #[detour(ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED)]
     pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
         // TODO: Put this call and subsequent log behind OpenZT debug flag
-        let result = unsafe { ZTUI_GENERAL_ENTITYTYPEISDISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
+        let result = unsafe { ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
 
         let Some(current_expansion) = read_current_expansion() else {
             return 0;
