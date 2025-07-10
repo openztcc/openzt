@@ -49,7 +49,7 @@ fn init_console() -> windows::core::Result<()> {
 
 #[detour_mod]
 mod detour_zoo_main {
-    use tracing::info;
+    use tracing::{error, info};
     use openzt_detour::LOAD_LANG_DLLS;
     use crate::rpc_hooks::{show_int, hello_world};
 
@@ -65,8 +65,66 @@ mod detour_zoo_main {
         srv_fun.regist("show_int", show_int);
         srv_fun.regist("hello_world", hello_world);
 
-        lrpc::service(srv_fun, "0.0.0.0:9009");
-
-        std::process::exit(1);
+        // Get port from environment variable, default to 9009
+        let port = std::env::var("OPENZT_RPC_PORT").unwrap_or_else(|_| "9009".to_string());
+        let addr = format!("0.0.0.0:{}", port);
+        
+        info!("Starting RPC server on {}", addr);
+        
+        // Try to start the RPC server
+        // Note: lrpc::service blocks forever if successful, so we need to handle this differently
+        // We'll use a channel to communicate startup status
+        let (tx, rx) = std::sync::mpsc::channel();
+        let addr_clone = addr.clone();
+        
+        std::thread::spawn(move || {
+            // Attempt to bind to the port first
+            match std::net::TcpListener::bind(&addr_clone) {
+                Ok(listener) => {
+                    // Successfully bound, close the test listener
+                    drop(listener);
+                    tx.send(Ok(())).unwrap();
+                    
+                    // Now start the actual RPC server (this will block forever)
+                    lrpc::service(srv_fun, &addr_clone);
+                }
+                Err(e) => {
+                    tx.send(Err(e)).unwrap();
+                }
+            }
+        });
+        
+        // Wait for the startup result
+        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(Ok(())) => {
+                info!("RPC server successfully started on {}", addr);
+                // The server is running in the background thread, we can continue
+                // Note: The server thread will keep running even after this function returns
+            }
+            Ok(Err(e)) => {
+                error!("Failed to start RPC server on {}: {}", addr, e);
+                error!("The port may already be in use or there may be a network configuration issue.");
+                error!("You can specify a different port using the OPENZT_RPC_PORT environment variable.");
+                error!("Exiting in 30 seconds...");
+                
+                // Wait 30 seconds before exiting
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                std::process::exit(1);
+            }
+            Err(_) => {
+                error!("RPC server startup timed out after 5 seconds");
+                error!("Exiting in 30 seconds...");
+                
+                // Wait 30 seconds before exiting
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                std::process::exit(1);
+            }
+        }
+        
+        // Continue with normal execution - don't block on the server thread
+        // The RPC server is running in the background
+        
+        // Return the original result from the detoured function
+        _result
     }
 }
