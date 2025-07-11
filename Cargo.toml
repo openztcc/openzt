@@ -16,6 +16,7 @@ members = [
     "openzt-test-rpc",
     "openzt-detour-macro",
     "openzt-detour", 
+    "openzt-store-macro",
 
     # # TODO:	
     # "openzt-animations",

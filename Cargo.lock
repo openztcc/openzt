@@ -865,6 +865,7 @@ dependencies = [
  "openzt-detour",
  "openzt-detour-macro",
  "openzt-loader",
+ "openzt-store-macro",
  "public",
  "regex",
  "retour",
@@ -914,6 +915,15 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "winapi",
+]
+
+[[package]]
+name = "openzt-store-macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
 ]
 
 [[package]]

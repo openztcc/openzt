@@ -3,6 +3,7 @@ use num_enum::FromPrimitive;
 use tracing::info;
 use openzt_detour_macro::detour_mod;
 use lrpc::{CommonStore, Store, ByteQue};
+use openzt_store_macro::StoreSkipArrays;
 
 use crate::bfentitytype::{ZTEntityTypeClass, ZTSceneryType, zt_entity_type_class_is};
 use crate::util::{get_from_memory, checked_get_from_memory, save_to_memory};
@@ -38,9 +39,8 @@ use crate::ztworldmgr::{BFEntity, ZTEntity, IVec3, read_zt_entity_from_memory};
 //     Unknown = 0x0,
 // }
 
-
 // TODO: Impl Store for this, create own macro that ignores the padding OR type alias for the padding with a nop impl of Store
-#[derive(Debug, CommonStore)]
+#[derive(Debug, StoreSkipArrays)]
 #[repr(C)]
 pub struct BFTile {
     padding: [u8; 0x34],
