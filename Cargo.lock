@@ -907,6 +907,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openzt-dll"
+version = "0.1.0"
+dependencies = [
+ "openzt",
+ "tracing",
+ "windows",
+]
+
+[[package]]
 name = "openzt-loader"
 version = "0.1.0"
 dependencies = [

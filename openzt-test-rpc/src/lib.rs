@@ -122,13 +122,18 @@ mod detour_zoo_main {
     }
 }
 
-use crate::rpc_hooks::{show_int, hello_world};
+use crate::rpc_hooks::{show_int, hello_world, show_ivec3, rpc_hooks::{allocate_bftile, deallocate_bftile, allocate_ivec3, deallocate_ivec3}};
 
 fn init_srv() -> lrpc::Fun {
     let mut srv_fun = lrpc::Fun::new();
 
     srv_fun.regist("show_int", show_int);
     srv_fun.regist("hello_world", hello_world);
+    srv_fun.regist("allocate_bftile", allocate_bftile);
+    srv_fun.regist("deallocate_bftile", deallocate_bftile);
+    srv_fun.regist("allocate_ivec3", allocate_ivec3);
+    srv_fun.regist("deallocate_ivec3", deallocate_ivec3);
+    srv_fun.regist("show_ivec3", show_ivec3);
 
     srv_fun
 }

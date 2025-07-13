@@ -1,4 +1,5 @@
 #![feature(let_chains)] // Remove when upgrading to Rust 1.88 2024 edition
+#![feature(lazy_cell)] // Remove when upgrading to Rust 1.88 2024 edition (need to figure out what is causing the crash when creating a thread in dll)
 #![allow(dead_code)]
 
 /// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this
@@ -77,39 +78,12 @@ mod util;
 /// Loads settings from the zoo.ini file and commands/functions for reading and writing settings during runtime
 mod settings;
 
-use tracing::info;
-#[cfg(target_os = "windows")]
-use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
-
 use openzt_detour_macro::detour_mod;
 
-#[no_mangle]
-extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
-    match reason {
-        DLL_PROCESS_ATTACH => {
-
-            // Initialize a hook into the WinMain function, where we can perform further initialization
-            // We just unwrap here as this is a critical initialization step, and we want to panic if it fails.
-            unsafe { zoo_init::init_detours().unwrap() }
-        }
-        DLL_PROCESS_DETACH => {
-            // info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);
-        }
-        DLL_THREAD_ATTACH => {
-            info!("DllMain: DLL_THREAD_ATTACH: {}, {} {}", module, reason, _reserved);
-        }
-        DLL_THREAD_DETACH => {
-            // info!("DllMain: DLL_THREAD_DETACH: {}, {} {}", module, reason, _reserved);
-        }
-        _ => {
-            // info!("DllMain: Unknown: {}, {} {}", module, reason, _reserved);
-        }
-    }
-    1
-}
+use tracing::info;
 
 #[detour_mod]
-mod zoo_init {
+pub mod zoo_init {
     use super::*;
     use openzt_detour::WINMAIN;
 

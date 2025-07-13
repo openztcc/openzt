@@ -22,8 +22,8 @@ pub mod rpc_hooks {
     use lrpc::*;
  
 
-    generate_allocate_deallocate_named!(openzt::ztmapview::BFTile, bftile);
-    generate_allocate_deallocate_named!(openzt::ztworldmgr::IVec3, ivec3);
+    generate_allocate_deallocate_named!(openztlib::ztmapview::BFTile, bftile);
+    generate_allocate_deallocate_named!(openztlib::ztworldmgr::IVec3, ivec3);
 
 }
 
@@ -36,6 +36,14 @@ pub fn hello_world(name: String) -> String{
 #[fmt_function]
 pub fn show_int(num: i32) {
     info!("Received number: {}", num);
+}
+
+#[fmt_function]
+pub fn show_ivec3(vec_ptr: u32) {
+    unsafe {
+        let vec = Box::from_raw(vec_ptr as *mut openztlib::ztworldmgr::IVec3);
+        info!("Received IVec3: ({}, {}, {})", vec.x, vec.y, vec.z);
+    }
 }
 
 // #[fmt_function]

@@ -48,8 +48,8 @@ openzt-loader = { version = "0.1.0", path = "../openzt-loader" }
 # openzt-test-rpc = { path = "../openzt-test-rpc", version = "0.1.0" }
 
 [lib]
-name = "openzt"
-crate-type = ["cdylib", "lib"]
+name = "openztlib"
+crate-type = ["lib"]
 
 #[[bin]]
 #name = "test"

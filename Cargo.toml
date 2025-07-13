@@ -17,6 +17,7 @@ members = [
     "openzt-detour-macro",
     "openzt-detour", 
     "openzt-store-macro",
+    "openzt-dll",
 
     # # TODO:	
     # "openzt-animations",

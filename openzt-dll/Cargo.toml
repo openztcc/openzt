@@ -1,0 +1,16 @@
+[package]
+name = "openzt-dll"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+openzt = { version = "0.1.0-alpha", path = "../openzt" }
+tracing = "0.1.41"
+windows = "0.61.3"
+
+[lib]
+name = "openzt"
+crate-type = ["cdylib"]
