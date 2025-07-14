@@ -27,6 +27,7 @@ mod ztui;
 /// fence 1 tile away from the edge of the map, and a bug where the
 /// game crashes if a zoo wall that is one tile away from the edge
 /// of the map is deleted.
+#[cfg(target_os = "windows")]
 mod bugfix;
 
 /// Methods for reading the vanilla ZTAdvTerrainMgr class, which contains information about terrain types.
@@ -78,10 +79,14 @@ mod util;
 /// Loads settings from the zoo.ini file and commands/functions for reading and writing settings during runtime
 mod settings;
 
+#[cfg(target_os = "windows")]
+use windows::Win32::System::{SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}, Console::{AllocConsole, FreeConsole}};
+
 use openzt_detour_macro::detour_mod;
 
 use tracing::info;
 
+#[cfg(target_os = "windows")]
 #[detour_mod]
 pub mod zoo_init {
     use super::*;
@@ -91,8 +96,9 @@ pub mod zoo_init {
     //  the console starts a new thead which is not recommended in the DllMain function.
     #[detour(WINMAIN)]
     unsafe extern "stdcall" fn win_main(hInstance: u32, hPrevInstance: u32, lpCmdLine: u32, nShowCm: u32) -> u32 {
+	// init_console() 
         info!("###################### WinMain: {} {} {} {}", hInstance, hPrevInstance, lpCmdLine, nShowCm);
-        match command_console::init() {
+        match init_console() {
             Ok(_) => {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
                 tracing_subscriber::fmt().with_ansi(enable_ansi).init();
@@ -105,6 +111,7 @@ pub mod zoo_init {
 
 
         // Initialize stable modules
+        command_console::init();
         resource_manager::init();
         expansions::init();
         string_registry::init();
@@ -131,4 +138,15 @@ pub mod zoo_init {
         }
         unsafe { WINMAIN_DETOUR.call(hInstance, hPrevInstance, lpCmdLine, nShowCm) }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn init_console() -> windows::core::Result<()> {
+        // Free the current console
+        unsafe { FreeConsole()? };
+
+        // Allocate a new console
+        unsafe { AllocConsole()? };
+
+        Ok(())
 }

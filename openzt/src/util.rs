@@ -22,6 +22,7 @@ pub fn save_to_memory<T>(address: u32, value: T) {
     unsafe { ptr::write(address as *mut T, value) };
 }
 
+#[cfg(target_os = "windows")]
 pub fn save_to_protected_memory<T>(address: u32, value: T) -> anyhow::Result<()> {
     unsafe {
         {
@@ -46,6 +47,7 @@ pub fn get_ini_path() -> PathBuf {
     exe_location
 }
 
+#[cfg(target_os = "windows")]
 pub fn patch_nop(address: u32) -> anyhow::Result<()> {
     unsafe {
         {

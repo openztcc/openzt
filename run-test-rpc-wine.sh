@@ -1,5 +1,5 @@
 echo "Run cargo build with specified arguments"
-cargo build --lib --release --target=i686-pc-windows-msvc %*
+cargo +nightly build --lib --release --target=i686-pc-windows-gnu
 
 echo "Check if the build succeeded"
 if [ $retval -ne 0 ]; then
@@ -7,9 +7,12 @@ if [ $retval -ne 0 ]; then
     exit 1
 fi
 
+echo "Remove conflicting dlls"
+rm "$1/res-openzt.dll"
+
 echo "Copy the file to the destination"
-cp "target/i686-pc-windows-msvc/release/openzt.dll" "$1/res-openzt.dll"
+cp "target/i686-pc-windows-gnu/release/openzttestrpc.dll" "$1/res-openzt-rpc.dll"
 echo "Check copy succeeded"
 
 echo "Run the zoo.exe executable"
-wine "C:/Program Files (x86)/Microsoft Games/Zoo Tycoon/zoo.exe"
+wine "$1/zoo.exe"
