@@ -11,12 +11,14 @@ enable-ansi-support = "0.2.1"
 lrpc = "1.1.0"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
-windows =  { version = "0.61.3", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices"]}
 retour = { version = "0.3.1", features = ["thiscall-abi"] }
 openzt-detour = { path = "../openzt-detour", version = "0.1.0" }
 openzt-detour-macro = { path = "../openzt-detour-macro", version = "0.1.0" }
 openzt = { path = "../openzt", version = "0.1.0-alpha" }
 paste = "1.0.15"
+
+[target.'cfg(windows)'.dependencies]
+windows =  { version = "0.61.3", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices"]}
 
 [lib]
 name = "openzttestrpc"

@@ -27,6 +27,7 @@ mod ztui;
 /// fence 1 tile away from the edge of the map, and a bug where the
 /// game crashes if a zoo wall that is one tile away from the edge
 /// of the map is deleted.
+#[cfg(target_os = "windows")]
 mod bugfix;
 
 /// Methods for reading the vanilla ZTAdvTerrainMgr class, which contains information about terrain types.
@@ -78,10 +79,14 @@ mod util;
 /// Loads settings from the zoo.ini file and commands/functions for reading and writing settings during runtime
 mod settings;
 
+#[cfg(target_os = "windows")]
+use windows::Win32::System::{SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}, Console::{AllocConsole, FreeConsole}};
+
 use openzt_detour_macro::detour_mod;
 
 use tracing::info;
 
+#[cfg(target_os = "windows")]
 #[detour_mod]
 mod zoo_init {
     use super::*;
@@ -104,6 +109,7 @@ mod zoo_init {
 
 
         // Initialize stable modules
+        command_console::init();
         resource_manager::init();
         expansions::init();
         string_registry::init();
