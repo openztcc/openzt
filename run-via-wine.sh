@@ -1,5 +1,5 @@
 echo "Run cargo build with specified arguments"
-cargo +nightly-2024-05-02 build --manifest-path openzt-test-rpc/Cargo.toml --lib --release --target=i686-pc-windows-gnu
+cargo +nightly-2024-05-02 build --manifest-path openzt-dll/Cargo.toml --lib --release --target=i686-pc-windows-gnu
 
 echo "Check if the build succeeded"
 if [ "$retval" -ne 0 ]; then
@@ -17,7 +17,7 @@ rm "$ZT_DIR/res-openzt.dll"
 rm "$ZT_DIR/res-openzt-rpc.dll"
 
 echo "Copy the file to the destination"
-cp "target/i686-pc-windows-gnu/release/openzttestrpc.dll" "$ZT_DIR/res-openzt-rpc.dll"
+cp "target/i686-pc-windows-gnu/release/openzt.dll" "$ZT_DIR/res-openzt.dll"
 echo "Check copy succeeded"
 
 echo "Run the zoo.exe executable"
