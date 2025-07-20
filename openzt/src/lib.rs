@@ -96,7 +96,7 @@ mod zoo_init {
     //  the console starts a new thead which is not recommended in the DllMain function.
     #[detour(LOAD_LANG_DLLS)]
     unsafe extern "thiscall" fn load_res_dlls(this: u32) -> u32 {
-        match command_console::init() {
+        match init_console() {
             Ok(_) => {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
                 tracing_subscriber::fmt().with_ansi(enable_ansi).init();
@@ -143,4 +143,15 @@ pub fn init() {
     unsafe {
         zoo_init::init_detours().expect("Failed to initialize detours");
     }
+}
+
+#[cfg(target_os = "windows")]
+fn init_console() -> windows::core::Result<()> {
+        // Free the current console
+        unsafe { FreeConsole()? };
+
+        // Allocate a new console
+        unsafe { AllocConsole()? };
+
+        Ok(())
 }
