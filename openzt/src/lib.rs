@@ -83,15 +83,14 @@ use openzt_detour_macro::detour_mod;
 use tracing::info;
 
 #[detour_mod]
-pub mod zoo_init {
+mod zoo_init {
     use super::*;
-    use openzt_detour::WINMAIN;
+    use openzt_detour::LOAD_LANG_DLLS;
 
-    // Note(finn): We hook the WinMain function to perform some later initialization steps. Starting
+    // Note(finn): We hook the LoadRes function to perform some later initialization steps. Starting
     //  the console starts a new thead which is not recommended in the DllMain function.
-    #[detour(WINMAIN)]
-    unsafe extern "stdcall" fn win_main(hInstance: u32, hPrevInstance: u32, lpCmdLine: u32, nShowCm: u32) -> u32 {
-        info!("###################### WinMain: {} {} {} {}", hInstance, hPrevInstance, lpCmdLine, nShowCm);
+    #[detour(LOAD_LANG_DLLS)]
+    unsafe extern "thiscall" fn load_res_dlls(this: u32) -> u32 {
         match command_console::init() {
             Ok(_) => {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
@@ -129,6 +128,13 @@ pub mod zoo_init {
             ztmapview::init();
             zthabitatmgr::init();
         }
-        unsafe { WINMAIN_DETOUR.call(hInstance, hPrevInstance, lpCmdLine, nShowCm) }
+        unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
+    }
+}
+
+pub fn init() {
+    // Initialize the detours
+    unsafe {
+        zoo_init::init_detours().expect("Failed to initialize detours");
     }
 }

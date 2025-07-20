@@ -9,7 +9,8 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 
-del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\lang301-openzt.dll"
+del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzt.dll"
+del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openztrpc.dll"
 
 @REM echo Building and running openzt loader
 @REM cargo +nightly-2025-06-23-i686-pc-windows-msvc run --release --manifest-path openzt-loader/Cargo.toml -- --dll-path="target\i686-pc-windows-msvc\release\openzttestrpc.dll" --resume
