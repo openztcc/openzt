@@ -138,6 +138,7 @@ mod zoo_init {
     }
 }
 
+#[cfg(target_os = "windows")]
 pub fn init() {
     // Initialize the detours
     unsafe {

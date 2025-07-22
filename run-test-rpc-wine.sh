@@ -1,3 +1,4 @@
+#!/bin/bash
 echo "Run cargo build with specified arguments"
 cargo +nightly-2024-05-02 build --manifest-path openzt-test-rpc/Cargo.toml --lib --release --target=i686-pc-windows-gnu
 
