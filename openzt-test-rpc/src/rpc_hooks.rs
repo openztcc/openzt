@@ -6,7 +6,9 @@ macro_rules! generate_allocate_deallocate_named {
         paste::paste! {
             #[fmt_function]
             pub fn [<allocate_ $name>](item: $type) -> u32 {
-                Box::into_raw(Box::new(item)) as u32
+                let ptr = Box::into_raw(Box::new(item)) as u32;
+                info!("Allocated {} at {}", stringify!($name), ptr);
+                ptr
             }
 
             #[fmt_function]
@@ -16,15 +18,14 @@ macro_rules! generate_allocate_deallocate_named {
                 }
             }
 
-            // TODO: We can we store the ptrs in a HashMap to avoid having to deallocate and reallocate?
-            //  Leak rather than into_raw and store the reference in a HashMap
+            // TODO: Leak rather than into_raw and store the reference in a HashMap
             #[fmt_function]
             pub fn [<show_ $name>](ptr: u32) -> u32 {
-                unsafe {
-                    let item = Box::from_raw(ptr as *mut $type);
-                    info!("Received {}: {:?}", stringify!($name), item);
-                    Box::into_raw(Box::new(item)) as u32
-                }
+                let item = unsafe {Box::from_raw(ptr as *mut $type)};
+                info!("Received {}: {:?}", stringify!($name), item);
+                let ptr = Box::into_raw(Box::new(item)) as u32;
+                info!("Allocated {} at {}", stringify!($name), ptr);
+                ptr
             }
         }
     };

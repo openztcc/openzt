@@ -19,7 +19,9 @@ pub fn main() {
     let vec = openztlib::ztworldmgr::IVec3 { x: 1, y: 2, z: 3 };
     let vec_ptr: u32 = conn.invoke(fun!("allocate_ivec3", vec)).unwrap();
     info!("Allocated IVec3 at pointer: {}", vec_ptr);
-    conn.invoke::<()>(fun!("show_ivec3", vec_ptr)).unwrap();
+    let vec_ptr2: u32 = conn.invoke(fun!("show_ivec3", vec_ptr)).unwrap();
+    info!("Reallocated IVec3 at pointer: {}", vec_ptr2);
+    conn.invoke::<()>(fun!("show_ivec3", vec_ptr2)).unwrap();
     // let result: Result<String> = conn.invoke::<String>(fun!("hello_world", "world".to_string()));
     // if let Ok(res) = result {
     //     info!("Result: {}", res);

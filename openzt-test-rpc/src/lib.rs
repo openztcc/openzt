@@ -10,20 +10,6 @@ use tracing::{error, info};
 use windows::Win32::System::{SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}, Console::{AllocConsole, FreeConsole}};
 
 #[cfg(target_os = "windows")]
-#[no_mangle]
-extern "system" fn DllMain(_module: u8, reason: u32, _reserved: u8) -> i32 {
-    match reason {
-        DLL_PROCESS_ATTACH => {
-        }
-        DLL_PROCESS_DETACH => {}
-        DLL_THREAD_ATTACH => {}
-        DLL_THREAD_DETACH => {}
-        _ => {}
-    }
-    1
-}
-
-#[cfg(target_os = "windows")]
 pub fn init() {
     match init_console() {
         Ok(_) => {
@@ -32,7 +18,6 @@ pub fn init() {
         },
         Err(e) => {
             info!("Failed to initialize console: {}", e);
-            return 0; // Return 0 to indicate failure
         }
     }
 
