@@ -16,12 +16,14 @@ macro_rules! generate_allocate_deallocate_named {
                 }
             }
 
+            // TODO: We can we store the ptrs in a HashMap to avoid having to deallocate and reallocate?
+            //  Leak rather than into_raw and store the reference in a HashMap
             #[fmt_function]
             pub fn [<show_ $name>](ptr: u32) -> u32 {
                 unsafe {
                     let item = Box::from_raw(ptr as *mut $type);
                     info!("Received {}: {:?}", stringify!($name), item);
-                    [<show_ $name>](item)
+                    Box::into_raw(Box::new(item)) as u32
                 }
             }
         }
@@ -29,6 +31,7 @@ macro_rules! generate_allocate_deallocate_named {
 }
 pub mod rpc_hooks {
     use lrpc::*;
+    use tracing::info;
  
 
     generate_allocate_deallocate_named!(openztlib::ztmapview::BFTile, bftile);
