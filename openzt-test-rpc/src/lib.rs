@@ -14,20 +14,6 @@ use windows::Win32::System::{SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DE
 extern "system" fn DllMain(_module: u8, reason: u32, _reserved: u8) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
-            match init_console() {
-                Ok(_) => {
-                    let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
-                    tracing_subscriber::fmt().with_ansi(enable_ansi).init();
-                },
-                Err(e) => {
-                    info!("Failed to initialize console: {}", e);
-                    return 0; // Return 0 to indicate failure
-                }
-            }
-
-            unsafe { detour_zoo_main::init_detours() }.is_err().then(|| {
-                error!("Error initialising zoo_main detours");
-            });
         }
         DLL_PROCESS_DETACH => {}
         DLL_THREAD_ATTACH => {}
@@ -35,6 +21,24 @@ extern "system" fn DllMain(_module: u8, reason: u32, _reserved: u8) -> i32 {
         _ => {}
     }
     1
+}
+
+#[cfg(target_os = "windows")]
+pub fn init() {
+    match init_console() {
+        Ok(_) => {
+            let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
+            tracing_subscriber::fmt().with_ansi(enable_ansi).init();
+        },
+        Err(e) => {
+            info!("Failed to initialize console: {}", e);
+            return 0; // Return 0 to indicate failure
+        }
+    }
+
+    unsafe { detour_zoo_main::init_detours() }.is_err().then(|| {
+        error!("Error initialising zoo_main detours");
+    });
 }
 
 

@@ -14,6 +14,7 @@ members = [
     "openzt-console",
     "openzt-configparser",
     "openzt-test-rpc",
+    "openzt-test-rpc-dll",
     "openzt-detour-macro",
     "openzt-detour", 
     "openzt-store-macro",
@@ -22,7 +23,7 @@ members = [
     # # TODO:	
     # "openzt-animations",
 ]
-exclude = ["outside-workspace"]
+#exclude = ["outside-workspace"]
 resolver = "3"
 
 [workspace.package]

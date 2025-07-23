@@ -860,12 +860,11 @@ dependencies = [
  "maplit",
  "nt-time",
  "num_enum 0.7.4",
- "once_cell",
  "openzt-configparser",
  "openzt-detour",
  "openzt-detour-macro",
- "openzt-loader",
  "openzt-store-macro",
+ "openzt-test-rpc",
  "public",
  "regex",
  "retour",
@@ -948,6 +947,14 @@ dependencies = [
  "retour",
  "tracing",
  "tracing-subscriber",
+ "windows",
+]
+
+[[package]]
+name = "openzt-test-rpc-dll"
+version = "0.1.0"
+dependencies = [
+ "openzt-test-rpc",
  "windows",
 ]
 
