@@ -156,3 +156,47 @@ fn init_console() -> windows::core::Result<()> {
 
         Ok(())
 }
+
+
+#[cfg(test)]
+mod tests {
+    use lrpc::*;
+    use tracing::info;
+    use std::sync::LazyLock;
+    // Use parking_lot for a Mutex that recovers from panics
+    use parking_lot::Mutex;
+
+    static GRPC_CONNECTION: LazyLock<Mutex<Connection>> = LazyLock::new(|| Mutex::new(
+        {
+            let port = std::env::var("OPENZT_RPC_PORT").unwrap_or_else(|_| "9009".to_string());
+            let addr = format!("127.0.0.1:{}", port);
+    
+            info!("Connecting to RPC server at {}", addr);
+            Connection::new(&addr)
+        }
+    ));
+   
+    macro_rules! rpc_test {
+        (fn $name: ident($arg:ident : $arg_type:ty) {
+            $( $body:stmt );* $(;)?
+        }) => {
+            #[test]
+            fn $name() {
+                let mut conn = GRPC_CONNECTION.lock();
+                (|$arg: $arg_type| {
+                    info!("Running test case: {}", stringify!($name));
+                    $(
+                        $body
+                    )*
+                })(&mut conn);
+            }
+        };
+    }
+
+    rpc_test! {
+        fn hello_world_test(conn: &mut Connection) {
+            let response: String = conn.invoke(fun!("hello_world", "World".to_string())).unwrap();
+            assert_eq!(response, "Hello, World!");
+        }
+    }
+}

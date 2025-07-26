@@ -47,6 +47,7 @@ windows = { version = "0.61.3", features = ["Win32", "Win32_System_Console", "Wi
 [dev-dependencies]
 #openzt-loader = { version = "0.1.0", path = "../openzt-loader" }
 openzt-test-rpc = { path = "../openzt-test-rpc", version = "0.1.0" }
+parking_lot = "0.12"
 
 [lib]
 name = "openztlib"
