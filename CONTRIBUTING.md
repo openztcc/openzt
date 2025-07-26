@@ -119,11 +119,11 @@ They can be accessed using something like `let mut data_mutex = EXPANSION_ARRAY.
 In almost all circumstances modules shouldn't access other modules LazyMutexes directly and should use wrapper functions to avoid holding the mutex from longer than neccessary.
 
 ### Calling Zoo Tycoon functions
-Occasionally you'll need to call a ZT function rather than just hooking calls coming from ZT. Note here that we use the full address and not an offset.
+Occasionally you'll need to call a ZT function rather than just hooking calls coming from ZT. We use the same `FunctionDef` we use for detours by calling `FunctionDef::original()` which returns a function pointer to the original ZT function
 
 ```rust
-let get_element_fn: extern "thiscall" fn(u32, u32) -> u32 = unsafe { std::mem::transmute(0x0040157d) };
-let element = get_element_fn(BFUIMGR_PTR, 0x2001);
+let get_element_fn = unsafe { openzt_detour::ZTUI_GET_ELEMENT.original() };
+let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, 0x2001) };
 ```
 
 ### Feature flags

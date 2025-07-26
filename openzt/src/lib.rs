@@ -160,10 +160,11 @@ fn init_console() -> windows::core::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
     use lrpc::*;
     use tracing::info;
     use std::sync::LazyLock;
-    // Use parking_lot for a Mutex that recovers from panics
+    // Use parking_lot for a Mutex that recovers when a thread panics, so a single test failure does not prevent other tests from running.
     use parking_lot::Mutex;
 
     static GRPC_CONNECTION: LazyLock<Mutex<Connection>> = LazyLock::new(|| Mutex::new(
@@ -197,6 +198,13 @@ mod tests {
         fn hello_world_test(conn: &mut Connection) {
             let response: String = conn.invoke(fun!("hello_world", "World".to_string())).unwrap();
             assert_eq!(response, "Hello, World!");
+        }
+    }
+
+    rpc_test! {
+        fn add_test(conn: &mut Connection) {
+            let response: i32 = conn.invoke(fun!("add", 5, 10)).unwrap();
+            assert_eq!(response, 15);
         }
     }
 }

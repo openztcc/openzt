@@ -194,17 +194,17 @@ impl BFEntity {
     pub fn get_footprint(&self) -> IVec3 {
         let entity_type = self.entity_type();
         if self.rotation % 4 == 0 {
-            return IVec3 {
+            IVec3 {
                 x: entity_type.footprintx,
                 y: entity_type.footprinty,
                 z: entity_type.footprintz,
-            };
+            }
         } else {
-            return IVec3 {
+            IVec3 {
                 x: entity_type.footprinty,
                 y: entity_type.footprintx,
                 z: entity_type.footprintz,
-            };
+            }
         }
     }
     
@@ -319,7 +319,7 @@ impl ZTWorldMgr {
     pub fn get_ptr_from_bftile(&self, bftile: &BFTile) -> u32 {
         let x = bftile.pos.x as u32;
         let y = bftile.pos.y as u32;
-        (self.tile_array + ((y * self.map_x_size + x) * 0x8c)).try_into().unwrap()
+        self.tile_array + ((y * self.map_x_size + x) * 0x8c)
     }
 
     pub fn get_tile_from_pos(&self, pos: IVec3) -> Option<BFTile> {

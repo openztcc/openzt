@@ -8,8 +8,19 @@ pub struct FunctionDef<T> {
 }
 
 impl<T> FunctionDef<T> where T: retour::Function {
+    /// # Safety
+    /// 
+    /// This function will cause issues if the address or signature is not correct.
     pub unsafe fn detour(self, target: T) -> Result<GenericDetour<T>, retour::Error> {
         GenericDetour::<T>::new(::retour::Function::from_ptr(self.address as *const ()), target)
+    }
+
+    // TODO: Would be nice to have a `call` that calls the original function without having to detour it first.
+    /// # Safety
+    /// 
+    /// This function will cause issues if the address is not correct
+    pub unsafe fn original(&self) -> T {
+        ::retour::Function::from_ptr(self.address as *const ())
     }
 }
 
@@ -66,3 +77,7 @@ pub const BFVERSIONINFO_GET_VERSION_STRING: FunctionDef<unsafe extern "cdecl" fn
 
 // Logging
 pub const ZOOLOGGING_LOG: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32, u8, u32, u32, u32)> = FunctionDef{address: 0x00401363, function_type: PhantomData};
+
+// UI
+pub const ZTUI_GET_SELECTED_ENTITY: FunctionDef<unsafe extern "stdcall" fn() -> u32> = FunctionDef{address: 0x00410f84, function_type: PhantomData};
+pub const ZTUI_GET_ELEMENT: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u32> = FunctionDef{address: 0x0040157d, function_type: PhantomData};
