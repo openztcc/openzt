@@ -80,7 +80,7 @@ mod util;
 mod settings;
 
 #[cfg(target_os = "windows")]
-use windows::Win32::System::{SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}, Console::{AllocConsole, FreeConsole}};
+use windows::Win32::System::{Console::{AllocConsole, FreeConsole}};
 
 use openzt_detour_macro::detour_mod;
 

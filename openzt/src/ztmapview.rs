@@ -2,13 +2,12 @@ use core::fmt;
 use num_enum::FromPrimitive;
 use tracing::info;
 use openzt_detour_macro::detour_mod;
-use lrpc::{CommonStore, Store, ByteQue};
 use openzt_store_macro::StoreSkipArrays;
 
 use crate::bfentitytype::{ZTEntityTypeClass, ZTSceneryType, zt_entity_type_class_is};
-use crate::util::{get_from_memory, checked_get_from_memory, save_to_memory};
+use crate::util::{get_from_memory, checked_get_from_memory};
 use crate::zthabitatmgr::read_zt_habitat_mgr_from_memory;
-use crate::ztworldmgr::{BFEntity, ZTEntity, IVec3, read_zt_entity_from_memory};
+use crate::ztworldmgr::{BFEntity, IVec3};
 // use crate::{
 //     util::get_from_memory,
 // };
@@ -193,9 +192,9 @@ impl BFTile {
 
 #[detour_mod]
 pub mod zoo_ztmapview {
-    use tracing::{error, info};
-    use crate::zthabitatmgr::{ZTHabitatMgr, read_zt_habitat_mgr_from_memory};
-    use crate::ztworldmgr::{read_zt_entity_from_memory, IVec3};
+    use tracing::{info};
+    
+    use crate::ztworldmgr::{IVec3};
     use crate::util::get_from_memory;
     use crate::ztmapview::{BFTile, ZTMapView, ErrorStringId};
     use openzt_detour::{ZTMAPVIEW_CHECK_TANK_PLACEMENT, BFTILE_GET_LOCAL_ELEVATION};

@@ -3,12 +3,12 @@ use tracing::info;
 use std::fmt;
 use openzt_detour_macro::detour_mod;
 
-use getset::{Getters, Setters};
+use getset::{Getters};
 
 use crate::{
     command_console::{add_to_command_register, CommandError},
     util::{get_from_memory, ZTArray, ZTBoundedString, ZTString},
-    ztworldmgr::{read_zt_world_mgr_from_global, ZTWorldMgr, Direction},
+    ztworldmgr::{read_zt_world_mgr_from_global, Direction},
     ztmapview::BFTile,
 };
 
