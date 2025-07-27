@@ -39,7 +39,7 @@ use crate::ztworldmgr::{BFEntity, IVec3};
 // }
 
 // TODO: Impl Store for this, create own macro that ignores the padding OR type alias for the padding with a nop impl of Store
-#[derive(Debug, StoreSkipArrays)]
+#[derive(Debug, StoreSkipArrays, Clone, Copy)]
 #[repr(C)]
 pub struct BFTile {
     padding: [u8; 0x34],
@@ -66,6 +66,20 @@ impl fmt::Display for BFTile {
 }
 
 impl BFTile {
+    pub fn new(pos: IVec3, unknown_byte_2: u8) -> Self {
+        BFTile {
+            padding: [0; 0x34],
+            pos,
+            padding_2: [0; 0x40],
+            unknown_byte_1: 0,
+            unknown_byte_2,
+            unknown_byte_3: 0,
+            unknown_byte_4: 0,
+            unknown_byte_5: 0,
+            padding_3: [0; 0x8],
+        }
+    }
+
     pub fn get_local_elevation(&self, pos: IVec3) -> i32 {
     // Helper function to perform integer division by 64
     // Equivalent to: 16 * val / 64

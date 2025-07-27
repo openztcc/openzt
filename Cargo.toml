@@ -31,3 +31,8 @@ edition = "2021"
 rust-version = "1.80.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/openztcc/openzt"
+
+[profile.dev]
+opt-level = 3
+[profile.dev.package."*"]
+opt-level = 1

@@ -113,7 +113,7 @@ mod detour_zoo_main {
     }
 }
 
-use crate::rpc_hooks::{show_int, hello_world, rpc_hooks::{allocate_bftile, deallocate_bftile, allocate_ivec3, deallocate_ivec3, show_ivec3}};
+use crate::rpc_hooks::{show_int, hello_world, rpc_hooks::{allocate_bftile, deallocate_bftile, allocate_ivec3, deallocate_ivec3, show_ivec3, bftile_get_local_elevation, bftile_get_local_elevation_2}};
 
 fn init_srv() -> lrpc::Fun {
     let mut srv_fun = lrpc::Fun::new();
@@ -125,6 +125,8 @@ fn init_srv() -> lrpc::Fun {
     srv_fun.regist("allocate_ivec3", allocate_ivec3);
     srv_fun.regist("deallocate_ivec3", deallocate_ivec3);
     srv_fun.regist("show_ivec3", show_ivec3);
+    srv_fun.regist("get_local_elevation", bftile_get_local_elevation);
+    srv_fun.regist("test_test_test_test", bftile_get_local_elevation_2);
 
     srv_fun
 }

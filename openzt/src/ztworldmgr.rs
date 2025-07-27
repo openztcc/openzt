@@ -64,6 +64,12 @@ pub struct IVec3 {
     pub z: i32,
 }
 
+impl IVec3 {
+    pub fn new(x: i32, y: i32, z: i32) -> Self {
+        IVec3 { x, y, z }
+    }
+}
+
 impl fmt::Display for IVec3 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Vec3 {{ x: {}, y: {}, z: {} }}", self.x, self.y, self.z)

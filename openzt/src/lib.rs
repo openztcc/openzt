@@ -167,6 +167,9 @@ mod tests {
     // Use parking_lot for a Mutex that recovers when a thread panics, so a single test failure does not prevent other tests from running.
     use parking_lot::Mutex;
 
+    use crate::ztworldmgr::IVec3;
+    use crate::ztmapview::BFTile;
+
     static GRPC_CONNECTION: LazyLock<Mutex<Connection>> = LazyLock::new(|| Mutex::new(
         {
             let port = std::env::var("OPENZT_RPC_PORT").unwrap_or_else(|_| "9009".to_string());
@@ -201,10 +204,40 @@ mod tests {
         }
     }
 
-    rpc_test! {
-        fn add_test(conn: &mut Connection) {
-            let response: i32 = conn.invoke(fun!("add", 5, 10)).unwrap();
-            assert_eq!(response, 15);
-        }
+    // rpc_test! {
+    //     fn get_local_elevation_test(conn: &mut Connection) {
+    //         let unknown_byte_values = vec![0x1,0x4,0x5,0x10,0x11,0x14,0x15,0x19,0x40,0x41,0x44,0x45,0x46,0x50,0x51,0x54,0x64,0x91];
+    //         unknown_byte_values.iter().for_each(|&unknown_byte_2| {
+    //             proptest!(|(x in 0i32..1000i32, y in 0i32..1000i32)| {
+    //                 let pos = IVec3::new(x, y, 0);
+    //                 let tile = BFTile::new(pos.clone(), unknown_byte_2);
+    //                 let reimplemented_result = tile.get_local_elevation(pos.clone());
+
+    //                 let pos_ptr: u32 = conn.invoke(fun!("allocate_vec3", pos.clone())).unwrap();
+    //                 let tile_ptr: u32 = conn.invoke(fun!("allocate_tile", tile.clone())).unwrap();
+    //                 let result: i32 = conn.invoke(fun!("get_local_elevation", pos_ptr, tile_ptr)).unwrap();
+    //                 assert_eq!(result, reimplemented_result, "Failed for pos: {:?}, tile: {:?}, unknown_byte_2: {}", pos, tile, unknown_byte_2);
+    //             });
+    //         });
+    //     }
+    // }
+
+    #[test]
+    fn get_local_elevation_test() {
+        let unknown_byte_values = vec![0x1,0x4,0x5,0x10,0x11,0x14,0x15,0x19,0x40,0x41,0x44,0x45,0x46,0x50,0x51,0x54,0x64,0x91];
+        unknown_byte_values.iter().for_each(|&unknown_byte_2| {
+            // proptest!(|(x in 0i32..1000i32, y in 0i32..1000i32)| {
+                let mut conn = GRPC_CONNECTION.lock();
+                // let pos = IVec3::new(x, y, 0);
+                let pos = IVec3::new(1, 1, 0);
+                let tile = BFTile::new(pos.clone(), unknown_byte_2);
+                let reimplemented_result = tile.get_local_elevation(pos.clone());
+                
+                let pos_ptr: u32 = conn.invoke(fun!("allocate_ivec3", pos.clone())).unwrap();
+                let tile_ptr: u32 = conn.invoke(fun!("allocate_bftile", tile.clone())).unwrap();
+                let result: i32 = conn.invoke::<i32>(fun!("get_local_elevation", tile_ptr, pos_ptr)).unwrap();
+                info!("Result: {}, Reimplemented Result: {}", result, reimplemented_result);
+            // });
+        });
     }
 }

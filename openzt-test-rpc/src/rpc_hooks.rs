@@ -30,6 +30,9 @@ macro_rules! generate_allocate_deallocate_named {
         }
     };
 }
+
+// TODO: Create a proc macro to replace the 
+// #[rpc_mod]
 pub mod rpc_hooks {
     use lrpc::*;
     use tracing::info;
@@ -37,6 +40,33 @@ pub mod rpc_hooks {
 
     generate_allocate_deallocate_named!(openztlib::ztmapview::BFTile, bftile);
     generate_allocate_deallocate_named!(openztlib::ztworldmgr::IVec3, ivec3);
+
+
+    #[fmt_function]
+    pub fn bftile_get_local_elevation(tile: u32, ivec3: u32) -> i32 {
+        unsafe { openzt_detour::BFTILE_GET_LOCAL_ELEVATION.original()(tile, ivec3) }
+    }
+
+    #[fmt_function]
+    pub fn bftile_get_local_elevation_2(ivec3: u32) -> i32 {
+        info!("Getting local elevation for with IVec3 at {}", ivec3);
+        // unsafe { openzt_detour::BFTILE_GET_LOCAL_ELEVATION.original()(tile, ivec3) }
+        0
+    }
+
+    // pub fn show_string(s: String) {
+    //     info!("Received string: {}", s);
+    // }
+
+    // #[fmt_function]
+    // pub fn show_bool(b: bool) {
+    //     info!("Received boolean: {}", b);
+    // }
+
+    // #[fmt_function]
+    // pub fn show_float(f: f32) {
+    //     info!("Received float: {}", f);
+    // }    
 
 }
 

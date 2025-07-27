@@ -9,11 +9,6 @@ license.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[profile.dev]
-opt-level = 1
-[profile.dev.package."*"]
-opt-level = 3
-
 [dependencies]
 tracing-subscriber = "0.3.19"
 tracing = "0.1.41"
@@ -50,6 +45,7 @@ winresource = "0.1"
 [dev-dependencies]
 openzt-test-rpc = { path = "../openzt-test-rpc", version = "0.1.0" }
 parking_lot = "0.12"
+proptest = "1.7.0"
 
 [lib]
 name = "openztlib"
