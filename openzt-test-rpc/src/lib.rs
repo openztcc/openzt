@@ -2,6 +2,11 @@
 #![feature(lazy_cell)]
 
 mod rpc_hooks;
+mod service;
+
+use futures::prelude::*;
+use tarpc::{context, server::{self, Channel}};
+use std::net::SocketAddr;
 
 use openzt_detour_macro::detour_mod;
 use tracing::{error, info};
@@ -42,7 +47,8 @@ fn init_console() -> windows::core::Result<()> {
 mod detour_zoo_main {
     use tracing::{error, info};
     use openzt_detour::LOAD_LANG_DLLS;
-    use super::init_srv;
+    use std::net::SocketAddr;
+    use super::spawn_server;
 
     // TODO: Fix this so it works with a crate/mod prefix
     #[detour(LOAD_LANG_DLLS)]
@@ -70,8 +76,16 @@ mod detour_zoo_main {
                 drop(listener);
                 tx.send(Ok(())).unwrap();
                 
-                // Now start the actual RPC server (this will block forever)
-                lrpc::service(init_srv(), &addr_clone);
+                // Now start the actual RPC server in a background thread
+                let socket_addr: SocketAddr = addr_clone.parse().expect("Invalid address");
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async move {
+                        if let Err(e) = spawn_server(socket_addr).await {
+                            error!("RPC server error: {}", e);
+                        }
+                    });
+                });
             }
             Err(e) => {
                 tx.send(Err(e)).unwrap();
@@ -114,19 +128,71 @@ mod detour_zoo_main {
 }
 
 use crate::rpc_hooks::{show_int, hello_world, rpc_hooks::{allocate_bftile, deallocate_bftile, allocate_ivec3, deallocate_ivec3, show_ivec3, bftile_get_local_elevation, bftile_get_local_elevation_2}};
+use crate::service::{OpenZTRpc, IVec3, BFTile};
 
-fn init_srv() -> lrpc::Fun {
-    let mut srv_fun = lrpc::Fun::new();
+#[derive(Clone)]
+struct OpenZTRpcImpl;
 
-    srv_fun.regist("show_int", show_int);
-    srv_fun.regist("hello_world", hello_world);
-    srv_fun.regist("allocate_bftile", allocate_bftile);
-    srv_fun.regist("deallocate_bftile", deallocate_bftile);
-    srv_fun.regist("allocate_ivec3", allocate_ivec3);
-    srv_fun.regist("deallocate_ivec3", deallocate_ivec3);
-    srv_fun.regist("show_ivec3", show_ivec3);
-    srv_fun.regist("get_local_elevation", bftile_get_local_elevation);
-    srv_fun.regist("test_test_test_test", bftile_get_local_elevation_2);
+impl OpenZTRpc for OpenZTRpcImpl {
+    async fn show_int(self, _: context::Context, num: i32) {
+        show_int(num);
+    }
 
-    srv_fun
+    async fn hello_world(self, _: context::Context, name: String) -> String {
+        hello_world(name)
+    }
+
+    async fn allocate_bftile(self, _: context::Context, tile: BFTile) -> u32 {
+        // Convert from service::BFTile to openztlib::ztmapview::BFTile
+        let pos = openztlib::ztworldmgr::IVec3 { x: tile.pos.x, y: tile.pos.y, z: tile.pos.z };
+        let tile = openztlib::ztmapview::BFTile::new(pos, tile.unknown_byte_2);
+        allocate_bftile(tile)
+    }
+
+    async fn deallocate_bftile(self, _: context::Context, ptr: u32) {
+        deallocate_bftile(ptr);
+    }
+
+    async fn allocate_ivec3(self, _: context::Context, ivec3: IVec3) -> u32 {
+        // Convert from service::IVec3 to openztlib::ztworldmgr::IVec3
+        let ivec3 = openztlib::ztworldmgr::IVec3 { x: ivec3.x, y: ivec3.y, z: ivec3.z };
+        allocate_ivec3(ivec3)
+    }
+
+    async fn deallocate_ivec3(self, _: context::Context, ptr: u32) {
+        deallocate_ivec3(ptr);
+    }
+
+    async fn show_ivec3(self, _: context::Context, ptr: u32) -> u32 {
+        show_ivec3(ptr)
+    }
+
+    async fn get_local_elevation(self, _: context::Context, tile: u32, ivec3: u32) -> i32 {
+        bftile_get_local_elevation(tile, ivec3)
+    }
+
+    async fn test_test_test_test(self, _: context::Context, ivec3: u32) -> i32 {
+        bftile_get_local_elevation_2(ivec3)
+    }
+}
+
+async fn spawn_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    let mut listener = tarpc::serde_transport::tcp::listen(&addr, tarpc::tokio_serde::formats::Json::default).await?;
+    listener.config_mut().max_frame_length(usize::MAX);
+    
+    loop {
+        let Some(transport) = listener.next().await else {
+            break;
+        };
+        let transport = transport?;
+        let handler = OpenZTRpcImpl;
+        tokio::spawn(
+            server::BaseChannel::with_defaults(transport)
+                .execute(handler.serve())
+                .for_each(|resp| async move {
+                    tokio::spawn(resp);
+                })
+        );
+    }
+    Ok(())
 }

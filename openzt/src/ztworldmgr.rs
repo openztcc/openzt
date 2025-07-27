@@ -6,7 +6,6 @@ use itertools::Itertools;
 use num_enum::FromPrimitive;
 use tracing::{error, info};
 use openzt_detour_macro::detour_mod;
-use lrpc::{CommonStore, Store, ByteQue};
 
 use crate::{
     bfentitytype::{read_zt_entity_type_from_memory, BFEntityType, ZTEntityType, ZTSceneryType},
@@ -57,7 +56,7 @@ pub struct ZTEntity {
 
 // Move to util or use existing implementation
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Default, CommonStore)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct IVec3 {
     pub x: i32,
     pub y: i32,
