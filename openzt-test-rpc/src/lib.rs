@@ -2,7 +2,7 @@
 #![feature(lazy_cell)]
 
 mod rpc_hooks;
-mod service;
+pub mod service;
 
 use futures::prelude::*;
 use tarpc::{context, server::{self, Channel}};

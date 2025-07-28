@@ -49,6 +49,7 @@ winresource = "0.1"
 openzt-test-rpc = { path = "../openzt-test-rpc", version = "0.1.0" }
 parking_lot = "0.12"
 proptest = "1.7.0"
+tokio-test = "0.4"
 
 [lib]
 name = "openztlib"
