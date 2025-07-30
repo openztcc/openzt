@@ -1,10 +1,9 @@
-mod service;
+#![cfg(feature = "test-rpc")]
 
-use futures::prelude::*;
 use tarpc::{client, context};
 use tracing::info;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use service::{OpenZTRpcClient, IVec3};
+use openztlib::test_rpc::service::{OpenZTRpcClient, IVec3};
 
 
 #[tokio::main]

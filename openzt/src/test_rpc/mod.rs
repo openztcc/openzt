@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-#![feature(lazy_cell)]
 
 mod rpc_hooks;
 pub mod service;
@@ -8,27 +7,52 @@ use futures::prelude::*;
 use tarpc::{context, server::{self, Channel}};
 use std::net::SocketAddr;
 
-use openzt_detour_macro::detour_mod;
+#[cfg(target_os = "windows")]
+use crate::detour_mod;
 use tracing::{error, info};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::System::{Console::{AllocConsole, FreeConsole}};
 
-#[cfg(target_os = "windows")]
 pub fn init() {
-    match init_console() {
-        Ok(_) => {
-            let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
-            tracing_subscriber::fmt().with_ansi(enable_ansi).init();
-        },
-        Err(e) => {
-            info!("Failed to initialize console: {}", e);
+    #[cfg(target_os = "windows")]
+    {
+        match init_console() {
+            Ok(_) => {
+                let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
+                tracing_subscriber::fmt().with_ansi(enable_ansi).init();
+            },
+            Err(e) => {
+                info!("Failed to initialize console: {}", e);
+            }
         }
-    }
 
-    unsafe { detour_zoo_main::init_detours() }.is_err().then(|| {
-        error!("Error initialising zoo_main detours");
-    });
+        unsafe { detour_zoo_main::init_detours() }.is_err().then(|| {
+            error!("Error initialising zoo_main detours");
+        });
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        tracing_subscriber::fmt().init();
+        info!("Test RPC module initialized (non-Windows platform)");
+        
+        // Start RPC server on non-Windows platforms
+        let port = std::env::var("OPENZT_RPC_PORT").unwrap_or_else(|_| "9009".to_string());
+        let addr = format!("0.0.0.0:{}", port);
+        
+        info!("Starting RPC server on {}", addr);
+        
+        let socket_addr: SocketAddr = addr.parse().expect("Invalid address");
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                if let Err(e) = spawn_server(socket_addr).await {
+                    error!("RPC server error: {}", e);
+                }
+            });
+        });
+    }
 }
 
 
@@ -43,14 +67,17 @@ fn init_console() -> windows::core::Result<()> {
         Ok(())
 }
 
+#[cfg(target_os = "windows")]
 #[detour_mod]
 mod detour_zoo_main {
     use tracing::{error, info};
+    #[cfg(target_os = "windows")]
     use openzt_detour::LOAD_LANG_DLLS;
     use std::net::SocketAddr;
     use super::spawn_server;
 
     // TODO: Fix this so it works with a crate/mod prefix
+    #[cfg(target_os = "windows")]
     #[detour(LOAD_LANG_DLLS)]
     unsafe extern "thiscall" fn detour_target(this: u32) -> u32 {
         info!("Detour success");
@@ -127,8 +154,8 @@ mod detour_zoo_main {
     }
 }
 
-use crate::rpc_hooks::{show_int, hello_world, rpc_hooks::{allocate_bftile, deallocate_bftile, allocate_ivec3, deallocate_ivec3, show_ivec3, bftile_get_local_elevation, bftile_get_local_elevation_2}};
-use crate::service::{OpenZTRpc, IVec3, BFTile};
+use crate::test_rpc::rpc_hooks::{show_int, hello_world, rpc_hooks::{allocate_bftile, deallocate_bftile, allocate_ivec3, deallocate_ivec3, show_ivec3, bftile_get_local_elevation, bftile_get_local_elevation_2}};
+use crate::test_rpc::service::{OpenZTRpc, IVec3, BFTile};
 
 #[derive(Clone)]
 struct OpenZTRpcImpl;
@@ -143,9 +170,9 @@ impl OpenZTRpc for OpenZTRpcImpl {
     }
 
     async fn allocate_bftile(self, _: context::Context, tile: BFTile) -> u32 {
-        // Convert from service::BFTile to openztlib::ztmapview::BFTile
-        let pos = openztlib::ztworldmgr::IVec3 { x: tile.pos.x, y: tile.pos.y, z: tile.pos.z };
-        let tile = openztlib::ztmapview::BFTile::new(pos, tile.unknown_byte_2);
+        // Convert from service::BFTile to ztmapview::BFTile
+        let pos = crate::ztworldmgr::IVec3 { x: tile.pos.x, y: tile.pos.y, z: tile.pos.z };
+        let tile = crate::ztmapview::BFTile::new(pos, tile.unknown_byte_2);
         allocate_bftile(tile)
     }
 
@@ -154,8 +181,8 @@ impl OpenZTRpc for OpenZTRpcImpl {
     }
 
     async fn allocate_ivec3(self, _: context::Context, ivec3: IVec3) -> u32 {
-        // Convert from service::IVec3 to openztlib::ztworldmgr::IVec3
-        let ivec3 = openztlib::ztworldmgr::IVec3 { x: ivec3.x, y: ivec3.y, z: ivec3.z };
+        // Convert from service::IVec3 to ztworldmgr::IVec3
+        let ivec3 = crate::ztworldmgr::IVec3 { x: ivec3.x, y: ivec3.y, z: ivec3.z };
         allocate_ivec3(ivec3)
     }
 

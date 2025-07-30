@@ -79,11 +79,17 @@ mod util;
 /// Loads settings from the zoo.ini file and commands/functions for reading and writing settings during runtime
 mod settings;
 
+/// RPC server for testing OpenZT functionality
+#[cfg(feature = "test-rpc")]
+pub mod test_rpc;
+
 #[cfg(target_os = "windows")]
 use windows::Win32::System::{Console::{AllocConsole, FreeConsole}};
 
+#[cfg(target_os = "windows")]
 use openzt_detour_macro::detour_mod;
 
+#[cfg(target_os = "windows")]
 use tracing::info;
 
 #[cfg(target_os = "windows")]
@@ -134,6 +140,12 @@ mod zoo_init {
             ztmapview::init();
             zthabitatmgr::init();
         }
+
+        #[cfg(feature = "test-rpc")]
+        {
+            info!("Feature 'test-rpc' enabled");
+            test_rpc::init();
+        }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }
 }
@@ -158,6 +170,7 @@ fn init_console() -> windows::core::Result<()> {
 }
 
 
+#[cfg(feature = "test-rpc")]
 #[cfg(test)]
 mod tests {
     use tracing::info;
@@ -169,7 +182,7 @@ mod tests {
 
     use crate::ztworldmgr::IVec3;
     use crate::ztmapview::BFTile;
-    use openzttestrpclib::service::{OpenZTRpcClient, IVec3 as ServiceIVec3, BFTile as ServiceBFTile};
+    use crate::test_rpc::service::{OpenZTRpcClient, IVec3 as ServiceIVec3, BFTile as ServiceBFTile};
 
     static RPC_CLIENT: LazyLock<Mutex<Option<OpenZTRpcClient>>> = LazyLock::new(|| {
         Mutex::new(None)

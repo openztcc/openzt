@@ -1163,6 +1163,7 @@ name = "openzt"
 version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
+ "async-trait",
  "enable-ansi-support",
  "field_accessor_as_string",
  "field_accessor_as_string_trait",
@@ -1176,8 +1177,8 @@ dependencies = [
  "openzt-detour",
  "openzt-detour-macro",
  "openzt-store-macro",
- "openzt-test-rpc",
  "parking_lot",
+ "paste",
  "proptest",
  "public",
  "regex",
@@ -1186,6 +1187,7 @@ dependencies = [
  "serde_json",
  "tarpc",
  "tokio",
+ "tokio-serde",
  "tokio-test",
  "toml 0.9.2",
  "tracing",
@@ -1254,32 +1256,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "openzt-test-rpc"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "enable-ansi-support",
- "futures",
- "openzt",
- "openzt-detour",
- "openzt-detour-macro",
- "paste",
- "retour",
- "serde",
- "serde_json",
- "tarpc",
- "tokio",
- "tokio-serde",
- "tracing",
- "tracing-subscriber",
- "windows",
-]
-
-[[package]]
 name = "openzt-test-rpc-dll"
 version = "0.1.0"
 dependencies = [
- "openzt-test-rpc",
+ "openzt",
  "windows",
 ]
 

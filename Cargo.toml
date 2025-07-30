@@ -13,7 +13,6 @@ members = [
     "openzt-loader",
     "openzt-console",
     "openzt-configparser",
-    "openzt-test-rpc",
     "openzt-test-rpc-dll",
     "openzt-detour-macro",
     "openzt-detour", 

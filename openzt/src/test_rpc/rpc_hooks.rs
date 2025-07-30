@@ -31,17 +31,24 @@ pub mod rpc_hooks {
     use tracing::info;
  
 
-    generate_allocate_deallocate_named!(openztlib::ztmapview::BFTile, bftile);
-    generate_allocate_deallocate_named!(openztlib::ztworldmgr::IVec3, ivec3);
+    generate_allocate_deallocate_named!(crate::ztmapview::BFTile, bftile);
+    generate_allocate_deallocate_named!(crate::ztworldmgr::IVec3, ivec3);
 
 
     pub fn bftile_get_local_elevation(tile: u32, ivec3: u32) -> i32 {
+        #[cfg(target_os = "windows")]
         unsafe { openzt_detour::BFTILE_GET_LOCAL_ELEVATION.original()(tile, ivec3) }
+        
+        #[cfg(not(target_os = "windows"))]
+        {
+            info!("bftile_get_local_elevation called with tile: {}, ivec3: {} (stub on non-Windows)", tile, ivec3);
+            0
+        }
     }
 
     pub fn bftile_get_local_elevation_2(ivec3: u32) -> i32 {
         info!("Getting local elevation for with IVec3 at {}", ivec3);
-        // unsafe { openzt_detour::BFTILE_GET_LOCAL_ELEVATION.original()(tile, ivec3) }
+        // unsafe { crate::detours::BFTILE_GET_LOCAL_ELEVATION.original()(tile, ivec3) }
         0
     }
 
@@ -73,20 +80,19 @@ pub fn show_int(num: i32) {
 // #[fmt_function]
 // pub fn show_ivec3(vec_ptr: u32) {
 //     unsafe {
-//         let vec = Box::from_raw(vec_ptr as *mut openztlib::ztworldmgr::IVec3);
+//         let vec = Box::from_raw(vec_ptr as *mut crate::ztworldmgr::IVec3);
 //         info!("Received IVec3: ({}, {}, {})", vec.x, vec.y, vec.z);
 //     }
 // }
 
 // #[fmt_function]
-// pub fn allocate_bftile(tile: openzt::ztmapview::BFTile) -> u32 {
+// pub fn allocate_bftile(tile: crate::ztmapview::BFTile) -> u32 {
 //     Box::into_raw(Box::new(tile)) as u32
 // }
 
 // #[fmt_function]
 // pub fn deallocate_bftile(ptr: u32) {
 //     unsafe {
-//         let _ = Box::from_raw(ptr as *mut openzt::ztmapview::BFTile);
+//         let _ = Box::from_raw(ptr as *mut crate::ztmapview::BFTile);
 //     }
 // }
-
