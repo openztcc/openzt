@@ -12,7 +12,7 @@ impl<T> FunctionDef<T> where T: retour::Function {
     /// 
     /// This function will cause issues if the address or signature is not correct.
     pub unsafe fn detour(self, target: T) -> Result<GenericDetour<T>, retour::Error> {
-        GenericDetour::<T>::new(::retour::Function::from_ptr(self.address as *const ()), target)
+        unsafe { GenericDetour::<T>::new(::retour::Function::from_ptr(self.address as *const ()), target) }
     }
 
     // TODO: Would be nice to have a `call` that calls the original function without having to detour it first.
@@ -20,7 +20,7 @@ impl<T> FunctionDef<T> where T: retour::Function {
     /// 
     /// This function will cause issues if the address is not correct
     pub unsafe fn original(&self) -> T {
-        ::retour::Function::from_ptr(self.address as *const ())
+        unsafe { ::retour::Function::from_ptr(self.address as *const ()) }
     }
 }
 

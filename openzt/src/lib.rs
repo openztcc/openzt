@@ -1,5 +1,3 @@
-#![feature(let_chains)] // Remove when upgrading to Rust 1.88 2024 edition
-#![feature(lazy_cell)] // Remove when upgrading to Rust 1.88 2024 edition (need to figure out what is causing the crash when creating a thread in dll)
 #![allow(dead_code)]
 
 /// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this
