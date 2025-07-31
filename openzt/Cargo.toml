@@ -12,9 +12,7 @@ license.workspace = true
 [dependencies]
 tracing-subscriber = "0.3.19"
 tracing = "0.1.41"
-# TODO: Figure out how to use retour-rs with generic-detours so we don't need nightly and can use addresses by variables
-# retour = {path = "../vendor/retour-rs", version = "0.3.1"}
-retour = {version = "0.3.1", features = ["thiscall-abi"]}
+retour = {path = "../vendor/retour-rs", version = "0.3.1"}
 num_enum = "0.7.3"
 walkdir = "2.5.0"
 zip = "=2.3.0"

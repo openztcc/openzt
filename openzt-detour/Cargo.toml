@@ -7,4 +7,4 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-retour = "0.3.1"
+retour = {path = "../vendor/retour-rs", version = "0.3.1"}
