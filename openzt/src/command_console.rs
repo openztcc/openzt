@@ -72,7 +72,7 @@ pub mod zoo_console {
     use tracing::error;
     use openzt_detour::ZTAPP_UPDATEGAME;
 
-    use super::{add_to_command_register, call_next_command, command_list_commands, start_server};
+    use super::{add_to_command_register, call_next_command, command_list_commands};
 
     #[detour(ZTAPP_UPDATEGAME)]
     unsafe extern "thiscall" fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
@@ -87,9 +87,6 @@ pub mod zoo_console {
             }
         };
         add_to_command_register("list_commands".to_owned(), command_list_commands);
-        std::thread::spawn(|| {
-            start_server();
-        });
     }
 }
 
@@ -98,6 +95,13 @@ pub fn init() {
 }
 
 type CommandCallback = fn(args: Vec<&str>) -> Result<String, CommandError>;
+
+
+static COMMAND_THREAD: LazyLock<Mutex<std::thread::JoinHandle<()>>> = LazyLock::new(|| Mutex::new(std::thread::spawn(|| {
+            start_server();
+        }
+    ))
+);
 
 static COMMAND_REGISTRY: LazyLock<Mutex<HashMap<String, CommandCallback>>> = LazyLock::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
 
@@ -124,6 +128,7 @@ fn call_command(command_name: String, args: Vec<&str>) -> Result<String, Command
 }
 
 pub fn call_next_command() {
+    let _unused = COMMAND_THREAD.lock().unwrap();
     let Some(command) = get_from_command_queue() else {
         return;
     };

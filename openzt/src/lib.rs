@@ -1,5 +1,8 @@
 #![allow(dead_code)]
-
+#![cfg_attr(
+  feature = "command-console",
+  feature(lazy_cell)
+)]
 /// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this
 /// allowed customization via zoo.ini, but in practice it appears unused.
 mod bfregistry;
@@ -112,8 +115,10 @@ mod zoo_init {
         }
 
 
-        // Initialize stable modules
-        command_console::init();
+        // Command console is broken on latest stable Rust so we disable it by default.
+        if cfg!(feature = "command-console") {
+            command_console::init();
+        }
         resource_manager::init();
         expansions::init();
         string_registry::init();

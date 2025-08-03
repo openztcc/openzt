@@ -55,9 +55,11 @@ mod zoo_resource_mgr {
                 }
             }
         }
-        if check_file(&file_name_string)
-            && let Some(ptr) = get_file_ptr(&file_name_string)
-        {
+        if !check_file(&file_name_string) {
+            return false
+        }
+
+        if let Some(ptr) = get_file_ptr(&file_name_string) {
             let mut bfrp = unsafe { Box::from_raw(ptr as *mut BFResourcePtr) };
 
             if bfrp.num_refs < 100 {
@@ -69,9 +71,6 @@ mod zoo_resource_mgr {
             save_to_memory(this_ptr, ptr);
             true
         } else {
-            if !file_name_string.starts_with("ztat") {
-                info!("Missing file: {}", file_name_string);
-            }
             false
         }
     }

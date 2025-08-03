@@ -140,9 +140,10 @@ fn command_get_current_buy_tab(_args: Vec<&str>) -> Result<String, &'static str>
 }
 
 pub fn get_current_buy_tab() -> Option<BuyTab> {
-    if let Some(asr) = get_element(UIElementId::AnimalScrollingRegion)
-        && !asr.state.is_hidden()
-    {
+    if let Some(asr) = get_element(UIElementId::AnimalScrollingRegion) {
+        if asr.state.is_hidden() {
+            return None;
+        }
         if get_element(UIElementId::AnimalTab)?.state.is_selected() {
             return Some(BuyTab::Animal);
         }
@@ -156,9 +157,10 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
             return Some(BuyTab::ShowToys);
         }
     }
-    if let Some(osr) = get_element(UIElementId::BuyObjectScrollingRegion)
-        && !osr.state.is_hidden()
-    {
+    if let Some(osr) = get_element(UIElementId::BuyObjectScrollingRegion) {
+        if osr.state.is_hidden() {
+            return None;
+        }
         if get_element(UIElementId::BuildingTab)?.state.is_selected() {
             return Some(BuyTab::Building);
         }
@@ -166,9 +168,10 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
             return Some(BuyTab::Scenery);
         }
     }
-    if let Some(hsr) = get_element(UIElementId::BuildHabitatScrollingRegion)
-        && !hsr.state.is_hidden()
-    {
+    if let Some(hsr) = get_element(UIElementId::BuildHabitatScrollingRegion) {
+        if hsr.state.is_hidden() {
+            return None;
+        }
         if get_element(UIElementId::FenceTab)?.state.is_selected() {
             return Some(BuyTab::Fence);
         }
@@ -182,9 +185,10 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
             return Some(BuyTab::Rocks);
         }
     }
-    if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion)
-        && !tsr.state.is_hidden()
-    {
+    if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion) {
+        if tsr.state.is_hidden() {
+            return None;
+        }
         if get_element(UIElementId::PaintTerrainTab)?.state.is_selected() {
             return Some(BuyTab::PaintTerrain);
         }
@@ -192,14 +196,16 @@ pub fn get_current_buy_tab() -> Option<BuyTab> {
             return Some(BuyTab::Terraform);
         }
     }
-    if let Some(ssr) = get_element(UIElementId::StaffScrollingRegion)
-        && !ssr.state.is_hidden()
-    {
+    if let Some(ssr) = get_element(UIElementId::StaffScrollingRegion) {
+        if ssr.state.is_hidden() {
+            return None;
+        }
         return Some(BuyTab::Staff);
     }
-    if let Some(developer_tab) = get_element(UIElementId::DeveloperScrollingRegion)
-        && !developer_tab.state.is_hidden()
-    {
+    if let Some(developer_tab) = get_element(UIElementId::DeveloperScrollingRegion) {
+        if developer_tab.state.is_hidden() {
+            return None;
+        }
         return Some(BuyTab::Developer);
     }
     None

@@ -361,12 +361,12 @@ pub mod custom_expansion {
 
 fn initialise_expansions() {
     add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
-    if let Some(member_hash) = get_members(&get_cc_expansion_name_all())
-        && !member_hash.is_empty()
-    {
-        add_expansion_with_string_value(0x4000, get_cc_expansion_name_all(), "Custom Content".to_string(), true);
+    if let Some(member_hash) = get_members(&get_cc_expansion_name_all()){
+        if !member_hash.is_empty() {
+            add_expansion_with_string_value(0x4000, get_cc_expansion_name_all(), "Custom Content".to_string(), true);
 
-        save_mutex();
+            save_mutex();
+        }
     }
 
     let number_of_expansions = get_expansions().len();
