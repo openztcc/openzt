@@ -261,8 +261,8 @@ mod tests {
         
         for unknown_byte_2 in unknown_byte_values {
             let pos = IVec3::new(1, 1, 0);
-            let tile = BFTile::new(pos.clone(), unknown_byte_2);
-            let reimplemented_result = tile.get_local_elevation(pos.clone());
+            let tile = BFTile::new(pos, unknown_byte_2);
+            let reimplemented_result = tile.get_local_elevation(pos);
             
             // Convert to service types
             let service_pos = ServiceIVec3 { x: pos.x, y: pos.y, z: pos.z };
