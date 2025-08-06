@@ -14,3 +14,6 @@ windows = "0.61.3"
 [lib]
 name = "openzt"
 crate-type = ["cdylib"]
+
+[features]
+command-console = ["openzt/command-console"]

@@ -81,8 +81,8 @@ mod util;
 mod settings;
 
 /// RPC server for testing OpenZT functionality
-#[cfg(feature = "test-rpc")]
-pub mod test_rpc;
+#[cfg(feature = "reimplementation-tests")]
+pub mod reimplementation_tests;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::System::{Console::{AllocConsole, FreeConsole}};
@@ -143,12 +143,6 @@ mod zoo_init {
             ztmapview::init();
             zthabitatmgr::init();
         }
-
-        #[cfg(feature = "test-rpc")]
-        {
-            info!("Feature 'test-rpc' enabled");
-            test_rpc::init();
-        }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }
 }
@@ -170,108 +164,4 @@ fn init_console() -> windows::core::Result<()> {
         unsafe { AllocConsole()? };
 
         Ok(())
-}
-
-
-#[cfg(feature = "test-rpc")]
-#[cfg(test)]
-mod tests {
-    use tracing::info;
-    use std::sync::LazyLock;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-    // Use parking_lot for a Mutex that recovers when a thread panics, so a single test failure does not prevent other tests from running.
-    use parking_lot::Mutex;
-    use tarpc::{client, context};
-
-    use crate::ztworldmgr::IVec3;
-    use crate::ztmapview::BFTile;
-    use crate::test_rpc::service::{OpenZTRpcClient, IVec3 as ServiceIVec3, BFTile as ServiceBFTile};
-
-    static RPC_CLIENT: LazyLock<Mutex<Option<OpenZTRpcClient>>> = LazyLock::new(|| {
-        Mutex::new(None)
-    });
-
-    async fn get_rpc_client() -> OpenZTRpcClient {
-        let mut client_lock = RPC_CLIENT.lock();
-        if let Some(client) = client_lock.as_ref() {
-            return client.clone();
-        }
-        
-        let port = std::env::var("OPENZT_RPC_PORT").unwrap_or_else(|_| "9009".to_string());
-        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port.parse().expect("Invalid port"));
-        
-        info!("Connecting to RPC server at {}", socket_addr);
-        let transport = tarpc::serde_transport::tcp::connect(socket_addr, tarpc::tokio_serde::formats::Json::default)
-            .await
-            .expect("Failed to connect to RPC server");
-        let client = OpenZTRpcClient::new(client::Config::default(), transport).spawn();
-        
-        *client_lock = Some(client.clone());
-        client
-    }
-    
-    macro_rules! async_rpc_test {
-        (fn $name: ident($arg:ident : $arg_type:ty) {
-            $( $body:stmt );* $(;)?
-        }) => {
-            #[tokio::test]
-            async fn $name() {
-                let $arg = get_rpc_client().await;
-                info!("Running test case: {}", stringify!($name));
-                $(
-                    $body;
-                )*
-            }
-        };
-    }
- 
-    async_rpc_test! {
-        fn hello_world_test(client: OpenZTRpcClient) {
-            let response: String = client.hello_world(context::current(), "World".to_string()).await.unwrap();
-            assert_eq!(response, "Hello, World!");
-        }
-    }
- 
-    // TODO: Reimplement this test with proptest + async
-    // async_rpc_test! {
-    //     fn get_local_elevation_proptest(client: OpenZTRpcClient) {
-    //         let unknown_byte_values = vec![0x1,0x4,0x5,0x10,0x11,0x14,0x15,0x19,0x40,0x41,0x44,0x45,0x46,0x50,0x51,0x54,0x64,0x91];
-    //         for unknown_byte_2 in unknown_byte_values {
-    //             proptest!(|(x in 0i32..1000i32, y in 0i32..1000i32)| {
-    //                 let pos = IVec3::new(x, y, 0);
-    //                 let tile = BFTile::new(pos.clone(), unknown_byte_2);
-    //                 let reimplemented_result = tile.get_local_elevation(pos.clone());
-    // 
-    //                 let service_pos = ServiceIVec3 { x: pos.x, y: pos.y, z: pos.z };
-    //                 let service_tile = ServiceBFTile { pos: service_pos.clone(), unknown_byte_2 };
-    //                 
-    //                 let pos_ptr: u32 = client.allocate_ivec3(context::current(), service_pos).await.unwrap();
-    //                 let tile_ptr: u32 = client.allocate_bftile(context::current(), service_tile).await.unwrap();
-    //                 let result: i32 = client.get_local_elevation(context::current(), tile_ptr, pos_ptr).await.unwrap();
-    //                 assert_eq!(result, reimplemented_result, "Failed for pos: {:?}, tile: {:?}, unknown_byte_2: {}", pos, tile, unknown_byte_2);
-    //             });
-    //         }
-    //     }
-    // }
- 
-    #[tokio::test]
-    async fn get_local_elevation_test() {
-        let unknown_byte_values = vec![0x1,0x4,0x5,0x10,0x11,0x14,0x15,0x19,0x40,0x41,0x44,0x45,0x46,0x50,0x51,0x54,0x64,0x91];
-        let client = get_rpc_client().await;
-        
-        for unknown_byte_2 in unknown_byte_values {
-            let pos = IVec3::new(1, 1, 0);
-            let tile = BFTile::new(pos, unknown_byte_2);
-            let reimplemented_result = tile.get_local_elevation(pos);
-            
-            // Convert to service types
-            let service_pos = ServiceIVec3 { x: pos.x, y: pos.y, z: pos.z };
-            let service_tile = ServiceBFTile { pos: service_pos.clone(), unknown_byte_2 };
-            
-            let pos_ptr: u32 = client.allocate_ivec3(context::current(), service_pos).await.unwrap();
-            let tile_ptr: u32 = client.allocate_bftile(context::current(), service_tile).await.unwrap();
-            let result: i32 = client.get_local_elevation(context::current(), tile_ptr, pos_ptr).await.unwrap();
-            info!("Result: {}, Reimplemented Result: {}", result, reimplemented_result);
-        }
-    }
 }

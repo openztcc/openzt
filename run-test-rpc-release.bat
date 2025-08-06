@@ -1,7 +1,7 @@
 @echo off
 
 echo Building openzt dll
-cargo +nightly-2024-05-02-i686-pc-windows-msvc build --manifest-path openzt-test-rpc-dll/Cargo.toml --lib --release --target=i686-pc-windows-msvc %*
+cargo build --manifest-path openzt-test-rpc-dll/Cargo.toml --lib --release --target=i686-pc-windows-msvc %*
 
 if %errorlevel% neq 0 (
     echo Failed

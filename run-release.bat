@@ -1,7 +1,7 @@
 @echo off
 
 REM Building openzt dll
-cargo +nightly-2024-05-02-i686-pc-windows-msvc build --manifest-path openzt-dll/Cargo.toml --lib --release --target=i686-pc-windows-msvc %*
+cargo +nightly-2024-05-02-i686-pc-windows-msvc build --manifest-path openzt-dll/Cargo.toml --lib --release --target=i686-pc-windows-msvc  --features "command-console" %*
 
 if %errorlevel% neq 0 (
     echo Failed
