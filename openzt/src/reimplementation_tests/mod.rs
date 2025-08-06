@@ -113,7 +113,7 @@ mod detour_zoo_main {
 
                     // let fb_ref_good_new = &raw const ms.field_b; 
                     let result = BFTILE_GET_LOCAL_ELEVATION.original()(&raw const tile as u32, &raw const pos as u32);
-                    assert_eq!(result+1, reimplemented_result, "Failed for pos: {:?}, tile: {:?}, unknown_byte_2: {}", pos, tile, unknown_byte_2);
+                    assert_eq!(result, reimplemented_result, "Failed for pos: {:?}, tile: {:?}, unknown_byte_2: {}", pos, tile, unknown_byte_2);
                 });
             }
         }).unwrap_or_else(|e| {

@@ -7,15 +7,14 @@ members = [
     # derive macro
     "field_accessor_as_string",
     "field_accessor_as_string_trait",
+    "openzt-detour-macro",
 
     # # ecosystem
     "openzt-loader",
     "openzt-console",
     "openzt-configparser",
-    "openzt-test-rpc-dll",
-    "openzt-detour-macro",
+    "openzt-test-dll",
     "openzt-detour", 
-    "openzt-store-macro",
     "openzt-dll",
 
     # # TODO:	

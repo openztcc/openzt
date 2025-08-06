@@ -19,7 +19,6 @@ zip = "=2.3.0"
 openzt-configparser = { path = "../openzt-configparser", version = "1.1.1", features = ["indexmap"]}
 openzt-detour = { path = "../openzt-detour", version = "0.1.0" }
 openzt-detour-macro = { path = "../openzt-detour-macro", version = "0.1.0" }
-openzt-store-macro = { path = "../openzt-store-macro", version = "0.1.0" }
 anyhow = "1.0.89"
 getset = "0.1.3"
 maplit = "1.0.2"
