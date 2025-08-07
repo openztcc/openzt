@@ -25,9 +25,6 @@ cargo +nightly build --lib --target=i686-pc-windows-msvc
 # Release build  
 cargo +nightly build --lib --release --target=i686-pc-windows-msvc
 
-# Testing (use specific nightly version for consistency)
-cargo +nightly-2024-05-02 test --manifest-path openzt/Cargo.toml --release --target=i686-pc-windows-gnu
-
 # Documentation
 cargo +nightly rustdoc --manifest-path openzt/Cargo.toml --lib --target i686-pc-windows-msvc --open -- --document-private-items
 ```
