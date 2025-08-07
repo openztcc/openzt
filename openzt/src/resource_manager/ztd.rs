@@ -36,7 +36,7 @@ impl ZtdArchive {
         &self.archive_name
     }
 
-    pub fn by_name(&mut self, file_name: &str) -> anyhow::Result<ZtdFile> {
+    pub fn by_name(&mut self, file_name: &str) -> anyhow::Result<ZtdFile<'_>> {
         let zip_file = self
             .archive
             .by_name(file_name)
@@ -48,7 +48,7 @@ impl ZtdArchive {
         self.archive.len()
     }
 
-    pub fn by_index(&mut self, index: usize) -> anyhow::Result<ZtdFile> {
+    pub fn by_index(&mut self, index: usize) -> anyhow::Result<ZtdFile<'_>> {
         let zip_file = self
             .archive
             .by_index(index)

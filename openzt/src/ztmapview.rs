@@ -90,7 +90,7 @@ impl BFTile {
     // Equivalent to: ((((-16 * val) >> 31) & 0x3F) - 16 * val) >> 6
     fn negative_scale_and_divide(val: i32) -> i32 {
         let neg_scaled = -16 * val;
-        ((neg_scaled >> 31) & 0x3f + neg_scaled) >> 6
+        ((neg_scaled >> 31) & (0x3f + neg_scaled)) >> 6
     }
 
     let x = pos.x;

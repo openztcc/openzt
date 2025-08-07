@@ -1,5 +1,5 @@
 [package]
-name = "openzt-test-rpc-dll"
+name = "openzt-test-dll"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true

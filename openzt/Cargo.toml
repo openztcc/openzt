@@ -45,15 +45,6 @@ winresource = "0.1"
 name = "openztlib"
 crate-type = ["lib"]
 
-[[bin]]
-name = "openzt_test_rpc_client"
-path = "src/bin/openzt_test_rpc_client.rs"
-required-features = ["test-rpc"]
-
-#[[bin]]
-#name = "test"
-#path = "src/debug_dll.rs"
-
 [features]
 default = ["experimental", "ini"]
 release = []

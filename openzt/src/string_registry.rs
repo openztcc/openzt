@@ -17,7 +17,7 @@ static STRING_OVERRIDES: LazyLock<Mutex<HashMap<u32, String>>> = LazyLock::new(|
     Mutex::new(DEFAULT_OVERRIDES.iter().map(|(id, string_override)| (*id, string_override.to_string())).collect())
 });
 
-const DEFAULT_OVERRIDES: &'static [(u32, &'static str)] = &[
+const DEFAULT_OVERRIDES: &[(u32, &str)] = &[
     (3383, "Swamp"),
     (33383, "Swampy terrain"),
 ];
@@ -86,7 +86,7 @@ fn command_get_string(args: Vec<&str>) -> Result<String, CommandError> {
             return Err(Into::into("String not found"));
         }
         let string_slice = &buffer[..length as usize];
-        return Ok(String::from_utf8_lossy(string_slice).to_string());
+        Ok(String::from_utf8_lossy(string_slice).to_string())
     }
 }
 

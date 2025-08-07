@@ -9,13 +9,15 @@ members = [
     "field_accessor_as_string_trait",
     "openzt-detour-macro",
 
-    # # ecosystem
-    "openzt-loader",
+    # ecosystem
     "openzt-console",
     "openzt-configparser",
     "openzt-test-dll",
     "openzt-detour", 
     "openzt-dll",
+
+    # vendor
+    "vendor/retour-rs",
 
     # # TODO:	
     # "openzt-animations",

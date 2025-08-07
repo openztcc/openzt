@@ -76,16 +76,16 @@ impl ZTHabitatMgr {
 
 impl fmt::Display for ZTHabitatMgr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ZTHabitatMgr ({:#x}) {{\n", self.vtable)?;
-        write!(f, "  map_size_x: {},\n", self.map_size_x)?;
-        write!(f, "  map_size_y: {},\n", self.map_size_y)?;
-        write!(f, "  zoo_entrance_x: {},\n", self.zoo_entrance_x)?;
-        write!(f, "  zoo_entrance_y: {},\n", self.zoo_entrance_y)?;
-        write!(f, "  exhibit_array length: {},\n", self.exhibit_array.len())?;
-        write!(f, "  other_array_start: {:#x},\n", self.other_array_start)?;
-        write!(f, "  other_array_end: {:#x} ({}),\n", self.other_array_end, (self.other_array_end - self.other_array_start) / 12)?;
-        write!(f, "  other_array_buffer_end: {:#x} ({}),\n", self.other_array_buffer_end, (self.other_array_buffer_end - self.other_array_start) /12)?;
-        write!(f, "  popularity_scale_factor: {},\n", self.popularity_scale_factor)?;
+        writeln!(f, "ZTHabitatMgr ({:#x}) {{", self.vtable)?;
+        writeln!(f, "  map_size_x: {},", self.map_size_x)?;
+        writeln!(f, "  map_size_y: {},", self.map_size_y)?;
+        writeln!(f, "  zoo_entrance_x: {},", self.zoo_entrance_x)?;
+        writeln!(f, "  zoo_entrance_y: {},", self.zoo_entrance_y)?;
+        writeln!(f, "  exhibit_array length: {},", self.exhibit_array.len())?;
+        writeln!(f, "  other_array_start: {:#x},", self.other_array_start)?;
+        writeln!(f, "  other_array_end: {:#x} ({}),", self.other_array_end, (self.other_array_end - self.other_array_start) / 12)?;
+        writeln!(f, "  other_array_buffer_end: {:#x} ({}),", self.other_array_buffer_end, (self.other_array_buffer_end - self.other_array_start) /12)?;
+        writeln!(f, "  popularity_scale_factor: {},", self.popularity_scale_factor)?;
         write!(f, "}}")
     }
 }
@@ -155,48 +155,48 @@ impl PartialEq for ZTHabitat {
 
 impl fmt::Display for ZTHabitat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ZTHabitat {{\n",)?;
-        write!(f, "  vtable: {:#x},\n", self.vtable)?;
-        write!(f, "  zt_show_info_ptr: {:#x},\n", self.zt_show_info_ptr)?;
-        write!(f, "  exhibit_tile_ptr: {:#x},\n", self.exhibit_tile_ptr)?;
-        write!(f, "  entrance_tile_ptr: {:#x},\n", self.entrance_tile_ptr)?;
-        write!(f, "  entrance_rotation: {:#x},\n", self.entrance_rotation)?;
-        write!(f, "  unknown_u32: {:#x},\n", self.unknown_u32)?;
-        write!(f, "  current_donactions: {},\n", self.current_donactions)?;
-        write!(f, "  last_donactions: {},\n", self.last_donactions)?;
-        write!(f, "  total_donactions: {},\n", self.total_donactions)?;
-        write!(f, "  current_upkeep: {},\n", self.current_upkeep)?;
-        write!(f, "  last_upkeep: {},\n", self.last_upkeep)?;
-        write!(f, "  total_upkeep: {},\n", self.total_upkeep)?;
-        write!(f, "  unknown_u32_2: {:#x},\n", self.unknown_u32_2)?;
-        write!(f, "  unknown_u32_3: {:#x},\n", self.unknown_u32_3)?;
-        write!(f, "  unknown_u32_4: {:#x},\n", self.unknown_u32_4)?;
-        write!(f, "  created_timestamp: {},\n", OffsetDateTime::try_from(self.created_timestamp).unwrap())?;
-        write!(f, "  unknown_nt_time: {} ({}, {}, {}),\n", OffsetDateTime::try_from(self.unknown_nt_time).unwrap(), self.unknown_nt_time.to_raw() as f64, self.unknown_nt_time.to_raw() as u32, (self.unknown_nt_time.to_raw() >> 32) as u32)?;
-        write!(f, "  exhibit_name: {},\n", self.exhibit_name.copy_to_string())?;
+        writeln!(f, "ZTHabitat {{",)?;
+        writeln!(f, "  vtable: {:#x},", self.vtable)?;
+        writeln!(f, "  zt_show_info_ptr: {:#x},", self.zt_show_info_ptr)?;
+        writeln!(f, "  exhibit_tile_ptr: {:#x},", self.exhibit_tile_ptr)?;
+        writeln!(f, "  entrance_tile_ptr: {:#x},", self.entrance_tile_ptr)?;
+        writeln!(f, "  entrance_rotation: {:#x},", self.entrance_rotation)?;
+        writeln!(f, "  unknown_u32: {:#x},", self.unknown_u32)?;
+        writeln!(f, "  current_donactions: {},", self.current_donactions)?;
+        writeln!(f, "  last_donactions: {},", self.last_donactions)?;
+        writeln!(f, "  total_donactions: {},", self.total_donactions)?;
+        writeln!(f, "  current_upkeep: {},", self.current_upkeep)?;
+        writeln!(f, "  last_upkeep: {},", self.last_upkeep)?;
+        writeln!(f, "  total_upkeep: {},", self.total_upkeep)?;
+        writeln!(f, "  unknown_u32_2: {:#x},", self.unknown_u32_2)?;
+        writeln!(f, "  unknown_u32_3: {:#x},", self.unknown_u32_3)?;
+        writeln!(f, "  unknown_u32_4: {:#x},", self.unknown_u32_4)?;
+        writeln!(f, "  created_timestamp: {},", OffsetDateTime::try_from(self.created_timestamp).unwrap())?;
+        writeln!(f, "  unknown_nt_time: {} ({}, {}, {}),", OffsetDateTime::try_from(self.unknown_nt_time).unwrap(), self.unknown_nt_time.to_raw() as f64, self.unknown_nt_time.to_raw() as u32, (self.unknown_nt_time.to_raw() >> 32) as u32)?;
+        writeln!(f, "  exhibit_name: {},", self.exhibit_name.copy_to_string())?;
 
 
 
 
 
 
-        // write!(f, "  entrance_x: {},\n", self.entrance_x)?;
-        // write!(f, "  entrance_y: {},\n", self.entrance_y)?;
-        // write!(f, "  entrance_rotation: {},\n", self.entrance_rotation)?;
-        // write!(f, "  unknown_ptr: {:#x},\n", self.unknown_ptr)?;
-        // write!(f, "  unknown_ptr2: {:#x},\n", self.unknown_ptr2)?;
-        // write!(f, "  unknown_ptr3: {:#x},\n", self.unknown_ptr3)?;
-        // write!(f, "  current_donations: {},\n", self.current_donations)?;
-        // write!(f, "  last_donations: {},\n", self.last_donations)?;
-        // write!(f, "  total_donations: {},\n", self.total_donations)?;
-        // write!(f, "  current_upkeep: {},\n", self.current_upkeep)?;
-        // write!(f, "  last_upkeep: {},\n", self.last_upkeep)?;
-        // write!(f, "  total_upkeep: {},\n", self.total_upkeep)?;
-        // write!(f, " unknown_ptr4: {:#x},\n", self.unknown_ptr4)?;
-        // write!(f, " unknown_ptr5: {:#x},\n", self.unknown_ptr5)?;
-        // write!(f, " unknown_ptr6: {:#x},\n", self.unknown_ptr6)?;
-        // write!(f, " created_timestamp: {:#x},\n", self.created_timestamp)?;
-        write!(f, "}}")
+        // writeln!(f, "  entrance_x: {},", self.entrance_x)?;
+        // writeln!(f, "  entrance_y: {},", self.entrance_y)?;
+        // writeln!(f, "  entrance_rotation: {},", self.entrance_rotation)?;
+        // writeln!(f, "  unknown_ptr: {:#x},", self.unknown_ptr)?;
+        // writeln!(f, "  unknown_ptr2: {:#x},", self.unknown_ptr2)?;
+        // writeln!(f, "  unknown_ptr3: {:#x},", self.unknown_ptr3)?;
+        // writeln!(f, "  current_donations: {},", self.current_donations)?;
+        // writeln!(f, "  last_donations: {},", self.last_donations)?;
+        // writeln!(f, "  total_donations: {},", self.total_donations)?;
+        // writeln!(f, "  current_upkeep: {},", self.current_upkeep)?;
+        // writeln!(f, "  last_upkeep: {},", self.last_upkeep)?;
+        // writeln!(f, "  total_upkeep: {},", self.total_upkeep)?;
+        // writeln!(f, " unknown_ptr4: {:#x},", self.unknown_ptr4)?;
+        // writeln!(f, " unknown_ptr5: {:#x},", self.unknown_ptr5)?;
+        // writeln!(f, " unknown_ptr6: {:#x},", self.unknown_ptr6)?;
+        // writeln!(f, " created_timestamp: {:#x},", self.created_timestamp)?;
+        writeln!(f, "}}")
     }
 }
 

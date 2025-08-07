@@ -1,4 +1,5 @@
 #![recursion_limit = "1024"]
+#![allow(warnings)] // Allow warnings for a vendored crate
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
   feature = "static-detour",

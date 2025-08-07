@@ -1081,16 +1081,16 @@ pub struct ZTAnimalType {
     pub habitat_preference: i32,        // 0x2BC
     pad11: [u8; 0x31C - 0x2C0],         // ----------------------- padding: 92 bytes
     pub baby_born_change: i32,          // 0x31C
-    pad12: [u8; 0x320 - 0x320],         // ----------------------- padding: 4 bytes
+    // pad12: [u8; 0x320 - 0x320],         // ----------------------- padding: 4 bytes
     pub energy_increment: i32,          // 0x320
     pub energy_threshold: i32,          // 0x324
     pub dirty_increment: i32,           // 0x328
     pub dirty_threshold: i32,           // 0x32C
-    pad13: [u8; 0x330 - 0x330],         // ----------------------- padding: 4 bytes
+    // pad13: [u8; 0x330 - 0x330],         // ----------------------- padding: 4 bytes
     pub sick_time: i32,                 // 0x330
     pad14: [u8; 0x344 - 0x334],         // ----------------------- padding: 16 bytes
     pub baby_to_adult: i32,             // 0x344
-    pad15: [u8; 0x348 - 0x348],         // ----------------------- padding: 4 bytes
+    // pad15: [u8; 0x348 - 0x348],         // ----------------------- padding: 4 bytes
     pub other_food: i32,                // 0x348
     pub tree_pref: i32,                 // 0x34C
     pub rock_pref: i32,                 // 0x350
@@ -1103,7 +1103,7 @@ pub struct ZTAnimalType {
     pub salinity_health_change: i32,    // 0x36C
     pad16: [u8; 0x378 - 0x370],         // ----------------------- padding: 8 bytes
     pub happy_reproduce_threshold: i32, // 0x378
-    pad17: [u8; 0x37C - 0x37C],         // ----------------------- padding: 4 bytes
+    // pad17: [u8; 0x37C - 0x37C],         // ----------------------- padding: 4 bytes
     pub building_use_chance: i32,       // 0x37C
     pub no_mate_change: i32,            // 0x380
     pub time_death: i32,                // 0x384
@@ -1259,7 +1259,7 @@ pub struct ZTStaffType {
     pad01: [u8; 0x1B4 - 0x188], // ----------------------- padding: 44 bytes
     pub work_check: i32,        // 0x1B4
     pub chase_check: i32,       // 0x1B8
-    pad02: [u8; 0x1BC - 0x1BC], // ----------------------- padding: 4 bytes
+    // pad02: [u8; 0x1BC - 0x1BC], // ----------------------- padding: 4 bytes
     pub monthly_cost: f32,      // 0x1BC
     // pub training_icon_name: string ptr, // 0x1D8 TODO: implement string ptr as function getter
     pad03: [u8; 0x1E8 - 0x1C0], // ----------------------- padding: 24 bytes

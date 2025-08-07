@@ -1,8 +1,7 @@
 #![allow(dead_code)]
-#![feature(lazy_cell)]
 
 #[cfg(target_os = "windows")]
-use windows::Win32::System::{SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}, Console::{AllocConsole, FreeConsole}};
+use windows::Win32::System::{SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}};
 
 #[cfg(target_os = "windows")]
 #[no_mangle]

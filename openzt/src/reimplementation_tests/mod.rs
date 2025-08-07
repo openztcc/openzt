@@ -68,8 +68,7 @@ impl FailurePersistence for NoopFailurePersistence {
     fn eq(&self, other: &dyn FailurePersistence) -> bool {
         other
             .as_any()
-            .downcast_ref::<Self>()
-            .map_or(false, |x| x == self)
+            .downcast_ref::<Self>() == Some(self)
     }
 
     fn as_any(&self) -> &dyn Any {
