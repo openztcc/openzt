@@ -92,7 +92,7 @@ mod detour_zoo_main {
 
     // TODO: Fix this so it works with a crate/mod prefix
     #[detour(LOAD_LANG_DLLS)]
-    unsafe extern "thiscall" fn detour_target(this: u32) -> u32 {
+    unsafe extern "thiscall" fn detour_target(_this: u32) -> u32 {
         info!("Detour success");
 
         panic::catch_unwind(|| {
@@ -117,9 +117,9 @@ mod detour_zoo_main {
             }
         }).unwrap_or_else(|e| {
             error!("Proptest failed: {:?}", e);
+            std::process::exit(1);
         });
         
-
-        unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
+        std::process::exit(0);
     }
 }
