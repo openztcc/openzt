@@ -77,7 +77,7 @@ if cfg!(feature = "bugfix") {
 More complex modules can be split into multiple submodules in a subdirectory, see `/resource_manager/` and `/settings/` as examples, each has a respective `resource_manager.rs` and `settings.rs` file that defines the submodules
 
 ### detours
-You can create a detour as follows. First, define the function signature and address as a constant in the `openzt-detour` crate (address = Ghidra offset + 0x400000). Then use the `#[detour_mod]` attribute on your module and `#[detour(CONSTANT_NAME)]` on your function. The calling convention (`cdecl`, `thiscall`, `stdcall`) should match the original function.
+You can create a detour as follows. First, define the function signature and address as a constant in the `openzt-detour` crate (address = Ghidra offset). Then use the `#[detour_mod]` attribute on your module and `#[detour(CONSTANT_NAME)]` on your function. The calling convention (`cdecl`, `thiscall`, `stdcall`) should match the original function.
 
 ```rust
 // In openzt-detour/src/lib.rs
