@@ -1,0 +1,10 @@
+[package]
+name = "openzt-detour"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+retour = {path = "../vendor/retour-rs", version = "0.3.1"}

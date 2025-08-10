@@ -6,7 +6,7 @@ use std::{
 };
 
 use openzt_configparser::ini::Ini;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use tracing::{error, info};
 use walkdir::WalkDir;
@@ -358,7 +358,7 @@ fn map_legacy_cfg_type(file_type_str: &str, file_name: String) -> Result<LegacyC
     }
 }
 
-static LEGACY_CFG_REGEX: Lazy<Regex> = Lazy::new(|| {
+static LEGACY_CFG_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^((ambient|animal|bldg|fences|filter|food|free|fringe|guests|help|items|paths|rubble|scenar|scener|staff|tile|twall|xpac)[\w\-. ]*?\.cfg)|((shows|tanks|ui\/infoimg|economy)\.cfg)$")
         .unwrap()
 });

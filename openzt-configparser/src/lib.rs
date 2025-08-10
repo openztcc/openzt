@@ -1,3 +1,6 @@
+// TODO: Should probably actually fix all the warnings but for now I'm considering this crate functionally complete
+#![allow(warnings)]
+
 /*!
 This crate provides the `Ini` struct which implements a basic configuration language which provides a structure similar to what’s found in Windows' `ini` files.
 You can use this to write Rust programs which can be customized by end users easily.

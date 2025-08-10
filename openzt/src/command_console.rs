@@ -8,10 +8,9 @@ use std::{
     thread,
 };
 
-use once_cell::sync::Lazy; //TODO: Use std::sync::LazyCell when it becomes stable
-use retour_utils::hook_module;
+use std::sync::LazyLock; //TODO: Use std::sync::LazyCell when it becomes stable
+use openzt_detour_macro::detour_mod;
 use tracing::{error, info};
-use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 
 #[derive(Debug)]
 pub struct CommandError {
@@ -68,16 +67,17 @@ impl From<&str> for CommandError {
     }
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 pub mod zoo_console {
     use tracing::error;
+    use openzt_detour::ZTAPP_UPDATEGAME;
 
-    use super::{add_to_command_register, call_next_command, command_list_commands, start_server};
+    use super::{add_to_command_register, call_next_command, command_list_commands};
 
-    #[hook(unsafe extern "thiscall" ZTApp_updateGame, offset = 0x0001a6d1)]
-    fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
+    #[detour(ZTAPP_UPDATEGAME)]
+    unsafe extern "thiscall" fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
         call_next_command();
-        unsafe { ZTApp_updateGame.call(_this_ptr, param_2) }
+        unsafe { ZTAPP_UPDATEGAME_DETOUR.call(_this_ptr, param_2) }
     }
 
     pub fn init() {
@@ -87,19 +87,27 @@ pub mod zoo_console {
             }
         };
         add_to_command_register("list_commands".to_owned(), command_list_commands);
-        std::thread::spawn(|| {
-            start_server();
-        });
     }
+}
+
+pub fn init() {
+    zoo_console::init();
 }
 
 type CommandCallback = fn(args: Vec<&str>) -> Result<String, CommandError>;
 
-static COMMAND_REGISTRY: Lazy<Mutex<HashMap<String, CommandCallback>>> = Lazy::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
 
-static COMMAND_RESULTS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<String>::new()));
+static COMMAND_THREAD: LazyLock<Mutex<std::thread::JoinHandle<()>>> = LazyLock::new(|| Mutex::new(std::thread::spawn(|| {
+            start_server();
+        }
+    ))
+);
 
-static COMMAND_QUEUE: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::<String>::new()));
+static COMMAND_REGISTRY: LazyLock<Mutex<HashMap<String, CommandCallback>>> = LazyLock::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
+
+static COMMAND_RESULTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::<String>::new()));
+
+static COMMAND_QUEUE: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::<String>::new()));
 
 pub fn add_to_command_register(command_name: String, command_callback: CommandCallback) {
     info!("Registring command {} to registry", command_name);
@@ -120,6 +128,7 @@ fn call_command(command_name: String, args: Vec<&str>) -> Result<String, Command
 }
 
 pub fn call_next_command() {
+    let _unused = COMMAND_THREAD.lock().unwrap();
     let Some(command) = get_from_command_queue() else {
         return;
     };
@@ -227,27 +236,4 @@ pub fn start_server() {
             }
         }
     }
-}
-
-pub fn init() -> windows::core::Result<()> {
-    zoo_console::init();
-
-    // Free the current console
-    unsafe { FreeConsole()? };
-
-    // Allocate a new console
-    unsafe { AllocConsole()? };
-
-    // Get the handle to the new console's standard output
-    // let handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }.unwrap();
-
-    // // Write to the new console
-    // write_to_console(handle, "Hello from the new console!\n")?;
-
-    // Wait for user input before closing
-    // println!("Press Enter to exit...");
-    // let mut input = String::new();
-    // std::io::stdin().read_line(&mut input).unwrap();
-
-    Ok(())
 }

@@ -10,8 +10,8 @@ use std::{
 use anyhow::{anyhow, Context};
 use openzt_configparser::ini::Ini;
 use maplit::hashset;
-use once_cell::sync::Lazy;
-use retour_utils::hook_module;
+use std::sync::LazyLock;
+use openzt_detour_macro::detour_mod;
 use tracing::{debug, error, info};
 
 use crate::{
@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// List of official ZTD files so we can determine if a given ZTD file is custom content
-static OFFICIAL_FILESET: Lazy<HashSet<&str>> = Lazy::new(|| {
+static OFFICIAL_FILESET: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     hashset! {"animals8.ztd",
         "awards5.ztd",
         "config5.ztd",
@@ -145,7 +145,7 @@ const EXPANSION_RESOURCE_PAL: &str = "listbk.pal";
 const EXPANSION_RESOURCE_ANIMATION: &str = "listbk.animation";
 
 /// Mutex to store the contents of each `member` set, determined by the `member` section in the `uca`, `ucs`, `ucb`, and `ai` files
-static MEMBER_SETS: Lazy<Mutex<HashMap<String, HashSet<String>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static MEMBER_SETS: LazyLock<Mutex<HashMap<String, HashSet<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
     let mut data_mutex = MEMBER_SETS.lock().unwrap();
@@ -176,7 +176,7 @@ fn get_cc_expansion_name(subdir: &str) -> String {
 }
 
 /// Mutex containing all expansions
-static EXPANSION_ARRAY: Lazy<Mutex<Vec<Expansion>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static EXPANSION_ARRAY: LazyLock<Mutex<Vec<Expansion>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 /// Adds to the expansion mutex and saves to ZT memory
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<()> {
@@ -315,17 +315,18 @@ impl Display for ExpansionList {
     }
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 pub mod custom_expansion {
     use tracing::info;
+    use openzt_detour::{ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED, ZTUI_EXPANSIONSELECT_SETUP};
 
     use super::{initialise_expansions, read_current_expansion};
     use crate::{bfentitytype::read_zt_entity_type_from_memory, ztui::get_current_buy_tab};
 
-    #[hook(unsafe extern "cdecl" ZTUI_general_entityTypeIsDisplayed, offset=0x000e8cc8)]
-    pub fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
+    #[detour(ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED)]
+    pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
         // TODO: Put this call and subsequent log behind OpenZT debug flag
-        let result = unsafe { ZTUI_general_entityTypeIsDisplayed.call(bf_entity, param_1, param_2) };
+        let result = unsafe { ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
 
         let Some(current_expansion) = read_current_expansion() else {
             return 0;
@@ -350,9 +351,9 @@ pub mod custom_expansion {
         reimplemented_result
     }
 
-    #[hook(unsafe extern "stdcall" ZTUI_expansionselect_setup, offset=0x001291fb)]
-    pub fn ztui_expansionselect_setup() {
-        unsafe { ZTUI_expansionselect_setup.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
+    #[detour(ZTUI_EXPANSIONSELECT_SETUP)]
+    pub unsafe extern "stdcall" fn ztui_expansionselect_setup() {
+        unsafe { ZTUI_EXPANSIONSELECT_SETUP_DETOUR.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
 
         initialise_expansions();
     }
@@ -360,12 +361,12 @@ pub mod custom_expansion {
 
 fn initialise_expansions() {
     add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
-    if let Some(member_hash) = get_members(&get_cc_expansion_name_all())
-        && !member_hash.is_empty()
-    {
-        add_expansion_with_string_value(0x4000, get_cc_expansion_name_all(), "Custom Content".to_string(), true);
+    if let Some(member_hash) = get_members(&get_cc_expansion_name_all()){
+        if !member_hash.is_empty() {
+            add_expansion_with_string_value(0x4000, get_cc_expansion_name_all(), "Custom Content".to_string(), true);
 
-        save_mutex();
+            save_mutex();
+        }
     }
 
     let number_of_expansions = get_expansions().len();
@@ -424,6 +425,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
 }
 
 fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &ZTEntityType) -> bool {
+    // TODO: ZTEntityType should also be considered when filtering, not just members
     match buy_tab {
         BuyTab::Animal => {
             if !entity.is_member("animals".to_string()) {
@@ -481,7 +483,7 @@ fn filter_entity_type(buy_tab: &BuyTab, current_expansion: &Expansion, entity: &
             }
         }
         BuyTab::Foliage => {
-            if !entity.is_member("foliage".to_string()) {
+            if !entity.is_member("foliage".to_string()) || entity.class == ZTEntityTypeClass::Food {
                 return false;
             }
         }

@@ -1,6 +1,8 @@
-#![feature(let_chains)]
 #![allow(dead_code)]
-
+#![cfg_attr(
+  feature = "command-console",
+  feature(lazy_cell)
+)]
 /// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this
 /// allowed customization via zoo.ini, but in practice it appears unused.
 mod bfregistry;
@@ -13,7 +15,7 @@ mod capture_ztlog;
 mod command_console;
 
 /// Commands and functions for reading entities and entity types from the ZTWorldMgr class
-mod ztworldmgr;
+pub mod ztworldmgr;
 
 mod resource_manager;
 
@@ -26,6 +28,7 @@ mod ztui;
 /// fence 1 tile away from the edge of the map, and a bug where the
 /// game crashes if a zoo wall that is one tile away from the edge
 /// of the map is deleted.
+#[cfg(target_os = "windows")]
 mod bugfix;
 
 /// Methods for reading the vanilla ZTAdvTerrainMgr class, which contains information about terrain types.
@@ -55,9 +58,18 @@ mod bfentitytype;
 /// ztgamemgr module has commands to interact with the live zoo stats such as cash, num animals, species, guests, etc. via the vanilla ZTGameMgr class.
 mod ztgamemgr;
 
+/// ztmapview is the main view in zoo tycoon, all map interaction is done through this class.
+pub mod ztmapview;
+
+/// zthabitatmgr module has commands to interact with habitats/exhibits/tanks via the vanilla ZTHabitatMgr class.
+mod zthabitatmgr;
+
+mod experimental;
+
 /// Patches in the current OpenZT build version into the game's version string.
 mod version;
 
+// TODO: Move this to resource_manager/openzt_mods
 /// OpenZT mod structs
 mod mods;
 
@@ -68,45 +80,30 @@ mod util;
 /// Loads settings from the zoo.ini file and commands/functions for reading and writing settings during runtime
 mod settings;
 
-use tracing::info;
+/// RPC server for testing OpenZT functionality
+#[cfg(feature = "reimplementation-tests")]
+pub mod reimplementation_tests;
+
 #[cfg(target_os = "windows")]
-use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH};
+use windows::Win32::System::{Console::{AllocConsole, FreeConsole}};
 
-use retour_utils::hook_module;
+#[cfg(target_os = "windows")]
+use openzt_detour_macro::detour_mod;
 
-#[no_mangle]
-extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
-    match reason {
-        DLL_PROCESS_ATTACH => {
+#[cfg(target_os = "windows")]
+use tracing::info;
 
-            // Initialize a hook into the WinMain function, where we can perform further initialization
-            // We just unwrap here as this is a critical initialization step, and we want to panic if it fails.
-            unsafe { zoo_init::init_detours().unwrap() }
-        }
-        DLL_PROCESS_DETACH => {
-            // info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);
-        }
-        DLL_THREAD_ATTACH => {
-            info!("DllMain: DLL_THREAD_ATTACH: {}, {} {}", module, reason, _reserved);
-        }
-        DLL_THREAD_DETACH => {
-            // info!("DllMain: DLL_THREAD_DETACH: {}, {} {}", module, reason, _reserved);
-        }
-        _ => {
-            // info!("DllMain: Unknown: {}, {} {}", module, reason, _reserved);
-        }
-    }
-    1
-}
-
-#[hook_module("zoo.exe")]
+#[cfg(target_os = "windows")]
+#[detour_mod]
 mod zoo_init {
     use super::*;
+    use openzt_detour::LOAD_LANG_DLLS;
 
-    #[hook(unsafe extern "stdcall" WinMain, offset = 0x0001a8bc)]
-    fn win_main(hInstance: u32, hPrevInstance: u32, lpCmdLine: u32, nShowCm: u32) -> u32 {
-        info!("###################### WinMain: {} {} {} {}", hInstance, hPrevInstance, lpCmdLine, nShowCm);
-        match command_console::init() {
+    // Note(finn): We hook the LoadRes function to perform some later initialization steps. Starting
+    //  the console starts a new thead which is not recommended in the DllMain function.
+    #[detour(LOAD_LANG_DLLS)]
+    unsafe extern "thiscall" fn load_res_dlls(this: u32) -> u32 {
+        match init_console() {
             Ok(_) => {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
                 tracing_subscriber::fmt().with_ansi(enable_ansi).init();
@@ -117,10 +114,11 @@ mod zoo_init {
             }
         }
 
-        // dll_first_load();
-        // info!("DllMain: DLL_PROCESS_ATTACH: {}, {} {}", module, reason, _reserved);
 
-        // Initialize stable modules
+        // Command console is broken on latest stable Rust so we disable it by default.
+        if cfg!(feature = "command-console") {
+            command_console::init();
+        }
         resource_manager::init();
         expansions::init();
         string_registry::init();
@@ -133,15 +131,37 @@ mod zoo_init {
 
         if cfg!(feature = "capture_ztlog") {
             use crate::capture_ztlog;
-            // info!("Feature 'capture_ztlog' enabled");
+            info!("Feature 'capture_ztlog' enabled");
             capture_ztlog::init();
         }
 
         if cfg!(feature = "experimental") {
-            // info!("Feature 'experimental' enabled");
+            info!("Feature 'experimental' enabled");
             ztadvterrainmgr::init();
             ztgamemgr::init();
+            experimental::init();
+            ztmapview::init();
+            zthabitatmgr::init();
         }
-        unsafe { WinMain.call(hInstance, hPrevInstance, lpCmdLine, nShowCm) }
+        unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }
+}
+
+#[cfg(target_os = "windows")]
+pub fn init() {
+    // Initialize the detours
+    unsafe {
+        zoo_init::init_detours().expect("Failed to initialize detours");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn init_console() -> windows::core::Result<()> {
+        // Free the current console
+        unsafe { FreeConsole()? };
+
+        // Allocate a new console
+        unsafe { AllocConsole()? };
+
+        Ok(())
 }

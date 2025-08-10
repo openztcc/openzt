@@ -584,11 +584,11 @@ fn get_keys() -> Result<(), Box<dyn Error>> {
     config.load("tests/test.ini")?;
 
 
-    let expected_values = vec!["Bool".to_string(), "Boolcoerce".to_string(), "Int".to_string(), "Uint".to_string(), "Float".to_string()];
+    let expected_values = ["Bool".to_string(), "Boolcoerce".to_string(), "Int".to_string(), "Uint".to_string(), "Float".to_string()];
 
     let keys = config.get_keys("values").unwrap();
     for key in keys {
-        assert_eq!(expected_values.contains(&key), true)
+        assert!(expected_values.contains(&key))
     }
 
     Ok(())

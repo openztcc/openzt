@@ -9,51 +9,41 @@ license.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[profile.dev]
-opt-level = 1
-[profile.dev.package."*"]
-opt-level = 3
-
 [dependencies]
 tracing-subscriber = "0.3.19"
 tracing = "0.1.41"
-# TODO: Figure out how to use retour-rs with generic-detours so we don't need nightly and can use addresses by variables
-# retour = {path = "../vendor/retour-rs", version = "0.3.1", features = ["thiscall-abi"]}
-retour = {version = "0.3.1", features = ["thiscall-abi"]}
-# retour-utils = "0.2.1"
-retour-utils = { path = "../vendor/retour-utils", version = "0.2.1"}
-once_cell = "1.18.0"
+retour = {path = "../vendor/retour-rs", version = "0.3.1"}
 num_enum = "0.7.3"
 walkdir = "2.5.0"
 zip = "=2.3.0"
 openzt-configparser = { path = "../openzt-configparser", version = "1.1.1", features = ["indexmap"]}
+openzt-detour = { path = "../openzt-detour", version = "0.1.0" }
+openzt-detour-macro = { path = "../openzt-detour-macro", version = "0.1.0" }
 anyhow = "1.0.89"
 getset = "0.1.3"
 maplit = "1.0.2"
 field_accessor_as_string = { path = "../field_accessor_as_string" }
 field_accessor_as_string_trait = { path = "../field_accessor_as_string_trait" }
 serde = {version = "1.0.210", features = ["derive"]}
-toml = "0.8.23"
+toml = "0.9.0"
 regex = "1.10.6"
 public = "0.2.2"
-windows = { version = "0.61.3", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices", "Win32_System_Memory"] }
 enable-ansi-support = "0.2.1"
 itertools = "0.14.0"
 nt-time = "0.10.6"
+proptest = { version = "1.7.0", optional = true}
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.3", features = ["Win32", "Win32_System_Console", "Win32_System_SystemServices", "Win32_System_Memory"] }
 
 [build-dependencies]
 winresource = "0.1"
 
 [dev-dependencies]
-openzt-loader = { version = "0.1.0", path = "../openzt-loader" }
 
 [lib]
-name = "openzt"
-crate-type = ["cdylib"]
-
-#[[bin]]
-#name = "test"
-#path = "src/debug_dll.rs"
+name = "openztlib"
+crate-type = ["lib"]
 
 [features]
 default = ["experimental", "ini"]
@@ -61,3 +51,6 @@ release = []
 ini = []
 capture_ztlog = []
 experimental = []
+reimplementation-tests = ["proptest"]
+command-console = []
+proptest = ["dep:proptest"]

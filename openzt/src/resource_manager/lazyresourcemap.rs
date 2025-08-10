@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Context;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tracing::{error, info};
 
 use super::ztd::ZtdArchive;
@@ -19,7 +19,7 @@ use crate::{
     util::{get_from_memory, ZTString},
 };
 
-static LAZY_RESOURCE_MAP: Lazy<Mutex<HashMap<String, LazyResource>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static LAZY_RESOURCE_MAP: LazyLock<Mutex<HashMap<String, LazyResource>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 struct LazyResourceMap {}
 

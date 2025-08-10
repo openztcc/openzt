@@ -1,8 +1,8 @@
 use std::sync::Mutex;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashMap;
-use retour_utils::hook_module;
+use openzt_detour_macro::detour_mod;
 use tracing::info;
 
 use crate::command_console::{add_to_command_register, CommandError};
@@ -11,13 +11,13 @@ const STRING_REGISTRY_ID_OFFSET: u32 = 100_000;
 
 const GLOBAL_BFAPP: u32 = 0x00638148;
 
-static STRING_REGISTRY: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static STRING_REGISTRY: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
-static STRING_OVERRIDES: Lazy<Mutex<HashMap<u32, String>>> = Lazy::new(|| {
+static STRING_OVERRIDES: LazyLock<Mutex<HashMap<u32, String>>> = LazyLock::new(|| {
     Mutex::new(DEFAULT_OVERRIDES.iter().map(|(id, string_override)| (*id, string_override.to_string())).collect())
 });
 
-const DEFAULT_OVERRIDES: &'static [(u32, &'static str)] = &[
+const DEFAULT_OVERRIDES: &[(u32, &str)] = &[
     (3383, "Swamp"),
     (33383, "Swampy terrain"),
 ];
@@ -86,19 +86,20 @@ fn command_get_string(args: Vec<&str>) -> Result<String, CommandError> {
             return Err(Into::into("String not found"));
         }
         let string_slice = &buffer[..length as usize];
-        return Ok(String::from_utf8_lossy(string_slice).to_string());
+        Ok(String::from_utf8_lossy(string_slice).to_string())
     }
 }
 
-#[hook_module("zoo.exe")]
+#[detour_mod]
 pub mod zoo_string {
     use tracing::info;
+    use openzt_detour::BFAPP_LOADSTRING;
 
     use super::{is_user_type_id, STRING_REGISTRY_ID_OFFSET, get_override_string_from_registry};
     use crate::{string_registry::get_string_from_registry, util::save_string_to_memory};
 
-    #[hook(unsafe extern "thiscall" BFApp_loadString, offset = 0x00004e0a)]
-    fn bf_app_load_string(this_ptr: u32, string_id: u32, string_buffer: u32) -> u32 {
+    #[detour(BFAPP_LOADSTRING)]
+    unsafe extern "thiscall" fn bf_app_load_string(this_ptr: u32, string_id: u32, string_buffer: u32) -> u32 {
         if is_user_type_id(string_id) {
             info!("BFApp::loadString {:#x} {} {:#x}", this_ptr, string_id, string_buffer);
         }
@@ -113,7 +114,7 @@ pub mod zoo_string {
             save_string_to_memory(string_buffer, &override_string);
             return override_string.len() as u32 + 1;
         }
-        unsafe { BFApp_loadString.call(this_ptr, string_id, string_buffer) }
+        unsafe { BFAPP_LOADSTRING_DETOUR.call(this_ptr, string_id, string_buffer) }
     }
 
     // #[hook(unsafe extern "thiscall" BFWorldMgr_unknown, offset = 0x00010d48)]

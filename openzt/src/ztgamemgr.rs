@@ -32,6 +32,16 @@ struct ZTGameMgr {
     pad10: [u8; 0x1194 - 0x1164],  // 0x1160
     date: Systemtime,              // 0x1194
     pad11: [u8; 0x1400],           // 0x1194
+    // TODO: Below
+    // admissions_income_by_month: get_from_memory::<[f32; 12]>(zt_game_mgr_prt + 0x254),
+    // concessions_benefit_by_month: get_from_memory::<[f32; 12]>(zt_game_mgr_prt + 0x29c),
+    // recycling_benefit_by_month: get_from_memory::<[f32; 12]>(zt_game_mgr_prt + 0x340),
+    // // net_income maybe?: get_from_memory::<i32>(zt_game_mgr_prt + 0x404),
+    // income_by_month: get_from_memory::<[f32; 12]>(zt_game_mgr_prt + 0x404),
+    // income_expense_totals_by_month: get_from_memory::<[f32; 12]>(zt_game_mgr_prt + 0x44c),
+    // zoo_rating_by_month: get_from_memory::<[f32; 12]>(zt_game_mgr_prt + 0x464),
+    // unknown_array: get_from_memory::<[f32; 12]>(zt_game_mgr_prt + 0x4c4),
+    // construction_cost_by_month: get_from_memory::<[f32; 12]>(zt_game_mgr_prt + 0x824),
 }
 
 /// SYSTEMTIME struct from Windows API
