@@ -378,14 +378,15 @@ pub mod hooks_ztworldmgr {
 
     use super::*;
 
+    // TODO: Generated signature returns i32 instead of u32 - verify if sign matters
     #[detour(BFMAP_GET_NEIGHBOUR)]
-    unsafe extern "thiscall" fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
+    unsafe extern "thiscall" fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> i32 {
         let ztwm = read_zt_world_mgr_from_global();
         let bftile = get_from_memory::<BFTile>(bftile);
         let direction = Direction::from(direction);
         match ztwm.get_neighbour(&bftile, direction) {
             Some(neighbour) => {
-                ztwm.get_ptr_from_bftile(&neighbour)
+                ztwm.get_ptr_from_bftile(&neighbour) as i32
             }
             None => {
                 0
@@ -394,15 +395,16 @@ pub mod hooks_ztworldmgr {
     }    
 
     // 0x0040f916 int * __thiscall OOAnalyzer::BFEntity::getFootprint(BFEntity *this,undefined4 *param_1)
+    // TODO: Generated signature has only 2 params and returns u8 - verify signature
     #[detour(BFENTITY_GET_FOOTPRINT)]
-    unsafe extern "thiscall" fn bfentity_get_footprint(_this: u32, param_1: u32, _param_2: u32) -> u32 {
+    unsafe extern "thiscall" fn bfentity_get_footprint(_this: u32, param_1: u32) {
         let entity = get_from_memory::<BFEntity>(_this);
         let footprint = entity.get_footprint();
         save_to_memory(param_1, footprint.x);
         save_to_memory(param_1 + 0x4, footprint.y);
         save_to_memory(param_1 + 0x8, footprint.z);
 
-        param_1
+        1  // TODO: Verify what return value should be
     }
 
     // 0x0042721a u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
@@ -434,16 +436,17 @@ pub mod hooks_ztworldmgr {
 
     // TODO: Remove this when check_tank_placement is fully implemented
     // 004e16f1 bool __thiscall OOAnalyzer::BFEntity::isOnTile(BFEntity *this,BFTile *param_1)
+    // TODO: Generated signature returns u32 instead of bool - verify if this matters
     #[detour(BFENTITY_IS_ON_TILE)]
-    unsafe extern "thiscall" fn bfentity_is_on_tile(_this: u32, param_1: u32) -> bool {
+    unsafe extern "thiscall" fn bfentity_is_on_tile(_this: u32, param_1: u32) -> u32 {
         let result = unsafe { BFENTITY_IS_ON_TILE_DETOUR.call(_this, param_1) };
         let entity = get_from_memory::<BFEntity>(_this);
         let tile = get_from_memory::<BFTile>(param_1);
         let reimimplented_result = entity.is_on_tile(&tile);
-        if result != reimimplented_result {
+        if result != (reimimplented_result as u32) {
             error!("BFEntity::is_on_tile: Detour result ({}) does not match reimplemented result ({}) for entity {}", result, reimimplented_result, entity.name);
         }
-        reimimplented_result
+        reimimplented_result as u32
     }
 }
 

@@ -1,3 +1,5 @@
+pub mod gen;
+
 use std::marker::PhantomData;
 
 use retour::GenericDetour;
@@ -24,60 +26,35 @@ impl<T> FunctionDef<T> where T: retour::Function {
     }
 }
 
-// Language DLLs
-pub const LOAD_LANG_DLLS: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> = FunctionDef{address: 0x00537333, function_type: PhantomData};
-
-// Main entry point
-pub const WINMAIN: FunctionDef<unsafe extern "stdcall" fn(u32, u32, u32, u32) -> u32> = FunctionDef{address: 0x0041a8bc, function_type: PhantomData};
-
-// World manager hooks
-pub const BFMAP_GET_NEIGHBOUR: FunctionDef<unsafe extern "thiscall" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x00432236, function_type: PhantomData};
-pub const BFENTITY_GET_FOOTPRINT: FunctionDef<unsafe extern "thiscall" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x0040f916, function_type: PhantomData};
-pub const BFENTITY_GET_BLOCKING_RECT: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u32> = FunctionDef{address: 0x0042721a, function_type: PhantomData};
+// Re-export from generated definitions
+pub use gen::bfapp::LOAD_STRING as BFAPP_LOADSTRING;
+pub use gen::bfapp::LOAD_LANG_DLLS;
+pub use gen::bfapp::WIN_MAIN as WINMAIN;
+pub use gen::bfmap::GET_NEIGHBOR_1 as BFMAP_GET_NEIGHBOUR;
+pub use gen::bfentity::GET_FOOTPRINT as BFENTITY_GET_FOOTPRINT;
+pub use gen::bfentity::GET_BLOCKING_RECT as BFENTITY_GET_BLOCKING_RECT;
+// TODO: BFENTITY_GET_BLOCKING_RECT_ZTPATH not found in gen - verify if this function exists
 pub const BFENTITY_GET_BLOCKING_RECT_ZTPATH: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u32> = FunctionDef{address: 0x004fbbee, function_type: PhantomData};
-pub const BFMAP_TILE_TO_WORLD: FunctionDef<unsafe extern "thiscall" fn(u32, u32, u32, u32) -> u32> = FunctionDef{address: 0x0040f26c, function_type: PhantomData};
-pub const BFENTITY_IS_ON_TILE: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> bool> = FunctionDef{address: 0x004e16f1, function_type: PhantomData};
-
-// String registry
-pub const BFAPP_LOADSTRING: FunctionDef<unsafe extern "thiscall" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x00404e0a, function_type: PhantomData};
-
-// Habitat manager
-pub const ZTHABITAT_GET_GATE_TILE_IN: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> = FunctionDef{address: 0x00410349, function_type: PhantomData};
-
-// Map view
-pub const ZTMAPVIEW_CHECK_TANK_PLACEMENT: FunctionDef<unsafe extern "thiscall" fn(u32, u32, u32, *mut u32) -> u32> = FunctionDef{address: 0x004df688, function_type: PhantomData};
-pub const BFTILE_GET_LOCAL_ELEVATION: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> i32> = FunctionDef{address: 0x0040f24d, function_type: PhantomData};
-
-// BF Registry
-pub const BFREGISTRY_PRTGET: FunctionDef<unsafe extern "thiscall" fn(u32, u32, u8) -> u32> = FunctionDef{address: 0x004bdd22, function_type: PhantomData};
-pub const BFREGISTRY_ADD: FunctionDef<unsafe extern "cdecl" fn(u32, u32) -> u32> = FunctionDef{address: 0x005770e5, function_type: PhantomData};
+pub use gen::bfmap::TILE_TO_WORLD as BFMAP_TILE_TO_WORLD;
+pub use gen::bfentity::IS_ON_TILE as BFENTITY_IS_ON_TILE;
+pub use gen::zthabitat::GET_GATE_TILE_IN as ZTHABITAT_GET_GATE_TILE_IN;
+pub use gen::ztmapview::CHECK_TANK_PLACEMENT as ZTMAPVIEW_CHECK_TANK_PLACEMENT;
+pub use gen::bftile::GET_LOCAL_ELEVATION as BFTILE_GET_LOCAL_ELEVATION;
+pub use gen::bfregistry::PTR_GET as BFREGISTRY_PRTGET;
+pub use gen::bfmgr::REGISTERIT as BFREGISTRY_ADD;
+// TODO: BFREGISTRY_ADDUI not found in gen - verify if this function exists
 pub const BFREGISTRY_ADDUI: FunctionDef<unsafe extern "cdecl" fn(u32, u32) -> u32> = FunctionDef{address: 0x005774bf, function_type: PhantomData};
-
-// Console
-pub const ZTAPP_UPDATEGAME: FunctionDef<unsafe extern "thiscall" fn(u32, u32)> = FunctionDef{address: 0x0041a6d1, function_type: PhantomData};
-
-// Expansions
-pub const ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u8> = FunctionDef{address: 0x004e8cc8, function_type: PhantomData};
-pub const ZTUI_EXPANSIONSELECT_SETUP: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x005291fb, function_type: PhantomData};
-
-// Experimental
+pub use gen::ztapp::UPDATE_SIM as ZTAPP_UPDATEGAME;
+pub use gen::ztui_general::ENTITY_TYPE_IS_DISPLAYED as ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED;
+pub use gen::ztui_expansionselect::SETUP as ZTUI_EXPANSIONSELECT_SETUP;
+// TODO: BFUIMGR_DISPLAY_MESSAGE not found in gen with matching signature - verify function name/signature
 pub const BFUIMGR_DISPLAY_MESSAGE: FunctionDef<unsafe extern "thiscall" fn(u32, u32, i32, u32, u32, bool, bool)> = FunctionDef{address: 0x0049ccc3, function_type: PhantomData};
-
-// Settings
-pub const LOAD_DEBUG_SETTINGS_FROM_INI: FunctionDef<unsafe extern "cdecl" fn() -> u32> = FunctionDef{address: 0x00579f4c, function_type: PhantomData};
-
-// Resource manager
-pub const BFRESOURCE_ATTEMPT: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u8> = FunctionDef{address: 0x00403891, function_type: PhantomData};
-pub const BFRESOURCE_PREPARE: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u8> = FunctionDef{address: 0x004047f4, function_type: PhantomData};
-pub const BFRESOURCEMGR_CONSTRUCTOR: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> = FunctionDef{address: 0x0052903f, function_type: PhantomData};
-pub const ZTUI_GENERAL_GET_INFO_IMAGE_NAME: FunctionDef<unsafe extern "cdecl" fn(u32) -> u32> = FunctionDef{address: 0x004f85d2, function_type: PhantomData};
-
-// Version
-pub const BFVERSIONINFO_GET_VERSION_STRING: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x004bdfd4, function_type: PhantomData};
-
-// Logging
-pub const ZOOLOGGING_LOG: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32, u8, u32, u32, u32)> = FunctionDef{address: 0x00401363, function_type: PhantomData};
-
-// UI
-pub const ZTUI_GET_SELECTED_ENTITY: FunctionDef<unsafe extern "stdcall" fn() -> u32> = FunctionDef{address: 0x00410f84, function_type: PhantomData};
-pub const ZTUI_GET_ELEMENT: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u32> = FunctionDef{address: 0x0040157d, function_type: PhantomData};
+pub use gen::standalone::LOAD_INI_DEBUG_SETTINGS as LOAD_DEBUG_SETTINGS_FROM_INI;
+pub use gen::bfresource::ATTEMPT as BFRESOURCE_ATTEMPT;
+pub use gen::bfresource::PREPARE as BFRESOURCE_PREPARE;
+pub use gen::bfresourcemgr::CONSTRUCTOR as BFRESOURCEMGR_CONSTRUCTOR;
+pub use gen::ztui_general::GET_INFO_IMAGE_NAME as ZTUI_GENERAL_GET_INFO_IMAGE_NAME;
+pub use gen::bfversioninfo::GET_VERSION_STRING as BFVERSIONINFO_GET_VERSION_STRING;
+pub use gen::bflog::LOG_MESSAGE as ZOOLOGGING_LOG;
+pub use gen::ztui_general::GET_SELECTED_ENTITY as ZTUI_GET_SELECTED_ENTITY;
+pub use gen::bfuimgr::GET_ELEMENT_0 as ZTUI_GET_ELEMENT;

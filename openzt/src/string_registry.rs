@@ -98,8 +98,9 @@ pub mod zoo_string {
     use super::{is_user_type_id, STRING_REGISTRY_ID_OFFSET, get_override_string_from_registry};
     use crate::{string_registry::get_string_from_registry, util::save_string_to_memory};
 
+    // TODO: Generated signature returns i32 instead of u32 - verify if sign matters
     #[detour(BFAPP_LOADSTRING)]
-    unsafe extern "thiscall" fn bf_app_load_string(this_ptr: u32, string_id: u32, string_buffer: u32) -> u32 {
+    unsafe extern "thiscall" fn bf_app_load_string(this_ptr: u32, string_id: u32, string_buffer: u32) -> i32 {
         if is_user_type_id(string_id) {
             info!("BFApp::loadString {:#x} {} {:#x}", this_ptr, string_id, string_buffer);
         }
@@ -107,12 +108,12 @@ pub mod zoo_string {
             if let Ok(string) = get_string_from_registry(string_id) {
                 info!("BFApp::loadString string_id: {}, override: {} -> {}", string_id, string, string.len());
                 save_string_to_memory(string_buffer, &string);
-                return string.len() as u32 + 1;
+                return (string.len() as u32 + 1) as i32;
             }
         }
         if let Some(override_string) = get_override_string_from_registry(string_id) {
             save_string_to_memory(string_buffer, &override_string);
-            return override_string.len() as u32 + 1;
+            return (override_string.len() as u32 + 1) as i32;
         }
         unsafe { BFAPP_LOADSTRING_DETOUR.call(this_ptr, string_id, string_buffer) }
     }

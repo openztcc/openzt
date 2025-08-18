@@ -114,7 +114,7 @@ fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
     if args.len() != 1 {
         return Err(Into::into("Expected 1 argument"));
     }
-    let address = args[0].parse()?;
+    let address: i32 = args[0].parse()?;
     let get_element_fn = unsafe { openzt_detour::ZTUI_GET_ELEMENT.original() };
     let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, address) };
     if ui_element_addr == 0 {
@@ -127,7 +127,8 @@ fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
 
 fn get_element(id: UIElementId) -> Option<UIElement> {
     let get_element_fn = unsafe { openzt_detour::ZTUI_GET_ELEMENT.original() };
-    let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, id as u32) };
+    // TODO: Generated signature uses i32 instead of u32 for second param - verify if sign matters
+    let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, id as i32) };
     if ui_element_addr == 0 {
         return None;
     }

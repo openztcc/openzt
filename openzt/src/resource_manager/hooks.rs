@@ -12,6 +12,8 @@ mod zoo_resource_mgr {
     use openzt_configparser::ini::Ini;
     use tracing::info;
     use openzt_detour::{BFRESOURCE_ATTEMPT, BFRESOURCE_PREPARE, BFRESOURCEMGR_CONSTRUCTOR, ZTUI_GENERAL_GET_INFO_IMAGE_NAME};
+    use openzt_detour::gen::bfresourcemgr::{ATTEMPT, PREPARE, CONSTRUCTOR};
+    use openzt_detour::gen::ztuigeneral::{GET_INFO_IMAGE_NAME};
 
     use crate::{
         resource_manager::{
@@ -24,19 +26,21 @@ mod zoo_resource_mgr {
     };
 
     ///When Zoo Tycoon tries to load a resource we check if it's a resource we've already loaded and return that instead
+    // TODO: Generated signature returns bool instead of u8 - verify if this matters
     #[detour(BFRESOURCE_ATTEMPT)]
-    unsafe extern "thiscall" fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> u8 {
+    unsafe extern "thiscall" fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> bool {
         if bf_resource_inner(this_ptr, file_name) {
-            return 1;
+            return true;
         }
         unsafe { BFRESOURCE_ATTEMPT_DETOUR.call(this_ptr, file_name) }
     }
 
     ///When Zoo Tycoon tries to load a resource we check if it's a resource we've already loaded and return that instead
+    // TODO: Generated signature returns bool instead of u8 - verify if this matters
     #[detour(BFRESOURCE_PREPARE)]
-    unsafe extern "thiscall" fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32) -> u8 {
+    unsafe extern "thiscall" fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32) -> bool {
         if bf_resource_inner(this_ptr, file_name) {
-            return 1;
+            return true;
         }
 
         unsafe { BFRESOURCE_PREPARE_DETOUR.call(this_ptr, file_name) }
@@ -112,9 +116,10 @@ mod zoo_resource_mgr {
         return_value
     }
 
+    // TODO: Generated signature uses i32 instead of u32 for parameter - verify if sign matters
     #[detour(ZTUI_GENERAL_GET_INFO_IMAGE_NAME)]
-    unsafe extern "cdecl" fn zoo_ui_general_get_info_image_name(id: u32) -> u32 {
-        match get_location_or_habitat_by_id(id) {
+    unsafe extern "cdecl" fn zoo_ui_general_get_info_image_name(id: i32) -> u32 {
+        match get_location_or_habitat_by_id(id as u32) {
             Some(resource_ptr) => resource_ptr,
             None => unsafe { ZTUI_GENERAL_GET_INFO_IMAGE_NAME_DETOUR.call(id) },
         }

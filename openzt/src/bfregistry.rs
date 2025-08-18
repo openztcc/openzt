@@ -64,8 +64,9 @@ mod zoo_bf_registry {
     };
     use openzt_detour::{BFREGISTRY_PRTGET, BFREGISTRY_ADD, BFREGISTRY_ADDUI};
 
+    // TODO: Generated signature is missing third parameter - verify if it's actually needed
     #[detour(BFREGISTRY_PRTGET)]
-    unsafe extern "thiscall" fn prt_get(_this_prt: u32, class_name: u32, _delimeter_maybe: u8) -> u32 {
+    unsafe extern "thiscall" fn prt_get(_this_prt: u32, class_name: u32) -> u32 {
         get_from_registry(get_string_from_memory(get_from_memory::<u32>(class_name))).unwrap()
     }
 

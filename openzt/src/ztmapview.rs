@@ -218,9 +218,10 @@ pub mod zoo_ztmapview {
     // };
 
     //004df688
+    // TODO: Generated signature has different calling convention, return type and param type - verify correctness
     #[detour(ZTMAPVIEW_CHECK_TANK_PLACEMENT)]
     // fn check_tank_placement(ZTMapView *other_this, BFEntity *param_2, BFTile *param_3, int *param_4)
-    unsafe extern "thiscall" fn check_tank_placement(_this: u32, temp_entity_ptr: u32, tile: u32, response_ptr: *mut u32) -> u32 {
+    unsafe extern "stdcall" fn check_tank_placement(_this: u32, temp_entity_ptr: u32, tile: u32, response_ptr: u32) -> bool {
         let result = unsafe { ZTMAPVIEW_CHECK_TANK_PLACEMENT_DETOUR.call(_this, temp_entity_ptr, tile, response_ptr) };
 
         // let entity = get_from_memory(temp_entity);
@@ -230,10 +231,10 @@ pub mod zoo_ztmapview {
         let zt_map_view = get_from_memory::<ZTMapView>(_this);
         
         if let Err(reimplemented_result) = zt_map_view.check_tank_placement(temp_entity_ptr, &bf_tile) {
-            if reimplemented_result == ErrorStringId::from(unsafe{*response_ptr}) {
+            if reimplemented_result == ErrorStringId::from(response_ptr) {
                 info!("ZTMapView::checkTankPlacement success {:?}", reimplemented_result);
             } else {
-                info!("Fail {:?}", ErrorStringId::from(unsafe{*response_ptr}));
+                info!("Fail {:?}", ErrorStringId::from(response_ptr));
             }
             // info!("ZTMapView::checkTankPlacement 1 -> {:?}", reimplemented_result);
 

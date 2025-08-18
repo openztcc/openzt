@@ -67,8 +67,9 @@ mod zoo_ini_loading {
     use tracing::info;
     use openzt_detour::LOAD_DEBUG_SETTINGS_FROM_INI;
 
+    // TODO: Generated signature uses stdcall instead of cdecl - verify calling convention
     #[detour(LOAD_DEBUG_SETTINGS_FROM_INI)]
-    unsafe extern "cdecl" fn load_debug_settings_from_ini_detour() -> u32 {
+    unsafe extern "stdcall" fn load_debug_settings_from_ini_detour() -> u32 {
         let result = unsafe { LOAD_DEBUG_SETTINGS_FROM_INI_DETOUR.call() };
         info!("######################LoadDebugSettingsFromIniHook: {}", result);
         result

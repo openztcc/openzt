@@ -324,7 +324,7 @@ pub mod custom_expansion {
     use crate::{bfentitytype::read_zt_entity_type_from_memory, ztui::get_current_buy_tab};
 
     #[detour(ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED)]
-    pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
+    pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> bool {
         // TODO: Put this call and subsequent log behind OpenZT debug flag
         let result = unsafe { ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
 
@@ -348,14 +348,16 @@ pub mod custom_expansion {
             info!("Filtering mismatch {} {} ({:#x} vs {:#x})", entity, current_buy_tab, result, reimplemented_result);
         }
 
-        reimplemented_result
+        reimplemented_result as u32
     }
 
+    // TODO: Generated signature returns u8 instead of void - verify if this matters
     #[detour(ZTUI_EXPANSIONSELECT_SETUP)]
     pub unsafe extern "stdcall" fn ztui_expansionselect_setup() {
-        unsafe { ZTUI_EXPANSIONSELECT_SETUP_DETOUR.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
+        let result = unsafe { ZTUI_EXPANSIONSELECT_SETUP_DETOUR.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
 
         initialise_expansions();
+        result
     }
 }
 
