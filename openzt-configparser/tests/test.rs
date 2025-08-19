@@ -313,9 +313,6 @@ Key3 = another value
 }
 
 #[test]
-#[cfg(feature = "indexmap")]
-#[cfg(feature = "async-std")]
-#[cfg(feature = "tokio")]
 fn pretty_write_result_is_formatted_correctly() -> Result<(), Box<dyn Error>> {
     use openzt_configparser::ini::IniDefault;
 
@@ -364,128 +361,6 @@ Key2 = this is a haiku
 Key3 = another value
 "
     );
-
-    Ok(())
-}
-
-#[tokio::test]
-#[cfg(feature = "indexmap")]
-#[cfg(feature = "async-std")]
-#[cfg(feature = "tokio")]
-async fn async_pretty_print_result_is_formatted_correctly() -> Result<(), Box<dyn Error>> {
-    use openzt_configparser::ini::IniDefault;
-
-    const OUT_FILE_CONTENTS: &str = "defaultvalues=defaultvalues
-[topsecret]
-KFC=the secret herb is orega-
-Empty string=
-None string
-Password=[in-brackets]
-[Section]
-Key1: Value1
-Key2: this is a haiku
-    spread across separate lines
-    a single value
-Key3: another value
-";
-
-    let mut ini_defaults = IniDefault::default();
-    ini_defaults.case_sensitive = true;
-    ini_defaults.multiline = true;
-    let mut config = Ini::new_from_defaults(ini_defaults);
-    config.read(OUT_FILE_CONTENTS.to_owned())?;
-
-    let mut write_options = WriteOptions::default();
-    write_options.space_around_delimiters = true;
-    write_options.multiline_line_indentation = 2;
-    write_options.blank_lines_between_sections = 1;
-    config
-        .pretty_write_async("pretty_output_async.ini", &write_options)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let file_contents = std::fs::read_to_string("pretty_output_async.ini")?;
-    assert_eq!(
-        file_contents,
-        "defaultvalues = defaultvalues
-
-[topsecret]
-KFC = the secret herb is orega-
-Empty string =
-None string
-Password = [in-brackets]
-
-[Section]
-Key1 = Value1
-Key2 = this is a haiku
-  spread across separate lines
-  a single value
-Key3 = another value
-"
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-#[cfg(feature = "async-std")]
-#[cfg(feature = "tokio")]
-async fn async_load_write() -> Result<(), Box<dyn Error>> {
-    const OUT_FILE_CONTENTS: &str = "defaultvalues=defaultvalues
-    [topsecret]
-    KFC = the secret herb is orega-
-            colon:value after colon
-    Empty string =
-    None string
-    Password=[in-brackets]
-    [ spacing ]
-        indented=indented
-    not indented = not indented             ;testcomment
-    !modified comment
-    [values]#another comment
-    Bool = True
-    Boolcoerce = 0
-    Int = -31415
-    Uint = 31415
-    Float = 3.1415";
-
-    let mut config = Ini::new();
-    config.read(OUT_FILE_CONTENTS.to_owned())?;
-    config.write("output_sync.ini")?;
-
-    let mut config_async = Ini::new();
-    config_async.read(OUT_FILE_CONTENTS.to_owned())?;
-    config_async
-        .write_async("output_async.ini")
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let mut sync_content = Ini::new();
-    sync_content.load("output_sync.ini")?;
-
-    let mut async_content = Ini::new();
-    async_content.load_async("output_async.ini").await?;
-
-    assert_eq!(sync_content, async_content);
-
-    Ok(())
-}
-
-#[tokio::test]
-#[cfg(feature = "async-std")]
-#[cfg(feature = "tokio")]
-async fn async_load_and_append() -> Result<(), Box<dyn Error>> {
-    let mut sync_content = Ini::new();
-    sync_content.load("tests/test.ini")?;
-    sync_content.load_and_append("tests/test_more.ini")?;
-
-    let mut async_content = Ini::new();
-    async_content.load_async("tests/test.ini").await?;
-    async_content
-        .load_and_append_async("tests/test_more.ini")
-        .await?;
-
-    assert_eq!(sync_content, async_content);
 
     Ok(())
 }

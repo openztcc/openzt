@@ -6,14 +6,6 @@ use indexmap::IndexMap as Map;
 #[cfg(not(feature = "indexmap"))]
 use std::collections::HashMap as Map;
 
-#[deprecated(
-since = "3.0.4",
-note = "async-std runtime has been replaced with tokio"
-)]
-#[cfg(feature = "async-std")]
-#[cfg(feature = "tokio")]
-use tokio::fs as async_fs;
-
 use std::collections::HashMap;
 use std::convert::AsRef;
 use std::fmt::{Debug, Write};
@@ -1352,108 +1344,6 @@ impl Ini {
             },
             None => None,
         }
-    }
-}
-
-#[cfg(feature = "async-std")]
-impl Ini {
-    ///Loads a file asynchronously from a defined path, parses it and puts the hashmap into our struct.
-    ///At one time, it only stores one configuration, so each call to `load()` or `read()` will clear the existing `Map`, if present.
-    ///
-    ///Usage is similar to `load`, but `.await` must be called after along with the usual async rules.
-    ///
-    ///Returns `Ok(map)` with a clone of the stored `Map` if no errors are thrown or else `Err(error_string)`.
-    ///Use `get_mut_map()` if you want a mutable reference.
-    pub async fn load_async<T: AsRef<Path>>(
-        &mut self,
-        path: T,
-    ) -> Result<Map<String, Map<String, Option<Vec<String>>>>, String> {
-        self.map = match self.parse(match async_fs::read_to_string(&path).await {
-            Err(why) => {
-                return Err(format!(
-                    "couldn't read {}: {}",
-                    &path.as_ref().display(),
-                    why
-                ));
-            }
-            Ok(s) => s,
-        }) {
-            Err(why) => {
-                return Err(format!(
-                    "couldn't read {}: {}",
-                    &path.as_ref().display(),
-                    why
-                ));
-            }
-            Ok(map) => map,
-        };
-        Ok(self.map.clone())
-    }
-
-    ///Loads a file from a defined path, parses it and applies it to the existing hashmap in our struct.
-    ///While `load_async()` will clear the existing `Map`, `load_and_append_async()` applies the new values on top
-    ///of the existing hashmap, preserving previous values.
-    ///
-    ///Usage is similar to `load_and_append`, but `.await` must be called after along with the usual async rules.
-    ///
-    ///Returns `Ok(map)` with a clone of the stored `Map` if no errors are thrown or else `Err(error_string)`.
-    ///Use `get_mut_map()` if you want a mutable reference.
-    pub async fn load_and_append_async<T: AsRef<Path>>(
-        &mut self,
-        path: T,
-    ) -> Result<Map<String, Map<String, Option<Vec<String>>>>, String> {
-        let loaded = match self.parse(match async_fs::read_to_string(&path).await {
-            Err(why) => {
-                return Err(format!(
-                    "couldn't read {}: {}",
-                    &path.as_ref().display(),
-                    why
-                ));
-            }
-            Ok(s) => s,
-        }) {
-            Err(why) => {
-                return Err(format!(
-                    "couldn't read {}: {}",
-                    &path.as_ref().display(),
-                    why
-                ));
-            }
-            Ok(map) => map,
-        };
-
-        for (section, section_map) in loaded.iter() {
-            self.map
-                .entry(section.clone())
-                .or_insert_with(Map::new)
-                .extend(section_map.clone());
-        }
-
-        Ok(self.map.clone())
-    }
-
-    ///Writes the current configuation to the specified path asynchronously using default formatting. If a file is not present, it is automatically created for you, if a file already
-    ///exists, it is truncated and the configuration is written to it.
-    ///
-    ///Usage is the same as `write`, but `.await` must be called after along with the usual async rules.
-    ///
-    ///Returns a `std::io::Result<()>` type dependent on whether the write was successful or not.
-    pub async fn write_async<T: AsRef<Path>>(&self, path: T) -> std::io::Result<()> {
-        async_fs::write(path.as_ref(), self.unparse(&WriteOptions::default())).await
-    }
-
-    ///Writes the current configuation to the specified path asynchronously using the given formatting options. If a file is not present, it is automatically created for you, if a file already
-    ///exists, it is truncated and the configuration is written to it.
-    ///
-    ///Usage is the same as `pretty_pretty_write`, but `.await` must be called after along with the usual async rules.
-    ///
-    ///Returns a `std::io::Result<()>` type dependent on whether the write was successful or not.
-    pub async fn pretty_write_async<T: AsRef<Path>>(
-        &self,
-        path: T,
-        write_options: &WriteOptions,
-    ) -> std::io::Result<()> {
-        async_fs::write(path.as_ref(), self.unparse(write_options)).await
     }
 }
 
