@@ -14,7 +14,8 @@ fi
 
 echo "Remove conflicting dlls"
 rm "$ZT_DIR/res-openzt.dll"
-rm "$ZT_DIR/res-openzt-rpc.dll"
+rm "$ZT_DIR/res-openztrpc.dll"
+rm "$ZT_DIR/res-openzttest.dll"
 
 echo "Copy the file to the destination"
 cp "target/i686-pc-windows-gnu/release/openzt.dll" "$ZT_DIR/res-openzt.dll"
