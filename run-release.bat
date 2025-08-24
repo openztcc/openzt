@@ -11,6 +11,7 @@ if %errorlevel% neq 0 (
 
 del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzt.dll"
 del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openztrpc.dll"
+del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzttest.dll"
 
 copy "target\i686-pc-windows-msvc\release\openzt.dll" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzt.dll"
 
