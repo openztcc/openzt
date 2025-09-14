@@ -97,7 +97,7 @@ use tracing::info;
 #[detour_mod]
 mod zoo_init {
     use super::*;
-    use openzt_detour::LOAD_LANG_DLLS;
+    use openzt_detour::gen::bfapp::LOAD_LANG_DLLS;
 
     // Note(finn): We hook the LoadRes function to perform some later initialization steps. Starting
     //  the console starts a new thead which is not recommended in the DllMain function.
@@ -113,7 +113,6 @@ mod zoo_init {
                 return 0; // Return 0 to indicate failure
             }
         }
-
 
         // Command console is broken on latest stable Rust so we disable it by default.
         if cfg!(feature = "command-console") {
