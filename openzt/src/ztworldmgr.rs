@@ -375,10 +375,12 @@ impl ZTWorldMgr {
 pub mod hooks_ztworldmgr {
     use crate::util::save_to_memory;
     use openzt_detour::*;
+    use openzt_detour::gen::bfmap::{GET_NEIGHBOR_1, TILE_TO_WORLD};
+    use openzt_detour::gen::bfentity::{GET_BLOCKING_RECT, GET_FOOTPRINT, IS_ON_TILE};
 
     use super::*;
 
-    #[detour(BFMAP_GET_NEIGHBOUR)]
+    #[detour(GET_NEIGHBOR_1)]
     unsafe extern "thiscall" fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
         let ztwm = read_zt_world_mgr_from_global();
         let bftile = get_from_memory::<BFTile>(bftile);
@@ -394,8 +396,8 @@ pub mod hooks_ztworldmgr {
     }    
 
     // 0x0040f916 int * __thiscall OOAnalyzer::BFEntity::getFootprint(BFEntity *this,undefined4 *param_1)
-    #[detour(BFENTITY_GET_FOOTPRINT)]
-    unsafe extern "thiscall" fn bfentity_get_footprint(_this: u32, param_1: u32, _param_2: u32) -> u32 {
+    #[detour(GET_FOOTPRINT)]
+    unsafe extern "thiscall" fn bfentity_get_footprint(_this: u32, param_1: u32, _param_2: bool) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         let footprint = entity.get_footprint();
         save_to_memory(param_1, footprint.x);
@@ -406,7 +408,7 @@ pub mod hooks_ztworldmgr {
     }
 
     // 0x0042721a u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
-    #[detour(BFENTITY_GET_BLOCKING_RECT)]
+    #[detour(GET_BLOCKING_RECT)]
     unsafe extern "thiscall" fn bfentity_get_blocking_rect(_this: u32, param_1: u32) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         save_to_memory(param_1, entity.get_blocking_rect());
@@ -422,7 +424,7 @@ pub mod hooks_ztworldmgr {
     }
 
     // // 0040f26c BFPos * __thiscall OOAnalyzer::BFMap::tileToWorld(BFMap *this,BFPos *param_1,BFPos *param_2,BFPos *param_3)
-    #[detour(BFMAP_TILE_TO_WORLD)]
+    #[detour(TILE_TO_WORLD)]
     unsafe extern "thiscall" fn bfmap_tile_to_world(_this: u32, param_1: u32, param_2: u32, param_3: u32) -> u32 {
         let ztwm = read_zt_world_mgr_from_global();
         let tile_pos = get_from_memory::<IVec3>(param_2);
@@ -434,9 +436,9 @@ pub mod hooks_ztworldmgr {
 
     // TODO: Remove this when check_tank_placement is fully implemented
     // 004e16f1 bool __thiscall OOAnalyzer::BFEntity::isOnTile(BFEntity *this,BFTile *param_1)
-    #[detour(BFENTITY_IS_ON_TILE)]
+    #[detour(IS_ON_TILE)]
     unsafe extern "thiscall" fn bfentity_is_on_tile(_this: u32, param_1: u32) -> bool {
-        let result = unsafe { BFENTITY_IS_ON_TILE_DETOUR.call(_this, param_1) };
+        let result = unsafe { IS_ON_TILE_DETOUR.call(_this, param_1) };
         let entity = get_from_memory::<BFEntity>(_this);
         let tile = get_from_memory::<BFTile>(param_1);
         let reimimplented_result = entity.is_on_tile(&tile);

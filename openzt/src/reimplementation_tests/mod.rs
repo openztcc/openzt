@@ -103,6 +103,7 @@ mod detour_zoo_main {
         };
         let mut runner = proptest::test_runner::TestRunner::new(runner_config);
         let test_name = "BFTILE_GET_LOCAL_ELEVATION";
+        // Create a enum strategy so this is all tested in one test and test that each enum variant is tested
         let unknown_byte_values = vec![
             0x1, 0x4, 0x5, 0x10, 0x11, 0x14, 0x15, 0x19, 0x40, 0x41, 0x44, 0x45, 0x46, 0x50, 0x51, 0x54, 0x64, 0x91,
         ];

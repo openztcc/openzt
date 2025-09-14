@@ -226,10 +226,10 @@ fn command_get_zt_habitats(_args: Vec<&str>) -> Result<String, CommandError> {
 #[detour_mod]
 pub mod hooks_zthabitatmgr {
     use super::*;
-    use openzt_detour::ZTHABITAT_GET_GATE_TILE_IN;
+    use openzt_detour::gen::zthabitat::GET_GATE_TILE_IN;
 
     // 00410349 BFTile * __thiscall OOAnalyzer::ZTHabitat::getGateTileIn(ZTHabitat *this)
-    #[detour(ZTHABITAT_GET_GATE_TILE_IN)]
+    #[detour(GET_GATE_TILE_IN)]
     unsafe extern "thiscall" fn get_gate_tile_in(_this: u32) -> u32 {
         let habitat = get_from_memory::<ZTHabitat>(_this);
         match habitat.get_gate_tile_in() {
@@ -241,8 +241,6 @@ pub mod hooks_zthabitatmgr {
             }
         }
     }
-
-    
 }
 
 pub fn init() {
