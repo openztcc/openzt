@@ -1,5 +1,6 @@
 use std::fmt;
 
+use openzt_detour::ZTUI_GET_SELECTED_ENTITY;
 use tracing::info;
 
 use crate::{
@@ -7,8 +8,6 @@ use crate::{
     util::{get_from_memory, get_string_from_memory_bounded, ZTBufferString},
     ztworldmgr::read_zt_entity_from_memory,
 };
-
-use openzt_detour::ZTUI_GET_SELECTED_ENTITY;
 
 const BFUIMGR_PTR: u32 = 0x00638de0;
 
@@ -98,10 +97,11 @@ const RANDOM_SEX_STRING_PTR: u32 = 0x0063e420;
 pub fn init() {
     add_to_command_register("get_selected_entity".to_owned(), command_get_selected_entity);
     add_to_command_register("get_element".to_owned(), command_get_element);
+    add_to_command_register("get_buy_tab".to_owned(), command_get_current_buy_tab);
 }
 
 fn command_get_selected_entity(_args: Vec<&str>) -> Result<String, CommandError> {
-    let get_selected_entity_fn = unsafe {ZTUI_GET_SELECTED_ENTITY.original()};
+    let get_selected_entity_fn = unsafe { ZTUI_GET_SELECTED_ENTITY.original() };
     let entity_address = unsafe { get_selected_entity_fn() };
     if entity_address == 0 {
         return Err(Into::into("No entity selected"));
@@ -134,79 +134,73 @@ fn get_element(id: UIElementId) -> Option<UIElement> {
     Some(get_from_memory(ui_element_addr))
 }
 
-fn command_get_current_buy_tab(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_current_buy_tab(_args: Vec<&str>) -> Result<String, CommandError> {
     let tab = get_current_buy_tab();
     Ok(format!("{:?}", tab))
 }
 
 pub fn get_current_buy_tab() -> Option<BuyTab> {
     if let Some(asr) = get_element(UIElementId::AnimalScrollingRegion) {
-        if asr.state.is_hidden() {
-            return None;
-        }
-        if get_element(UIElementId::AnimalTab)?.state.is_selected() {
-            return Some(BuyTab::Animal);
-        }
-        if get_element(UIElementId::ShelterTab)?.state.is_selected() {
-            return Some(BuyTab::Shelter);
-        }
-        if get_element(UIElementId::ToysTab)?.state.is_selected() {
-            return Some(BuyTab::Toys);
-        }
-        if get_element(UIElementId::ShowToysTab)?.state.is_selected() {
-            return Some(BuyTab::ShowToys);
+        if !asr.state.is_hidden() {
+            if get_element(UIElementId::AnimalTab)?.state.is_selected() {
+                return Some(BuyTab::Animal);
+            }
+            if get_element(UIElementId::ShelterTab)?.state.is_selected() {
+                return Some(BuyTab::Shelter);
+            }
+            if get_element(UIElementId::ToysTab)?.state.is_selected() {
+                return Some(BuyTab::Toys);
+            }
+            if get_element(UIElementId::ShowToysTab)?.state.is_selected() {
+                return Some(BuyTab::ShowToys);
+            }
         }
     }
     if let Some(osr) = get_element(UIElementId::BuyObjectScrollingRegion) {
-        if osr.state.is_hidden() {
-            return None;
-        }
-        if get_element(UIElementId::BuildingTab)?.state.is_selected() {
-            return Some(BuyTab::Building);
-        }
-        if get_element(UIElementId::SceneryTab)?.state.is_selected() {
-            return Some(BuyTab::Scenery);
+        if !osr.state.is_hidden() {
+            if get_element(UIElementId::BuildingTab)?.state.is_selected() {
+                return Some(BuyTab::Building);
+            }
+            if get_element(UIElementId::SceneryTab)?.state.is_selected() {
+                return Some(BuyTab::Scenery);
+            }
         }
     }
     if let Some(hsr) = get_element(UIElementId::BuildHabitatScrollingRegion) {
-        if hsr.state.is_hidden() {
-            return None;
-        }
-        if get_element(UIElementId::FenceTab)?.state.is_selected() {
-            return Some(BuyTab::Fence);
-        }
-        if get_element(UIElementId::PathTab)?.state.is_selected() {
-            return Some(BuyTab::Path);
-        }
-        if get_element(UIElementId::FoliageTab)?.state.is_selected() {
-            return Some(BuyTab::Foliage);
-        }
-        if get_element(UIElementId::RocksTab)?.state.is_selected() {
-            return Some(BuyTab::Rocks);
+        if !hsr.state.is_hidden() {
+            if get_element(UIElementId::FenceTab)?.state.is_selected() {
+                return Some(BuyTab::Fence);
+            }
+            if get_element(UIElementId::PathTab)?.state.is_selected() {
+                return Some(BuyTab::Path);
+            }
+            if get_element(UIElementId::FoliageTab)?.state.is_selected() {
+                return Some(BuyTab::Foliage);
+            }
+            if get_element(UIElementId::RocksTab)?.state.is_selected() {
+                return Some(BuyTab::Rocks);
+            }
         }
     }
     if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion) {
-        if tsr.state.is_hidden() {
-            return None;
-        }
-        if get_element(UIElementId::PaintTerrainTab)?.state.is_selected() {
-            return Some(BuyTab::PaintTerrain);
-        }
-        if get_element(UIElementId::TerraformTab)?.state.is_selected() {
-            return Some(BuyTab::Terraform);
+        if !tsr.state.is_hidden() {
+            if get_element(UIElementId::PaintTerrainTab)?.state.is_selected() {
+                return Some(BuyTab::PaintTerrain);
+            }
+            if get_element(UIElementId::TerraformTab)?.state.is_selected() {
+                return Some(BuyTab::Terraform);
+            }
         }
     }
     if let Some(ssr) = get_element(UIElementId::StaffScrollingRegion) {
-        if ssr.state.is_hidden() {
-            return None;
+        if !ssr.state.is_hidden() {
+            return Some(BuyTab::Staff);
         }
-        return Some(BuyTab::Staff);
     }
     if let Some(developer_tab) = get_element(UIElementId::DeveloperScrollingRegion) {
-        if developer_tab.state.is_hidden() {
-            return None;
+        if !developer_tab.state.is_hidden() {
+            return Some(BuyTab::Developer);
         }
-        return Some(BuyTab::Developer);
     }
     None
 }
