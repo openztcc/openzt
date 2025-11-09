@@ -101,6 +101,16 @@ pub mod zoo_string {
     // TODO: Generated signature returns i32 instead of u32 - verify if sign matters
     #[detour(BFAPP_LOADSTRING)]
     unsafe extern "thiscall" fn bf_app_load_string(this_ptr: u32, string_id: u32, string_buffer: u32) -> i32 {
+        #[cfg(feature = "detour-testing")]
+        crate::detour_testing::register_detour_call("BFAPP_LOADSTRING", 0x00404e0a);
+
+        #[cfg(feature = "detour-testing")]
+        if !crate::detour_testing::should_execute_detour_logic("BFAPP_LOADSTRING") {
+            // Test mode: just pass through to original
+            return unsafe { BFAPP_LOADSTRING_DETOUR.call(this_ptr, string_id, string_buffer) };
+        }
+
+        // Original detour logic
         if is_user_type_id(string_id) {
             info!("BFApp::loadString {:#x} {} {:#x}", this_ptr, string_id, string_buffer);
         }

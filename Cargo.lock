@@ -680,6 +680,7 @@ dependencies = [
  "maplit",
  "nt-time",
  "num_enum",
+ "once_cell",
  "openzt-configparser",
  "openzt-detour",
  "openzt-detour-macro",

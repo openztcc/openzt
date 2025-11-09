@@ -329,13 +329,13 @@ pub mod custom_expansion {
         let result = unsafe { ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
 
         let Some(current_expansion) = read_current_expansion() else {
-            return 0;
+            return false;
         };
 
         let entity = read_zt_entity_type_from_memory(bf_entity);
 
         let Some(current_buy_tab) = get_current_buy_tab() else {
-            return 0;
+            return false;
         };
 
         let reimplemented_result = match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
@@ -344,20 +344,20 @@ pub mod custom_expansion {
         };
 
         // TODO: Put this log behind OpenZT debug flag
-        if result != reimplemented_result {
-            info!("Filtering mismatch {} {} ({:#x} vs {:#x})", entity, current_buy_tab, result, reimplemented_result);
+        let result_as_int = if result { 1 } else { 0 };
+        if result_as_int != reimplemented_result {
+            info!("Filtering mismatch {} {} ({:#x} vs {:#x})", entity, current_buy_tab, result_as_int, reimplemented_result);
         }
 
-        reimplemented_result as u32
+        reimplemented_result != 0
     }
 
-    // TODO: Generated signature returns u8 instead of void - verify if this matters
+    // TODO: Generated signature returns void - matches expectations
     #[detour(ZTUI_EXPANSIONSELECT_SETUP)]
     pub unsafe extern "stdcall" fn ztui_expansionselect_setup() {
-        let result = unsafe { ZTUI_EXPANSIONSELECT_SETUP_DETOUR.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
+        unsafe { ZTUI_EXPANSIONSELECT_SETUP_DETOUR.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
 
         initialise_expansions();
-        result
     }
 }
 

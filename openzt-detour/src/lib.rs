@@ -1,4 +1,6 @@
 pub mod gen;
+#[cfg(feature = "detour-testing")]
+pub mod test;
 
 use std::marker::PhantomData;
 

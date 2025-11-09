@@ -14,6 +14,10 @@ mod capture_ztlog;
 /// functions for registering commands with a function callback and hooks so that a command is run every game update
 mod command_console;
 
+/// Testing infrastructure for safely validating detours and tracking coverage
+#[cfg(feature = "detour-testing")]
+mod detour_testing;
+
 /// Commands and functions for reading entities and entity types from the ZTWorldMgr class
 pub mod ztworldmgr;
 
@@ -99,6 +103,23 @@ mod zoo_init {
     use super::*;
     use openzt_detour::LOAD_LANG_DLLS;
 
+    use crate::util::get_from_memory;
+
+    use openzt_detour::gen::ambientsgroup::PLAY as AMBIENTGROUP_PLAY;
+    use openzt_detour::gen::soundgroup::PLAY as SOUNDGROUP_PLAY;
+
+    #[detour(AMBIENTGROUP_PLAY)]
+    unsafe extern "thiscall" fn ambientgroup_play_d(this: u32, a: u32, b: u32) -> u32 {
+        info!("ambientsgroup::PLAY: {:X} -> {:X}", this, get_from_memory::<u32>(this));
+        AMBIENTGROUP_PLAY_DETOUR.call(this, a, b)
+    }
+
+    #[detour(SOUNDGROUP_PLAY)]
+    unsafe extern "thiscall" fn soundgroup_play_d(this: u32, a: u32, b: u32) -> u32 {
+        info!("soundgroup::PLAY: {:X} -> {:X}", this, get_from_memory::<u32>(this));
+        SOUNDGROUP_PLAY_DETOUR.call(this, a, b)
+    }
+
     // Note(finn): We hook the LoadRes function to perform some later initialization steps. Starting
     //  the console starts a new thead which is not recommended in the DllMain function.
     #[detour(LOAD_LANG_DLLS)]
@@ -113,7 +134,6 @@ mod zoo_init {
                 return 0; // Return 0 to indicate failure
             }
         }
-
 
         // Command console is broken on latest stable Rust so we disable it by default.
         if cfg!(feature = "command-console") {
@@ -142,6 +162,12 @@ mod zoo_init {
             experimental::init();
             ztmapview::init();
             zthabitatmgr::init();
+        }
+
+        #[cfg(feature = "detour-testing")]
+        {
+            info!("Feature 'detour-testing' enabled - detours will be tested before activation");
+            detour_testing::console_commands::init();
         }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }

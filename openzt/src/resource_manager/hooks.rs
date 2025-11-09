@@ -12,8 +12,6 @@ mod zoo_resource_mgr {
     use openzt_configparser::ini::Ini;
     use tracing::info;
     use openzt_detour::{BFRESOURCE_ATTEMPT, BFRESOURCE_PREPARE, BFRESOURCEMGR_CONSTRUCTOR, ZTUI_GENERAL_GET_INFO_IMAGE_NAME};
-    use openzt_detour::gen::bfresourcemgr::{ATTEMPT, PREPARE, CONSTRUCTOR};
-    use openzt_detour::gen::ztuigeneral::{GET_INFO_IMAGE_NAME};
 
     use crate::{
         resource_manager::{
