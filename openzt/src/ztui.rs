@@ -98,6 +98,7 @@ pub fn init() {
     add_to_command_register("get_selected_entity".to_owned(), command_get_selected_entity);
     add_to_command_register("get_element".to_owned(), command_get_element);
     add_to_command_register("get_buy_tab".to_owned(), command_get_current_buy_tab);
+    add_to_command_register("ui".to_owned(), command_call_ui_callback);
 }
 
 fn command_get_selected_entity(_args: Vec<&str>) -> Result<String, CommandError> {
@@ -311,4 +312,25 @@ impl fmt::Display for UIState {
             self.is_focused()
         )
     }
+}
+
+fn command_call_ui_callback(args: Vec<&str>) -> Result<String, CommandError> {
+    if args.len() != 1 {
+        return Err(Into::into("Expected 1 argument"));
+    }
+    let callback_function = match args[0] {
+        "click_continue" => {
+            unsafe {
+                openzt_detour::gen::ztui::CLICK_CONTINUE.original()
+            }
+        },
+        "list" => {
+            return Ok("click_continue".to_string());
+        },
+        _ => return Err(Into::into("Unknown UI callback")),
+    };
+    unsafe {
+        callback_function();
+    }
+    Ok("Success".to_string())
 }

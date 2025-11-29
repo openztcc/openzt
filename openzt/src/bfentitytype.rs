@@ -282,7 +282,7 @@ impl Checkable for ZTSceneryType {
     fn check(ptr: u32) -> anyhow::Result<()> {
         let entity_type_vtable = ZTEntityTypeClass::from(get_from_memory::<u32>(ptr));
         if !zt_entity_type_class_is(&entity_type_vtable, &ZTEntityTypeClass::Scenery) {
-            return Err(anyhow::anyhow!("Incompatible entity type: expected ZTEntityTypeClass::Scenery, found {:?}", entity_type_vtable));
+            return Err(anyhow::anyhow!("Incompatible entity type: expected ZTEntityTypeClass::Scenery, found {:?}({:#x})", entity_type_vtable, get_from_memory::<u32>(ptr)));
         }
         anyhow::Ok(())
     }

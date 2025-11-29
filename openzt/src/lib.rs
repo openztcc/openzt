@@ -80,6 +80,9 @@ mod util;
 /// Loads settings from the zoo.ini file and commands/functions for reading and writing settings during runtime
 mod settings;
 
+/// Scripting module for OpenZT using the mlua library. Contains functions for loading and running Lua scripts, and registering Rust functions to be called from Lua.
+mod scripting;
+
 /// RPC server for testing OpenZT functionality
 #[cfg(feature = "reimplementation-tests")]
 pub mod reimplementation_tests;
@@ -127,6 +130,7 @@ mod zoo_init {
         ztworldmgr::init();
         bfentitytype::init();
         settings::init();
+        scripting::init();
 
         if cfg!(feature = "capture_ztlog") {
             use crate::capture_ztlog;

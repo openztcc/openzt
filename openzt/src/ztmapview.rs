@@ -308,15 +308,19 @@ impl ZTMapView {
                 }
             }
         }
-        if zt_entity_type_class_is(&entity_type_class, &ZTEntityTypeClass::Scenery) {
-            let Ok(scenery_entity) = checked_get_from_memory::<ZTSceneryType>(temp_entity_ptr) else {
-                panic!("Failed to get ZTSceneryType from memory for entity at ptr: {:#x}", temp_entity_ptr);
-            };
+        // TODO: Fix this, currently we are trying to read a ZTSceneryType from the address of a ZTScenery entity instance
+        // if zt_entity_type_class_is(&entity_type_class, &ZTEntityTypeClass::Scenery) {
+        //     let scenery_entity = match checked_get_from_memory::<ZTSceneryType>(temp_entity_ptr) {
+        //         Ok(entity) => entity,
+        //         Err(e) => {
+        //             panic!("Failed to get ZTSceneryType from memory for entity at ptr: {:#x}, error: {}", temp_entity_ptr, e);
+        //         }
+        //     };
 
-            if !scenery_entity.underwater || !scenery_entity.surface {
-                return Err(ErrorStringId::ObjectCannotBePlacedInTank);
-            }
-        }
+        //     if !scenery_entity.underwater || !scenery_entity.surface {
+        //         return Err(ErrorStringId::ObjectCannotBePlacedInTank);
+        //     }
+        // }
         // match  {
         //     ZTEntityTypeClass::ZTKeeper
         // }

@@ -32,13 +32,6 @@ pub const BFENTITY_GET_BLOCKING_RECT_ZTPATH: FunctionDef<unsafe extern "thiscall
 // TODO: Actually UIElement::registerit
 pub const BFREGISTRY_ADDUI: FunctionDef<unsafe extern "cdecl" fn(u32, u32) -> u32> = FunctionDef{address: 0x005774bf, function_type: PhantomData};
 
-// Console
-pub const ZTAPP_UPDATEGAME: FunctionDef<unsafe extern "thiscall" fn(u32, u32)> = FunctionDef{address: 0x0041a6d1, function_type: PhantomData};
-
-// Expansions
-pub const ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u8> = FunctionDef{address: 0x004e8cc8, function_type: PhantomData};
-pub const ZTUI_EXPANSIONSELECT_SETUP: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x005291fb, function_type: PhantomData};
-
 // Experimental
 pub const BFUIMGR_DISPLAY_MESSAGE: FunctionDef<unsafe extern "thiscall" fn(u32, u32, i32, u32, u32, bool, bool)> = FunctionDef{address: 0x0049ccc3, function_type: PhantomData};
 

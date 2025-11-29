@@ -70,14 +70,14 @@ impl From<&str> for CommandError {
 #[detour_mod]
 pub mod zoo_console {
     use tracing::error;
-    use openzt_detour::ZTAPP_UPDATEGAME;
+    use openzt_detour::gen::ztapp::UPDATE_SIM;
 
     use super::{add_to_command_register, call_next_command, command_list_commands};
 
-    #[detour(ZTAPP_UPDATEGAME)]
-    unsafe extern "thiscall" fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
+    #[detour(UPDATE_SIM)]
+    unsafe extern "thiscall" fn zoo_zt_app_update_game(_this_ptr: u32, param_2: i32) {
         call_next_command();
-        unsafe { ZTAPP_UPDATEGAME_DETOUR.call(_this_ptr, param_2) }
+        unsafe { UPDATE_SIM_DETOUR.call(_this_ptr, param_2) }
     }
 
     pub fn init() {
