@@ -6,7 +6,8 @@ use openzt_detour_macro::detour_mod;
 use getset::{Getters};
 
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    scripting::add_lua_function,
     util::{get_from_memory, ZTArray, ZTBoundedString, ZTString},
     ztworldmgr::{read_zt_world_mgr_from_global, Direction},
     ztmapview::BFTile,
@@ -244,9 +245,32 @@ pub mod hooks_zthabitatmgr {
 }
 
 pub fn init() {
-    add_to_command_register("get_zthabitatmgr".to_owned(), command_get_zt_habitat_mgr);
-    add_to_command_register("list_exhibits".to_string(), command_get_zt_habitats);
-    
+    // get_zthabitatmgr() - no args
+    add_lua_function(
+        "get_zthabitatmgr",
+        "Returns ZTHabitatMgr debug info",
+        "get_zthabitatmgr()",
+        |lua| lua.create_function(|_, ()| {
+            match command_get_zt_habitat_mgr(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // list_exhibits() - no args
+    add_lua_function(
+        "list_exhibits",
+        "Lists all zoo exhibits/habitats",
+        "list_exhibits()",
+        |lua| lua.create_function(|_, ()| {
+            match command_get_zt_habitats(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
     if let Err(e) = unsafe { hooks_zthabitatmgr::init_detours() } {
         info!("Error initialising zthabitatmgr detours: {}", e);
     }

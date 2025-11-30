@@ -4,7 +4,8 @@ use openzt_detour::ZTUI_GET_SELECTED_ENTITY;
 use tracing::info;
 
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    scripting::add_lua_function,
     util::{get_from_memory, get_string_from_memory_bounded, ZTBufferString},
     ztworldmgr::read_zt_entity_from_memory,
 };
@@ -95,10 +96,58 @@ impl fmt::Display for Sex {
 const RANDOM_SEX_STRING_PTR: u32 = 0x0063e420;
 
 pub fn init() {
-    add_to_command_register("get_selected_entity".to_owned(), command_get_selected_entity);
-    add_to_command_register("get_element".to_owned(), command_get_element);
-    add_to_command_register("get_buy_tab".to_owned(), command_get_current_buy_tab);
-    add_to_command_register("ui".to_owned(), command_call_ui_callback);
+    // get_selected_entity() - no args
+    add_lua_function(
+        "get_selected_entity",
+        "Returns details of the currently selected entity",
+        "get_selected_entity()",
+        |lua| lua.create_function(|_, ()| {
+            match command_get_selected_entity(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // get_element(id) - single u32 arg
+    add_lua_function(
+        "get_element",
+        "Returns UI element details by ID",
+        "get_element(id)",
+        |lua| lua.create_function(|_, id: u32| {
+            let id_str = id.to_string();
+            match command_get_element(vec![&id_str]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // get_buy_tab() - no args
+    add_lua_function(
+        "get_buy_tab",
+        "Returns the currently active buy tab",
+        "get_buy_tab()",
+        |lua| lua.create_function(|_, ()| {
+            match command_get_current_buy_tab(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // ui(callback_name) - single string arg
+    add_lua_function(
+        "ui",
+        "Calls a UI callback function",
+        "ui(callback_name)",
+        |lua| lua.create_function(|_, callback: String| {
+            match command_call_ui_callback(vec![&callback]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
 }
 
 fn command_get_selected_entity(_args: Vec<&str>) -> Result<String, CommandError> {

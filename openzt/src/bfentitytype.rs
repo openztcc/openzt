@@ -8,8 +8,9 @@ use num_enum::FromPrimitive;
 use tracing::info;
 
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
     expansions::is_member,
+    scripting::add_lua_function,
     util::{get_from_memory, get_string_from_memory, map_from_memory, Checkable},
     ztui::get_selected_entity_type_address,
     ztworldmgr,
@@ -1768,8 +1769,33 @@ fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> {
 
     // initializes the custom command
     pub fn init() {
-        add_to_command_register("sel_type".to_string(), command_sel_type);
-        add_to_command_register("make_sel".to_owned(), command_make_sel);
+        // sel_type([key], [value]) - optional arguments
+        add_lua_function(
+            "sel_type",
+            "Gets selected entity type config, with optional key/value to set",
+            "sel_type([key], [value]) or sel_type(\"-v\")",
+            |lua| lua.create_function(|_, args: mlua::Variadic<String>| {
+                let args_vec: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                match command_sel_type(args_vec) {
+                    Ok(result) => Ok((Some(result), None::<String>)),
+                    Err(e) => Ok((None::<String>, Some(e.to_string())))
+                }
+            }).unwrap()
+        ).unwrap();
+
+        // make_sel(id) - single u32 arg
+        add_lua_function(
+            "make_sel",
+            "Makes entity type selectable",
+            "make_sel(id)",
+            |lua| lua.create_function(|_, id: u32| {
+                let id_str = id.to_string();
+                match command_make_sel(vec![&id_str]) {
+                    Ok(result) => Ok((Some(result), None::<String>)),
+                    Err(e) => Ok((None::<String>, Some(e.to_string())))
+                }
+            }).unwrap()
+        ).unwrap();
     }
 
 #[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]
