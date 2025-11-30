@@ -5,7 +5,8 @@ use openzt_detour_macro::detour_mod;
 use tracing::info;
 
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    scripting::add_lua_function,
     util::get_from_memory,
 };
 
@@ -91,5 +92,17 @@ pub fn init() {
     if let Err(e) = unsafe { zoo_bf_registry::init_detours() } {
         info!("Error initialising bf_registry detours: {}", e);
     };
-    add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
+
+    // list_bf_registry() - no args
+    add_lua_function(
+        "list_bf_registry",
+        "Lists BF registry entries (deprecated)",
+        "list_bf_registry()",
+        |lua| lua.create_function(|_, ()| {
+            match command_list_registry(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
 }

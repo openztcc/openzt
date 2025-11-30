@@ -9,7 +9,8 @@ use openzt_detour_macro::detour_mod;
 
 use crate::{
     bfentitytype::{read_zt_entity_type_from_memory, BFEntityType, ZTEntityType, ZTSceneryType},
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    scripting::add_lua_function,
     util::{get_from_memory, get_string_from_memory, map_from_memory},
 };
 use crate::util::ZTBufferString;
@@ -450,13 +451,97 @@ pub mod hooks_ztworldmgr {
 }
 
 pub fn init() {
-    add_to_command_register("list_entities".to_owned(), command_get_zt_world_mgr_entities);
-    add_to_command_register("list_entities_2".to_owned(), command_get_zt_world_mgr_entities_2);
-    add_to_command_register("list_types".to_owned(), command_get_zt_world_mgr_types);
-    add_to_command_register("get_zt_world_mgr".to_owned(), command_get_zt_world_mgr);
-    add_to_command_register("get_types_summary".to_owned(), command_zt_world_mgr_types_summary);
-    add_to_command_register("get_entity_vtable_entry".to_owned(), command_get_entity_unique_vtable_entries);
-    add_to_command_register("get_entity_type_vtable_entry".to_owned(), command_get_entity_type_unique_vtable_entries);
+    // list_entities() - no args
+    add_lua_function(
+        "list_entities",
+        "Lists all entities in the world",
+        "list_entities()",
+        |lua| lua.create_function(|_, ()| {
+            match command_get_zt_world_mgr_entities(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // list_entities_2() - no args
+    add_lua_function(
+        "list_entities_2",
+        "Lists all entities in the world (alternate format)",
+        "list_entities_2()",
+        |lua| lua.create_function(|_, ()| {
+            match command_get_zt_world_mgr_entities_2(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // list_types() - no args
+    add_lua_function(
+        "list_types",
+        "Lists all entity types in the world",
+        "list_types()",
+        |lua| lua.create_function(|_, ()| {
+            match command_get_zt_world_mgr_types(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // get_zt_world_mgr() - no args
+    add_lua_function(
+        "get_zt_world_mgr",
+        "Returns world manager details",
+        "get_zt_world_mgr()",
+        |lua| lua.create_function(|_, ()| {
+            match command_get_zt_world_mgr(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // get_types_summary() - no args
+    add_lua_function(
+        "get_types_summary",
+        "Returns summary of all entity types",
+        "get_types_summary()",
+        |lua| lua.create_function(|_, ()| {
+            match command_zt_world_mgr_types_summary(vec![]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // get_entity_vtable_entry(offset) - single string arg
+    add_lua_function(
+        "get_entity_vtable_entry",
+        "Returns unique entity vtable entries at offset",
+        "get_entity_vtable_entry(offset)",
+        |lua| lua.create_function(|_, offset: String| {
+            match command_get_entity_unique_vtable_entries(vec![&offset]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
+    // get_entity_type_vtable_entry(offset) - single string arg
+    add_lua_function(
+        "get_entity_type_vtable_entry",
+        "Returns unique entity type vtable entries at offset",
+        "get_entity_type_vtable_entry(offset)",
+        |lua| lua.create_function(|_, offset: String| {
+            match command_get_entity_type_unique_vtable_entries(vec![&offset]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        }).unwrap()
+    ).unwrap();
+
     unsafe { hooks_ztworldmgr::init_detours().unwrap() };
 }
 
