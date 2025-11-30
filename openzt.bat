@@ -73,6 +73,7 @@ IF "%~1"=="--pause" (
 IF "%~1"=="--" (
     SET PARSING_CARGO_ARGS=1
     SHIFT
+    GOTO parse_loop
 )
 IF DEFINED PARSING_CARGO_ARGS (
     SET CARGO_ARGS=!CARGO_ARGS! %~1
@@ -141,11 +142,11 @@ IF DEFINED FEATURE_FLAGS (
 REM Execute cargo build for DLL
 cargo !TOOLCHAIN! build --manifest-path !MANIFEST_PATH! --lib --target=i686-pc-windows-msvc !BUILD_FLAGS! !FEATURE_FLAGS! !CARGO_ARGS!
 
-IF %errorlevel% NEQ 0 (
+IF !errorlevel! NEQ 0 (
     echo.
     echo Build failed
     pause
-    exit /b %errorlevel%
+    exit /b !errorlevel!
 )
 
 echo.
@@ -185,7 +186,7 @@ REM Set source path
 SET SOURCE_DLL=target\i686-pc-windows-msvc\!BUILD_TYPE!\!DLL_NAME!
 
 REM Check source exists
-IF NOT EXIST !SOURCE_DLL! (
+IF NOT EXIST "!SOURCE_DLL!" (
     echo Error: Built DLL not found at !SOURCE_DLL!
     pause
     exit /b 1
@@ -209,12 +210,12 @@ IF DEFINED LOADER_FLAG (
     REM Run via loader
     IF DEFINED PAUSE_FLAG (
         echo.
-        echo Running openzt-loader.exe directly (for debugger attachment)...
-        target\i686-pc-windows-msvc\!BUILD_TYPE!\openzt-loader.exe --dll-path="target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!"
+        echo Running openzt-loader.exe directly ^(for debugger attachment^)...
+        target\i686-pc-windows-msvc\!BUILD_TYPE!\openzt-loader.exe --dll-path=^"target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!^"
     ) ELSE (
         echo.
-        echo Running via openzt-loader (cargo run)...
-        cargo !LOADER_TOOLCHAIN! run !BUILD_FLAGS! --manifest-path openzt-loader/Cargo.toml -- --dll-path="target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!" --listen --resume
+        echo Running via openzt-loader ^(cargo run^)...
+        cargo !LOADER_TOOLCHAIN! run !BUILD_FLAGS! --manifest-path openzt-loader/Cargo.toml -- --dll-path=^"target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!^" --listen --resume
     )
 
     pause
@@ -230,7 +231,7 @@ del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openztrpc.dll" 2>nul
 del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzttest.dll" 2>nul
 
 REM Determine destination name
-IF "!DLL_NAME!"=="openzt.dll" (
+IF !DLL_NAME!==openzt.dll (
     SET DEST_NAME=res-openzt.dll
 ) ELSE (
     SET DEST_NAME=res-openzttest.dll
@@ -240,11 +241,11 @@ REM Copy DLL
 echo Copying !DLL_NAME! to Zoo Tycoon directory...
 copy "!SOURCE_DLL!" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\!DEST_NAME!"
 
-IF %errorlevel% NEQ 0 (
+IF !errorlevel! NEQ 0 (
     echo.
     echo Copy failed
     pause
-    exit /b %errorlevel%
+    exit /b !errorlevel!
 )
 
 REM Launch game
@@ -263,11 +264,11 @@ REM ============================================================
 echo Opening documentation...
 cargo +nightly rustdoc --manifest-path openzt/Cargo.toml --lib --target i686-pc-windows-msvc --open -- --document-private-items
 
-IF %errorlevel% NEQ 0 (
+IF !errorlevel! NEQ 0 (
     echo.
     echo Documentation generation failed
     pause
-    exit /b %errorlevel%
+    exit /b !errorlevel!
 )
 
 GOTO :EOF
