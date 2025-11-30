@@ -3,3 +3,4 @@
 ._target
 /libs/*/target
 .idea
+.openzt-build-state

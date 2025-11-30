@@ -38,11 +38,13 @@ GOTO parse_flags
 SET RELEASE_FLAG=
 SET TEST_FLAG=
 SET STABLE_FLAG=
+SET LOADER_FLAG=
+SET PAUSE_FLAG=
 SET CARGO_ARGS=
 SET PARSING_CARGO_ARGS=
 
 :parse_loop
-IF "%~1"=="" GOTO build
+IF "%~1"=="" GOTO validate_and_build
 IF "%~1"=="--release" (
     SET RELEASE_FLAG=1
     SHIFT
@@ -58,6 +60,16 @@ IF "%~1"=="--stable" (
     SHIFT
     GOTO parse_loop
 )
+IF "%~1"=="--loader" (
+    SET LOADER_FLAG=1
+    SHIFT
+    GOTO parse_loop
+)
+IF "%~1"=="--pause" (
+    SET PAUSE_FLAG=1
+    SHIFT
+    GOTO parse_loop
+)
 IF "%~1"=="--" (
     SET PARSING_CARGO_ARGS=1
     SHIFT
@@ -70,15 +82,28 @@ IF DEFINED PARSING_CARGO_ARGS (
 echo Error: Unknown flag "%~1"
 exit /b 1
 
+:validate_and_build
+REM Validate flag combinations
+IF DEFINED PAUSE_FLAG (
+    IF NOT DEFINED LOADER_FLAG (
+        echo Error: --pause requires --loader
+        pause
+        exit /b 1
+    )
+)
+GOTO build
+
 REM ============================================================
 REM Build Function
 REM ============================================================
 
 :build
-REM Set toolchain
+REM Set toolchains
 SET TOOLCHAIN=+nightly-2024-05-02-i686-pc-windows-msvc
+SET LOADER_TOOLCHAIN=+nightly-2025-06-23-i686-pc-windows-msvc
 IF DEFINED STABLE_FLAG (
     SET TOOLCHAIN=+stable
+    SET LOADER_TOOLCHAIN=+stable
 )
 
 REM Set manifest path and DLL name
@@ -113,7 +138,7 @@ IF DEFINED FEATURE_FLAGS (
     echo Features: !FEATURE_FLAGS!
 )
 
-REM Execute cargo build
+REM Execute cargo build for DLL
 cargo !TOOLCHAIN! build --manifest-path !MANIFEST_PATH! --lib --target=i686-pc-windows-msvc !BUILD_FLAGS! !FEATURE_FLAGS! !CARGO_ARGS!
 
 IF %errorlevel% NEQ 0 (
@@ -123,12 +148,28 @@ IF %errorlevel% NEQ 0 (
     exit /b %errorlevel%
 )
 
+echo.
+echo Build successful: target\i686-pc-windows-msvc\!BUILD_TYPE!\!DLL_NAME!
+
+REM Build loader if --loader flag is set
+IF DEFINED LOADER_FLAG (
+    echo.
+    echo Building openzt-loader...
+    cargo !LOADER_TOOLCHAIN! build --manifest-path openzt-loader/Cargo.toml --target=i686-pc-windows-msvc !BUILD_FLAGS!
+
+    IF !errorlevel! NEQ 0 (
+        echo.
+        echo Loader build failed
+        pause
+        exit /b !errorlevel!
+    )
+
+    echo Loader build successful: target\i686-pc-windows-msvc\!BUILD_TYPE!\openzt-loader.exe
+)
+
 REM Write state file on success
 echo BUILD_TYPE=!BUILD_TYPE! > .openzt-build-state
 echo DLL_NAME=!DLL_NAME! >> .openzt-build-state
-
-echo.
-echo Build successful: target\i686-pc-windows-msvc\!BUILD_TYPE!\!DLL_NAME!
 
 REM If run command was used, continue to copy and launch
 IF DEFINED RUN_AFTER_BUILD GOTO copy_and_run
@@ -150,6 +191,37 @@ IF NOT EXIST !SOURCE_DLL! (
     exit /b 1
 )
 
+REM Check if using loader injection
+IF DEFINED LOADER_FLAG (
+    echo.
+    echo ============================================================
+    echo WARNING: The --loader injection method is deprecated.
+    echo Consider using the standard DLL copy method instead.
+    echo ============================================================
+    echo.
+
+    REM Delete old DLLs
+    echo Cleaning up old DLLs...
+    del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzt.dll" 2>nul
+    del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openztrpc.dll" 2>nul
+    del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzttest.dll" 2>nul
+
+    REM Run via loader
+    IF DEFINED PAUSE_FLAG (
+        echo.
+        echo Running openzt-loader.exe directly (for debugger attachment)...
+        target\i686-pc-windows-msvc\!BUILD_TYPE!\openzt-loader.exe --dll-path="target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!"
+    ) ELSE (
+        echo.
+        echo Running via openzt-loader (cargo run)...
+        cargo !LOADER_TOOLCHAIN! run !BUILD_FLAGS! --manifest-path openzt-loader/Cargo.toml -- --dll-path="target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!" --listen --resume
+    )
+
+    pause
+    GOTO :EOF
+)
+
+REM Standard DLL copy method (no loader)
 REM Delete old DLLs
 echo.
 echo Cleaning up old DLLs...
@@ -211,7 +283,7 @@ echo Usage: openzt.bat ^<subcommand^> [flags] [-- cargo-args]
 echo.
 echo Subcommands:
 echo   build     Build the DLL only
-echo   run       Build the DLL, copy to Zoo Tycoon, and launch the game
+echo   run       Build the DLL and launch the game
 echo   docs      Generate and open documentation
 echo   help      Show this help message
 echo.
@@ -219,18 +291,23 @@ echo Build/Run Flags:
 echo   --release      Build with release optimizations
 echo   --test         Build the test DLL (openzt-test-dll)
 echo   --stable       Build with stable Rust toolchain (disables command-console)
+echo   --loader       Use openzt-loader for DLL injection (instead of copy)
+echo   --pause        (with --loader) Run loader exe directly for debugger
 echo   -- ^<args^>      Forward additional arguments to cargo
 echo.
 echo Note: command-console feature is enabled by default for non-test builds
 echo       with nightly toolchain. Use --stable or --test to disable it.
 echo.
 echo Examples:
-echo   openzt.bat build                    Build debug DLL with command-console
-echo   openzt.bat build --release          Build release DLL with command-console
-echo   openzt.bat run                      Build debug, copy, and launch game
-echo   openzt.bat run --release            Build release, copy, and launch game
-echo   openzt.bat run --test               Build test DLL and launch game
-echo   openzt.bat build --stable           Build debug without command-console
-echo   openzt.bat docs                     Generate and open docs
+echo   openzt.bat build                     Build debug DLL with command-console
+echo   openzt.bat build --release           Build release DLL with command-console
+echo   openzt.bat build --loader            Build DLL + loader
+echo   openzt.bat run                       Build debug, copy DLL, launch game
+echo   openzt.bat run --release             Build release, copy DLL, launch game
+echo   openzt.bat run --loader              Build + run via loader injection
+echo   openzt.bat run --loader --pause      Build + run loader exe (for debugger)
+echo   openzt.bat run --test                Build test DLL and launch game
+echo   openzt.bat build --stable            Build debug without command-console
+echo   openzt.bat docs                      Generate and open docs
 echo.
 GOTO :EOF

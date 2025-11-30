@@ -19,22 +19,29 @@ OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It pr
 
 ### Build Commands
 ```bash
-# Debug build
-cargo +nightly build --lib --target=i686-pc-windows-msvc
+# Build only (no game launch)
+openzt.bat build                           # Debug with command-console
+openzt.bat build --release                 # Release with command-console
+openzt.bat build --stable                  # Debug with stable Rust (no console)
+openzt.bat build --test                    # Debug test build
+openzt.bat build --test --release          # Release test build
+openzt.bat build --loader                  # Debug + loader
 
-# Release build  
-cargo +nightly build --lib --release --target=i686-pc-windows-msvc
+# Build and run - DLL copy method (default)
+openzt.bat run                             # Debug with command-console
+openzt.bat run --release                   # Release with command-console
+openzt.bat run --test                      # Debug test build
+openzt.bat run --test --release            # Release test build
+openzt.bat run --stable                    # Debug with stable Rust
+
+# Build and run - loader injection method
+openzt.bat run --loader                    # Debug via loader injection
+openzt.bat run --loader --release          # Release via loader injection
+openzt.bat run --loader --pause            # Debug, run loader exe (for debugger)
+openzt.bat run --loader --pause --release  # Release, run loader exe (for debugger)
 
 # Documentation
-cargo +nightly rustdoc --manifest-path openzt/Cargo.toml --lib --target i686-pc-windows-msvc --open -- --document-private-items
-```
-
-### Running/Testing
-```bash
-# Via loader (preferred)
-run-via-loader.bat           # Debug
-run-via-loader-release.bat   # Release
-run-via-loader-pause.bat     # Suspended for debugger
+openzt.bat docs
 ```
 
 ### Lua Console (Runtime Scripting)
