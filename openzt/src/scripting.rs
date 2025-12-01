@@ -3,6 +3,63 @@ use std::sync::Mutex;
 use mlua::Lua;
 use tracing::info;
 
+/// Macro to simplify registering Lua functions
+///
+/// # Usage
+/// ```rust
+/// // No arguments
+/// lua_fn!("my_func", "Does something", "my_func()", || {
+///     Ok("result")
+/// });
+///
+/// // Single argument
+/// lua_fn!("my_func", "Does something", "my_func(arg)", |arg: String| {
+///     Ok(format!("Got: {}", arg))
+/// });
+///
+/// // Multiple arguments
+/// lua_fn!("my_func", "Does something", "my_func(a, b)", |a: u32, b: String| {
+///     Ok(format!("{}: {}", a, b))
+/// });
+///
+/// // Optional argument
+/// lua_fn!("my_func", "Does something", "my_func([opt])", |opt: Option<String>| {
+///     Ok(opt.unwrap_or_else(|| "default".to_string()))
+/// });
+/// ```
+#[macro_export]
+macro_rules! lua_fn {
+    // No arguments
+    ($name:expr, $desc:expr, $sig:expr, || $body:block) => {
+        $crate::scripting::add_lua_function(
+            $name,
+            $desc,
+            $sig,
+            |lua| lua.create_function(|_, ()| $body).unwrap()
+        ).unwrap()
+    };
+
+    // Single argument
+    ($name:expr, $desc:expr, $sig:expr, |$arg:ident : $arg_ty:ty| $body:block) => {
+        $crate::scripting::add_lua_function(
+            $name,
+            $desc,
+            $sig,
+            |lua| lua.create_function(|_, $arg: $arg_ty| $body).unwrap()
+        ).unwrap()
+    };
+
+    // Multiple arguments (2+)
+    ($name:expr, $desc:expr, $sig:expr, |$($arg:ident : $arg_ty:ty),+ $(,)?| $body:block) => {
+        $crate::scripting::add_lua_function(
+            $name,
+            $desc,
+            $sig,
+            |lua| lua.create_function(|_, ($($arg),+): ($($arg_ty),+)| $body).unwrap()
+        ).unwrap()
+    };
+}
+
 static LUA_CONTEXT: LazyLock<Mutex<Lua>> = LazyLock::new(|| Mutex::new(Lua::new()));
 
 // Metadata for help() function
@@ -82,51 +139,36 @@ pub fn init() {
     info!("Initializing Lua scripting");
 
     // Register the continue() function
-    add_lua_function(
-        "continue",
-        "Clicks the continue button",
-        "continue()",
-        |lua| {
-            lua.create_function(|_, ()| {
-                unsafe {
-                    info!("Clicking continue");
-                    openzt_detour::gen::ztui::CLICK_CONTINUE.original()();
-                }
-                Ok(())
-            }).unwrap()
+    lua_fn!("click_continue", "Clicks the continue button", "continue()", || {
+        unsafe {
+            openzt_detour::gen::ztui::CLICK_CONTINUE.original()();
         }
-    ).expect("Failed to add 'continue' function to Lua context");
+        Ok(())
+    });
 
     // Register the help() function
-    add_lua_function(
-        "help",
-        "Lists available Lua functions or searches by keyword",
-        "help([search_term])",
-        |lua| {
-            lua.create_function(|_, search: Option<String>| {
-                let metadata = LUA_FUNCTION_METADATA.lock().unwrap();
-                let filtered: Vec<&LuaFunctionMeta> = match &search {
-                    Some(term) => metadata.iter()
-                        .filter(|m| m.name.contains(term.as_str()) || m.description.to_lowercase().contains(&term.to_lowercase()))
-                        .collect(),
-                    None => metadata.iter().collect()
-                };
+    lua_fn!("help", "Lists available Lua functions or searches by keyword", "help([search_term])", |search: Option<String>| {
+        let metadata = LUA_FUNCTION_METADATA.lock().unwrap();
+        let filtered: Vec<&LuaFunctionMeta> = match &search {
+            Some(term) => metadata.iter()
+                .filter(|m| m.name.contains(term.as_str()) || m.description.to_lowercase().contains(&term.to_lowercase()))
+                .collect(),
+            None => metadata.iter().collect()
+        };
 
-                if filtered.is_empty() {
-                    if let Some(term) = search {
-                        return Ok(format!("No functions found matching '{}'", term));
-                    } else {
-                        return Ok("No functions registered".to_string());
-                    }
-                }
-
-                let mut result = String::new();
-                for meta in filtered {
-                    result.push_str(&format!("{} - {}\n  Usage: {}\n\n",
-                        meta.name, meta.description, meta.signature));
-                }
-                Ok(result)
-            }).unwrap()
+        if filtered.is_empty() {
+            if let Some(term) = search {
+                return Ok(format!("No functions found matching '{}'", term));
+            } else {
+                return Ok("No functions registered".to_string());
+            }
         }
-    ).expect("Failed to add 'help' function to Lua context");
+
+        let mut result = String::new();
+        for meta in filtered {
+            result.push_str(&format!("{} - {}\n  Usage: {}\n\n",
+                meta.name, meta.description, meta.signature));
+        }
+        Ok(result)
+    });
 }
