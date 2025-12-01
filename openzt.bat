@@ -15,6 +15,7 @@ IF "%~1"=="-h" GOTO show_help
 IF "%~1"=="build" GOTO parse_build_flags
 IF "%~1"=="run" GOTO parse_run_flags
 IF "%~1"=="docs" GOTO docs
+IF "%~1"=="console" GOTO console
 
 echo Error: Unknown subcommand "%~1"
 echo.
@@ -267,6 +268,23 @@ cargo +nightly rustdoc --manifest-path openzt/Cargo.toml --lib --target i686-pc-
 IF !errorlevel! NEQ 0 (
     echo.
     echo Documentation generation failed
+    pause
+    exit /b !errorlevel!
+)
+
+GOTO :EOF
+
+REM ============================================================
+REM Console Function
+REM ============================================================
+
+:console
+echo Opening console...
+cargo run --manifest-path=../openzt-console/Cargo.toml
+
+IF !errorlevel! NEQ 0 (
+    echo.
+    echo Console failed to open
     pause
     exit /b !errorlevel!
 )
