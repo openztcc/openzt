@@ -1,5 +1,5 @@
 use crate::command_console::CommandError;
-use crate::scripting::add_lua_function;
+use crate::lua_fn;
 use tracing::error;
 use openzt_detour_macro::detour_mod;
 
@@ -77,53 +77,38 @@ mod zoo_ini_loading {
 
 pub fn init() {
     // get_setting(section, key) - two string args
-    add_lua_function(
-        "get_setting",
-        "Gets a setting value",
-        "get_setting(section, key)",
-        |lua| lua.create_function(|_, (section, key): (String, String)| {
-            match command_get_setting(vec![&section, &key]) {
-                Ok(result) => Ok((Some(result), None::<String>)),
-                Err(e) => Ok((None::<String>, Some(e.to_string())))
-            }
-        }).unwrap()
-    ).unwrap();
+    lua_fn!("get_setting", "Gets a setting value", "get_setting(section, key)", |section: String, key: String| {
+        match command_get_setting(vec![&section, &key]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 
     // set_setting(section, key, value) - three string args
-    add_lua_function(
-        "set_setting",
-        "Sets a setting value",
-        "set_setting(section, key, value)",
-        |lua| lua.create_function(|_, (section, key, value): (String, String, String)| {
-            match command_set_setting(vec![&section, &key, &value]) {
-                Ok(result) => Ok((Some(result), None::<String>)),
-                Err(e) => Ok((None::<String>, Some(e.to_string())))
-            }
-        }).unwrap()
-    ).unwrap();
+    lua_fn!("set_setting", "Sets a setting value", "set_setting(section, key, value)", |section: String, key: String, value: String| {
+        match command_set_setting(vec![&section, &key, &value]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 
     // list_settings([category]) - optional string arg
-    add_lua_function(
-        "list_settings",
-        "Lists available settings, optionally filtered by category",
-        "list_settings([category])",
-        |lua| lua.create_function(|_, category: Option<String>| {
-            match category {
-                Some(cat) => {
-                    match command_list_settings(vec![&cat]) {
-                        Ok(result) => Ok((Some(result), None::<String>)),
-                        Err(e) => Ok((None::<String>, Some(e.to_string())))
-                    }
-                },
-                None => {
-                    match command_list_settings(vec![]) {
-                        Ok(result) => Ok((Some(result), None::<String>)),
-                        Err(e) => Ok((None::<String>, Some(e.to_string())))
-                    }
+    lua_fn!("list_settings", "Lists available settings, optionally filtered by category", "list_settings([category])", |category: Option<String>| {
+        match category {
+            Some(cat) => {
+                match command_list_settings(vec![&cat]) {
+                    Ok(result) => Ok((Some(result), None::<String>)),
+                    Err(e) => Ok((None::<String>, Some(e.to_string())))
+                }
+            },
+            None => {
+                match command_list_settings(vec![]) {
+                    Ok(result) => Ok((Some(result), None::<String>)),
+                    Err(e) => Ok((None::<String>, Some(e.to_string())))
                 }
             }
-        }).unwrap()
-    ).unwrap();
+        }
+    });
 
     if unsafe { zoo_ini_loading::init_detours() }.is_err() {
         error!("Error initialising load ini detours");

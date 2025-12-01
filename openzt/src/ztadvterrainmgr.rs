@@ -4,7 +4,7 @@ use tracing::info;
 
 use crate::{
     command_console::CommandError,
-    scripting::add_lua_function,
+    lua_fn,
     util::{get_from_memory, ZTBufferString},
 };
 
@@ -102,15 +102,10 @@ fn command_get_bfterraintypeinfo(_args: Vec<&str>) -> Result<String, CommandErro
 
 pub fn init() {
     // list_bfterraintypeinfo() - no args
-    add_lua_function(
-        "list_bfterraintypeinfo",
-        "Lists terrain type info",
-        "list_bfterraintypeinfo()",
-        |lua| lua.create_function(|_, ()| {
-            match command_get_bfterraintypeinfo(vec![]) {
-                Ok(result) => Ok((Some(result), None::<String>)),
-                Err(e) => Ok((None::<String>, Some(e.to_string())))
-            }
-        }).unwrap()
-    ).unwrap();
+    lua_fn!("list_bfterraintypeinfo", "Lists terrain type info", "list_bfterraintypeinfo()", || {
+        match command_get_bfterraintypeinfo(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 }

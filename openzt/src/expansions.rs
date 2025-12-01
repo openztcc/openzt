@@ -18,8 +18,8 @@ use crate::{
     animation::Animation,
     bfentitytype::{ZTEntityType, ZTEntityTypeClass},
     command_console::CommandError,
+    lua_fn,
     resource_manager::{add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage, OPENZT_DIR0},
-    scripting::add_lua_function,
     string_registry::add_string_to_registry,
     util::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory},
     ztui::{get_random_sex, get_selected_sex, BuyTab, Sex},
@@ -731,43 +731,28 @@ fn command_get_current_expansion(_args: Vec<&str>) -> Result<String, CommandErro
 
 pub fn init() {
     // list_expansion() - no args
-    add_lua_function(
-        "list_expansion",
-        "Lists all loaded expansions",
-        "list_expansion()",
-        |lua| lua.create_function(|_, ()| {
-            match command_get_expansions(vec![]) {
-                Ok(result) => Ok((Some(result), None::<String>)),
-                Err(e) => Ok((None::<String>, Some(e.to_string())))
-            }
-        }).unwrap()
-    ).unwrap();
+    lua_fn!("list_expansion", "Lists all loaded expansions", "list_expansion()", || {
+        match command_get_expansions(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 
     // get_current_expansion() - no args
-    add_lua_function(
-        "get_current_expansion",
-        "Returns current active expansion",
-        "get_current_expansion()",
-        |lua| lua.create_function(|_, ()| {
-            match command_get_current_expansion(vec![]) {
-                Ok(result) => Ok((Some(result), None::<String>)),
-                Err(e) => Ok((None::<String>, Some(e.to_string())))
-            }
-        }).unwrap()
-    ).unwrap();
+    lua_fn!("get_current_expansion", "Returns current active expansion", "get_current_expansion()", || {
+        match command_get_current_expansion(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 
     // get_members() - no args
-    add_lua_function(
-        "get_members",
-        "Lists expansion member sets",
-        "get_members()",
-        |lua| lua.create_function(|_, ()| {
-            match command_get_members(vec![]) {
-                Ok(result) => Ok((Some(result), None::<String>)),
-                Err(e) => Ok((None::<String>, Some(e.to_string())))
-            }
-        }).unwrap()
-    ).unwrap();
+    lua_fn!("get_members", "Lists expansion member sets", "get_members()", || {
+        match command_get_members(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
     add_handler(
         Handler::builder()
             .prefix("xpac")
