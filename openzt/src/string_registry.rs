@@ -6,7 +6,7 @@ use openzt_detour_macro::detour_mod;
 use tracing::info;
 
 use crate::command_console::CommandError;
-use crate::scripting::add_lua_function;
+use crate::lua_fn;
 
 const STRING_REGISTRY_ID_OFFSET: u32 = 100_000;
 
@@ -150,16 +150,11 @@ pub fn init() {
     }
 
     // get_string(id) - single u32 arg
-    add_lua_function(
-        "get_string",
-        "Retrieves game string by ID (from OpenZT registry or game)",
-        "get_string(id)",
-        |lua| lua.create_function(|_, id: u32| {
-            let id_str = id.to_string();
-            match command_get_string(vec![&id_str]) {
-                Ok(result) => Ok((Some(result), None::<String>)),
-                Err(e) => Ok((None::<String>, Some(e.to_string())))
-            }
-        }).unwrap()
-    ).unwrap();
+    lua_fn!("get_string", "Retrieves game string by ID (from OpenZT registry or game)", "get_string(id)", |id: u32| {
+        let id_str = id.to_string();
+        match command_get_string(vec![&id_str]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 }

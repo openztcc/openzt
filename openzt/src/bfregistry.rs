@@ -6,7 +6,7 @@ use tracing::info;
 
 use crate::{
     command_console::CommandError,
-    scripting::add_lua_function,
+    lua_fn,
     util::get_from_memory,
 };
 
@@ -94,15 +94,10 @@ pub fn init() {
     };
 
     // list_bf_registry() - no args
-    add_lua_function(
-        "list_bf_registry",
-        "Lists BF registry entries (deprecated)",
-        "list_bf_registry()",
-        |lua| lua.create_function(|_, ()| {
-            match command_list_registry(vec![]) {
-                Ok(result) => Ok((Some(result), None::<String>)),
-                Err(e) => Ok((None::<String>, Some(e.to_string())))
-            }
-        }).unwrap()
-    ).unwrap();
+    lua_fn!("list_bf_registry", "Lists BF registry entries (deprecated)", "list_bf_registry()", || {
+        match command_list_registry(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 }
