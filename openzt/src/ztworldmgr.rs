@@ -377,7 +377,7 @@ pub mod hooks_ztworldmgr {
     use crate::util::save_to_memory;
     use openzt_detour::*;
     use openzt_detour::gen::bfmap::{GET_NEIGHBOR_1, TILE_TO_WORLD};
-    use openzt_detour::gen::bfentity::{GET_BLOCKING_RECT, GET_FOOTPRINT, IS_ON_TILE};
+    use openzt_detour::gen::bfentity::{GET_BLOCKING_RECT, GET_FOOTPRINT, IS_ON_TILE, GET_BLOCKING_RECT_VIRT_ZTPATH};
 
     use super::*;
 
@@ -417,7 +417,7 @@ pub mod hooks_ztworldmgr {
     }
 
     // 0x004fbbee u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
-    #[detour(BFENTITY_GET_BLOCKING_RECT_ZTPATH)]
+    #[detour(GET_BLOCKING_RECT_VIRT_ZTPATH)]
     unsafe extern "thiscall" fn bfentity_get_blocking_rect_ztpath(_this: u32, param_1: u32) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         save_to_memory(param_1, entity.get_blocking_rect());

@@ -11,7 +11,10 @@ pub fn init_hooks() {
 mod zoo_resource_mgr {
     use openzt_configparser::ini::Ini;
     use tracing::info;
-    use openzt_detour::{BFRESOURCE_ATTEMPT, BFRESOURCE_PREPARE, BFRESOURCEMGR_CONSTRUCTOR, ZTUI_GENERAL_GET_INFO_IMAGE_NAME};
+    // use openzt_detour::{BFRESOURCE_ATTEMPT, BFRESOURCE_PREPARE, BFRESOURCEMGR_CONSTRUCTOR, ZTUI_GENERAL_GET_INFO_IMAGE_NAME};
+    use openzt_detour::gen::bfresourcemgr::CONSTRUCTOR;
+    use openzt_detour::gen::bfresource::{ATTEMPT, PREPARE};
+    use openzt_detour::gen::ztui_general::GET_INFO_IMAGE_NAME;
 
     use crate::{
         resource_manager::{
@@ -24,22 +27,22 @@ mod zoo_resource_mgr {
     };
 
     ///When Zoo Tycoon tries to load a resource we check if it's a resource we've already loaded and return that instead
-    #[detour(BFRESOURCE_ATTEMPT)]
-    unsafe extern "thiscall" fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> u8 {
+    #[detour(ATTEMPT)]
+    unsafe extern "thiscall" fn zoo_bf_resource_attempt(this_ptr: u32, file_name: u32) -> bool {
         if bf_resource_inner(this_ptr, file_name) {
-            return 1;
+            return true;
         }
-        unsafe { BFRESOURCE_ATTEMPT_DETOUR.call(this_ptr, file_name) }
+        unsafe { ATTEMPT_DETOUR.call(this_ptr, file_name) }
     }
 
     ///When Zoo Tycoon tries to load a resource we check if it's a resource we've already loaded and return that instead
-    #[detour(BFRESOURCE_PREPARE)]
-    unsafe extern "thiscall" fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32) -> u8 {
+    #[detour(PREPARE)]
+    unsafe extern "thiscall" fn zoo_bf_resource_prepare(this_ptr: u32, file_name: u32) -> bool {
         if bf_resource_inner(this_ptr, file_name) {
-            return 1;
+            return true;
         }
 
-        unsafe { BFRESOURCE_PREPARE_DETOUR.call(this_ptr, file_name) }
+        unsafe { PREPARE_DETOUR.call(this_ptr, file_name) }
     }
 
     fn bf_resource_inner(this_ptr: u32, file_name: u32) -> bool {
@@ -85,14 +88,14 @@ mod zoo_resource_mgr {
         Err("Invalid openzt resource string")
     }
 
-    #[detour(BFRESOURCEMGR_CONSTRUCTOR)]
+    #[detour(CONSTRUCTOR)]
     unsafe extern "thiscall" fn zoo_bf_resource_mgr_constructor(this_ptr: u32) -> u32 {
         info!("BFResourceMgr::constructor({:X})", this_ptr);
 
         use std::time::Instant;
         let now = Instant::now();
 
-        let return_value = unsafe { BFRESOURCEMGR_CONSTRUCTOR_DETOUR.call(this_ptr) };
+        let return_value = unsafe { CONSTRUCTOR_DETOUR.call(this_ptr) };
 
         let elapsed = now.elapsed();
         info!("Vanilla loading took {:.2?}", elapsed);
@@ -112,11 +115,11 @@ mod zoo_resource_mgr {
         return_value
     }
 
-    #[detour(ZTUI_GENERAL_GET_INFO_IMAGE_NAME)]
-    unsafe extern "cdecl" fn zoo_ui_general_get_info_image_name(id: u32) -> u32 {
-        match get_location_or_habitat_by_id(id) {
+    #[detour(GET_INFO_IMAGE_NAME)]
+    unsafe extern "cdecl" fn zoo_ui_general_get_info_image_name(id: i32) -> u32 {
+        match get_location_or_habitat_by_id(id as u32) {
             Some(resource_ptr) => resource_ptr,
-            None => unsafe { ZTUI_GENERAL_GET_INFO_IMAGE_NAME_DETOUR.call(id) },
+            None => unsafe { GET_INFO_IMAGE_NAME_DETOUR.call(id) },
         }
     }
 }

@@ -26,9 +26,6 @@ impl<T> FunctionDef<T> where T: retour::Function {
     }
 }
 
-// World manager hooks
-pub const BFENTITY_GET_BLOCKING_RECT_ZTPATH: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u32> = FunctionDef{address: 0x004fbbee, function_type: PhantomData};
-
 // TODO: Actually UIElement::registerit
 pub const BFREGISTRY_ADDUI: FunctionDef<unsafe extern "cdecl" fn(u32, u32) -> u32> = FunctionDef{address: 0x005774bf, function_type: PhantomData};
 
@@ -37,12 +34,6 @@ pub const BFUIMGR_DISPLAY_MESSAGE: FunctionDef<unsafe extern "thiscall" fn(u32, 
 
 // Settings
 pub const LOAD_DEBUG_SETTINGS_FROM_INI: FunctionDef<unsafe extern "cdecl" fn() -> u32> = FunctionDef{address: 0x00579f4c, function_type: PhantomData};
-
-// Resource manager
-pub const BFRESOURCE_ATTEMPT: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u8> = FunctionDef{address: 0x00403891, function_type: PhantomData};
-pub const BFRESOURCE_PREPARE: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u8> = FunctionDef{address: 0x004047f4, function_type: PhantomData};
-pub const BFRESOURCEMGR_CONSTRUCTOR: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> = FunctionDef{address: 0x0052903f, function_type: PhantomData};
-pub const ZTUI_GENERAL_GET_INFO_IMAGE_NAME: FunctionDef<unsafe extern "cdecl" fn(u32) -> u32> = FunctionDef{address: 0x004f85d2, function_type: PhantomData};
 
 // Version
 pub const BFVERSIONINFO_GET_VERSION_STRING: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x004bdfd4, function_type: PhantomData};
