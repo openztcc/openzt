@@ -25,22 +25,3 @@ impl<T> FunctionDef<T> where T: retour::Function {
         unsafe { ::retour::Function::from_ptr(self.address as *const ()) }
     }
 }
-
-// TODO: Actually UIElement::registerit
-pub const BFREGISTRY_ADDUI: FunctionDef<unsafe extern "cdecl" fn(u32, u32) -> u32> = FunctionDef{address: 0x005774bf, function_type: PhantomData};
-
-// Experimental
-pub const BFUIMGR_DISPLAY_MESSAGE: FunctionDef<unsafe extern "thiscall" fn(u32, u32, i32, u32, u32, bool, bool)> = FunctionDef{address: 0x0049ccc3, function_type: PhantomData};
-
-// Settings
-pub const LOAD_DEBUG_SETTINGS_FROM_INI: FunctionDef<unsafe extern "cdecl" fn() -> u32> = FunctionDef{address: 0x00579f4c, function_type: PhantomData};
-
-// Version
-pub const BFVERSIONINFO_GET_VERSION_STRING: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x004bdfd4, function_type: PhantomData};
-
-// Logging
-pub const ZOOLOGGING_LOG: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32, u8, u32, u32, u32)> = FunctionDef{address: 0x00401363, function_type: PhantomData};
-
-// UI
-pub const ZTUI_GET_SELECTED_ENTITY: FunctionDef<unsafe extern "stdcall" fn() -> u32> = FunctionDef{address: 0x00410f84, function_type: PhantomData};
-pub const ZTUI_GET_ELEMENT: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u32> = FunctionDef{address: 0x0040157d, function_type: PhantomData};

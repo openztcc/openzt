@@ -13,7 +13,7 @@ use openzt_detour_macro::detour_mod;
 #[detour_mod]
 pub mod zoo_experimental {
     use tracing::info;
-    use openzt_detour::BFUIMGR_DISPLAY_MESSAGE;
+    use openzt_detour::gen::bfuimgr::DISPLAY_MESSAGE_0;
 
     
     // use crate::{
@@ -21,10 +21,10 @@ pub mod zoo_experimental {
     //     util::{get_from_memory, get_string_from_memory},
     // };
 
-    #[detour(BFUIMGR_DISPLAY_MESSAGE)]
+    #[detour(DISPLAY_MESSAGE_0)]
     unsafe extern "thiscall" fn prt_get(_this_prt: u32, param_1: u32, param_2: i32, param_3: u32, param_4: u32, param_5: bool, param_6: bool) {
         info!("BFUIMgr::displayMessage called with params: {}, {}, {}, {}, {}, {}", param_1, param_2, param_3, param_4, param_5, param_6);
-        unsafe { BFUIMGR_DISPLAY_MESSAGE_DETOUR.call(_this_prt, param_1, param_2, param_3, param_4, param_5, param_6) };
+        unsafe { DISPLAY_MESSAGE_0_DETOUR.call(_this_prt, param_1, param_2, param_3, param_4, param_5, param_6) };
     }
 
     // // 0x431c3e : void __thiscall FUN_00431c3e(void *this,int *param_1,int *param_2,char param_3,int **param_4)

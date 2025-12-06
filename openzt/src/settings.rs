@@ -64,11 +64,12 @@ fn command_list_settings(args: Vec<&str>) -> Result<String, CommandError> {
 #[detour_mod]
 mod zoo_ini_loading {
     use tracing::info;
-    use openzt_detour::LOAD_DEBUG_SETTINGS_FROM_INI;
+    use openzt_detour::gen::standalone::LOAD_INI_DEBUG_SETTINGS;
 
-    #[detour(LOAD_DEBUG_SETTINGS_FROM_INI)]
-    unsafe extern "cdecl" fn load_debug_settings_from_ini_detour() -> u32 {
-        let result = unsafe { LOAD_DEBUG_SETTINGS_FROM_INI_DETOUR.call() };
+    #[detour(LOAD_INI_DEBUG_SETTINGS)]
+    // unsafe extern "cdecl" fn load_debug_settings_from_ini_detour() -> u32 {
+    unsafe extern "stdcall" fn load_debug_settings_from_ini_detour() -> u32 {
+        let result = unsafe { LOAD_INI_DEBUG_SETTINGS_DETOUR.call() };
         info!("######################LoadDebugSettingsFromIniHook: {}", result);
         result
     }
