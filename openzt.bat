@@ -279,12 +279,26 @@ REM Console Function
 REM ============================================================
 
 :console
-echo Opening console...
-cargo run --manifest-path=../openzt-console/Cargo.toml
+SHIFT
+SET CONSOLE_ARGS=
+:console_args_loop
+IF "%~1"=="" GOTO run_console
+SET CONSOLE_ARGS=!CONSOLE_ARGS! %1
+SHIFT
+GOTO console_args_loop
+
+:run_console
+IF "!CONSOLE_ARGS!"=="" (
+    echo Opening console...
+    cargo run --manifest-path=openzt-console/Cargo.toml
+) ELSE (
+    echo Running console command...
+    cargo run --manifest-path=openzt-console/Cargo.toml --!CONSOLE_ARGS!
+)
 
 IF !errorlevel! NEQ 0 (
     echo.
-    echo Console failed to open
+    echo Console failed
     pause
     exit /b !errorlevel!
 )
@@ -304,6 +318,7 @@ echo Subcommands:
 echo   build     Build the DLL only
 echo   run       Build the DLL and launch the game
 echo   docs      Generate and open documentation
+echo   console   Open interactive Lua console or run oneshot command
 echo   help      Show this help message
 echo.
 echo Build/Run Flags:
@@ -328,5 +343,8 @@ echo   openzt.bat run --loader --pause      Build + run loader exe (for debugger
 echo   openzt.bat run --test                Build test DLL and launch game
 echo   openzt.bat build --stable            Build debug without command-console
 echo   openzt.bat docs                      Generate and open docs
+echo   openzt.bat console                   Open interactive Lua console
+echo   openzt.bat console --oneshot "help()"          Run single Lua command and exit
+echo   openzt.bat console --oneshot "add_cash(10000)" Add cash via oneshot command
 echo.
 GOTO :EOF
