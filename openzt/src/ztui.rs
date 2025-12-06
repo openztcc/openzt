@@ -1,6 +1,7 @@
 use std::fmt;
 
-use openzt_detour::ZTUI_GET_SELECTED_ENTITY;
+use openzt_detour::gen::ztui_general::GET_SELECTED_ENTITY;
+use openzt_detour::gen::bfuimgr::GET_ELEMENT_0;
 use tracing::info;
 
 use crate::{
@@ -131,7 +132,7 @@ pub fn init() {
 }
 
 fn command_get_selected_entity(_args: Vec<&str>) -> Result<String, CommandError> {
-    let get_selected_entity_fn = unsafe { ZTUI_GET_SELECTED_ENTITY.original() };
+    let get_selected_entity_fn = unsafe { GET_SELECTED_ENTITY.original() };
     let entity_address = unsafe { get_selected_entity_fn() };
     if entity_address == 0 {
         return Err(Into::into("No entity selected"));
@@ -145,7 +146,7 @@ fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
         return Err(Into::into("Expected 1 argument"));
     }
     let address = args[0].parse()?;
-    let get_element_fn = unsafe { openzt_detour::ZTUI_GET_ELEMENT.original() };
+    let get_element_fn = unsafe { GET_ELEMENT_0.original() };
     let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, address) };
     if ui_element_addr == 0 {
         return Err(Into::into("No element found"));
@@ -156,8 +157,8 @@ fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
 }
 
 fn get_element(id: UIElementId) -> Option<UIElement> {
-    let get_element_fn = unsafe { openzt_detour::ZTUI_GET_ELEMENT.original() };
-    let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, id as u32) };
+    let get_element_fn = unsafe { GET_ELEMENT_0.original() };
+    let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, id as i32) };
     if ui_element_addr == 0 {
         return None;
     }
@@ -256,7 +257,7 @@ pub fn get_random_sex() -> Option<Sex> {
 
 /// returns the address of the selected entity
 pub fn get_selected_entity() -> u32 {
-    let get_selected_entity_fn = unsafe { openzt_detour::ZTUI_GET_SELECTED_ENTITY.original() };
+    let get_selected_entity_fn = unsafe { GET_SELECTED_ENTITY.original() };
     unsafe { get_selected_entity_fn() }
 }
 

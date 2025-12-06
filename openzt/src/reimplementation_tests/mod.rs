@@ -73,7 +73,8 @@ mod detour_zoo_main {
     }
 
     #[cfg(target_os = "windows")]
-    use openzt_detour::{BFTILE_GET_LOCAL_ELEVATION, LOAD_LANG_DLLS};
+    use openzt_detour::gen::bfapp::LOAD_LANG_DLLS;
+    use openzt_detour::gen::bftile::GET_LOCAL_ELEVATION;
     use proptest::prelude::ProptestConfig;
     use tracing::{error, info};
 
@@ -114,7 +115,7 @@ mod detour_zoo_main {
                 let tile = BFTile::new(pos, unknown_byte_2);
                 let reimplemented_result = tile.get_local_elevation(pos);
 
-                let result = BFTILE_GET_LOCAL_ELEVATION.original()(&raw const tile as u32, &raw const pos as u32);
+                let result = GET_LOCAL_ELEVATION.original()(&raw const tile as u32, &raw const pos as u32);
                 assert_eq!(
                     result, reimplemented_result+1,
                     "Failed for pos: {:?}, tile: {:?}, unknown_byte_2: {}",

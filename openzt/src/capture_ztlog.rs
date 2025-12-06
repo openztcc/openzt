@@ -11,7 +11,7 @@ enum ZTLogLevel {
 }
 
 impl ZTLogLevel {
-    fn from_u32(value: u32) -> ZTLogLevel {
+    fn from_i32(value: i32) -> ZTLogLevel {
         match value {
             3 => ZTLogLevel::Trace,
             6 => ZTLogLevel::Info,
@@ -34,21 +34,21 @@ impl ZTLogLevel {
     }
 }
 
-pub fn log_from_zt(source_file: &String, line_number: u32, level: u32, message: &String) {
-    let level = ZTLogLevel::from_u32(level);
+pub fn log_from_zt(source_file: &String, line_number: i32, level: i32, message: &String) {
+    let level = ZTLogLevel::from_i32(level);
     info!("{}({}) : {} : {}", source_file, line_number, level.as_str(), message);
 }
 
 #[detour_mod]
 mod zoo_logging {
     use crate::{capture_ztlog::log_from_zt, util::get_string_from_memory};
-    use openzt_detour::ZOOLOGGING_LOG;
+    use openzt_detour::gen::bflog::LOG_MESSAGE;
 
-    #[detour(ZOOLOGGING_LOG)]
-    unsafe extern "cdecl" fn zoo_log_func(source_file: u32, param_2: u32, param_3: u32, _param_4: u8, _param_5: u32, _param_6: u32, log_message: u32) {
+    #[detour(LOG_MESSAGE)]
+    unsafe extern "cdecl" fn zoo_log_func(source_file: u32, line_number: i32, level: i32, _param_4: i8, _param_5: i32, _param_6: i32, log_message: u32) {
         let source_file_string = get_string_from_memory(source_file);
         let log_message_string = get_string_from_memory(log_message);
-        log_from_zt(&source_file_string, param_2, param_3, &log_message_string);
+        log_from_zt(&source_file_string, line_number, level, &log_message_string);
     }
 }
 
