@@ -196,6 +196,152 @@ pub struct IconDefinition {
     icon_palette_path: String,
 }
 
+// ============================================================================
+// Patch System Data Structures
+// ============================================================================
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct PatchFile {
+    #[serde(rename = "patch")]
+    pub patches: Vec<Patch>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum Patch {
+    Replace(ReplacePatch),
+    Merge(MergePatch),
+    Delete(DeletePatch),
+    SetKey(SetKeyPatch),
+    SetKeys(SetKeysPatch),
+    AppendValue(AppendValuePatch),
+    AppendValues(AppendValuesPatch),
+    RemoveKey(RemoveKeyPatch),
+    RemoveKeys(RemoveKeysPatch),
+    AddSection(AddSectionPatch),
+    ClearSection(ClearSectionPatch),
+    RemoveSection(RemoveSectionPatch),
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeMode {
+    PatchPriority,
+    BasePriority,
+}
+
+fn default_merge_mode() -> MergeMode {
+    MergeMode::PatchPriority
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ReplacePatch {
+    pub target: String,
+    pub source: String,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct MergePatch {
+    pub target: String,
+    pub source: String,
+    #[serde(default = "default_merge_mode")]
+    pub merge_mode: MergeMode,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct DeletePatch {
+    pub target: String,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct SetKeyPatch {
+    pub target: String,
+    pub section: String,
+    pub key: String,
+    pub value: String,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct SetKeysPatch {
+    pub target: String,
+    pub section: String,
+    pub keys: HashMap<String, String>,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct AppendValuePatch {
+    pub target: String,
+    pub section: String,
+    pub key: String,
+    pub value: String,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct AppendValuesPatch {
+    pub target: String,
+    pub section: String,
+    pub key: String,
+    pub values: Vec<String>,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct RemoveKeyPatch {
+    pub target: String,
+    pub section: String,
+    pub key: String,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct RemoveKeysPatch {
+    pub target: String,
+    pub section: String,
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct AddSectionPatch {
+    pub target: String,
+    pub section: String,
+    #[serde(default)]
+    pub keys: HashMap<String, String>,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ClearSectionPatch {
+    pub target: String,
+    pub section: String,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct RemoveSectionPatch {
+    pub target: String,
+    pub section: String,
+    #[serde(default)]
+    pub target_mod: Option<String>,
+}
+
 #[cfg(test)]
 mod mod_loading_tests {
     use crate::mods::Version;
@@ -274,5 +420,49 @@ mod mod_loading_tests {
         check_moon_location(location_2);
         let habitat = habitats.get("swamp").unwrap();
         check_swamp_habitat(habitat);
+    }
+
+    #[test]
+    fn test_parse_patches() {
+        let patches: super::PatchFile = toml::from_str(include_str!("../resources/test/patch.toml")).unwrap();
+        assert_eq!(patches.patches.len(), 4);
+
+        // Test merge patch (defaults to patch_priority)
+        match &patches.patches[0] {
+            super::Patch::Merge(patch) => {
+                assert_eq!(patch.target, "animals/blckbuck.ai");
+                assert_eq!(patch.source, "resources/patches/blckbuck.ai");
+                assert_eq!(patch.merge_mode, super::MergeMode::PatchPriority);
+            }
+            _ => panic!("Expected Merge patch"),
+        }
+
+        // Test replace patch
+        match &patches.patches[1] {
+            super::Patch::Replace(patch) => {
+                assert_eq!(patch.target, "animals/blckbuck.ai");
+                assert_eq!(patch.source, "resources/patches/blckbuck.ai");
+            }
+            _ => panic!("Expected Replace patch"),
+        }
+
+        // Test delete patch
+        match &patches.patches[2] {
+            super::Patch::Delete(patch) => {
+                assert_eq!(patch.target, "animals/oldanimal.ai");
+            }
+            _ => panic!("Expected Delete patch"),
+        }
+
+        // Test set_key patch
+        match &patches.patches[3] {
+            super::Patch::SetKey(patch) => {
+                assert_eq!(patch.target, "config/settings.ini");
+                assert_eq!(patch.section, "Graphics");
+                assert_eq!(patch.key, "Resolution");
+                assert_eq!(patch.value, "1920x1080");
+            }
+            _ => panic!("Expected SetKey patch"),
+        }
     }
 }

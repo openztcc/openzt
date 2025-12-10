@@ -1,20 +1,20 @@
-[patches.test]
-type="file"
-operation="merge"
-file_path="animals/blckbuck.ai"
-source="resources/patches/blckbuck.ai"
-[patches.test2]
-type="file"
-operation="replace"
-file_path="animals/blckbuck.ai"
-source="resources/patches/blckbuck.ai"
-[patches.test3]
-type="openzt"
-operation="replace"
-resource_id="openzt.mods.finn.moon.location.moon"
-source="resources/patches/moon.ani"
-[patches.test4]
-type="location"
-operation="attach"
-animal="3hhkj312"
-habitat="openzt.mods.finn.moon.location.moon"
+[[patch]]
+operation = "merge"
+target = "animals/blckbuck.ai"
+source = "resources/patches/blckbuck.ai"
+
+[[patch]]
+operation = "replace"
+target = "animals/blckbuck.ai"
+source = "resources/patches/blckbuck.ai"
+
+[[patch]]
+operation = "delete"
+target = "animals/oldanimal.ai"
+
+[[patch]]
+operation = "set_key"
+target = "config/settings.ini"
+section = "Graphics"
+key = "Resolution"
+value = "1920x1080"

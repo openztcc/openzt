@@ -242,6 +242,15 @@ const LINE_ENDING: &str = "\r\n";
 #[cfg(not(windows))]
 const LINE_ENDING: &str = "\n";
 
+///Determines priority when merging INI configurations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeMode {
+    ///Patch values overwrite existing values (default)
+    PatchPriority,
+    ///Existing values are preserved, patch only adds new keys
+    BasePriority,
+}
+
 impl Ini {
     ///Creates a new `Map` of `Map<String, Map<String, Option<String>>>` type for the struct.
     ///All values in the Map are stored in `String` type.
@@ -1343,6 +1352,89 @@ impl Ini {
                 Some(keys)
             },
             None => None,
+        }
+    }
+
+    ///Checks if a section exists in the Ini configuration.
+    ///## Example
+    ///```rust
+    ///use openzt_configparser::ini::Ini;
+    ///
+    ///let mut config = Ini::new();
+    ///config.read(String::from("[section]\nkey=value"));
+    ///assert_eq!(config.has_section("section"), true);
+    ///assert_eq!(config.has_section("missing"), false);
+    ///```
+    ///Returns `true` if the section exists, else `false`.
+    pub fn has_section(&self, section: &str) -> bool {
+        let section = if self.case_sensitive {
+            section.to_owned()
+        } else {
+            section.to_lowercase()
+        };
+        self.map.contains_key(&section)
+    }
+
+    ///Clears all keys from a section but keeps the section header.
+    ///## Example
+    ///```rust
+    ///use openzt_configparser::ini::Ini;
+    ///
+    ///let mut config = Ini::new();
+    ///config.read(String::from("[section]\nkey1=value1\nkey2=value2"));
+    ///config.clear_section("section");
+    ///assert!(config.has_section("section"));
+    ///assert_eq!(config.get_keys("section").unwrap().len(), 0);
+    ///```
+    pub fn clear_section(&mut self, section: &str) {
+        let section = if self.case_sensitive {
+            section.to_owned()
+        } else {
+            section.to_lowercase()
+        };
+        if let Some(section_map) = self.map.get_mut(&section) {
+            section_map.clear();
+        }
+    }
+
+    ///Merges another Ini configuration into this one with configurable priority.
+    ///
+    ///The `merge_mode` parameter controls how conflicts are handled:
+    ///- `MergeMode::PatchPriority`: Values from `other` overwrite existing values (default behavior)
+    ///- `MergeMode::BasePriority`: Existing values are preserved, only new keys from `other` are added
+    ///
+    ///## Example
+    ///```rust
+    ///use openzt_configparser::ini::Ini;
+    ///
+    ///let mut base = Ini::new();
+    ///base.read(String::from("[section]\nkey1=original\nkey2=base_only"));
+    ///
+    ///let mut patch = Ini::new();
+    ///patch.read(String::from("[section]\nkey1=patched\nkey3=patch_only"));
+    ///
+    ///// With PatchPriority: key1 becomes "patched"
+    ///base.merge_with_priority(&patch, openzt_configparser::ini::MergeMode::PatchPriority);
+    ///
+    ///// With BasePriority: key1 stays "original"
+    ///// base.merge_with_priority(&patch, openzt_configparser::ini::MergeMode::BasePriority);
+    ///```
+    pub fn merge_with_priority(&mut self, other: &Ini, merge_mode: MergeMode) {
+        for (section, section_map) in other.map.iter() {
+            let target_section = self.map.entry(section.clone()).or_default();
+
+            match merge_mode {
+                MergeMode::PatchPriority => {
+                    // Patch values overwrite existing values
+                    target_section.extend(section_map.clone());
+                }
+                MergeMode::BasePriority => {
+                    // Preserve existing values, only add new keys
+                    for (key, value) in section_map.iter() {
+                        target_section.entry(key.clone()).or_insert_with(|| value.clone());
+                    }
+                }
+            }
         }
     }
 }
