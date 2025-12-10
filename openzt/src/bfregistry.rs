@@ -5,7 +5,8 @@ use openzt_detour_macro::detour_mod;
 use tracing::info;
 
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    lua_fn,
     util::get_from_memory,
 };
 
@@ -62,21 +63,24 @@ mod zoo_bf_registry {
         bfregistry::{add_to_registry, get_from_registry},
         util::{get_from_memory, get_string_from_memory},
     };
-    use openzt_detour::{BFREGISTRY_PRTGET, BFREGISTRY_ADD, BFREGISTRY_ADDUI};
+    // use openzt_detour::BFREGISTRY_ADDUI; // Actually UIElement::registerit
+    use openzt_detour::gen::uielement::REGISTERIT as UIELEMENT_REGISTERIT;
+    use openzt_detour::gen::bfregistry::PTR_GET;
+    use openzt_detour::gen::bfmgr::REGISTERIT as BFMGR_REGISTERIT;
 
-    #[detour(BFREGISTRY_PRTGET)]
-    unsafe extern "thiscall" fn prt_get(_this_prt: u32, class_name: u32, _delimeter_maybe: u8) -> u32 {
+    #[detour(PTR_GET)]
+    unsafe extern "thiscall" fn prt_get(_this_prt: u32, class_name: u32, _param_2: bool) -> u32 {
         get_from_registry(get_string_from_memory(get_from_memory::<u32>(class_name))).unwrap()
     }
 
-    #[detour(BFREGISTRY_ADD)]
+    #[detour(BFMGR_REGISTERIT)]
     unsafe extern "cdecl" fn add_to_bfregistry(param_1: u32, param_2: u32) -> u32 {
         let param_1_string = get_string_from_memory(get_from_memory::<u32>(param_1));
         add_to_registry(&param_1_string, param_2);
         0x638001
     }
 
-    #[detour(BFREGISTRY_ADDUI)]
+    #[detour(UIELEMENT_REGISTERIT)]
     unsafe extern "cdecl" fn add_to_bfregistry_ui(param_1: u32, param_2: u32) -> u32 {
         let param_1_string = get_string_from_memory(get_from_memory::<u32>(param_1));
         add_to_registry(&param_1_string, param_2);
@@ -89,5 +93,12 @@ pub fn init() {
     if let Err(e) = unsafe { zoo_bf_registry::init_detours() } {
         info!("Error initialising bf_registry detours: {}", e);
     };
-    add_to_command_register("list_bf_registry".to_owned(), command_list_registry)
+
+    // list_bf_registry() - no args
+    lua_fn!("list_bf_registry", "Lists BF registry entries (deprecated)", "list_bf_registry()", || {
+        match command_list_registry(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 }

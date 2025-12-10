@@ -19,26 +19,104 @@ OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It pr
 
 ### Build Commands
 ```bash
-# Debug build
-cargo +nightly build --lib --target=i686-pc-windows-msvc
+# Build only (no game launch)
+openzt.bat build                           # Debug with command-console
+openzt.bat build --release                 # Release with command-console
+openzt.bat build --stable                  # Debug with stable Rust (no console)
+openzt.bat build --test                    # Debug test build
+openzt.bat build --test --release          # Release test build
+openzt.bat build --loader                  # Debug + loader
 
-# Release build  
-cargo +nightly build --lib --release --target=i686-pc-windows-msvc
+# Build and run - DLL copy method (default)
+openzt.bat run                             # Debug with command-console
+openzt.bat run --release                   # Release with command-console
+openzt.bat run --test                      # Debug test build
+openzt.bat run --test --release            # Release test build
+openzt.bat run --stable                    # Debug with stable Rust
+
+# Build and run - loader injection method
+openzt.bat run --loader                    # Debug via loader injection
+openzt.bat run --loader --release          # Release via loader injection
+openzt.bat run --loader --pause            # Debug, run loader exe (for debugger)
+openzt.bat run --loader --pause --release  # Release, run loader exe (for debugger)
 
 # Documentation
-cargo +nightly rustdoc --manifest-path openzt/Cargo.toml --lib --target i686-pc-windows-msvc --open -- --document-private-items
+openzt.bat docs
 ```
 
-### Running/Testing
-```bash
-# Via loader (preferred)
-run-via-loader.bat           # Debug
-run-via-loader-release.bat   # Release
-run-via-loader-pause.bat     # Suspended for debugger
+### Lua Console (Runtime Scripting)
 
-# Console (after OpenZT is running)
+The console executes Lua code directly on the game thread. Connect after OpenZT is running:
+
+```bash
 cd openzt-console && cargo run
 ```
+
+**Example Commands**:
+```lua
+-- List all available functions
+help()
+
+-- Search for specific functions
+help("cash")
+
+-- Game management
+get_date()                           -- Get current in-game date
+add_cash(10000)                      -- Add $10000 to budget
+enable_dev_mode(true)                -- Enable developer mode
+zoostats()                           -- Display zoo statistics
+
+-- Settings
+get_setting("AI", "cKeeperMaxTiredness")
+set_setting("AI", "cKeeperMaxTiredness", "100")
+list_settings()                      -- List all settings
+list_settings("AI")                  -- List AI settings only
+
+-- Entity management
+get_selected_entity()                -- Get selected entity details
+sel_type()                           -- Get selected entity type config
+sel_type("-v")                       -- Verbose entity type info
+make_sel(9500)                       -- Make entity type selectable
+
+-- World/Habitat info
+list_entities()                      -- List all entities in world
+list_exhibits()                      -- List all exhibits/habitats
+get_zt_world_mgr()                   -- World manager debug info
+
+-- Expansions
+list_expansion()                     -- List loaded expansions
+get_current_expansion()              -- Get active expansion
+get_members()                        -- List expansion member sets
+
+-- Resources
+list_resources()                     -- List BF resource directories
+list_openzt_mods()                   -- List OpenZT mod IDs
+get_string(9211)                     -- Get game string by ID
+
+-- UI
+ui("click_continue")                 -- Click continue button
+continue()                           -- Shorthand for above
+get_buy_tab()                        -- Get current buy tab
+```
+
+**Error Handling**:
+```lua
+-- Functions return (nil, error_string) on failure
+result, err = get_string(999999)
+if err then
+    print("Error: " .. err)
+else
+    print("Result: " .. result)
+end
+
+-- Or check for nil
+local date = get_date()
+if date then
+    print("Date: " .. date)
+end
+```
+
+**Migration Note**: The old command-style syntax (e.g., `add_cash 1000`) is deprecated. Use Lua function calls (e.g., `add_cash(1000)`) instead. See `MIGRATION_TEMPLATE.md` for details on migrating remaining commands.
 
 ## Architecture Patterns
 
@@ -91,8 +169,8 @@ resource_manager::add_handler("bfb", Box::new(BfbHandler));
 
 ### Core Systems
 - **Resource Management**: Custom file loading/modification via `resource_mgr/`
-- **String Registry**: Game text injection via `string_registry.rs`  
-- **Console**: Runtime command execution via socket connection
+- **String Registry**: Game text injection via `string_registry.rs`
+- **Lua Scripting**: Runtime Lua execution on game thread via TCP console (port 8080)
 - **Settings**: Enhanced INI configuration loading
 - **Expansion Packs**: Custom expansion support
 

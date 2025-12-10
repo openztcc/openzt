@@ -8,8 +8,9 @@ use num_enum::FromPrimitive;
 use tracing::info;
 
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
     expansions::is_member,
+    lua_fn,
     util::{get_from_memory, get_string_from_memory, map_from_memory, Checkable},
     ztui::get_selected_entity_type_address,
     ztworldmgr,
@@ -282,7 +283,7 @@ impl Checkable for ZTSceneryType {
     fn check(ptr: u32) -> anyhow::Result<()> {
         let entity_type_vtable = ZTEntityTypeClass::from(get_from_memory::<u32>(ptr));
         if !zt_entity_type_class_is(&entity_type_vtable, &ZTEntityTypeClass::Scenery) {
-            return Err(anyhow::anyhow!("Incompatible entity type: expected ZTEntityTypeClass::Scenery, found {:?}", entity_type_vtable));
+            return Err(anyhow::anyhow!("Incompatible entity type: expected ZTEntityTypeClass::Scenery, found {:?}({:#x})", entity_type_vtable, get_from_memory::<u32>(ptr)));
         }
         anyhow::Ok(())
     }
@@ -1768,8 +1769,23 @@ fn get_bfentitytype(address: u32) -> Result<Box<dyn EntityType>, String> {
 
     // initializes the custom command
     pub fn init() {
-        add_to_command_register("sel_type".to_string(), command_sel_type);
-        add_to_command_register("make_sel".to_owned(), command_make_sel);
+        // sel_type([key], [value]) - optional arguments
+        lua_fn!("sel_type", "Gets selected entity type config, with optional key/value to set", "sel_type([key], [value]) or sel_type(\"-v\")", |args: mlua::Variadic<String>| {
+            let args_vec: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            match command_sel_type(args_vec) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        });
+
+        // make_sel(id) - single u32 arg
+        lua_fn!("make_sel", "Makes entity type selectable", "make_sel(id)", |id: u32| {
+            let id_str = id.to_string();
+            match command_make_sel(vec![&id_str]) {
+                Ok(result) => Ok((Some(result), None::<String>)),
+                Err(e) => Ok((None::<String>, Some(e.to_string())))
+            }
+        });
     }
 
 #[derive(Debug, PartialEq, Eq, FromPrimitive, Clone)]

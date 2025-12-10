@@ -73,7 +73,8 @@ mod detour_zoo_main {
     }
 
     #[cfg(target_os = "windows")]
-    use openzt_detour::{BFTILE_GET_LOCAL_ELEVATION, LOAD_LANG_DLLS};
+    use openzt_detour::gen::bfapp::LOAD_LANG_DLLS;
+    use openzt_detour::gen::bftile::GET_LOCAL_ELEVATION;
     use proptest::prelude::ProptestConfig;
     use tracing::{error, info};
 
@@ -103,6 +104,7 @@ mod detour_zoo_main {
         };
         let mut runner = proptest::test_runner::TestRunner::new(runner_config);
         let test_name = "BFTILE_GET_LOCAL_ELEVATION";
+        // Create a enum strategy so this is all tested in one test and test that each enum variant is tested
         let unknown_byte_values = vec![
             0x1, 0x4, 0x5, 0x10, 0x11, 0x14, 0x15, 0x19, 0x40, 0x41, 0x44, 0x45, 0x46, 0x50, 0x51, 0x54, 0x64, 0x91,
         ];
@@ -113,7 +115,7 @@ mod detour_zoo_main {
                 let tile = BFTile::new(pos, unknown_byte_2);
                 let reimplemented_result = tile.get_local_elevation(pos);
 
-                let result = BFTILE_GET_LOCAL_ELEVATION.original()(&raw const tile as u32, &raw const pos as u32);
+                let result = GET_LOCAL_ELEVATION.original()(&raw const tile as u32, &raw const pos as u32);
                 assert_eq!(
                     result, reimplemented_result+1,
                     "Failed for pos: {:?}, tile: {:?}, unknown_byte_2: {}",

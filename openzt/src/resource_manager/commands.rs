@@ -1,5 +1,6 @@
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    lua_fn,
     resource_manager::{
         bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory},
         lazyresourcemap::get_file_names,
@@ -10,12 +11,63 @@ use crate::{
 };
 
 pub fn init_commands() {
-    add_to_command_register("list_resources".to_owned(), command_list_resources);
-    add_to_command_register("get_bfresourcemgr".to_owned(), command_get_bf_resource_mgr);
-    add_to_command_register("list_resource_strings".to_string(), command_list_resource_strings);
-    add_to_command_register("list_openzt_resource_strings".to_string(), command_list_openzt_resource_strings);
-    add_to_command_register("list_openzt_mods".to_string(), command_list_openzt_mod_ids);
-    add_to_command_register("list_openzt_locations_habitats".to_string(), command_list_openzt_locations_habitats);
+    // list_resources() - no args
+    lua_fn!("list_resources", "Lists all BF resource directories and files", "list_resources()", || {
+        match command_list_resources(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // get_bfresourcemgr() - no args
+    lua_fn!("get_bfresourcemgr", "Returns BF resource manager details", "get_bfresourcemgr()", || {
+        match command_get_bf_resource_mgr(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // list_resource_strings([prefix]) - optional string arg
+    lua_fn!("list_resource_strings", "Lists resource strings, optionally filtered by prefix", "list_resource_strings([prefix])", |prefix: Option<String>| {
+        match prefix {
+            Some(p) => {
+                match command_list_resource_strings(vec![&p]) {
+                    Ok(result) => Ok((Some(result), None::<String>)),
+                    Err(e) => Ok((None::<String>, Some(e.to_string())))
+                }
+            },
+            None => {
+                match command_list_resource_strings(vec![]) {
+                    Ok(result) => Ok((Some(result), None::<String>)),
+                    Err(e) => Ok((None::<String>, Some(e.to_string())))
+                }
+            }
+        }
+    });
+
+    // list_openzt_resource_strings() - no args
+    lua_fn!("list_openzt_resource_strings", "Lists all OpenZT resource strings", "list_openzt_resource_strings()", || {
+        match command_list_openzt_resource_strings(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // list_openzt_mods() - no args
+    lua_fn!("list_openzt_mods", "Lists all OpenZT mod IDs", "list_openzt_mods()", || {
+        match command_list_openzt_mod_ids(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // list_openzt_locations_habitats() - no args
+    lua_fn!("list_openzt_locations_habitats", "Lists all OpenZT location and habitat IDs", "list_openzt_locations_habitats()", || {
+        match command_list_openzt_locations_habitats(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 }
 
 fn command_list_resource_strings(args: Vec<&str>) -> Result<String, CommandError> {

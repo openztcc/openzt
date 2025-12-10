@@ -9,7 +9,8 @@ use openzt_detour_macro::detour_mod;
 
 use crate::{
     bfentitytype::{read_zt_entity_type_from_memory, BFEntityType, ZTEntityType, ZTSceneryType},
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    lua_fn,
     util::{get_from_memory, get_string_from_memory, map_from_memory},
 };
 use crate::util::ZTBufferString;
@@ -375,10 +376,12 @@ impl ZTWorldMgr {
 pub mod hooks_ztworldmgr {
     use crate::util::save_to_memory;
     use openzt_detour::*;
+    use openzt_detour::gen::bfmap::{GET_NEIGHBOR_1, TILE_TO_WORLD};
+    use openzt_detour::gen::bfentity::{GET_BLOCKING_RECT, GET_FOOTPRINT, IS_ON_TILE, GET_BLOCKING_RECT_VIRT_ZTPATH};
 
     use super::*;
 
-    #[detour(BFMAP_GET_NEIGHBOUR)]
+    #[detour(GET_NEIGHBOR_1)]
     unsafe extern "thiscall" fn bfmap_get_neighbour(_this: u32, bftile: u32, direction: u32) -> u32 {
         let ztwm = read_zt_world_mgr_from_global();
         let bftile = get_from_memory::<BFTile>(bftile);
@@ -394,8 +397,8 @@ pub mod hooks_ztworldmgr {
     }    
 
     // 0x0040f916 int * __thiscall OOAnalyzer::BFEntity::getFootprint(BFEntity *this,undefined4 *param_1)
-    #[detour(BFENTITY_GET_FOOTPRINT)]
-    unsafe extern "thiscall" fn bfentity_get_footprint(_this: u32, param_1: u32, _param_2: u32) -> u32 {
+    #[detour(GET_FOOTPRINT)]
+    unsafe extern "thiscall" fn bfentity_get_footprint(_this: u32, param_1: u32, _param_2: bool) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         let footprint = entity.get_footprint();
         save_to_memory(param_1, footprint.x);
@@ -406,7 +409,7 @@ pub mod hooks_ztworldmgr {
     }
 
     // 0x0042721a u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
-    #[detour(BFENTITY_GET_BLOCKING_RECT)]
+    #[detour(GET_BLOCKING_RECT)]
     unsafe extern "thiscall" fn bfentity_get_blocking_rect(_this: u32, param_1: u32) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         save_to_memory(param_1, entity.get_blocking_rect());
@@ -414,7 +417,7 @@ pub mod hooks_ztworldmgr {
     }
 
     // 0x004fbbee u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
-    #[detour(BFENTITY_GET_BLOCKING_RECT_ZTPATH)]
+    #[detour(GET_BLOCKING_RECT_VIRT_ZTPATH)]
     unsafe extern "thiscall" fn bfentity_get_blocking_rect_ztpath(_this: u32, param_1: u32) -> u32 {
         let entity = get_from_memory::<BFEntity>(_this);
         save_to_memory(param_1, entity.get_blocking_rect());
@@ -422,7 +425,7 @@ pub mod hooks_ztworldmgr {
     }
 
     // // 0040f26c BFPos * __thiscall OOAnalyzer::BFMap::tileToWorld(BFMap *this,BFPos *param_1,BFPos *param_2,BFPos *param_3)
-    #[detour(BFMAP_TILE_TO_WORLD)]
+    #[detour(TILE_TO_WORLD)]
     unsafe extern "thiscall" fn bfmap_tile_to_world(_this: u32, param_1: u32, param_2: u32, param_3: u32) -> u32 {
         let ztwm = read_zt_world_mgr_from_global();
         let tile_pos = get_from_memory::<IVec3>(param_2);
@@ -434,9 +437,9 @@ pub mod hooks_ztworldmgr {
 
     // TODO: Remove this when check_tank_placement is fully implemented
     // 004e16f1 bool __thiscall OOAnalyzer::BFEntity::isOnTile(BFEntity *this,BFTile *param_1)
-    #[detour(BFENTITY_IS_ON_TILE)]
+    #[detour(IS_ON_TILE)]
     unsafe extern "thiscall" fn bfentity_is_on_tile(_this: u32, param_1: u32) -> bool {
-        let result = unsafe { BFENTITY_IS_ON_TILE_DETOUR.call(_this, param_1) };
+        let result = unsafe { IS_ON_TILE_DETOUR.call(_this, param_1) };
         let entity = get_from_memory::<BFEntity>(_this);
         let tile = get_from_memory::<BFTile>(param_1);
         let reimimplented_result = entity.is_on_tile(&tile);
@@ -448,13 +451,62 @@ pub mod hooks_ztworldmgr {
 }
 
 pub fn init() {
-    add_to_command_register("list_entities".to_owned(), command_get_zt_world_mgr_entities);
-    add_to_command_register("list_entities_2".to_owned(), command_get_zt_world_mgr_entities_2);
-    add_to_command_register("list_types".to_owned(), command_get_zt_world_mgr_types);
-    add_to_command_register("get_zt_world_mgr".to_owned(), command_get_zt_world_mgr);
-    add_to_command_register("get_types_summary".to_owned(), command_zt_world_mgr_types_summary);
-    add_to_command_register("get_entity_vtable_entry".to_owned(), command_get_entity_unique_vtable_entries);
-    add_to_command_register("get_entity_type_vtable_entry".to_owned(), command_get_entity_type_unique_vtable_entries);
+    // list_entities() - no args
+    lua_fn!("list_entities", "Lists all entities in the world", "list_entities()", || {
+        match command_get_zt_world_mgr_entities(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // list_entities_2() - no args
+    lua_fn!("list_entities_2", "Lists all entities in the world (alternate format)", "list_entities_2()", || {
+        match command_get_zt_world_mgr_entities_2(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // list_types() - no args
+    lua_fn!("list_types", "Lists all entity types in the world", "list_types()", || {
+        match command_get_zt_world_mgr_types(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // get_zt_world_mgr() - no args
+    lua_fn!("get_zt_world_mgr", "Returns world manager details", "get_zt_world_mgr()", || {
+        match command_get_zt_world_mgr(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // get_types_summary() - no args
+    lua_fn!("get_types_summary", "Returns summary of all entity types", "get_types_summary()", || {
+        match command_zt_world_mgr_types_summary(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // get_entity_vtable_entry(offset) - single string arg
+    lua_fn!("get_entity_vtable_entry", "Returns unique entity vtable entries at offset", "get_entity_vtable_entry(offset)", |offset: String| {
+        match command_get_entity_unique_vtable_entries(vec![&offset]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // get_entity_type_vtable_entry(offset) - single string arg
+    lua_fn!("get_entity_type_vtable_entry", "Returns unique entity type vtable entries at offset", "get_entity_type_vtable_entry(offset)", |offset: String| {
+        match command_get_entity_type_unique_vtable_entries(vec![&offset]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
     unsafe { hooks_ztworldmgr::init_detours().unwrap() };
 }
 

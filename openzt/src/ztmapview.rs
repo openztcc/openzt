@@ -210,7 +210,8 @@ pub mod zoo_ztmapview {
     use crate::ztworldmgr::{IVec3};
     use crate::util::get_from_memory;
     use crate::ztmapview::{BFTile, ZTMapView, ErrorStringId};
-    use openzt_detour::{ZTMAPVIEW_CHECK_TANK_PLACEMENT, BFTILE_GET_LOCAL_ELEVATION};
+    use openzt_detour::gen::ztmapview::CHECK_TANK_PLACEMENT;
+    use openzt_detour::gen::bftile::GET_LOCAL_ELEVATION;
 
     // use crate::{
     //     bfregistry::{add_to_registry, get_from_registry},
@@ -218,18 +219,18 @@ pub mod zoo_ztmapview {
     // };
 
     //004df688
-    #[detour(ZTMAPVIEW_CHECK_TANK_PLACEMENT)]
+    #[detour(CHECK_TANK_PLACEMENT)]
     // fn check_tank_placement(ZTMapView *other_this, BFEntity *param_2, BFTile *param_3, int *param_4)
-    unsafe extern "thiscall" fn check_tank_placement(_this: u32, temp_entity_ptr: u32, tile: u32, response_ptr: *mut u32) -> u32 {
-        let result = unsafe { ZTMAPVIEW_CHECK_TANK_PLACEMENT_DETOUR.call(_this, temp_entity_ptr, tile, response_ptr) };
+    unsafe extern "stdcall" fn check_tank_placement(temp_entity_ptr: u32, tile: u32, response_ptr: *mut u32) -> bool {
+        let result = unsafe { CHECK_TANK_PLACEMENT_DETOUR.call(temp_entity_ptr, tile, response_ptr) };
 
         // let entity = get_from_memory(temp_entity);
 
         let bf_tile = get_from_memory::<BFTile>(tile);
         
-        let zt_map_view = get_from_memory::<ZTMapView>(_this);
+        // let zt_map_view = get_from_memory::<ZTMapView>(_this);
         
-        if let Err(reimplemented_result) = zt_map_view.check_tank_placement(temp_entity_ptr, &bf_tile) {
+        if let Err(reimplemented_result) = ZTMapView::check_tank_placement(temp_entity_ptr, &bf_tile) {
             if reimplemented_result == ErrorStringId::from(unsafe{*response_ptr}) {
                 info!("ZTMapView::checkTankPlacement success {:?}", reimplemented_result);
             } else {
@@ -243,7 +244,7 @@ pub mod zoo_ztmapview {
 
         // info!("ZTMapView::checkTankPlacement {}, {:p} -> {:#x}", result, response_ptr, unsafe{*response_ptr});
         result
-        // 1
+        // true
     }
 
     // #[hook(unsafe extern "thiscall" BFUIMgr_display_message, offset = 0x0009ccc3)]
@@ -253,7 +254,7 @@ pub mod zoo_ztmapview {
     // }
 
     // 0040f24d int __thiscall OOAnalyzer::BFTile::getLocalElevation(BFTile *this,BFPos *param_1)
-    #[detour(BFTILE_GET_LOCAL_ELEVATION)]
+    #[detour(GET_LOCAL_ELEVATION)]
     unsafe extern "thiscall" fn get_local_elevation(_this: u32, pos: u32) -> i32 {
         let tile = get_from_memory::<BFTile>(_this);
         let pos_vec = get_from_memory::<IVec3>(pos);
@@ -289,7 +290,7 @@ pub enum ErrorStringId {
 }
 
 impl ZTMapView {
-    pub fn check_tank_placement(&self, temp_entity_ptr: u32, tile: &BFTile) -> Result<(), ErrorStringId> {
+    pub fn check_tank_placement(temp_entity_ptr: u32, tile: &BFTile) -> Result<(), ErrorStringId> {
         info!("Entity Ptr {:#x} -> {:#x}", temp_entity_ptr, get_from_memory::<u32>(temp_entity_ptr));
         let temp_entity: BFEntity = get_from_memory(temp_entity_ptr);
         let habitat_mgr = read_zt_habitat_mgr_from_memory();
@@ -307,15 +308,19 @@ impl ZTMapView {
                 }
             }
         }
-        if zt_entity_type_class_is(&entity_type_class, &ZTEntityTypeClass::Scenery) {
-            let Ok(scenery_entity) = checked_get_from_memory::<ZTSceneryType>(temp_entity_ptr) else {
-                panic!("Failed to get ZTSceneryType from memory for entity at ptr: {:#x}", temp_entity_ptr);
-            };
+        // TODO: Fix this, currently we are trying to read a ZTSceneryType from the address of a ZTScenery entity instance
+        // if zt_entity_type_class_is(&entity_type_class, &ZTEntityTypeClass::Scenery) {
+        //     let scenery_entity = match checked_get_from_memory::<ZTSceneryType>(temp_entity_ptr) {
+        //         Ok(entity) => entity,
+        //         Err(e) => {
+        //             panic!("Failed to get ZTSceneryType from memory for entity at ptr: {:#x}, error: {}", temp_entity_ptr, e);
+        //         }
+        //     };
 
-            if !scenery_entity.underwater || !scenery_entity.surface {
-                return Err(ErrorStringId::ObjectCannotBePlacedInTank);
-            }
-        }
+        //     if !scenery_entity.underwater || !scenery_entity.surface {
+        //         return Err(ErrorStringId::ObjectCannotBePlacedInTank);
+        //     }
+        // }
         // match  {
         //     ZTEntityTypeClass::ZTKeeper
         // }

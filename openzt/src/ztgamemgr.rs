@@ -1,7 +1,8 @@
 use tracing::info;
 
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    lua_fn,
     util::get_from_memory,
 };
 
@@ -121,10 +122,39 @@ pub fn command_zoostats(_args: Vec<&str>) -> Result<String, CommandError> {
     Ok(format!("\nBudget: {}\nAnimals: {}\nSpecies: {}\nTired Guests: {}\nHungry Guests: {}\nThirsty Guests: {}\nGuests Need Restroom: {}\nNum Guests: {}\nZoo Admission Cost: ${}", ztgamemgr.cash, ztgamemgr.num_animals, ztgamemgr.num_species, ztgamemgr.num_tired_guests, ztgamemgr.num_hungry_guests, ztgamemgr.num_thirst_guests, ztgamemgr.num_guests_restroom_need, ztgamemgr.num_guests, ztgamemgr.zoo_admission_cost))
 }
 
-/// registers the commands with the command register
+/// registers the Lua functions
 pub fn init() {
-    add_to_command_register("get_date".to_string(), command_get_date_str);
-    add_to_command_register("add_cash".to_string(), command_add_cash);
-    add_to_command_register("enable_dev_mode".to_string(), command_enable_dev_mode);
-    add_to_command_register("zoostats".to_string(), command_zoostats);
+    // get_date() - no args
+    lua_fn!("get_date", "Returns current in-game date/time", "get_date()", || {
+        match command_get_date_str(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // add_cash(amount) - single f32 arg
+    lua_fn!("add_cash", "Adds cash to player's budget", "add_cash(amount)", |amount: f32| {
+        let amount_str = amount.to_string();
+        match command_add_cash(vec![&amount_str]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // enable_dev_mode(enabled) - bool arg
+    lua_fn!("enable_dev_mode", "Enables/disables developer mode", "enable_dev_mode(true/false)", |enabled: bool| {
+        let enabled_str = enabled.to_string();
+        match command_enable_dev_mode(vec![&enabled_str]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // zoostats() - no args
+    lua_fn!("zoostats", "Returns zoo statistics", "zoostats()", || {
+        match command_zoostats(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 }

@@ -1,14 +1,15 @@
 use std::fmt;
 
+use openzt_detour::gen::ztui_general::GET_SELECTED_ENTITY;
+use openzt_detour::gen::bfuimgr::GET_ELEMENT_0;
 use tracing::info;
 
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    lua_fn,
     util::{get_from_memory, get_string_from_memory_bounded, ZTBufferString},
     ztworldmgr::read_zt_entity_from_memory,
 };
-
-use openzt_detour::ZTUI_GET_SELECTED_ENTITY;
 
 const BFUIMGR_PTR: u32 = 0x00638de0;
 
@@ -96,12 +97,42 @@ impl fmt::Display for Sex {
 const RANDOM_SEX_STRING_PTR: u32 = 0x0063e420;
 
 pub fn init() {
-    add_to_command_register("get_selected_entity".to_owned(), command_get_selected_entity);
-    add_to_command_register("get_element".to_owned(), command_get_element);
+    // get_selected_entity() - no args
+    lua_fn!("get_selected_entity", "Returns details of the currently selected entity", "get_selected_entity()", || {
+        match command_get_selected_entity(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // get_element(id) - single u32 arg
+    lua_fn!("get_element", "Returns UI element details by ID", "get_element(id)", |id: u32| {
+        let id_str = id.to_string();
+        match command_get_element(vec![&id_str]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // get_buy_tab() - no args
+    lua_fn!("get_buy_tab", "Returns the currently active buy tab", "get_buy_tab()", || {
+        match command_get_current_buy_tab(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // ui(callback_name) - single string arg
+    lua_fn!("ui", "Calls a UI callback function", "ui(callback_name)", |callback: String| {
+        match command_call_ui_callback(vec![&callback]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 }
 
 fn command_get_selected_entity(_args: Vec<&str>) -> Result<String, CommandError> {
-    let get_selected_entity_fn = unsafe {ZTUI_GET_SELECTED_ENTITY.original()};
+    let get_selected_entity_fn = unsafe { GET_SELECTED_ENTITY.original() };
     let entity_address = unsafe { get_selected_entity_fn() };
     if entity_address == 0 {
         return Err(Into::into("No entity selected"));
@@ -115,7 +146,7 @@ fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
         return Err(Into::into("Expected 1 argument"));
     }
     let address = args[0].parse()?;
-    let get_element_fn = unsafe { openzt_detour::ZTUI_GET_ELEMENT.original() };
+    let get_element_fn = unsafe { GET_ELEMENT_0.original() };
     let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, address) };
     if ui_element_addr == 0 {
         return Err(Into::into("No element found"));
@@ -126,87 +157,81 @@ fn command_get_element(args: Vec<&str>) -> Result<String, CommandError> {
 }
 
 fn get_element(id: UIElementId) -> Option<UIElement> {
-    let get_element_fn = unsafe { openzt_detour::ZTUI_GET_ELEMENT.original() };
-    let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, id as u32) };
+    let get_element_fn = unsafe { GET_ELEMENT_0.original() };
+    let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, id as i32) };
     if ui_element_addr == 0 {
         return None;
     }
     Some(get_from_memory(ui_element_addr))
 }
 
-fn command_get_current_buy_tab(_args: Vec<&str>) -> Result<String, &'static str> {
+fn command_get_current_buy_tab(_args: Vec<&str>) -> Result<String, CommandError> {
     let tab = get_current_buy_tab();
     Ok(format!("{:?}", tab))
 }
 
 pub fn get_current_buy_tab() -> Option<BuyTab> {
     if let Some(asr) = get_element(UIElementId::AnimalScrollingRegion) {
-        if asr.state.is_hidden() {
-            return None;
-        }
-        if get_element(UIElementId::AnimalTab)?.state.is_selected() {
-            return Some(BuyTab::Animal);
-        }
-        if get_element(UIElementId::ShelterTab)?.state.is_selected() {
-            return Some(BuyTab::Shelter);
-        }
-        if get_element(UIElementId::ToysTab)?.state.is_selected() {
-            return Some(BuyTab::Toys);
-        }
-        if get_element(UIElementId::ShowToysTab)?.state.is_selected() {
-            return Some(BuyTab::ShowToys);
+        if !asr.state.is_hidden() {
+            if get_element(UIElementId::AnimalTab)?.state.is_selected() {
+                return Some(BuyTab::Animal);
+            }
+            if get_element(UIElementId::ShelterTab)?.state.is_selected() {
+                return Some(BuyTab::Shelter);
+            }
+            if get_element(UIElementId::ToysTab)?.state.is_selected() {
+                return Some(BuyTab::Toys);
+            }
+            if get_element(UIElementId::ShowToysTab)?.state.is_selected() {
+                return Some(BuyTab::ShowToys);
+            }
         }
     }
     if let Some(osr) = get_element(UIElementId::BuyObjectScrollingRegion) {
-        if osr.state.is_hidden() {
-            return None;
-        }
-        if get_element(UIElementId::BuildingTab)?.state.is_selected() {
-            return Some(BuyTab::Building);
-        }
-        if get_element(UIElementId::SceneryTab)?.state.is_selected() {
-            return Some(BuyTab::Scenery);
+        if !osr.state.is_hidden() {
+            if get_element(UIElementId::BuildingTab)?.state.is_selected() {
+                return Some(BuyTab::Building);
+            }
+            if get_element(UIElementId::SceneryTab)?.state.is_selected() {
+                return Some(BuyTab::Scenery);
+            }
         }
     }
     if let Some(hsr) = get_element(UIElementId::BuildHabitatScrollingRegion) {
-        if hsr.state.is_hidden() {
-            return None;
-        }
-        if get_element(UIElementId::FenceTab)?.state.is_selected() {
-            return Some(BuyTab::Fence);
-        }
-        if get_element(UIElementId::PathTab)?.state.is_selected() {
-            return Some(BuyTab::Path);
-        }
-        if get_element(UIElementId::FoliageTab)?.state.is_selected() {
-            return Some(BuyTab::Foliage);
-        }
-        if get_element(UIElementId::RocksTab)?.state.is_selected() {
-            return Some(BuyTab::Rocks);
+        if !hsr.state.is_hidden() {
+            if get_element(UIElementId::FenceTab)?.state.is_selected() {
+                return Some(BuyTab::Fence);
+            }
+            if get_element(UIElementId::PathTab)?.state.is_selected() {
+                return Some(BuyTab::Path);
+            }
+            if get_element(UIElementId::FoliageTab)?.state.is_selected() {
+                return Some(BuyTab::Foliage);
+            }
+            if get_element(UIElementId::RocksTab)?.state.is_selected() {
+                return Some(BuyTab::Rocks);
+            }
         }
     }
     if let Some(tsr) = get_element(UIElementId::TerraformScrollingRegion) {
-        if tsr.state.is_hidden() {
-            return None;
-        }
-        if get_element(UIElementId::PaintTerrainTab)?.state.is_selected() {
-            return Some(BuyTab::PaintTerrain);
-        }
-        if get_element(UIElementId::TerraformTab)?.state.is_selected() {
-            return Some(BuyTab::Terraform);
+        if !tsr.state.is_hidden() {
+            if get_element(UIElementId::PaintTerrainTab)?.state.is_selected() {
+                return Some(BuyTab::PaintTerrain);
+            }
+            if get_element(UIElementId::TerraformTab)?.state.is_selected() {
+                return Some(BuyTab::Terraform);
+            }
         }
     }
     if let Some(ssr) = get_element(UIElementId::StaffScrollingRegion) {
-        if ssr.state.is_hidden() {
-            return None;
+        if !ssr.state.is_hidden() {
+            return Some(BuyTab::Staff);
         }
-        return Some(BuyTab::Staff);
     }
     if let Some(developer_tab) = get_element(UIElementId::DeveloperScrollingRegion) {
-        if developer_tab.state.is_hidden() {
-            return None;
+        if !developer_tab.state.is_hidden() {
+            return Some(BuyTab::Developer);
         }
-        return Some(BuyTab::Developer);
     }
     None
 }
@@ -232,7 +257,7 @@ pub fn get_random_sex() -> Option<Sex> {
 
 /// returns the address of the selected entity
 pub fn get_selected_entity() -> u32 {
-    let get_selected_entity_fn = unsafe { openzt_detour::ZTUI_GET_SELECTED_ENTITY.original() };
+    let get_selected_entity_fn = unsafe { GET_SELECTED_ENTITY.original() };
     unsafe { get_selected_entity_fn() }
 }
 
@@ -317,4 +342,32 @@ impl fmt::Display for UIState {
             self.is_focused()
         )
     }
+}
+
+fn command_call_ui_callback(args: Vec<&str>) -> Result<String, CommandError> {
+    if args.len() != 1 {
+        return Err(Into::into("Expected 1 argument"));
+    }
+    let callback_function = match args[0] {
+        "click_continue" => {
+            unsafe {
+                openzt_detour::gen::ztui::CLICK_CONTINUE.original()
+            }
+        },
+        "list" => {
+            return Ok("click_continue".to_string());
+        },
+        _ => return Err(Into::into("Unknown UI callback")),
+    };
+    unsafe {
+        callback_function();
+    }
+    Ok("Success".to_string())
+}
+
+fn click_ui_element(id: UIElementId) {
+    // let click_element_fn = unsafe { openzt_detour::ZTUI_CLICK_ELEMENT.original() };
+    // unsafe {
+    //     click_element_fn(BFUIMGR_PTR, id as u32);
+    // }
 }

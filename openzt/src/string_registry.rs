@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use openzt_detour_macro::detour_mod;
 use tracing::info;
 
-use crate::command_console::{add_to_command_register, CommandError};
+use crate::command_console::CommandError;
+use crate::lua_fn;
 
 const STRING_REGISTRY_ID_OFFSET: u32 = 100_000;
 
@@ -93,12 +94,12 @@ fn command_get_string(args: Vec<&str>) -> Result<String, CommandError> {
 #[detour_mod]
 pub mod zoo_string {
     use tracing::info;
-    use openzt_detour::BFAPP_LOADSTRING;
+    use openzt_detour::gen::bfapp::LOAD_STRING;
 
     use super::{is_user_type_id, STRING_REGISTRY_ID_OFFSET, get_override_string_from_registry};
     use crate::{string_registry::get_string_from_registry, util::save_string_to_memory};
 
-    #[detour(BFAPP_LOADSTRING)]
+    #[detour(LOAD_STRING)]
     unsafe extern "thiscall" fn bf_app_load_string(this_ptr: u32, string_id: u32, string_buffer: u32) -> u32 {
         if is_user_type_id(string_id) {
             info!("BFApp::loadString {:#x} {} {:#x}", this_ptr, string_id, string_buffer);
@@ -114,7 +115,7 @@ pub mod zoo_string {
             save_string_to_memory(string_buffer, &override_string);
             return override_string.len() as u32 + 1;
         }
-        unsafe { BFAPP_LOADSTRING_DETOUR.call(this_ptr, string_id, string_buffer) }
+        unsafe { LOAD_STRING_DETOUR.call(this_ptr, string_id, string_buffer) }
     }
 
     // #[hook(unsafe extern "thiscall" BFWorldMgr_unknown, offset = 0x00010d48)]
@@ -147,5 +148,13 @@ pub fn init() {
     if unsafe { zoo_string::init_detours() }.is_err() {
         info!("Failed to initialize string_registry detours");
     }
-    add_to_command_register("get_string".to_string(), command_get_string)
+
+    // get_string(id) - single u32 arg
+    lua_fn!("get_string", "Retrieves game string by ID (from OpenZT registry or game)", "get_string(id)", |id: u32| {
+        let id_str = id.to_string();
+        match command_get_string(vec![&id_str]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
 }

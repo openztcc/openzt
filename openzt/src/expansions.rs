@@ -17,7 +17,8 @@ use tracing::{debug, error, info};
 use crate::{
     animation::Animation,
     bfentitytype::{ZTEntityType, ZTEntityTypeClass},
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    lua_fn,
     resource_manager::{add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage, OPENZT_DIR0},
     string_registry::add_string_to_registry,
     util::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory},
@@ -318,42 +319,42 @@ impl Display for ExpansionList {
 #[detour_mod]
 pub mod custom_expansion {
     use tracing::info;
-    use openzt_detour::{ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED, ZTUI_EXPANSIONSELECT_SETUP};
+    // use openzt_detour::{ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED, ZTUI_EXPANSIONSELECT_SETUP};
+    use openzt_detour::gen::ztui_general::ENTITY_TYPE_IS_DISPLAYED;
+    use openzt_detour::gen::ztui_expansionselect::SETUP;
 
     use super::{initialise_expansions, read_current_expansion};
     use crate::{bfentitytype::read_zt_entity_type_from_memory, ztui::get_current_buy_tab};
 
-    #[detour(ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED)]
-    pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
-        // TODO: Put this call and subsequent log behind OpenZT debug flag
-        let result = unsafe { ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
+    #[detour(ENTITY_TYPE_IS_DISPLAYED)]
+    pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> bool {
+
+        // TODO: Put this call and subsequent log behind OpenZT debug flag) };
+        let result = unsafe { ENTITY_TYPE_IS_DISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
 
         let Some(current_expansion) = read_current_expansion() else {
-            return 0;
+            return false;
         };
 
         let entity = read_zt_entity_type_from_memory(bf_entity);
 
         let Some(current_buy_tab) = get_current_buy_tab() else {
-            return 0;
+            return false;
         };
 
-        let reimplemented_result = match super::filter_entity_type(&current_buy_tab, &current_expansion, &entity) {
-            true => 1,
-            false => 0,
-        };
+        let reimplemented_result = super::filter_entity_type(&current_buy_tab, &current_expansion, &entity);
 
         // TODO: Put this log behind OpenZT debug flag
         if result != reimplemented_result {
-            info!("Filtering mismatch {} {} ({:#x} vs {:#x})", entity, current_buy_tab, result, reimplemented_result);
+            info!("Filtering mismatch {} {} ({} vs {})", entity, current_buy_tab, result, reimplemented_result);
         }
 
         reimplemented_result
     }
 
-    #[detour(ZTUI_EXPANSIONSELECT_SETUP)]
+    #[detour(SETUP)]
     pub unsafe extern "stdcall" fn ztui_expansionselect_setup() {
-        unsafe { ZTUI_EXPANSIONSELECT_SETUP_DETOUR.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
+        unsafe { SETUP_DETOUR.call() }; //TODO: Remove this call once all functionality has been replicated, need to figure out why removing is causes crashes currently
 
         initialise_expansions();
     }
@@ -729,9 +730,29 @@ fn command_get_current_expansion(_args: Vec<&str>) -> Result<String, CommandErro
 }
 
 pub fn init() {
-    add_to_command_register("list_expansion".to_string(), command_get_expansions);
-    add_to_command_register("get_current_expansion".to_string(), command_get_current_expansion);
-    add_to_command_register("get_members".to_string(), command_get_members);
+    // list_expansion() - no args
+    lua_fn!("list_expansion", "Lists all loaded expansions", "list_expansion()", || {
+        match command_get_expansions(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // get_current_expansion() - no args
+    lua_fn!("get_current_expansion", "Returns current active expansion", "get_current_expansion()", || {
+        match command_get_current_expansion(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // get_members() - no args
+    lua_fn!("get_members", "Lists expansion member sets", "get_members()", || {
+        match command_get_members(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
     add_handler(
         Handler::builder()
             .prefix("xpac")

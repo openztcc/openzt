@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     error::Error,
     fmt,
     io::{Read, Write},
@@ -8,10 +7,11 @@ use std::{
     thread,
 };
 
-use std::sync::LazyLock; //TODO: Use std::sync::LazyCell when it becomes stable
+use std::sync::LazyLock;
 use openzt_detour_macro::detour_mod;
 use tracing::{error, info};
 
+/// Error type for command execution (kept for backward compatibility with existing command implementations)
 #[derive(Debug)]
 pub struct CommandError {
     message: String,
@@ -70,14 +70,14 @@ impl From<&str> for CommandError {
 #[detour_mod]
 pub mod zoo_console {
     use tracing::error;
-    use openzt_detour::ZTAPP_UPDATEGAME;
+    use openzt_detour::gen::ztapp::UPDATE_SIM;
 
-    use super::{add_to_command_register, call_next_command, command_list_commands};
+    use super::call_next_command;
 
-    #[detour(ZTAPP_UPDATEGAME)]
-    unsafe extern "thiscall" fn zoo_zt_app_update_game(_this_ptr: u32, param_2: u32) {
+    #[detour(UPDATE_SIM)]
+    unsafe extern "thiscall" fn zoo_zt_app_update_game(_this_ptr: u32, param_2: i32) {
         call_next_command();
-        unsafe { ZTAPP_UPDATEGAME_DETOUR.call(_this_ptr, param_2) }
+        unsafe { UPDATE_SIM_DETOUR.call(_this_ptr, param_2) }
     }
 
     pub fn init() {
@@ -86,16 +86,13 @@ pub mod zoo_console {
                 error!("Failed to initialize console detours");
             }
         };
-        add_to_command_register("list_commands".to_owned(), command_list_commands);
     }
 }
 
 pub fn init() {
+    info!("Initializing Lua console on 127.0.0.1:8080");
     zoo_console::init();
 }
-
-type CommandCallback = fn(args: Vec<&str>) -> Result<String, CommandError>;
-
 
 static COMMAND_THREAD: LazyLock<Mutex<std::thread::JoinHandle<()>>> = LazyLock::new(|| Mutex::new(std::thread::spawn(|| {
             start_server();
@@ -103,56 +100,26 @@ static COMMAND_THREAD: LazyLock<Mutex<std::thread::JoinHandle<()>>> = LazyLock::
     ))
 );
 
-static COMMAND_REGISTRY: LazyLock<Mutex<HashMap<String, CommandCallback>>> = LazyLock::new(|| Mutex::new(HashMap::<String, CommandCallback>::new()));
-
 static COMMAND_RESULTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::<String>::new()));
 
 static COMMAND_QUEUE: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::<String>::new()));
 
-pub fn add_to_command_register(command_name: String, command_callback: CommandCallback) {
-    info!("Registring command {} to registry", command_name);
-    let mut data_mutex = COMMAND_REGISTRY.lock().unwrap();
-    data_mutex.insert(command_name, command_callback);
-}
-
-fn call_command(command_name: String, args: Vec<&str>) -> Result<String, CommandError> {
-    info!("Calling command {} with args {:?}", command_name, args);
-    let command = {
-        let data_mutex = COMMAND_REGISTRY.lock().unwrap();
-        data_mutex.get(&command_name).cloned()
-    };
-    match command {
-        Some(command) => command(args),
-        None => Err(Into::into("Command not found")),
-    }
-}
-
+/// Executes the next Lua code from the command queue on the game thread
 pub fn call_next_command() {
     let _unused = COMMAND_THREAD.lock().unwrap();
-    let Some(command) = get_from_command_queue() else {
+    let Some(lua_code) = get_from_command_queue() else {
         return;
     };
 
-    info!("Calling next command {}", command.clone());
+    info!("Executing Lua: {}", lua_code.clone());
 
-    let mut command_args = command.split_whitespace();
-    let Some(command_name) = command_args.next() else {
-        error!("Failed to get command name from command {}", command.clone());
-        return;
+    let result = match crate::scripting::execute_lua(&lua_code) {
+        Ok(result) => result,
+        Err(err) => err,
     };
-    let args: Vec<&str> = command_args.collect();
 
     let mut result_mutex = COMMAND_RESULTS.lock().unwrap();
-
-    match call_command(command_name.to_string(), args) {
-        Ok(result) => {
-            result_mutex.push(result);
-        }
-        Err(err) => {
-            let result = err.to_string();
-            result_mutex.push(result);
-        }
-    }
+    result_mutex.push(result);
 }
 
 pub fn get_next_result() -> Option<String> {
@@ -161,7 +128,7 @@ pub fn get_next_result() -> Option<String> {
 }
 
 fn add_to_command_queue(command: String) {
-    info!("Adding command {} to queue", command);
+    info!("Adding Lua code to queue: {}", command);
     let mut data_mutex = COMMAND_QUEUE.lock().unwrap();
     data_mutex.push(command);
 }
@@ -171,19 +138,8 @@ pub fn get_from_command_queue() -> Option<String> {
     data_mutex.pop()
 }
 
-pub fn command_list_commands(_args: Vec<&str>) -> Result<String, CommandError> {
-    info!("Getting command list");
-    let data_mutex = COMMAND_REGISTRY.lock().unwrap();
-    let mut result = String::new();
-    for command_name in data_mutex.keys() {
-        info!("Found command {}", command_name);
-        result.push_str(&format!("{}\n", command_name));
-    }
-    Ok(result)
-}
-
 fn handle_client(mut stream: TcpStream) {
-    let mut buffer = [0; 1024]; // Buffer to store received data
+    let mut buffer = [0; 1024];
 
     loop {
         match stream.read(&mut buffer) {
@@ -193,10 +149,10 @@ fn handle_client(mut stream: TcpStream) {
                     break;
                 }
 
-                // Print received string
+                // Received Lua code to execute
                 let received_string = String::from_utf8_lossy(&buffer[0..size]);
                 add_to_command_queue(received_string.to_string());
-                info!("Received: {}", received_string);
+                info!("Received Lua code: {}", received_string);
 
                 loop {
                     if let Some(result) = get_next_result() {

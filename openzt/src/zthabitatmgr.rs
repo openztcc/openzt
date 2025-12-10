@@ -6,7 +6,8 @@ use openzt_detour_macro::detour_mod;
 use getset::{Getters};
 
 use crate::{
-    command_console::{add_to_command_register, CommandError},
+    command_console::CommandError,
+    lua_fn,
     util::{get_from_memory, ZTArray, ZTBoundedString, ZTString},
     ztworldmgr::{read_zt_world_mgr_from_global, Direction},
     ztmapview::BFTile,
@@ -226,10 +227,10 @@ fn command_get_zt_habitats(_args: Vec<&str>) -> Result<String, CommandError> {
 #[detour_mod]
 pub mod hooks_zthabitatmgr {
     use super::*;
-    use openzt_detour::ZTHABITAT_GET_GATE_TILE_IN;
+    use openzt_detour::gen::zthabitat::GET_GATE_TILE_IN;
 
     // 00410349 BFTile * __thiscall OOAnalyzer::ZTHabitat::getGateTileIn(ZTHabitat *this)
-    #[detour(ZTHABITAT_GET_GATE_TILE_IN)]
+    #[detour(GET_GATE_TILE_IN)]
     unsafe extern "thiscall" fn get_gate_tile_in(_this: u32) -> u32 {
         let habitat = get_from_memory::<ZTHabitat>(_this);
         match habitat.get_gate_tile_in() {
@@ -241,14 +242,25 @@ pub mod hooks_zthabitatmgr {
             }
         }
     }
-
-    
 }
 
 pub fn init() {
-    add_to_command_register("get_zthabitatmgr".to_owned(), command_get_zt_habitat_mgr);
-    add_to_command_register("list_exhibits".to_string(), command_get_zt_habitats);
-    
+    // get_zthabitatmgr() - no args
+    lua_fn!("get_zthabitatmgr", "Returns ZTHabitatMgr debug info", "get_zthabitatmgr()", || {
+        match command_get_zt_habitat_mgr(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // list_exhibits() - no args
+    lua_fn!("list_exhibits", "Lists all zoo exhibits/habitats", "list_exhibits()", || {
+        match command_get_zt_habitats(vec![]) {
+            Ok(result) => Ok((Some(result), None::<String>)),
+            Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
     if let Err(e) = unsafe { hooks_zthabitatmgr::init_detours() } {
         info!("Error initialising zthabitatmgr detours: {}", e);
     }
