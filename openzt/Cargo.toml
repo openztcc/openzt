@@ -25,8 +25,9 @@ maplit = "1.0.2"
 field_accessor_as_string = { path = "../field_accessor_as_string" }
 field_accessor_as_string_trait = { path = "../field_accessor_as_string_trait" }
 serde = {version = "1.0.210", features = ["derive"]}
-toml = "0.9.0"
+toml = { version = "0.9.0", features = ["preserve_order"] }
 regex = "1.10.6"
+indexmap = { version = "2", features = ["serde"] }
 public = "0.2.2"
 enable-ansi-support = "0.3.1"
 itertools = "0.14.0"

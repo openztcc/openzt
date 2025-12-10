@@ -34,11 +34,15 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
 
 ## TOML Schema Reference
 
+### Named Patches
+
+Patches use named subtables with the syntax `[patch.patch_name]`. Each patch must have a unique name that will be used in logs and error messages. Patches are executed in the order they appear in the file (order is preserved via `IndexMap`).
+
 ### File-Level Operations
 
 #### Replace Entire File
 ```toml
-[[patch]]
+[patch.replace_elephant_config]
 operation = "replace"
 target = "animals/elephant.ai"
 source = "patches/elephant.ai"
@@ -47,7 +51,7 @@ target_mod = "base_game"  # Optional
 
 #### Merge INI Files
 ```toml
-[[patch]]
+[patch.merge_game_settings]
 operation = "merge"
 target = "config/settings.ini"
 source = "patches/settings.ini"
@@ -61,7 +65,7 @@ target_mod = "other_mod"  # Optional
 
 #### Delete File
 ```toml
-[[patch]]
+[patch.remove_deprecated_animal]
 operation = "delete"
 target = "animals/oldanimal.ai"
 target_mod = "some_mod"  # Optional
@@ -71,7 +75,7 @@ target_mod = "some_mod"  # Optional
 
 #### Set Single Key-Value
 ```toml
-[[patch]]
+[patch.increase_resolution]
 operation = "set_key"
 target = "config/settings.ini"
 section = "Graphics"
@@ -81,7 +85,7 @@ value = "1920x1080"
 
 #### Set Multiple Keys in Section
 ```toml
-[[patch]]
+[patch.configure_audio]
 operation = "set_keys"
 target = "config/settings.ini"
 section = "Audio"
@@ -90,7 +94,7 @@ keys = { Volume = "100", Enabled = "true", MusicVolume = "80" }
 
 #### Append Value to Array (Repeated Key)
 ```toml
-[[patch]]
+[patch.add_swim_behavior]
 operation = "append_value"
 target = "animals/elephant.ai"
 section = "Behaviors"
@@ -100,7 +104,7 @@ value = "swim"
 
 #### Append Multiple Values
 ```toml
-[[patch]]
+[patch.add_elephant_behaviors]
 operation = "append_values"
 target = "animals/elephant.ai"
 section = "Behaviors"
@@ -110,7 +114,7 @@ values = ["climb", "jump", "run"]
 
 #### Remove Single Key
 ```toml
-[[patch]]
+[patch.remove_debug_log_level]
 operation = "remove_key"
 target = "config/settings.ini"
 section = "Debug"
@@ -119,7 +123,7 @@ key = "LogLevel"
 
 #### Remove Multiple Keys
 ```toml
-[[patch]]
+[patch.cleanup_debug_settings]
 operation = "remove_keys"
 target = "config/settings.ini"
 section = "Debug"
@@ -128,7 +132,7 @@ keys = ["LogLevel", "DebugMode", "Verbose"]
 
 #### Add Section with Keys
 ```toml
-[[patch]]
+[patch.add_new_feature_section]
 operation = "add_section"
 target = "config/settings.ini"
 section = "NewFeature"
@@ -137,7 +141,7 @@ keys = { Enabled = "true", Value = "100" }  # Optional
 
 #### Clear Section (Remove All Keys)
 ```toml
-[[patch]]
+[patch.reset_cache_settings]
 operation = "clear_section"
 target = "config/settings.ini"
 section = "Cache"
@@ -145,7 +149,7 @@ section = "Cache"
 
 #### Remove Section Entirely
 ```toml
-[[patch]]
+[patch.remove_deprecated_section]
 operation = "remove_section"
 target = "config/settings.ini"
 section = "Deprecated"
@@ -156,7 +160,7 @@ section = "Deprecated"
 All operations support an optional `target_mod` field to specify which mod's file to patch:
 
 ```toml
-[[patch]]
+[patch.buff_elephant_speed]
 operation = "set_key"
 target = "animals/elephant.ai"
 target_mod = "base_game"  # Patch the base game's file
@@ -188,10 +192,16 @@ value = "15"
 
 ## Implementation Notes
 
+### Patch Naming
+- Each patch must have a unique name within a `patch.toml` file
+- Patch names are used in logs and error messages for debugging
+- Names should be descriptive (e.g., `fix_elephant_speed` not `patch1`)
+- Names use snake_case by convention but any valid TOML key is allowed
+
 ### Patch Application Order
 - Patches execute in mod load order (based on zoo.ini path order)
 - No explicit priority field - load order determines execution
-- Within a mod, patches execute in the order they appear in patch.toml
+- Within a mod, patches execute in the order they appear in patch.toml (preserved by `IndexMap`)
 
 ### Case Sensitivity
 - INI operations are case-insensitive by default (matching Zoo Tycoon behavior)
@@ -208,8 +218,10 @@ value = "15"
 All patch structures are defined in `openzt/src/mods.rs`:
 
 ```rust
+use indexmap::IndexMap;
+
 pub struct PatchFile {
-    pub patches: Vec<Patch>,
+    pub patches: IndexMap<String, Patch>,  // Preserves insertion order
 }
 
 pub enum Patch {
@@ -238,6 +250,8 @@ Each operation struct contains:
 - `source`: String (for replace/merge) - source file path within mod
 - `target_mod`: Option<String> - optional mod to target
 - Operation-specific fields (section, key, value, etc.)
+
+The `IndexMap` preserves patch order while allowing access by name for logging and error messages.
 
 ## Future Extensions
 

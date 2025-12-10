@@ -1,6 +1,7 @@
 use std::{collections::HashMap, error::Error, fmt, str::FromStr};
 
 use getset::Getters;
+use indexmap::IndexMap;
 use serde::{
     de::{self, Deserializer, Visitor},
     Deserialize,
@@ -203,7 +204,7 @@ pub struct IconDefinition {
 #[derive(Deserialize, Debug, Clone)]
 pub struct PatchFile {
     #[serde(rename = "patch")]
-    pub patches: Vec<Patch>,
+    pub patches: IndexMap<String, Patch>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -428,7 +429,8 @@ mod mod_loading_tests {
         assert_eq!(patches.patches.len(), 4);
 
         // Test merge patch (defaults to patch_priority)
-        match &patches.patches[0] {
+        let merge_patch = patches.patches.get("merge_blackbuck_ai").expect("merge_blackbuck_ai patch not found");
+        match merge_patch {
             super::Patch::Merge(patch) => {
                 assert_eq!(patch.target, "animals/blckbuck.ai");
                 assert_eq!(patch.source, "resources/patches/blckbuck.ai");
@@ -438,7 +440,8 @@ mod mod_loading_tests {
         }
 
         // Test replace patch
-        match &patches.patches[1] {
+        let replace_patch = patches.patches.get("replace_blackbuck_ai").expect("replace_blackbuck_ai patch not found");
+        match replace_patch {
             super::Patch::Replace(patch) => {
                 assert_eq!(patch.target, "animals/blckbuck.ai");
                 assert_eq!(patch.source, "resources/patches/blckbuck.ai");
@@ -447,7 +450,8 @@ mod mod_loading_tests {
         }
 
         // Test delete patch
-        match &patches.patches[2] {
+        let delete_patch = patches.patches.get("remove_old_animal").expect("remove_old_animal patch not found");
+        match delete_patch {
             super::Patch::Delete(patch) => {
                 assert_eq!(patch.target, "animals/oldanimal.ai");
             }
@@ -455,7 +459,8 @@ mod mod_loading_tests {
         }
 
         // Test set_key patch
-        match &patches.patches[3] {
+        let set_key_patch = patches.patches.get("update_resolution").expect("update_resolution patch not found");
+        match set_key_patch {
             super::Patch::SetKey(patch) => {
                 assert_eq!(patch.target, "config/settings.ini");
                 assert_eq!(patch.section, "Graphics");
@@ -464,5 +469,12 @@ mod mod_loading_tests {
             }
             _ => panic!("Expected SetKey patch"),
         }
+
+        // Test that patches are ordered correctly (IndexMap preserves insertion order)
+        let patch_names: Vec<_> = patches.patches.keys().collect();
+        assert_eq!(patch_names[0], "merge_blackbuck_ai");
+        assert_eq!(patch_names[1], "replace_blackbuck_ai");
+        assert_eq!(patch_names[2], "remove_old_animal");
+        assert_eq!(patch_names[3], "update_resolution");
     }
 }
