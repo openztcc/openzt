@@ -203,8 +203,28 @@ pub struct IconDefinition {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct PatchFile {
+    #[serde(flatten)]
+    pub config: PatchConfig,
     #[serde(rename = "patch")]
     pub patches: IndexMap<String, Patch>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct PatchConfig {
+    #[serde(default = "default_on_error")]
+    pub on_error: ErrorHandling,
+}
+
+fn default_on_error() -> ErrorHandling {
+    ErrorHandling::Continue
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorHandling {
+    Continue,
+    Abort,
+    AbortMod,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -235,12 +255,48 @@ fn default_merge_mode() -> MergeMode {
     MergeMode::PatchPriority
 }
 
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum OnExists {
+    Error,
+    Merge,
+    Skip,
+    Replace,
+}
+
+fn default_on_exists() -> OnExists {
+    OnExists::Error
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct PatchCondition {
+    #[serde(default)]
+    pub mod_loaded: Option<String>,
+    #[serde(default)]
+    pub key_exists: Option<KeyCheck>,
+    #[serde(default)]
+    pub value_equals: Option<ValueCheck>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct KeyCheck {
+    pub section: String,
+    pub key: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ValueCheck {
+    pub section: String,
+    pub key: String,
+    pub value: String,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct ReplacePatch {
     pub target: String,
     pub source: String,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -250,14 +306,14 @@ pub struct MergePatch {
     #[serde(default = "default_merge_mode")]
     pub merge_mode: MergeMode,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct DeletePatch {
     pub target: String,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -267,7 +323,7 @@ pub struct SetKeyPatch {
     pub key: String,
     pub value: String,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -276,7 +332,7 @@ pub struct SetKeysPatch {
     pub section: String,
     pub keys: HashMap<String, String>,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -286,7 +342,7 @@ pub struct AppendValuePatch {
     pub key: String,
     pub value: String,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -296,7 +352,7 @@ pub struct AppendValuesPatch {
     pub key: String,
     pub values: Vec<String>,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -305,7 +361,7 @@ pub struct RemoveKeyPatch {
     pub section: String,
     pub key: String,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -314,7 +370,7 @@ pub struct RemoveKeysPatch {
     pub section: String,
     pub keys: Vec<String>,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -323,8 +379,10 @@ pub struct AddSectionPatch {
     pub section: String,
     #[serde(default)]
     pub keys: HashMap<String, String>,
+    #[serde(default = "default_on_exists")]
+    pub on_exists: OnExists,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -332,7 +390,7 @@ pub struct ClearSectionPatch {
     pub target: String,
     pub section: String,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -340,7 +398,7 @@ pub struct RemoveSectionPatch {
     pub target: String,
     pub section: String,
     #[serde(default)]
-    pub target_mod: Option<String>,
+    pub condition: Option<PatchCondition>,
 }
 
 #[cfg(test)]
@@ -426,7 +484,10 @@ mod mod_loading_tests {
     #[test]
     fn test_parse_patches() {
         let patches: super::PatchFile = toml::from_str(include_str!("../resources/test/patch.toml")).unwrap();
-        assert_eq!(patches.patches.len(), 4);
+        assert_eq!(patches.patches.len(), 8);
+
+        // Test file-level config
+        assert_eq!(patches.config.on_error, super::ErrorHandling::Continue);
 
         // Test merge patch (defaults to patch_priority)
         let merge_patch = patches.patches.get("merge_blackbuck_ai").expect("merge_blackbuck_ai patch not found");
@@ -435,6 +496,7 @@ mod mod_loading_tests {
                 assert_eq!(patch.target, "animals/blckbuck.ai");
                 assert_eq!(patch.source, "resources/patches/blckbuck.ai");
                 assert_eq!(patch.merge_mode, super::MergeMode::PatchPriority);
+                assert!(patch.condition.is_none());
             }
             _ => panic!("Expected Merge patch"),
         }
@@ -445,6 +507,7 @@ mod mod_loading_tests {
             super::Patch::Replace(patch) => {
                 assert_eq!(patch.target, "animals/blckbuck.ai");
                 assert_eq!(patch.source, "resources/patches/blckbuck.ai");
+                assert!(patch.condition.is_none());
             }
             _ => panic!("Expected Replace patch"),
         }
@@ -454,6 +517,7 @@ mod mod_loading_tests {
         match delete_patch {
             super::Patch::Delete(patch) => {
                 assert_eq!(patch.target, "animals/oldanimal.ai");
+                assert!(patch.condition.is_none());
             }
             _ => panic!("Expected Delete patch"),
         }
@@ -466,8 +530,70 @@ mod mod_loading_tests {
                 assert_eq!(patch.section, "Graphics");
                 assert_eq!(patch.key, "Resolution");
                 assert_eq!(patch.value, "1920x1080");
+                assert!(patch.condition.is_none());
             }
             _ => panic!("Expected SetKey patch"),
+        }
+
+        // Test conditional patch with mod_loaded
+        let conditional_patch = patches.patches.get("conditional_mod_loaded").expect("conditional_mod_loaded patch not found");
+        match conditional_patch {
+            super::Patch::SetKey(patch) => {
+                assert_eq!(patch.target, "config/settings.ini");
+                assert_eq!(patch.section, "Features");
+                assert_eq!(patch.key, "AdvancedAI");
+                assert_eq!(patch.value, "true");
+                let condition = patch.condition.as_ref().expect("Expected condition");
+                assert_eq!(condition.mod_loaded, Some("AdvancedAI".to_string()));
+                assert!(condition.key_exists.is_none());
+                assert!(condition.value_equals.is_none());
+            }
+            _ => panic!("Expected SetKey patch"),
+        }
+
+        // Test conditional patch with key_exists
+        let conditional_patch = patches.patches.get("conditional_key_exists").expect("conditional_key_exists patch not found");
+        match conditional_patch {
+            super::Patch::SetKey(patch) => {
+                assert_eq!(patch.target, "config/settings.ini");
+                let condition = patch.condition.as_ref().expect("Expected condition");
+                assert!(condition.mod_loaded.is_none());
+                let key_check = condition.key_exists.as_ref().expect("Expected key_exists");
+                assert_eq!(key_check.section, "Graphics");
+                assert_eq!(key_check.key, "AntiAliasing");
+                assert!(condition.value_equals.is_none());
+            }
+            _ => panic!("Expected SetKey patch"),
+        }
+
+        // Test conditional patch with value_equals
+        let conditional_patch = patches.patches.get("conditional_value_equals").expect("conditional_value_equals patch not found");
+        match conditional_patch {
+            super::Patch::SetKey(patch) => {
+                assert_eq!(patch.target, "config/settings.ini");
+                let condition = patch.condition.as_ref().expect("Expected condition");
+                assert!(condition.mod_loaded.is_none());
+                assert!(condition.key_exists.is_none());
+                let value_check = condition.value_equals.as_ref().expect("Expected value_equals");
+                assert_eq!(value_check.section, "Graphics");
+                assert_eq!(value_check.key, "TextureQuality");
+                assert_eq!(value_check.value, "medium");
+            }
+            _ => panic!("Expected SetKey patch"),
+        }
+
+        // Test add_section patch with on_exists
+        let add_section_patch = patches.patches.get("add_section_with_on_exists").expect("add_section_with_on_exists patch not found");
+        match add_section_patch {
+            super::Patch::AddSection(patch) => {
+                assert_eq!(patch.target, "config/settings.ini");
+                assert_eq!(patch.section, "NewFeature");
+                assert_eq!(patch.on_exists, super::OnExists::Merge);
+                assert_eq!(patch.keys.get("Enabled"), Some(&"true".to_string()));
+                assert_eq!(patch.keys.get("Value"), Some(&"100".to_string()));
+                assert!(patch.condition.is_none());
+            }
+            _ => panic!("Expected AddSection patch"),
         }
 
         // Test that patches are ordered correctly (IndexMap preserves insertion order)
@@ -476,5 +602,9 @@ mod mod_loading_tests {
         assert_eq!(patch_names[1], "replace_blackbuck_ai");
         assert_eq!(patch_names[2], "remove_old_animal");
         assert_eq!(patch_names[3], "update_resolution");
+        assert_eq!(patch_names[4], "conditional_mod_loaded");
+        assert_eq!(patch_names[5], "conditional_key_exists");
+        assert_eq!(patch_names[6], "conditional_value_equals");
+        assert_eq!(patch_names[7], "add_section_with_on_exists");
     }
 }
