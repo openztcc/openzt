@@ -43,10 +43,13 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
    - Full logging, error handling, and validation for all operations
    - Conditional patching support (patch-level conditions will be evaluated in Phase 6)
 
-### 🚧 Remaining Work
+5. **Phase 5: Resource Map Updates** - Implemented in `openzt/src/resource_manager/lazyresourcemap.rs`
+   - `update_resource()` public API added (lines 255-266)
+   - Refactored patch operations to eliminate redundant remove_resource() calls
+   - `add_ztfile()` already handles replacement via `insert_custom()`
+   - Case-insensitive lookups already working correctly
 
-5. **Phase 5: Resource Map Updates** (may not be needed - Phase 3 already handles this)
-   - Evaluate if additional resource map methods are needed beyond remove_resource()
+### 🚧 Remaining Work
 
 6. **Phase 6: Patch Orchestration** (not yet implemented)
    - Load patch.toml from mod archives
