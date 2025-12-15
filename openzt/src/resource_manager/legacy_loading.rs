@@ -32,11 +32,15 @@ use crate::{
         ClearSectionPatch,
         RemoveSectionPatch,
         OnExists,
+        PatchFile,
+        PatchCondition,
+        ErrorHandling,
+        Patch,
     },
     resource_manager::{
         handlers::{get_handlers, RunStage},
-        lazyresourcemap::{add_lazy, add_ztfile, check_file, get_file, get_file_names, get_num_resources, remove_resource, update_resource},
-        openzt_mods::{get_num_mod_ids, load_open_zt_mod},
+        lazyresourcemap::{add_lazy, add_ztfile, check_file, get_file, get_file_names, get_num_resources, remove_resource},
+        openzt_mods::{get_num_mod_ids, get_mod_ids, load_open_zt_mod},
         ztfile::{modify_ztfile_as_animation, ZTFile, ZTFileType},
     },
 };
@@ -731,6 +735,329 @@ fn apply_remove_section_patch(patch: &RemoveSectionPatch, mod_path: &Path, patch
     save_ini_to_resources(&patch.target, &ini, mod_path)?;
 
     info!("Successfully applied remove_section patch '{}'", patch_name);
+    Ok(())
+}
+
+// ============================================================================
+// Phase 6: Patch Orchestration, Conditional Evaluation, and Error Handling
+// ============================================================================
+
+/// Helper function to check if a mod is loaded
+///
+/// # Arguments
+/// * `mod_id` - The mod ID to check
+///
+/// # Returns
+/// * `true` if the mod is loaded, `false` otherwise
+fn is_mod_loaded(mod_id: &str) -> bool {
+    let loaded_mods = get_mod_ids();
+    loaded_mods.iter().any(|id| id == mod_id)
+}
+
+/// Evaluate patch conditions to determine if a patch should be applied
+///
+/// # Arguments
+/// * `condition` - The condition to evaluate (if None, returns true)
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(true)` if all conditions pass (or no conditions specified)
+/// * `Ok(false)` if any condition fails
+/// * `Err(_)` if there's an error evaluating conditions
+#[allow(dead_code, unused_variables)]
+fn evaluate_condition(condition: &Option<PatchCondition>, patch_name: &str) -> anyhow::Result<bool> {
+    let Some(cond) = condition else {
+        // No conditions specified, always pass
+        return Ok(true);
+    };
+
+    // Check mod_loaded condition
+    if let Some(required_mod) = &cond.mod_loaded {
+        if !is_mod_loaded(required_mod) {
+            info!("Patch '{}': skipping - required mod '{}' not loaded", patch_name, required_mod);
+            return Ok(false);
+        }
+    }
+
+    // Check key_exists condition
+    if let Some(key_check) = &cond.key_exists {
+        // Need to load the target file - but we don't have target in PatchCondition
+        // This requires the target to be passed in. For now, we'll handle this
+        // in the apply_patches function where we have access to the target.
+        // For file-level conditions, we'll handle this specially.
+    }
+
+    // Check value_equals condition
+    if let Some(value_check) = &cond.value_equals {
+        // Similar to key_exists, we need the target file
+        // This will be handled in apply_patches
+    }
+
+    Ok(true)
+}
+
+/// Evaluate patch-level conditions that require target file access
+///
+/// # Arguments
+/// * `condition` - The condition to evaluate
+/// * `target` - Target file path
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(true)` if all conditions pass
+/// * `Ok(false)` if any condition fails
+/// * `Err(_)` if there's an error evaluating conditions
+fn evaluate_patch_condition_with_target(
+    condition: &Option<PatchCondition>,
+    target: &str,
+    patch_name: &str,
+) -> anyhow::Result<bool> {
+    let Some(cond) = condition else {
+        return Ok(true);
+    };
+
+    // First check mod_loaded condition (doesn't require target)
+    if let Some(required_mod) = &cond.mod_loaded {
+        if !is_mod_loaded(required_mod) {
+            info!("Patch '{}': skipping - required mod '{}' not loaded", patch_name, required_mod);
+            return Ok(false);
+        }
+    }
+
+    // Check key_exists condition
+    if let Some(key_check) = &cond.key_exists {
+        // Check if target file exists
+        if !check_file(target) {
+            warn!("Patch '{}': cannot evaluate key_exists condition - target file '{}' not found",
+                  patch_name, target);
+            return Ok(false);
+        }
+
+        // Try to load as INI file
+        match load_ini_from_resources(target) {
+            Ok(ini) => {
+                if ini.get(&key_check.section, &key_check.key).is_none() {
+                    info!("Patch '{}': skipping - key '[{}]{}' does not exist in '{}'",
+                          patch_name, key_check.section, key_check.key, target);
+                    return Ok(false);
+                }
+            }
+            Err(e) => {
+                warn!("Patch '{}': cannot evaluate key_exists condition - failed to load target '{}': {}",
+                      patch_name, target, e);
+                return Ok(false);
+            }
+        }
+    }
+
+    // Check value_equals condition
+    if let Some(value_check) = &cond.value_equals {
+        // Check if target file exists
+        if !check_file(target) {
+            warn!("Patch '{}': cannot evaluate value_equals condition - target file '{}' not found",
+                  patch_name, target);
+            return Ok(false);
+        }
+
+        // Try to load as INI file
+        match load_ini_from_resources(target) {
+            Ok(ini) => {
+                let actual_value = ini.get(&value_check.section, &value_check.key);
+                if actual_value.as_deref() != Some(&value_check.value) {
+                    info!("Patch '{}': skipping - key '[{}]{}' value does not equal '{}' (actual: {:?})",
+                          patch_name, value_check.section, value_check.key, value_check.value, actual_value);
+                    return Ok(false);
+                }
+            }
+            Err(e) => {
+                warn!("Patch '{}': cannot evaluate value_equals condition - failed to load target '{}': {}",
+                      patch_name, target, e);
+                return Ok(false);
+            }
+        }
+    }
+
+    Ok(true)
+}
+
+/// Get the target file path from a patch (for condition evaluation)
+fn get_patch_target(patch: &Patch) -> &str {
+    match patch {
+        Patch::Replace(p) => &p.target,
+        Patch::Merge(p) => &p.target,
+        Patch::Delete(p) => &p.target,
+        Patch::SetPalette(p) => &p.target,
+        Patch::SetKey(p) => &p.target,
+        Patch::SetKeys(p) => &p.target,
+        Patch::AppendValue(p) => &p.target,
+        Patch::AppendValues(p) => &p.target,
+        Patch::RemoveKey(p) => &p.target,
+        Patch::RemoveKeys(p) => &p.target,
+        Patch::AddSection(p) => &p.target,
+        Patch::ClearSection(p) => &p.target,
+        Patch::RemoveSection(p) => &p.target,
+    }
+}
+
+/// Get the condition from a patch (for condition evaluation)
+fn get_patch_condition(patch: &Patch) -> &Option<PatchCondition> {
+    match patch {
+        Patch::Replace(p) => &p.condition,
+        Patch::Merge(p) => &p.condition,
+        Patch::Delete(p) => &p.condition,
+        Patch::SetPalette(p) => &p.condition,
+        Patch::SetKey(p) => &p.condition,
+        Patch::SetKeys(p) => &p.condition,
+        Patch::AppendValue(p) => &p.condition,
+        Patch::AppendValues(p) => &p.condition,
+        Patch::RemoveKey(p) => &p.condition,
+        Patch::RemoveKeys(p) => &p.condition,
+        Patch::AddSection(p) => &p.condition,
+        Patch::ClearSection(p) => &p.condition,
+        Patch::RemoveSection(p) => &p.condition,
+    }
+}
+
+/// Result of applying a single patch
+#[derive(Debug, Clone, PartialEq)]
+enum PatchResult {
+    Success,
+    Skipped,           // Condition failed or warning situation
+    Error(String),     // Error occurred
+}
+
+/// Apply all patches from a patch file with error handling and conditional evaluation
+///
+/// # Arguments
+/// * `patch_file` - The patch file containing patches to apply
+/// * `mod_path` - Path to the current mod being loaded
+///
+/// # Returns
+/// * `Ok(())` if patches were applied successfully (or with continue error handling)
+/// * `Err(_)` if on_error=abort or on_error=abort_mod and an error occurred
+pub fn apply_patches(patch_file: &PatchFile, mod_path: &Path) -> anyhow::Result<()> {
+    info!("Applying patch file with {} patches (on_error: {:?})",
+          patch_file.patches.len(), patch_file.on_error);
+
+    // Step 1: Evaluate top-level conditions
+    if let Some(top_level_condition) = &patch_file.condition {
+        // Check mod_loaded at file level
+        if let Some(required_mod) = &top_level_condition.mod_loaded {
+            if !is_mod_loaded(required_mod) {
+                warn!("Patch file skipped - required mod '{}' not loaded", required_mod);
+                return Ok(());
+            }
+        }
+
+        // For key_exists and value_equals at file level, we need a target
+        // Since file-level conditions don't have a target, we log a warning
+        if top_level_condition.key_exists.is_some() || top_level_condition.value_equals.is_some() {
+            warn!("Top-level key_exists/value_equals conditions are not supported (no target file specified)");
+        }
+    }
+
+    // Step 2: Apply patches in order
+    let mut results: Vec<(String, PatchResult)> = Vec::new();
+    let mut patches_applied = 0;
+    let mut patches_skipped = 0;
+    let mut patches_failed = 0;
+
+    for (patch_name, patch) in &patch_file.patches {
+        info!("Processing patch '{}'", patch_name);
+
+        // Evaluate patch-level conditions
+        let target = get_patch_target(patch);
+        let condition = get_patch_condition(patch);
+
+        let condition_passed = match evaluate_patch_condition_with_target(condition, target, patch_name) {
+            Ok(passed) => passed,
+            Err(e) => {
+                let error_msg = format!("Error evaluating condition: {}", e);
+                error!("Patch '{}': {}", patch_name, error_msg);
+
+                match patch_file.on_error {
+                    ErrorHandling::Continue => {
+                        results.push((patch_name.clone(), PatchResult::Error(error_msg)));
+                        patches_failed += 1;
+                        continue;
+                    }
+                    ErrorHandling::Abort => {
+                        results.push((patch_name.clone(), PatchResult::Error(error_msg)));
+                        patches_failed += 1;
+                        warn!("Aborting patch file due to error (on_error=abort)");
+                        break;
+                    }
+                    ErrorHandling::AbortMod => {
+                        return Err(anyhow::anyhow!("Patch '{}': {} (on_error=abort_mod)", patch_name, error_msg));
+                    }
+                }
+            }
+        };
+
+        if !condition_passed {
+            results.push((patch_name.clone(), PatchResult::Skipped));
+            patches_skipped += 1;
+            continue;
+        }
+
+        // Apply the patch based on its type
+        let result = match patch {
+            Patch::Replace(p) => apply_replace_patch(p, mod_path, patch_name),
+            Patch::Merge(p) => apply_merge_patch(p, mod_path, patch_name),
+            Patch::Delete(p) => apply_delete_patch(p, patch_name),
+            Patch::SetPalette(p) => apply_set_palette_patch(p, patch_name),
+            Patch::SetKey(p) => apply_set_key_patch(p, mod_path, patch_name),
+            Patch::SetKeys(p) => apply_set_keys_patch(p, mod_path, patch_name),
+            Patch::AppendValue(p) => apply_append_value_patch(p, mod_path, patch_name),
+            Patch::AppendValues(p) => apply_append_values_patch(p, mod_path, patch_name),
+            Patch::RemoveKey(p) => apply_remove_key_patch(p, mod_path, patch_name),
+            Patch::RemoveKeys(p) => apply_remove_keys_patch(p, mod_path, patch_name),
+            Patch::AddSection(p) => apply_add_section_patch(p, mod_path, patch_name),
+            Patch::ClearSection(p) => apply_clear_section_patch(p, mod_path, patch_name),
+            Patch::RemoveSection(p) => apply_remove_section_patch(p, mod_path, patch_name),
+        };
+
+        match result {
+            Ok(()) => {
+                results.push((patch_name.clone(), PatchResult::Success));
+                patches_applied += 1;
+            }
+            Err(e) => {
+                let error_msg = format!("{}", e);
+                error!("Patch '{}' failed: {}", patch_name, error_msg);
+
+                match patch_file.on_error {
+                    ErrorHandling::Continue => {
+                        results.push((patch_name.clone(), PatchResult::Error(error_msg)));
+                        patches_failed += 1;
+                        continue;
+                    }
+                    ErrorHandling::Abort => {
+                        results.push((patch_name.clone(), PatchResult::Error(error_msg)));
+                        patches_failed += 1;
+                        warn!("Aborting patch file due to error (on_error=abort)");
+                        break;
+                    }
+                    ErrorHandling::AbortMod => {
+                        return Err(anyhow::anyhow!("Patch '{}' failed: {} (on_error=abort_mod)", patch_name, error_msg));
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 3: Log comprehensive summary
+    info!("Patch application complete: {} succeeded, {} skipped, {} failed",
+          patches_applied, patches_skipped, patches_failed);
+
+    for (patch_name, result) in &results {
+        match result {
+            PatchResult::Success => info!("  ✓ {}", patch_name),
+            PatchResult::Skipped => info!("  ⊘ {} (skipped)", patch_name),
+            PatchResult::Error(msg) => error!("  ✗ {}: {}", patch_name, msg),
+        }
+    }
+
     Ok(())
 }
 
