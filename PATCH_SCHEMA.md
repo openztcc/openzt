@@ -29,13 +29,21 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
    - Full logging and error handling for all operations
    - Proper validation (file types, extensions, existence checks)
 
+4. **Phase 4: Element-Level Operations** - Implemented in `openzt/src/resource_manager/legacy_loading.rs`
+   - `apply_set_key_patch()` - set single key-value pairs (lines 435-450)
+   - `apply_set_keys_patch()` - set multiple key-value pairs (lines 462-479)
+   - `apply_append_value_patch()` - append single value to arrays (lines 491-506)
+   - `apply_append_values_patch()` - append multiple values to arrays (lines 518-536)
+   - `apply_remove_key_patch()` - remove single keys (lines 548-569)
+   - `apply_remove_keys_patch()` - remove multiple keys (lines 581-611)
+   - `apply_add_section_patch()` - add sections with on_exists collision handling (lines 623-671)
+   - `apply_clear_section_patch()` - clear all keys from sections (lines 683-705)
+   - `apply_remove_section_patch()` - remove entire sections (lines 717-738)
+   - Helper functions: `validate_ini_file()`, `load_ini_from_resources()`, `save_ini_to_resources()` (lines 369-423)
+   - Full logging, error handling, and validation for all operations
+   - Conditional patching support (patch-level conditions will be evaluated in Phase 6)
+
 ### 🚧 Remaining Work
-4. **Phase 4: Element-Level Operations** (not yet implemented)
-   - Implement set_key, set_keys operations
-   - Implement append_value, append_values operations
-   - Implement remove_key, remove_keys operations
-   - Implement add_section (with on_exists modes), clear_section, remove_section operations
-   - Conditional patching support for element-level operations
 
 5. **Phase 5: Resource Map Updates** (may not be needed - Phase 3 already handles this)
    - Evaluate if additional resource map methods are needed beyond remove_resource()

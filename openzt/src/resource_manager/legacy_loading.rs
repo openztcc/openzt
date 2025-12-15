@@ -15,7 +15,24 @@ use zip::read::ZipFile;
 use super::ztd::ZtdArchive;
 use crate::{
     animation::Animation,
-    mods::{self, DeletePatch, MergePatch, ReplacePatch, SetPalettePatch, MergeMode},
+    mods::{
+        self,
+        DeletePatch,
+        MergePatch,
+        ReplacePatch,
+        SetPalettePatch,
+        MergeMode,
+        SetKeyPatch,
+        SetKeysPatch,
+        AppendValuePatch,
+        AppendValuesPatch,
+        RemoveKeyPatch,
+        RemoveKeysPatch,
+        AddSectionPatch,
+        ClearSectionPatch,
+        RemoveSectionPatch,
+        OnExists,
+    },
     resource_manager::{
         handlers::{get_handlers, RunStage},
         lazyresourcemap::{add_lazy, add_ztfile, check_file, get_file, get_file_names, get_num_resources, remove_resource},
@@ -342,6 +359,381 @@ fn apply_set_palette_patch(patch: &SetPalettePatch, patch_name: &str) -> anyhow:
 
     info!("Successfully applied set_palette patch '{}' - updated palette reference to '{}'",
           patch_name, patch.palette);
+    Ok(())
+}
+
+// ============================================================================
+// Phase 4: Element-Level Patch Operations (INI Files)
+// ============================================================================
+
+/// Helper function to validate that a file is an INI-compatible file
+fn validate_ini_file(target: &str) -> anyhow::Result<()> {
+    let target_path = Path::new(target);
+    let target_ext = target_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let valid_extensions = ["ini", "ai", "cfg", "uca", "ucs", "ucb", "scn", "lyt"];
+
+    if !valid_extensions.contains(&target_ext) {
+        anyhow::bail!(
+            "Target file '{}' is not an INI file (extension: {}). Element operations only work with INI files.",
+            target, target_ext
+        );
+    }
+
+    Ok(())
+}
+
+/// Helper function to load an INI file from the resource system
+fn load_ini_from_resources(target: &str) -> anyhow::Result<Ini> {
+    // Check if target file exists
+    if !check_file(target) {
+        anyhow::bail!("Target file '{}' not found in resource system", target);
+    }
+
+    // Validate file type
+    validate_ini_file(target)?;
+
+    // Load and parse INI file
+    let target_file = get_file(target)
+        .ok_or_else(|| anyhow::anyhow!("Failed to load target file '{}'", target))?;
+    let target_str = str::from_utf8(&target_file.1)?;
+    let mut ini = Ini::new_cs();
+    ini.set_comment_symbols(&[';', '#', ':']);
+    ini.read(target_str.to_string())
+        .map_err(|e| anyhow::anyhow!("Failed to parse INI file '{}': {}", target, e))?;
+
+    Ok(ini)
+}
+
+/// Helper function to save a modified INI file back to the resource system
+fn save_ini_to_resources(target: &str, ini: &Ini, mod_path: &Path) -> anyhow::Result<()> {
+    // Write INI to string
+    let content = ini.writes();
+
+    // Create ZTFile
+    let file_type = ZTFileType::try_from(Path::new(target))
+        .map_err(|e| anyhow::anyhow!("Invalid target file type: {}", e))?;
+    let c_string = std::ffi::CString::new(content.clone())?;
+    let ztfile = ZTFile::Text(c_string, file_type, content.len() as u32);
+
+    // Remove old file and add modified one
+    remove_resource(target);
+    add_ztfile(mod_path, target.to_string(), ztfile)?;
+
+    Ok(())
+}
+
+/// Apply a set_key patch: sets a single key-value pair in an INI section
+///
+/// # Arguments
+/// * `patch` - The set_key patch configuration
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully
+/// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
+fn apply_set_key_patch(patch: &SetKeyPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+    info!("Applying set_key patch '{}': {} [{}] {} = {}",
+          patch_name, patch.target, patch.section, patch.key, patch.value);
+
+    // Load INI file
+    let mut ini = load_ini_from_resources(&patch.target)?;
+
+    // Set the key (creates section if it doesn't exist)
+    ini.setstr(&patch.section, &patch.key, Some(&patch.value));
+
+    // Save back to resources
+    save_ini_to_resources(&patch.target, &ini, mod_path)?;
+
+    info!("Successfully applied set_key patch '{}'", patch_name);
+    Ok(())
+}
+
+/// Apply a set_keys patch: sets multiple key-value pairs in an INI section
+///
+/// # Arguments
+/// * `patch` - The set_keys patch configuration
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully
+/// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
+fn apply_set_keys_patch(patch: &SetKeysPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+    info!("Applying set_keys patch '{}': {} [{}] ({} keys)",
+          patch_name, patch.target, patch.section, patch.keys.len());
+
+    // Load INI file
+    let mut ini = load_ini_from_resources(&patch.target)?;
+
+    // Set all keys
+    for (key, value) in &patch.keys {
+        ini.setstr(&patch.section, key, Some(value));
+    }
+
+    // Save back to resources
+    save_ini_to_resources(&patch.target, &ini, mod_path)?;
+
+    info!("Successfully applied set_keys patch '{}' - set {} keys", patch_name, patch.keys.len());
+    Ok(())
+}
+
+/// Apply an append_value patch: appends a single value to an array (repeated key)
+///
+/// # Arguments
+/// * `patch` - The append_value patch configuration
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully
+/// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
+fn apply_append_value_patch(patch: &AppendValuePatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+    info!("Applying append_value patch '{}': {} [{}] {} += {}",
+          patch_name, patch.target, patch.section, patch.key, patch.value);
+
+    // Load INI file
+    let mut ini = load_ini_from_resources(&patch.target)?;
+
+    // Append the value (creates section if it doesn't exist)
+    ini.addstr(&patch.section, &patch.key, &patch.value);
+
+    // Save back to resources
+    save_ini_to_resources(&patch.target, &ini, mod_path)?;
+
+    info!("Successfully applied append_value patch '{}'", patch_name);
+    Ok(())
+}
+
+/// Apply an append_values patch: appends multiple values to an array
+///
+/// # Arguments
+/// * `patch` - The append_values patch configuration
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully
+/// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
+fn apply_append_values_patch(patch: &AppendValuesPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+    info!("Applying append_values patch '{}': {} [{}] {} += {} values",
+          patch_name, patch.target, patch.section, patch.key, patch.values.len());
+
+    // Load INI file
+    let mut ini = load_ini_from_resources(&patch.target)?;
+
+    // Append all values
+    for value in &patch.values {
+        ini.addstr(&patch.section, &patch.key, value);
+    }
+
+    // Save back to resources
+    save_ini_to_resources(&patch.target, &ini, mod_path)?;
+
+    info!("Successfully applied append_values patch '{}' - appended {} values",
+          patch_name, patch.values.len());
+    Ok(())
+}
+
+/// Apply a remove_key patch: removes a single key from an INI section
+///
+/// # Arguments
+/// * `patch` - The remove_key patch configuration
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully (warnings logged if key doesn't exist)
+/// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
+fn apply_remove_key_patch(patch: &RemoveKeyPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+    info!("Applying remove_key patch '{}': {} [{}] remove key '{}'",
+          patch_name, patch.target, patch.section, patch.key);
+
+    // Load INI file
+    let mut ini = load_ini_from_resources(&patch.target)?;
+
+    // Try to remove the key
+    let removed = ini.remove_key(&patch.section, &patch.key);
+
+    if removed.is_none() {
+        warn!("Remove_key patch '{}': key '{}' not found in section '{}' of '{}'",
+              patch_name, patch.key, patch.section, patch.target);
+        return Ok(());
+    }
+
+    // Save back to resources
+    save_ini_to_resources(&patch.target, &ini, mod_path)?;
+
+    info!("Successfully applied remove_key patch '{}'", patch_name);
+    Ok(())
+}
+
+/// Apply a remove_keys patch: removes multiple keys from an INI section
+///
+/// # Arguments
+/// * `patch` - The remove_keys patch configuration
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully (warnings logged for missing keys)
+/// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
+fn apply_remove_keys_patch(patch: &RemoveKeysPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+    info!("Applying remove_keys patch '{}': {} [{}] remove {} keys",
+          patch_name, patch.target, patch.section, patch.keys.len());
+
+    // Load INI file
+    let mut ini = load_ini_from_resources(&patch.target)?;
+
+    // Remove all keys, tracking successes
+    let mut removed_count = 0;
+    for key in &patch.keys {
+        let removed = ini.remove_key(&patch.section, key);
+        if removed.is_some() {
+            removed_count += 1;
+        } else {
+            warn!("Remove_keys patch '{}': key '{}' not found in section '{}'",
+                  patch_name, key, patch.section);
+        }
+    }
+
+    if removed_count == 0 {
+        warn!("Remove_keys patch '{}': no keys were removed (all keys not found)", patch_name);
+        return Ok(());
+    }
+
+    // Save back to resources
+    save_ini_to_resources(&patch.target, &ini, mod_path)?;
+
+    info!("Successfully applied remove_keys patch '{}' - removed {} of {} keys",
+          patch_name, removed_count, patch.keys.len());
+    Ok(())
+}
+
+/// Apply an add_section patch: adds a new section with keys to an INI file
+///
+/// # Arguments
+/// * `patch` - The add_section patch configuration
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully
+/// * `Err(_)` if the file doesn't exist, isn't an INI file, section collision occurs with on_exists=error, or other errors
+fn apply_add_section_patch(patch: &AddSectionPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+    info!("Applying add_section patch '{}': {} [{}] with {} keys (on_exists: {:?})",
+          patch_name, patch.target, patch.section, patch.keys.len(), patch.on_exists);
+
+    // Load INI file
+    let mut ini = load_ini_from_resources(&patch.target)?;
+
+    // Check if section already exists
+    let section_exists = ini.has_section(&patch.section);
+
+    if section_exists {
+        match patch.on_exists {
+            OnExists::Error => {
+                anyhow::bail!(
+                    "Add_section patch '{}': section '{}' already exists in '{}' (on_exists=error)",
+                    patch_name, patch.section, patch.target
+                );
+            }
+            OnExists::Skip => {
+                warn!("Add_section patch '{}': section '{}' already exists, skipping (on_exists=skip)",
+                      patch_name, patch.section);
+                return Ok(());
+            }
+            OnExists::Merge => {
+                info!("Add_section patch '{}': section '{}' exists, merging keys (on_exists=merge)",
+                      patch_name, patch.section);
+                // Fall through to add keys (they will merge with existing)
+            }
+            OnExists::Replace => {
+                info!("Add_section patch '{}': section '{}' exists, replacing (on_exists=replace)",
+                      patch_name, patch.section);
+                // Clear the section first
+                ini.clear_section(&patch.section);
+            }
+        }
+    }
+
+    // Add all keys to the section
+    for (key, value) in &patch.keys {
+        ini.setstr(&patch.section, key, Some(value));
+    }
+
+    // Save back to resources
+    save_ini_to_resources(&patch.target, &ini, mod_path)?;
+
+    info!("Successfully applied add_section patch '{}' - {} keys added/merged",
+          patch_name, patch.keys.len());
+    Ok(())
+}
+
+/// Apply a clear_section patch: removes all keys from an INI section (keeps section)
+///
+/// # Arguments
+/// * `patch` - The clear_section patch configuration
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully (warnings logged if section doesn't exist)
+/// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
+fn apply_clear_section_patch(patch: &ClearSectionPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+    info!("Applying clear_section patch '{}': {} [{}]",
+          patch_name, patch.target, patch.section);
+
+    // Load INI file
+    let mut ini = load_ini_from_resources(&patch.target)?;
+
+    // Check if section exists
+    if !ini.has_section(&patch.section) {
+        warn!("Clear_section patch '{}': section '{}' not found in '{}'",
+              patch_name, patch.section, patch.target);
+        return Ok(());
+    }
+
+    // Clear the section
+    ini.clear_section(&patch.section);
+
+    // Save back to resources
+    save_ini_to_resources(&patch.target, &ini, mod_path)?;
+
+    info!("Successfully applied clear_section patch '{}'", patch_name);
+    Ok(())
+}
+
+/// Apply a remove_section patch: removes an entire section from an INI file
+///
+/// # Arguments
+/// * `patch` - The remove_section patch configuration
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully (warnings logged if section doesn't exist)
+/// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
+fn apply_remove_section_patch(patch: &RemoveSectionPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+    info!("Applying remove_section patch '{}': {} [{}]",
+          patch_name, patch.target, patch.section);
+
+    // Load INI file
+    let mut ini = load_ini_from_resources(&patch.target)?;
+
+    // Try to remove the section
+    let removed = ini.remove_section(&patch.section);
+
+    if removed.is_none() {
+        warn!("Remove_section patch '{}': section '{}' not found in '{}'",
+              patch_name, patch.section, patch.target);
+        return Ok(());
+    }
+
+    // Save back to resources
+    save_ini_to_resources(&patch.target, &ini, mod_path)?;
+
+    info!("Successfully applied remove_section patch '{}'", patch_name);
     Ok(())
 }
 
