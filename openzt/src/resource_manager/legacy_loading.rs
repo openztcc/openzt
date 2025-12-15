@@ -180,7 +180,7 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
             LegacyCfgType::Fence => parse_simple_cfg(&ini, "fences"),  //parse_subtypes_cfg(&ini, "fences"),
             LegacyCfgType::Filter => parse_simple_cfg(&ini, "filter"), //parse_subtypes_cfg(&ini, "filter"),
             LegacyCfgType::Food => parse_simple_cfg(&ini, "food"),
-            LegacyCfgType::Free => parse_simple_cfg(&ini, "freeform"),
+            LegacyCfgType::Freeform => parse_simple_cfg(&ini, "freeform"),
             // LegacyCfgType::Fringe => Vec::new(),
             LegacyCfgType::Guest => parse_simple_cfg(&ini, "guest"),
             // LegacyCfgType::Help => Vec::new(),
@@ -235,7 +235,7 @@ enum LegacyCfgType {
     Fence,
     Filter,
     Food,
-    Free,
+    Freeform,
     Fringe,
     Guest,
     Help,
@@ -287,7 +287,7 @@ fn map_legacy_cfg_type(file_type_str: &str, file_name: String) -> Result<LegacyC
             file_name,
         }),
         "free" => Ok(LegacyCfg {
-            cfg_type: LegacyCfgType::Free,
+            cfg_type: LegacyCfgType::Freeform,
             file_name,
         }),
         "fringe" => Ok(LegacyCfg {

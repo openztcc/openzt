@@ -34,29 +34,61 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
 
 ## TOML Schema Reference
 
+### Patch File Structure
+
+Each patch file has a top-level configuration section followed by named patch operations:
+
+```toml
+# Top-level file configuration (optional)
+on_error = "continue"  # Options: "continue" (default), "abort", "abort_mod"
+
+# Top-level conditions (optional) - if these fail, entire file is skipped
+[condition]
+mod_loaded = "SomeRequiredMod"
+# ... other conditions
+
+# Individual patches
+[patches.first_patch]
+operation = "set_key"
+# ... patch details
+
+[patches.second_patch]
+operation = "merge"
+# ... patch details
+```
+
+**Error Handling** (`on_error` field at top level):
+- **`continue`** (default): Log error/warning and continue to next patch in this file
+- **`abort`**: Stop processing remaining patches in this file, continue loading mod (other patch files still process)
+- **`abort_mod`**: Stop loading this mod entirely (use for critical patches)
+
+**Top-Level Conditions** (`[condition]` table):
+- Optional conditions that apply to the entire file
+- If top-level conditions fail, the entire patch file is skipped (logged as warning)
+- Uses same condition types as individual patches: `mod_loaded`, `key_exists`, `value_equals`
+- All conditions must pass (AND logic)
+
 ### Named Patches
 
-Patches use named subtables with the syntax `[patch.patch_name]`. Each patch must have a unique name that will be used in logs and error messages. Patches are executed in the order they appear in the file (order is preserved via `IndexMap`).
+Patches use named subtables with the syntax `[patches.patch_name]`. Each patch must have a unique name that will be used in logs and error messages. Patches are executed in the order they appear in the file (order is preserved via `IndexMap`).
 
 ### File-Level Operations
 
 #### Replace Entire File
 ```toml
-[patch.replace_elephant_config]
+[patches.replace_elephant_config]
 operation = "replace"
 target = "animals/elephant.ai"
 source = "patches/elephant.ai"
-target_mod = "base_game"  # Optional
 ```
 
 #### Merge INI Files
 ```toml
-[patch.merge_game_settings]
+[patches.merge_game_settings]
 operation = "merge"
 target = "config/settings.ini"
 source = "patches/settings.ini"
 merge_mode = "patch_priority"  # or "base_priority" (default: "patch_priority")
-target_mod = "other_mod"  # Optional
 ```
 
 **Merge Modes:**
@@ -65,17 +97,16 @@ target_mod = "other_mod"  # Optional
 
 #### Delete File
 ```toml
-[patch.remove_deprecated_animal]
+[patches.remove_deprecated_animal]
 operation = "delete"
 target = "animals/oldanimal.ai"
-target_mod = "some_mod"  # Optional
 ```
 
 ### Element-Level Operations (INI Files Only)
 
 #### Set Single Key-Value
 ```toml
-[patch.increase_resolution]
+[patches.increase_resolution]
 operation = "set_key"
 target = "config/settings.ini"
 section = "Graphics"
@@ -85,7 +116,7 @@ value = "1920x1080"
 
 #### Set Multiple Keys in Section
 ```toml
-[patch.configure_audio]
+[patches.configure_audio]
 operation = "set_keys"
 target = "config/settings.ini"
 section = "Audio"
@@ -94,7 +125,7 @@ keys = { Volume = "100", Enabled = "true", MusicVolume = "80" }
 
 #### Append Value to Array (Repeated Key)
 ```toml
-[patch.add_swim_behavior]
+[patches.add_swim_behavior]
 operation = "append_value"
 target = "animals/elephant.ai"
 section = "Behaviors"
@@ -104,7 +135,7 @@ value = "swim"
 
 #### Append Multiple Values
 ```toml
-[patch.add_elephant_behaviors]
+[patches.add_elephant_behaviors]
 operation = "append_values"
 target = "animals/elephant.ai"
 section = "Behaviors"
@@ -114,7 +145,7 @@ values = ["climb", "jump", "run"]
 
 #### Remove Single Key
 ```toml
-[patch.remove_debug_log_level]
+[patches.remove_debug_log_level]
 operation = "remove_key"
 target = "config/settings.ini"
 section = "Debug"
@@ -123,7 +154,7 @@ key = "LogLevel"
 
 #### Remove Multiple Keys
 ```toml
-[patch.cleanup_debug_settings]
+[patches.cleanup_debug_settings]
 operation = "remove_keys"
 target = "config/settings.ini"
 section = "Debug"
@@ -132,16 +163,23 @@ keys = ["LogLevel", "DebugMode", "Verbose"]
 
 #### Add Section with Keys
 ```toml
-[patch.add_new_feature_section]
+[patches.add_new_feature_section]
 operation = "add_section"
 target = "config/settings.ini"
 section = "NewFeature"
-keys = { Enabled = "true", Value = "100" }  # Optional
+keys = { Enabled = "true", Value = "100" }
+on_exists = "error"  # Options: "error" (default), "merge", "skip", "replace"
 ```
+
+**Section Collision Handling** (`on_exists` for `add_section`):
+- **`error`** (default): Fail patch if section already exists
+- **`merge`**: Merge provided keys with existing section (patch keys overwrite existing)
+- **`skip`**: Skip operation if section exists (log warning)
+- **`replace`**: Delete existing section entirely and replace with new keys
 
 #### Clear Section (Remove All Keys)
 ```toml
-[patch.reset_cache_settings]
+[patches.reset_cache_settings]
 operation = "clear_section"
 target = "config/settings.ini"
 section = "Cache"
@@ -149,28 +187,83 @@ section = "Cache"
 
 #### Remove Section Entirely
 ```toml
-[patch.remove_deprecated_section]
+[patches.remove_deprecated_section]
 operation = "remove_section"
 target = "config/settings.ini"
 section = "Deprecated"
 ```
 
-## Cross-Mod Patching
+### Conditional Patching
 
-All operations support an optional `target_mod` field to specify which mod's file to patch:
+Patches can include conditions at two levels:
+
+1. **File-level conditions** (top-level `[condition]` table): If these fail, the entire patch file is skipped
+2. **Patch-level conditions** (within individual patches): If these fail, only that specific patch is skipped
 
 ```toml
-[patch.buff_elephant_speed]
+# Top-level condition - entire file skipped if this fails
+[condition]
+mod_loaded = "RequiredExpansion"
+
+# Individual patch with its own condition
+[patches.dolphin_compat_fix]
 operation = "set_key"
+target = "animals/dolphin.ai"
+section = "Habitat"
+key = "WaterDepth"
+value = "10"
+condition.mod_loaded = "DolphinExpansion"  # Only this patch skipped if fails
+
+# Only patch if a key exists
+[patches.fix_legacy_setting]
+operation = "set_key"
+target = "config/settings.ini"
+section = "Graphics"
+key = "AntiAliasing"
+value = "4x"
+condition.key_exists = { section = "Graphics", key = "AntiAliasing" }
+
+# Only patch if key has specific value
+[patches.upgrade_old_format]
+operation = "set_key"
+target = "config/settings.ini"
+section = "Graphics"
+key = "TextureQuality"
+value = "high"
+condition.value_equals = { section = "Graphics", key = "TextureQuality", value = "medium" }
+
+# Multiple conditions (all must be true - AND logic)
+[patches.complex_conditional]
+operation = "merge"
 target = "animals/elephant.ai"
-target_mod = "base_game"  # Patch the base game's file
+source = "patches/elephant_advanced.ai"
+condition.mod_loaded = "AdvancedAI"
+condition.key_exists = { section = "AI", key = "AdvancedMode" }
+condition.value_equals = { section = "AI", key = "AdvancedMode", value = "true" }
+```
+
+**Condition Types**:
+- **`mod_loaded`**: Check if mod ID is loaded (string value)
+- **`key_exists`**: Check if section and key exist (table with `section` and `key` fields)
+- **`value_equals`**: Check if key has specific value (table with `section`, `key`, and `value` fields)
+
+**Condition Logic**: All conditions must pass (AND logic). For OR logic, create separate patches or separate patch files.
+
+## Cross-Mod Patching
+
+Patches operate on the **current state** of files: base game files with all previously loaded mods and their patches already applied. This means mods patch a cumulative state, not individual mod files.
+
+```toml
+# Target field matches files from current state (base game + previous mods)
+[patches.buff_elephant_speed]
+operation = "set_key"
+target = "animals/elephant.ai"  # Matches current state, not specific mod
 section = "Stats"
 key = "Speed"
 value = "15"
 ```
 
-- If `target_mod` is omitted, the patch targets any matching file (first match wins)
-- If `target_mod` is specified, only that mod's file is patched
+**Note**: The `target` field matches against the current resource state. Mod load order (handled elsewhere) determines which version of a file is "current" when this patch runs.
 
 ## Edge Case Behavior
 
@@ -221,7 +314,20 @@ All patch structures are defined in `openzt/src/mods.rs`:
 use indexmap::IndexMap;
 
 pub struct PatchFile {
+    // Top-level on_error directive
+    pub on_error: ErrorHandling,  // Default: Continue
+
+    // Top-level conditions (optional)
+    pub condition: Option<PatchCondition>,
+
+    // Named patches
     pub patches: IndexMap<String, Patch>,  // Preserves insertion order
+}
+
+pub enum ErrorHandling {
+    Continue,   // Continue to next patch (default)
+    Abort,      // Stop processing this patch file
+    AbortMod,   // Stop loading this mod
 }
 
 pub enum Patch {
@@ -243,12 +349,25 @@ pub enum MergeMode {
     PatchPriority,  // Patch overwrites existing (default)
     BasePriority,   // Existing preserved, patch adds new only
 }
+
+pub enum OnExists {
+    Error,    // Fail if section exists (default)
+    Merge,    // Merge keys with existing section
+    Skip,     // Skip if exists
+    Replace,  // Replace entire section
+}
+
+pub struct PatchCondition {
+    pub mod_loaded: Option<String>,
+    pub key_exists: Option<KeyCheck>,
+    pub value_equals: Option<ValueCheck>,
+}
 ```
 
 Each operation struct contains:
 - `target`: String - target file path
 - `source`: String (for replace/merge) - source file path within mod
-- `target_mod`: Option<String> - optional mod to target
+- `condition`: Option<PatchCondition> - optional conditions
 - Operation-specific fields (section, key, value, etc.)
 
 The `IndexMap` preserves patch order while allowing access by name for logging and error messages.
@@ -257,24 +376,17 @@ The `IndexMap` preserves patch order while allowing access by name for logging a
 
 Potential enhancements not yet implemented:
 
-1. **Conditional Patches**: Apply only if another mod is loaded
+1. **Inline Content**: Small patches without separate files
    ```toml
-   [[patch]]
-   operation = "set_key"
-   condition = { mod_loaded = "graphics_enhancement_pack" }
-   ...
-   ```
-
-2. **Inline Content**: Small patches without separate files
-   ```toml
-   [[patch]]
+   [patches.inline_merge]
    operation = "merge_inline"
    target = "config/settings.ini"
    content = "[Graphics]\nResolution=1920x1080"
    ```
 
-3. **Array Element Operations**: Target specific array indices or value matching
-4. **Patch Validation Tool**: CLI tool to validate patch.toml files before packaging
+2. **Array Element Operations**: Target specific array indices or value matching
+3. **Patch Validation Tool**: CLI tool to validate patch.toml files before packaging
+4. **Pattern Matching**: Wildcard file targeting (e.g., `target = "animals/*.ai"`)
 
 ## Testing
 

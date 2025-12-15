@@ -1,27 +1,32 @@
+# Top-level configuration
 on_error = "continue"
 
-[patch.merge_blackbuck_ai]
+# Top-level conditions (commented out for test - would skip entire file)
+# [condition]
+# mod_loaded = "RequiredExpansion"
+
+[patches.merge_blackbuck_ai]
 operation = "merge"
 target = "animals/blckbuck.ai"
 source = "resources/patches/blckbuck.ai"
 
-[patch.replace_blackbuck_ai]
+[patches.replace_blackbuck_ai]
 operation = "replace"
 target = "animals/blckbuck.ai"
 source = "resources/patches/blckbuck.ai"
 
-[patch.remove_old_animal]
+[patches.remove_old_animal]
 operation = "delete"
 target = "animals/oldanimal.ai"
 
-[patch.update_resolution]
+[patches.update_resolution]
 operation = "set_key"
 target = "config/settings.ini"
 section = "Graphics"
 key = "Resolution"
 value = "1920x1080"
 
-[patch.conditional_mod_loaded]
+[patches.conditional_mod_loaded]
 operation = "set_key"
 target = "config/settings.ini"
 section = "Features"
@@ -29,7 +34,7 @@ key = "AdvancedAI"
 value = "true"
 condition.mod_loaded = "AdvancedAI"
 
-[patch.conditional_key_exists]
+[patches.conditional_key_exists]
 operation = "set_key"
 target = "config/settings.ini"
 section = "Graphics"
@@ -37,7 +42,7 @@ key = "AntiAliasing"
 value = "4x"
 condition.key_exists = { section = "Graphics", key = "AntiAliasing" }
 
-[patch.conditional_value_equals]
+[patches.conditional_value_equals]
 operation = "set_key"
 target = "config/settings.ini"
 section = "Graphics"
@@ -45,7 +50,7 @@ key = "TextureQuality"
 value = "high"
 condition.value_equals = { section = "Graphics", key = "TextureQuality", value = "medium" }
 
-[patch.add_section_with_on_exists]
+[patches.add_section_with_on_exists]
 operation = "add_section"
 target = "config/settings.ini"
 section = "NewFeature"

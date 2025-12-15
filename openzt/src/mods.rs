@@ -203,16 +203,16 @@ pub struct IconDefinition {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct PatchFile {
-    #[serde(flatten)]
-    pub config: PatchConfig,
-    #[serde(rename = "patch")]
-    pub patches: IndexMap<String, Patch>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct PatchConfig {
+    /// Top-level on_error directive for file-level error handling
     #[serde(default = "default_on_error")]
     pub on_error: ErrorHandling,
+
+    /// Top-level conditions - if these fail, entire file is skipped
+    #[serde(default)]
+    pub condition: Option<PatchCondition>,
+
+    /// Named patches (preserves insertion order via IndexMap)
+    pub patches: IndexMap<String, Patch>,
 }
 
 fn default_on_error() -> ErrorHandling {
@@ -487,7 +487,8 @@ mod mod_loading_tests {
         assert_eq!(patches.patches.len(), 8);
 
         // Test file-level config
-        assert_eq!(patches.config.on_error, super::ErrorHandling::Continue);
+        assert_eq!(patches.on_error, super::ErrorHandling::Continue);
+        assert!(patches.condition.is_none());
 
         // Test merge patch (defaults to patch_priority)
         let merge_patch = patches.patches.get("merge_blackbuck_ai").expect("merge_blackbuck_ai patch not found");

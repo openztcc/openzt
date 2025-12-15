@@ -42,11 +42,13 @@ pub fn get_mod_ids() -> Vec<String> {
     binding.iter().cloned().collect()
 }
 
+// TODO: We should use '/' as separator instead of '.' to match other resource ids
 pub fn openzt_base_resource_id(mod_id: &String, resource_type: ResourceType, resource_name: &String) -> String {
     let resource_type_name = resource_type.to_string();
     format!("openzt.mods.{}.{}.{}", mod_id, resource_type_name, resource_name)
 }
 
+// TODO: We should use '/' as separator instead of '.' to match other resource ids
 pub fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTFileType) -> String {
     format!("{}.{}", base_resource_id, file_type)
 }
