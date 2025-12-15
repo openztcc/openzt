@@ -251,3 +251,16 @@ pub fn add_lazy(file_name: String, archive: Arc<Mutex<ZtdArchive>>) {
 pub fn remove_resource(file_name: &str) -> bool {
     LazyResourceMap::remove(file_name.to_lowercase()).is_some()
 }
+
+/// Update or insert a resource in the resource map
+///
+/// This is more efficient than calling remove_resource() + add_ztfile() as it only
+/// acquires the lock once and atomically replaces the resource if it exists.
+///
+/// # Arguments
+/// * `file_name` - The resource file name (will be lowercased for case-insensitive lookup)
+/// * `file_type` - The type of the file
+/// * `data` - Pointer to the resource data
+pub fn update_resource(file_name: String, file_type: ZTFileType, data: u32) {
+    LazyResourceMap::insert_custom(file_name, file_type, data)
+}

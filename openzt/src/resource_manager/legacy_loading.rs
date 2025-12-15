@@ -35,7 +35,7 @@ use crate::{
     },
     resource_manager::{
         handlers::{get_handlers, RunStage},
-        lazyresourcemap::{add_lazy, add_ztfile, check_file, get_file, get_file_names, get_num_resources, remove_resource},
+        lazyresourcemap::{add_lazy, add_ztfile, check_file, get_file, get_file_names, get_num_resources, remove_resource, update_resource},
         openzt_mods::{get_num_mod_ids, load_open_zt_mod},
         ztfile::{modify_ztfile_as_animation, ZTFile, ZTFileType},
     },
@@ -204,8 +204,7 @@ fn apply_replace_patch(patch: &ReplacePatch, mod_path: &Path, patch_name: &str) 
         }
     };
 
-    // Remove old file and add new one
-    remove_resource(&patch.target);
+    // Update resource (add_ztfile automatically replaces if exists)
     add_ztfile(mod_path, patch.target.clone(), ztfile)?;
 
     info!("Successfully applied replace patch '{}'", patch_name);
@@ -282,8 +281,7 @@ fn apply_merge_patch(patch: &MergePatch, mod_path: &Path, patch_name: &str) -> a
     let c_string = std::ffi::CString::new(merged_content.clone())?;
     let ztfile = ZTFile::Text(c_string, file_type, merged_content.len() as u32);
 
-    // Remove old file and add merged one
-    remove_resource(&patch.target);
+    // Update resource (add_ztfile automatically replaces if exists)
     add_ztfile(mod_path, patch.target.clone(), ztfile)?;
 
     info!("Successfully applied merge patch '{}'", patch_name);
@@ -415,8 +413,7 @@ fn save_ini_to_resources(target: &str, ini: &Ini, mod_path: &Path) -> anyhow::Re
     let c_string = std::ffi::CString::new(content.clone())?;
     let ztfile = ZTFile::Text(c_string, file_type, content.len() as u32);
 
-    // Remove old file and add modified one
-    remove_resource(target);
+    // Update resource (add_ztfile automatically replaces if exists)
     add_ztfile(mod_path, target.to_string(), ztfile)?;
 
     Ok(())
