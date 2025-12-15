@@ -247,3 +247,7 @@ pub fn add_ztfile(path: &Path, file_name: String, ztfile: ZTFile) -> anyhow::Res
 pub fn add_lazy(file_name: String, archive: Arc<Mutex<ZtdArchive>>) {
     LazyResourceMap::insert_lazy(file_name, archive);
 }
+
+pub fn remove_resource(file_name: &str) -> bool {
+    LazyResourceMap::remove(file_name.to_lowercase()).is_some()
+}

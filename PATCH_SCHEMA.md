@@ -8,8 +8,10 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
 
 ### ✅ Completed
 1. **Phase 1: Data Structures** - All patch types defined in `openzt/src/mods.rs`
-   - `PatchFile`, `Patch` enum with 12 operation variants
+   - `PatchFile`, `Patch` enum with 13 operation variants (including SetPalette)
    - `MergeMode` enum for merge priority control
+   - `ErrorHandling` and `OnExists` enums for error handling and collision resolution
+   - `PatchCondition` support for conditional patching
    - TOML deserialization working and tested
 
 2. **Phase 2: INI Parser Enhancements** - New methods in `openzt-configparser/src/ini.rs`
@@ -18,19 +20,40 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
    - `merge_with_priority()` - merge with configurable priority (patch_priority vs base_priority)
    - `MergeMode` enum exported from configparser
 
+3. **Phase 3: File-Level Patch Operations** - Implemented in `openzt/src/resource_manager/legacy_loading.rs`
+   - `apply_replace_patch()` - replace entire files in resource system (lines 157-195)
+   - `apply_merge_patch()` - merge INI files with configurable priority (lines 210-271)
+   - `apply_delete_patch()` - remove files from resource system (lines 281-299)
+   - `apply_set_palette_patch()` - modify animation palette references (lines 313-343)
+   - `remove_resource()` - public function added to lazyresourcemap.rs (line 251-253)
+   - Full logging and error handling for all operations
+   - Proper validation (file types, extensions, existence checks)
+
 ### 🚧 Remaining Work
-3. **Phase 3-6: Patch Application System** (not yet implemented)
+4. **Phase 4: Element-Level Operations** (not yet implemented)
+   - Implement set_key, set_keys operations
+   - Implement append_value, append_values operations
+   - Implement remove_key, remove_keys operations
+   - Implement add_section (with on_exists modes), clear_section, remove_section operations
+   - Conditional patching support for element-level operations
+
+5. **Phase 5: Resource Map Updates** (may not be needed - Phase 3 already handles this)
+   - Evaluate if additional resource map methods are needed beyond remove_resource()
+
+6. **Phase 6: Patch Orchestration** (not yet implemented)
    - Load patch.toml from mod archives
-   - Implement file-level operations (replace, merge, delete)
-   - Implement element-level operations (set_key, append_value, etc.)
-   - Resource map integration
-   - Error handling and logging
-   - Patch orchestration in mod load order
+   - Evaluate top-level conditions (skip entire file if conditions fail)
+   - Apply patches in order with patch-level conditional evaluation
+   - Error handling (continue/abort/abort_mod modes)
+   - Call appropriate apply_*_patch() functions based on operation type
+   - Comprehensive logging with patch names
 
 7. **Phase 7: Comprehensive Testing** (not yet implemented)
    - Integration tests for all patch types
    - Edge case testing (missing files, sections, keys)
    - Cross-mod patching tests
+   - Conditional patching tests
+   - Error handling mode tests
 
 ## TOML Schema Reference
 
