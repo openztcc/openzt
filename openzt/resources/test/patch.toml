@@ -56,3 +56,14 @@ target = "config/settings.ini"
 section = "NewFeature"
 keys = { Enabled = "true", Value = "100" }
 on_exists = "merge"
+
+[patches.set_elephant_palette]
+operation = "set_palette"
+target = "animals/elephant/adult/male/n"
+palette = "animals/elephant/new_palette.pal"
+
+[patches.conditional_palette_swap]
+operation = "set_palette"
+target = "animals/tiger/adult/n"
+palette = "resources/tiger_hd.pal"
+condition.mod_loaded = "HDTexturesMod"

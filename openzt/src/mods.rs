@@ -233,6 +233,7 @@ pub enum Patch {
     Replace(ReplacePatch),
     Merge(MergePatch),
     Delete(DeletePatch),
+    SetPalette(SetPalettePatch),
     SetKey(SetKeyPatch),
     SetKeys(SetKeysPatch),
     AppendValue(AppendValuePatch),
@@ -312,6 +313,47 @@ pub struct MergePatch {
 #[derive(Deserialize, Debug, Clone)]
 pub struct DeletePatch {
     pub target: String,
+    #[serde(default)]
+    pub condition: Option<PatchCondition>,
+}
+
+/// Patch operation to change the palette file reference in an animation file
+///
+/// This operation modifies the palette filename stored inside an animation file's
+/// header without changing the animation data itself. This allows mods to swap
+/// color palettes for animals, buildings, or other animated sprites.
+///
+/// # Fields
+/// * `target` - Path to the animation file (must have no extension, e.g., "animals/elephant/n")
+/// * `palette` - Path to the palette file (.pal) to reference
+/// * `condition` - Optional conditions that must be met for the patch to apply
+///
+/// # Validation
+/// - Target file must exist in the resource system
+/// - Target file must be an animation file (no extension)
+/// - Palette path must end with .pal extension
+/// - Palette path must not be empty
+///
+/// # Example TOML
+/// ```toml
+/// [patches.update_elephant_colors]
+/// operation = "set_palette"
+/// target = "animals/elephant/adult/male/n"
+/// palette = "animals/elephant/new_colors.pal"
+/// ```
+///
+/// # Errors
+/// - Target file not found
+/// - Target has extension (not an animation file)
+/// - Palette path empty or has wrong extension
+/// - Animation file parsing/writing fails
+#[derive(Deserialize, Debug, Clone)]
+pub struct SetPalettePatch {
+    /// Target animation file path (must have no extension)
+    pub target: String,
+    /// Path to the palette file (.pal) to reference
+    pub palette: String,
+    /// Optional conditions for applying this patch
     #[serde(default)]
     pub condition: Option<PatchCondition>,
 }
@@ -484,7 +526,7 @@ mod mod_loading_tests {
     #[test]
     fn test_parse_patches() {
         let patches: super::PatchFile = toml::from_str(include_str!("../resources/test/patch.toml")).unwrap();
-        assert_eq!(patches.patches.len(), 8);
+        assert_eq!(patches.patches.len(), 10);
 
         // Test file-level config
         assert_eq!(patches.on_error, super::ErrorHandling::Continue);
@@ -597,6 +639,31 @@ mod mod_loading_tests {
             _ => panic!("Expected AddSection patch"),
         }
 
+        // Test set_palette patch
+        let set_palette_patch = patches.patches.get("set_elephant_palette")
+            .expect("set_elephant_palette patch not found");
+        match set_palette_patch {
+            super::Patch::SetPalette(patch) => {
+                assert_eq!(patch.target, "animals/elephant/adult/male/n");
+                assert_eq!(patch.palette, "animals/elephant/new_palette.pal");
+                assert!(patch.condition.is_none());
+            }
+            _ => panic!("Expected SetPalette patch"),
+        }
+
+        // Test set_palette patch with condition
+        let conditional_palette = patches.patches.get("conditional_palette_swap")
+            .expect("conditional_palette_swap patch not found");
+        match conditional_palette {
+            super::Patch::SetPalette(patch) => {
+                assert_eq!(patch.target, "animals/tiger/adult/n");
+                assert_eq!(patch.palette, "resources/tiger_hd.pal");
+                let condition = patch.condition.as_ref().expect("Expected condition");
+                assert_eq!(condition.mod_loaded, Some("HDTexturesMod".to_string()));
+            }
+            _ => panic!("Expected SetPalette patch"),
+        }
+
         // Test that patches are ordered correctly (IndexMap preserves insertion order)
         let patch_names: Vec<_> = patches.patches.keys().collect();
         assert_eq!(patch_names[0], "merge_blackbuck_ai");
@@ -607,5 +674,7 @@ mod mod_loading_tests {
         assert_eq!(patch_names[5], "conditional_key_exists");
         assert_eq!(patch_names[6], "conditional_value_equals");
         assert_eq!(patch_names[7], "add_section_with_on_exists");
+        assert_eq!(patch_names[8], "set_elephant_palette");
+        assert_eq!(patch_names[9], "conditional_palette_swap");
     }
 }

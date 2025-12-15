@@ -102,6 +102,37 @@ operation = "delete"
 target = "animals/oldanimal.ai"
 ```
 
+#### Set Animation Palette Reference
+```toml
+[patches.update_elephant_palette]
+operation = "set_palette"
+target = "animals/elephant/adult/male/n"  # Animation file (no extension)
+palette = "animals/elephant/custom.pal"   # New palette file path
+```
+
+**Purpose**: Changes the palette filename reference inside an animation file header without modifying animation data.
+
+**Requirements**:
+- Target must be an animation file (no extension: 'N', 'S', 'NE', etc.)
+- Palette path must end with `.pal` extension
+- Palette file must exist in mod archive
+- Target file must exist in resource system
+- Target file must be parseable as a valid animation
+
+**Use Cases**:
+- Swapping color palettes for animals/objects
+- HD texture mod palette updates
+- Seasonal/themed palette variations
+
+**Conditional Example**:
+```toml
+[patches.hd_palette_swap]
+operation = "set_palette"
+target = "animals/elephant/n"
+palette = "animals/elephant/hd.pal"
+condition.mod_loaded = "HDTexturePack"
+```
+
 ### Element-Level Operations (INI Files Only)
 
 #### Set Single Key-Value
@@ -283,6 +314,13 @@ value = "15"
 - Element-level operations only work on INI-like files: `.ini`, `.ai`, `.cfg`, `.uca`, `.ucs`, `.ucb`, `.scn`, `.lyt`
 - Attempting element ops on other files: Error with clear message
 
+### Animation Palette Reference (set_palette operation)
+- **Target has extension**: Error - only extensionless animation files supported
+- **Palette missing .pal extension**: Error - palette must be .pal file
+- **Palette not in resources**: Error during validation - file must exist
+- **Target not found**: Error - cannot modify non-existent file
+- **Animation parsing fails**: Error - file is not a valid animation or is corrupted
+
 ## Implementation Notes
 
 ### Patch Naming
@@ -334,6 +372,7 @@ pub enum Patch {
     Replace(ReplacePatch),
     Merge(MergePatch),
     Delete(DeletePatch),
+    SetPalette(SetPalettePatch),
     SetKey(SetKeyPatch),
     SetKeys(SetKeysPatch),
     AppendValue(AppendValuePatch),
@@ -362,11 +401,18 @@ pub struct PatchCondition {
     pub key_exists: Option<KeyCheck>,
     pub value_equals: Option<ValueCheck>,
 }
+
+pub struct SetPalettePatch {
+    pub target: String,                    // Animation file path
+    pub palette: String,                   // Palette file path (.pal)
+    pub condition: Option<PatchCondition>, // Optional conditions
+}
 ```
 
 Each operation struct contains:
 - `target`: String - target file path
 - `source`: String (for replace/merge) - source file path within mod
+- `palette`: String (for set_palette) - palette file path
 - `condition`: Option<PatchCondition> - optional conditions
 - Operation-specific fields (section, key, value, etc.)
 
