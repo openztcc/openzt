@@ -3,6 +3,8 @@ on_error = "continue"
 
 # Top-level conditions (commented out for test - would skip entire file)
 # [condition]
+# Top-level target required for key_exists/value_equals
+# target = "config/settings.ini"
 # mod_loaded = "RequiredExpansion"
 
 [patches.merge_blackbuck_ai]

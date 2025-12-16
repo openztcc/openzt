@@ -96,11 +96,24 @@ operation = "merge"
 - **`abort`**: Stop processing remaining patches in this file, continue loading mod (other patch files still process)
 - **`abort_mod`**: Stop loading this mod entirely (use for critical patches)
 
+**Current Limitation**: Only `on_error = "continue"` is currently supported. The `abort` and `abort_mod` modes require snapshot/rollback functionality which will be added in a future update.
+
 **Top-Level Conditions** (`[condition]` table):
 - Optional conditions that apply to the entire file
 - If top-level conditions fail, the entire patch file is skipped (logged as warning)
 - Uses same condition types as individual patches: `mod_loaded`, `key_exists`, `value_equals`
 - All conditions must pass (AND logic)
+
+**Target Requirement for key_exists/value_equals**:
+When using `key_exists` or `value_equals` in top-level conditions, you MUST specify a `target` field:
+
+```toml
+[condition]
+target = "config/settings.ini"
+key_exists = { section = "Graphics", key = "HDTextures" }
+```
+
+**Note**: The `mod_loaded` condition does not require a target.
 
 ### Named Patches
 

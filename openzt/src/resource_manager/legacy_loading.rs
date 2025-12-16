@@ -116,8 +116,8 @@ pub fn load_resources(paths: Vec<String>) {
         }
     }
 
-    // TODO: Implement patching
-    // apply_patches();
+    // Patches are now applied per-mod in handle_ztd()
+    // See handle_ztd() for patch orchestration
 
     info!("Running AfterOpenZTMods handlers");
     for handler in get_handlers().iter() {
@@ -238,13 +238,7 @@ fn apply_merge_patch(patch: &MergePatch, mod_path: &Path, patch_name: &str) -> a
     }
 
     // Validate that target is an INI-compatible file
-    let target_path = Path::new(&patch.target);
-    let target_ext = target_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let valid_extensions = ["ini", "ai", "cfg", "uca", "ucs", "ucb", "scn", "lyt"];
-    if !valid_extensions.contains(&target_ext) {
-        anyhow::bail!("Target file '{}' is not an INI file (extension: {}). Merge only works with INI files.",
-                     patch.target, target_ext);
-    }
+    validate_ini_file(&patch.target)?;
 
     // Load target INI file
     let target_file = get_file(&patch.target)
@@ -280,7 +274,7 @@ fn apply_merge_patch(patch: &MergePatch, mod_path: &Path, patch_name: &str) -> a
     let merged_content = target_ini.writes();
 
     // Create ZTFile and update resource
-    let file_type = ZTFileType::try_from(target_path)
+    let file_type = ZTFileType::try_from(Path::new(&patch.target))
         .map_err(|e| anyhow::anyhow!("Invalid target file type: {}", e))?;
     let c_string = std::ffi::CString::new(merged_content.clone())?;
     let ztfile = ZTFile::Text(c_string, file_type, merged_content.len() as u32);
@@ -368,16 +362,28 @@ fn apply_set_palette_patch(patch: &SetPalettePatch, patch_name: &str) -> anyhow:
 // Phase 4: Element-Level Patch Operations (INI Files)
 // ============================================================================
 
+/// Valid INI file extensions
+const VALID_INI_EXTENSIONS: &[&str] = &["ini", "ai", "cfg", "uca", "ucs", "ucb", "scn", "lyt"];
+
+/// Check if a file extension is valid for INI operations
+fn is_valid_ini_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|ext| VALID_INI_EXTENSIONS.contains(&ext))
+        .unwrap_or(false)
+}
+
 /// Helper function to validate that a file is an INI-compatible file
 fn validate_ini_file(target: &str) -> anyhow::Result<()> {
-    let target_path = Path::new(target);
-    let target_ext = target_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let valid_extensions = ["ini", "ai", "cfg", "uca", "ucs", "ucb", "scn", "lyt"];
+    let path = Path::new(target);
 
-    if !valid_extensions.contains(&target_ext) {
+    if !is_valid_ini_extension(path) {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("none");
         anyhow::bail!(
-            "Target file '{}' is not an INI file (extension: {}). Element operations only work with INI files.",
-            target, target_ext
+            "Target file '{}' is not an INI file (extension: {}). Valid extensions: {}",
+            target,
+            ext,
+            VALID_INI_EXTENSIONS.join(", ")
         );
     }
 
@@ -754,53 +760,11 @@ fn is_mod_loaded(mod_id: &str) -> bool {
     loaded_mods.iter().any(|id| id == mod_id)
 }
 
-/// Evaluate patch conditions to determine if a patch should be applied
-///
-/// # Arguments
-/// * `condition` - The condition to evaluate (if None, returns true)
-/// * `patch_name` - Name of the patch (for logging)
-///
-/// # Returns
-/// * `Ok(true)` if all conditions pass (or no conditions specified)
-/// * `Ok(false)` if any condition fails
-/// * `Err(_)` if there's an error evaluating conditions
-#[allow(dead_code, unused_variables)]
-fn evaluate_condition(condition: &Option<PatchCondition>, patch_name: &str) -> anyhow::Result<bool> {
-    let Some(cond) = condition else {
-        // No conditions specified, always pass
-        return Ok(true);
-    };
-
-    // Check mod_loaded condition
-    if let Some(required_mod) = &cond.mod_loaded {
-        if !is_mod_loaded(required_mod) {
-            info!("Patch '{}': skipping - required mod '{}' not loaded", patch_name, required_mod);
-            return Ok(false);
-        }
-    }
-
-    // Check key_exists condition
-    if let Some(key_check) = &cond.key_exists {
-        // Need to load the target file - but we don't have target in PatchCondition
-        // This requires the target to be passed in. For now, we'll handle this
-        // in the apply_patches function where we have access to the target.
-        // For file-level conditions, we'll handle this specially.
-    }
-
-    // Check value_equals condition
-    if let Some(value_check) = &cond.value_equals {
-        // Similar to key_exists, we need the target file
-        // This will be handled in apply_patches
-    }
-
-    Ok(true)
-}
-
 /// Evaluate patch-level conditions that require target file access
 ///
 /// # Arguments
 /// * `condition` - The condition to evaluate
-/// * `target` - Target file path
+/// * `default_target` - Default target file path (used if condition.target is not specified)
 /// * `patch_name` - Name of the patch (for logging)
 ///
 /// # Returns
@@ -809,12 +773,15 @@ fn evaluate_condition(condition: &Option<PatchCondition>, patch_name: &str) -> a
 /// * `Err(_)` if there's an error evaluating conditions
 fn evaluate_patch_condition_with_target(
     condition: &Option<PatchCondition>,
-    target: &str,
+    default_target: &str,
     patch_name: &str,
 ) -> anyhow::Result<bool> {
     let Some(cond) = condition else {
         return Ok(true);
     };
+
+    // Use condition.target if specified, otherwise use default_target
+    let target = cond.target.as_deref().unwrap_or(default_target);
 
     // First check mod_loaded condition (doesn't require target)
     if let Some(required_mod) = &cond.mod_loaded {
@@ -936,6 +903,15 @@ enum PatchResult {
 /// * `Ok(())` if patches were applied successfully (or with continue error handling)
 /// * `Err(_)` if on_error=abort or on_error=abort_mod and an error occurred
 pub fn apply_patches(patch_file: &PatchFile, mod_path: &Path) -> anyhow::Result<()> {
+    // VALIDATE: Only 'continue' mode is currently supported
+    if patch_file.on_error != ErrorHandling::Continue {
+        return Err(anyhow::anyhow!(
+            "Unsupported on_error mode: {:?}. Only 'continue' is currently supported. \
+             Snapshot/rollback features for 'abort' and 'abort_mod' will be added in a future update.",
+            patch_file.on_error
+        ));
+    }
+
     info!("Applying patch file with {} patches (on_error: {:?})",
           patch_file.patches.len(), patch_file.on_error);
 
@@ -949,10 +925,19 @@ pub fn apply_patches(patch_file: &PatchFile, mod_path: &Path) -> anyhow::Result<
             }
         }
 
-        // For key_exists and value_equals at file level, we need a target
-        // Since file-level conditions don't have a target, we log a warning
+        // Check key_exists and value_equals with target
         if top_level_condition.key_exists.is_some() || top_level_condition.value_equals.is_some() {
-            warn!("Top-level key_exists/value_equals conditions are not supported (no target file specified)");
+            let Some(target) = &top_level_condition.target else {
+                return Err(anyhow::anyhow!(
+                    "Top-level condition with key_exists/value_equals requires 'target' field"
+                ));
+            };
+
+            // Use existing evaluation function with target
+            if !evaluate_patch_condition_with_target(&Some(top_level_condition.clone()), target, "top-level")? {
+                warn!("Patch file skipped - top-level conditions failed");
+                return Ok(());
+            }
         }
     }
 
@@ -1061,13 +1046,43 @@ pub fn apply_patches(patch_file: &PatchFile, mod_path: &Path) -> anyhow::Result<
     Ok(())
 }
 
+/// Load a file from a ZTD archive by name
+fn load_file_from_archive(archive: &mut ZtdArchive, filename: &str) -> anyhow::Result<String> {
+    let mut file = archive.by_name(filename)
+        .map_err(|e| anyhow::anyhow!("File '{}' not found in archive: {}", filename, e))?;
+
+    let content = file.read_to_string()
+        .map_err(|e| anyhow::anyhow!("Failed to read '{}': {}", filename, e))?;
+
+    Ok(content)
+}
+
 fn handle_ztd(resource: &Path) -> anyhow::Result<i32> {
     let mut load_count = 0;
     let mut zip = ZtdArchive::new(resource)?;
 
     let ztd_type = load_open_zt_mod(&mut zip)?;
 
+    // Load and apply patches for OpenZT mods
     if ztd_type == mods::ZtdType::Openzt {
+        if let Ok(patch_toml_content) = load_file_from_archive(&mut zip, "patch.toml") {
+            match toml::from_str::<PatchFile>(&patch_toml_content) {
+                Ok(patch_file) => {
+                    info!("Found patch.toml in mod at {}", resource.display());
+                    if let Err(e) = apply_patches(&patch_file, resource) {
+                        error!("Failed to apply patches for mod: {}", e);
+                        // Error already logged, propagate if needed
+                        return Err(e);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to parse patch.toml in mod: {}", e);
+                    return Err(anyhow::anyhow!("Invalid patch.toml: {}", e));
+                }
+            }
+        }
+        // If no patch.toml, that's fine - continue normally
+
         return Ok(0);
     }
 

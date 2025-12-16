@@ -271,6 +271,11 @@ fn default_on_exists() -> OnExists {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct PatchCondition {
+    /// Target file for key_exists/value_equals conditions
+    /// Required at top-level if using key_exists or value_equals
+    /// Optional at patch-level (defaults to the patch's own target)
+    #[serde(default)]
+    pub target: Option<String>,
     #[serde(default)]
     pub mod_loaded: Option<String>,
     #[serde(default)]

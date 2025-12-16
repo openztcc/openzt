@@ -32,8 +32,17 @@ Design and implement a comprehensive TOML schema for patch operations on Zoo Tyc
 
 - Phase 3: File-level patch operations (replace, merge, delete, set_palette) + conditional support ✅
 - Phase 4: Element-level patch operations (set_key, append_value, etc.) + conditional support + on_exists for add_section ✅
-- Phase 5: Resource map update methods (already handled in Phase 3/4)
-- Phase 6: Patch orchestration, conditional evaluation, and error handling (on_error modes)
+- Phase 5: Resource map update methods (already handled in Phase 3/4) ✅
+- Phase 6: Patch orchestration, conditional evaluation, and error handling (on_error modes) ✅
+- **Phase 6.5: Core Improvements** ✅
+  - Add condition.target field for top-level conditionals
+  - Wire up apply_patches integration to handle_ztd()
+  - Code quality improvements (DRY validation, remove dead code)
+  - Validate only on_error="continue" is used (others not yet supported)
+- **Phase 6.6: Snapshot/Rollback & Dry-Run** (FUTURE PLAN)
+  - Implement selective snapshot/rollback for abort_mod
+  - Add dry_run flag support
+  - Enable abort and abort_mod error handling modes
 - Phase 7: Comprehensive integration tests (including conditionals, error modes, on_exists)
 
 ## Requirements Summary
@@ -631,6 +640,40 @@ value = "swim"  # Destroys walk/eat/sleep
 ## Future Extensions
 
 Potential enhancements for future schema versions:
+
+### Dry-Run Mode Enhancement
+Built-in support for previewing patch effects without applying them:
+```toml
+# In patch.toml
+dry_run = true
+```
+
+**Benefits**:
+- Test patches before deployment
+- Preview what files will be modified
+- Validate patch syntax and conditionals
+- Safe testing in production environments
+
+**Output**: Detailed logs showing each operation that would occur:
+```
+DRY RUN: Would set [Graphics]Resolution = '1920x1080' in 'config/settings.ini'
+DRY RUN: Would merge 'animals/elephant.ai' with 'patches/elephant.ai' (mode: PatchPriority)
+```
+
+### Rollback & Transaction Support
+Automatic snapshot/rollback for failed patches:
+
+**Current Implementation (v1.0)**:
+- Selective snapshots of affected resources before patch application
+- Automatic rollback on `on_error = "abort_mod"`
+- Only snapshots resources actually modified by patches (memory efficient)
+- Snapshots discarded on successful completion
+
+**Future Enhancements**:
+- Manual rollback API for advanced mod authors
+- Persistent transaction log for debugging
+- Cross-mod dependency rollback (if Mod B depends on Mod A patches)
+- Checkpoint/restore at arbitrary points in mod loading
 
 ### Array Element Operations
 Fine-grained control over array elements:
