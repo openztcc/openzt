@@ -1,5 +1,6 @@
 mod habitats_locations;
 mod loading;
+pub mod patches;
 
 pub use crate::resource_manager::openzt_mods::{
     habitats_locations::{get_location_habitat_ids, get_location_or_habitat_by_id},

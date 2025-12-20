@@ -174,6 +174,8 @@ pub enum Ordering {
 pub struct ModDefinition {
     habitats: Option<HashMap<String, IconDefinition>>,
     locations: Option<HashMap<String, IconDefinition>>,
+    // We probably need to separate this into Option<PatchMeta> and Option<Hashmap<String, Patch>>
+    patches: Option<PatchFile>,
 }
 
 impl ModDefinition {

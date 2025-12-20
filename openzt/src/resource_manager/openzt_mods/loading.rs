@@ -10,7 +10,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use openzt_configparser::ini::{Ini, WriteOptions};
 use std::sync::LazyLock;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::{
     animation::Animation,
@@ -53,7 +53,7 @@ pub fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTFile
     format!("{}.{}", base_resource_id, file_type)
 }
 
-pub fn load_open_zt_mod(archive: &mut ZtdArchive) -> anyhow::Result<mods::ZtdType> {
+pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Result<mods::ZtdType> {
     let archive_name = archive.name().to_string();
     let Ok(meta_file) = archive.by_name("meta.toml") else {
         return Ok(mods::ZtdType::Legacy);
@@ -97,7 +97,16 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive) -> anyhow::Result<mods::ZtdTyp
 
     for file_name in keys {
         if file_name.starts_with("defs/") {
-            load_def(&mod_id, file_name, &file_map)?;
+            let mod_def = load_def(&mod_id, file_name, &file_map)?;
+
+            // Apply patches from this definition file if present
+            if let Some(patch_file) = mod_def.patches() {
+                info!("Found {} patches in {}", patch_file.patches.len(), file_name);
+                if let Err(e) = super::patches::apply_patches(patch_file, resource) {
+                    error!("Failed to apply patches from {}: {}", file_name, e);
+                    return Err(e);
+                }
+            }
         }
     }
 

@@ -9,10 +9,13 @@ pub fn init_hooks() {
 
 #[detour_mod]
 mod zoo_resource_mgr {
-    use openzt_configparser::ini::Ini;
+    use std::ffi::CString;
+    use std::time::Instant;
+
     use tracing::info;
-    // use openzt_detour::{BFRESOURCE_ATTEMPT, BFRESOURCE_PREPARE, BFRESOURCEMGR_CONSTRUCTOR, ZTUI_GENERAL_GET_INFO_IMAGE_NAME};
-    use openzt_detour::gen::bfresourcemgr::CONSTRUCTOR;
+
+    use openzt_configparser::ini::Ini;
+    use openzt_detour::gen::bfresourcemgr::{CONSTRUCTOR, ADD_PATH};
     use openzt_detour::gen::bfresource::{ATTEMPT, PREPARE};
     use openzt_detour::gen::ztui_general::GET_INFO_IMAGE_NAME;
 
@@ -92,7 +95,6 @@ mod zoo_resource_mgr {
     unsafe extern "thiscall" fn zoo_bf_resource_mgr_constructor(this_ptr: u32) -> u32 {
         info!("BFResourceMgr::constructor({:X})", this_ptr);
 
-        use std::time::Instant;
         let now = Instant::now();
 
         let return_value = unsafe { CONSTRUCTOR_DETOUR.call(this_ptr) };
@@ -107,9 +109,24 @@ mod zoo_resource_mgr {
             info!("Failed to load zoo.ini: {}", e);
             return return_value;
         };
+
         if let Some(paths) = zoo_ini.get("resource", "path") {
-            info!("Loading resources from: {}", paths);
-            load_resources(paths.split(';').map(|s| s.to_owned()).collect());
+
+            let mut paths: Vec<String> = paths.split(';').map(|s| s.to_owned()).collect();
+
+            if !paths.iter().any(|s| s.trim() == "./mods") {
+
+                info!("Adding mods directory to BFResourceMgr");
+
+                if let Ok(mods_path) = CString::new("./mods") {
+                    ADD_PATH.original()(this_ptr, mods_path.as_ptr() as u32);
+                }
+
+                paths.insert(0, "./mods".to_owned());
+            }
+
+            info!("Loading resources from: {:?}", paths);
+            load_resources(paths);
             info!("Resources loaded");
         }
         return_value
