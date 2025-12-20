@@ -8,11 +8,13 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
 
 ### ✅ Completed
 1. **Phase 1: Data Structures** - All patch types defined in `openzt/src/mods.rs`
-   - `PatchFile`, `Patch` enum with 13 operation variants (including SetPalette)
+   - `Patch` enum with 13 operation variants (including SetPalette)
    - `MergeMode` enum for merge priority control
    - `ErrorHandling` and `OnExists` enums for error handling and collision resolution
    - `PatchCondition` support for conditional patching
    - TOML deserialization working and tested
+   - **Refactored Structure**: Split into `PatchMeta` (metadata) and separate `patches` field in `ModDefinition`
+   - TOML uses `[patch_meta]` section for on_error and conditions, `[patches.*]` for individual patches
 
 2. **Phase 2: INI Parser Enhancements** - New methods in `openzt-configparser/src/ini.rs`
    - `has_section()` - check if section exists
@@ -49,15 +51,26 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
    - `add_ztfile()` already handles replacement via `insert_custom()`
    - Case-insensitive lookups already working correctly
 
+6. **Phase 6: Patch Orchestration** ✅ (COMPLETED)
+   - Apply patches with error handling and conditional evaluation (lines 784-930)
+   - Top-level condition evaluation (skip file if conditions fail)
+   - Patch-level condition evaluation (skip individual patches)
+   - Comprehensive logging with patch names
+   - Error handling modes (currently only 'continue' supported)
+
+6.7. **Phase 6.7: ModDefinition Refactoring** ✅ (COMPLETED)
+   - Refactored `PatchFile` into `PatchMeta` and separate patches field
+   - Updated `ModDefinition` struct with `patch_meta` and `patches` fields
+   - Updated test code to load patches as part of ModDefinition
+   - Updated TOML structure to use `[patch_meta]` section
+   - All tests passing, builds successfully
+
 ### 🚧 Remaining Work
 
-6. **Phase 6: Patch Orchestration** (not yet implemented)
-   - Load patch.toml from mod archives
-   - Evaluate top-level conditions (skip entire file if conditions fail)
-   - Apply patches in order with patch-level conditional evaluation
-   - Error handling (continue/abort/abort_mod modes)
-   - Call appropriate apply_*_patch() functions based on operation type
-   - Comprehensive logging with patch names
+6.6. **Phase 6.6: Snapshot/Rollback & Dry-Run** (not yet implemented)
+   - Implement selective snapshot/rollback for abort_mod
+   - Add dry_run flag support
+   - Enable abort and abort_mod error handling modes
 
 7. **Phase 7: Comprehensive Testing** (not yet implemented)
    - Integration tests for all patch types
@@ -70,14 +83,15 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
 
 ### Patch File Structure
 
-Each patch file has a top-level configuration section followed by named patch operations:
+Each patch file has a patch metadata section followed by named patch operations:
 
 ```toml
-# Top-level file configuration (optional)
+# Patch metadata section (optional)
+[patch_meta]
 on_error = "continue"  # Options: "continue" (default), "abort", "abort_mod"
 
 # Top-level conditions (optional) - if these fail, entire file is skipped
-[condition]
+[patch_meta.condition]
 mod_loaded = "SomeRequiredMod"
 # ... other conditions
 
@@ -98,7 +112,7 @@ operation = "merge"
 
 **Current Limitation**: Only `on_error = "continue"` is currently supported. The `abort` and `abort_mod` modes require snapshot/rollback functionality which will be added in a future update.
 
-**Top-Level Conditions** (`[condition]` table):
+**Top-Level Conditions** (`[patch_meta.condition]` table):
 - Optional conditions that apply to the entire file
 - If top-level conditions fail, the entire patch file is skipped (logged as warning)
 - Uses same condition types as individual patches: `mod_loaded`, `key_exists`, `value_equals`
@@ -108,7 +122,7 @@ operation = "merge"
 When using `key_exists` or `value_equals` in top-level conditions, you MUST specify a `target` field:
 
 ```toml
-[condition]
+[patch_meta.condition]
 target = "config/settings.ini"
 key_exists = { section = "Graphics", key = "HDTextures" }
 ```
@@ -275,12 +289,12 @@ section = "Deprecated"
 
 Patches can include conditions at two levels:
 
-1. **File-level conditions** (top-level `[condition]` table): If these fail, the entire patch file is skipped
+1. **File-level conditions** (`[patch_meta.condition]` table): If these fail, the entire patch file is skipped
 2. **Patch-level conditions** (within individual patches): If these fail, only that specific patch is skipped
 
 ```toml
 # Top-level condition - entire file skipped if this fails
-[condition]
+[patch_meta.condition]
 mod_loaded = "RequiredExpansion"
 
 # Individual patch with its own condition
@@ -397,16 +411,38 @@ All patch structures are defined in `openzt/src/mods.rs`:
 
 ```rust
 use indexmap::IndexMap;
+use std::collections::HashMap;
 
-pub struct PatchFile {
-    // Top-level on_error directive
-    pub on_error: ErrorHandling,  // Default: Continue
+#[derive(Deserialize, Debug, Getters)]
+#[get = "pub"]
+pub struct ModDefinition {
+    habitats: Option<HashMap<String, IconDefinition>>,
+    locations: Option<HashMap<String, IconDefinition>>,
 
-    // Top-level conditions (optional)
+    // Patch system - split into metadata and patches
+    patch_meta: Option<PatchMeta>,
+    patches: Option<IndexMap<String, Patch>>,  // MUST use IndexMap for order preservation
+}
+
+/// Metadata for patch configuration
+#[derive(Deserialize, Debug, Clone)]
+pub struct PatchMeta {
+    /// File-level on_error directive for error handling
+    #[serde(default = "default_on_error")]
+    pub on_error: ErrorHandling,
+
+    /// File-level conditions - if these fail, all patches are skipped
+    #[serde(default)]
     pub condition: Option<PatchCondition>,
+}
 
-    // Named patches
-    pub patches: IndexMap<String, Patch>,  // Preserves insertion order
+impl Default for PatchMeta {
+    fn default() -> Self {
+        PatchMeta {
+            on_error: ErrorHandling::Continue,
+            condition: None,
+        }
+    }
 }
 
 pub enum ErrorHandling {
@@ -463,7 +499,11 @@ Each operation struct contains:
 - `condition`: Option<PatchCondition> - optional conditions
 - Operation-specific fields (section, key, value, etc.)
 
-The `IndexMap` preserves patch order while allowing access by name for logging and error messages.
+**Implementation Notes**:
+- Patches are stored as `patches: Option<IndexMap<String, Patch>>` in `ModDefinition`
+- Metadata is stored separately as `patch_meta: Option<PatchMeta>`
+- The `IndexMap` preserves patch order while allowing access by name for logging
+- If only `patches` is specified without `patch_meta`, default values are used (on_error=Continue, no conditions)
 
 ## Future Extensions
 

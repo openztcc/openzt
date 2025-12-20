@@ -43,6 +43,11 @@ Design and implement a comprehensive TOML schema for patch operations on Zoo Tyc
   - Implement selective snapshot/rollback for abort_mod
   - Add dry_run flag support
   - Enable abort and abort_mod error handling modes
+- **Phase 6.7: ModDefinition Refactoring** ✅
+  - Split `PatchFile` into `PatchMeta` and separate patches field
+  - Update `ModDefinition` to use `patch_meta` and `patches` fields
+  - Refactor test code to load patches as part of ModDefinition
+  - Update TOML structure to use `[patch_meta]` section
 - Phase 7: Comprehensive integration tests (including conditionals, error modes, on_exists)
 
 ## Requirements Summary
@@ -79,11 +84,12 @@ Based on user requirements:
 Each patch file has a top-level configuration section followed by named patch operations:
 
 ```toml
-# Top-level file configuration (optional)
+# Patch metadata section (optional)
+[patch_meta]
 on_error = "continue"  # Options: "continue" (default), "abort", "abort_mod"
 
 # Top-level conditions (optional) - if these fail, entire file is skipped
-[condition]
+[patch_meta.condition]
 mod_loaded = "SomeRequiredMod"
 # ... other conditions
 
@@ -102,7 +108,7 @@ operation = "merge"
 - **`abort`**: Stop processing remaining patches in this file, continue loading mod (other patch files still process)
 - **`abort_mod`**: Stop loading this mod entirely (use for critical patches)
 
-**Top-Level Conditions** (`[condition]` table):
+**Top-Level Conditions** (`[patch_meta.condition]` table):
 - Optional conditions that apply to the entire file
 - If top-level conditions fail, the entire patch file is skipped (logged as warning)
 - Uses same condition types as individual patches: `mod_loaded`, `key_exists`, `value_equals`
@@ -226,12 +232,12 @@ value = "15"
 
 Patches can include conditions at two levels:
 
-1. **File-level conditions** (top-level `[condition]` table): If these fail, the entire patch file is skipped
+1. **File-level conditions** (`[patch_meta.condition]` table): If these fail, the entire patch file is skipped
 2. **Patch-level conditions** (within individual patches): If these fail, only that specific patch is skipped
 
 ```toml
 # Top-level condition - entire file skipped if this fails
-[condition]
+[patch_meta.condition]
 mod_loaded = "RequiredExpansion"
 
 # Individual patch with its own condition
@@ -311,18 +317,36 @@ location = "1.0"    # Location definition schema (if applicable)
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
+#[derive(Deserialize, Debug, Getters)]
+#[get = "pub"]
+pub struct ModDefinition {
+    habitats: Option<HashMap<String, IconDefinition>>,
+    locations: Option<HashMap<String, IconDefinition>>,
+
+    // Patch system - split into metadata and patches
+    patch_meta: Option<PatchMeta>,
+    patches: Option<IndexMap<String, Patch>>,  // MUST use IndexMap for order preservation
+}
+
+/// Metadata for patch configuration
 #[derive(Deserialize, Debug, Clone)]
-pub struct PatchFile {
-    // Top-level on_error directive
+pub struct PatchMeta {
+    /// File-level on_error directive for error handling
     #[serde(default = "default_on_error")]
     pub on_error: ErrorHandling,
 
-    // Top-level conditions (optional)
+    /// File-level conditions - if these fail, all patches are skipped
     #[serde(default)]
     pub condition: Option<PatchCondition>,
+}
 
-    // Named patches
-    pub patches: IndexMap<String, Patch>,  // Preserves insertion order
+impl Default for PatchMeta {
+    fn default() -> Self {
+        PatchMeta {
+            on_error: ErrorHandling::Continue,
+            condition: None,
+        }
+    }
 }
 
 fn default_on_error() -> ErrorHandling {
@@ -517,9 +541,15 @@ value = "swim"  # Destroys walk/eat/sleep
 2. ✅ Add patch loading during mod initialization
 3. ✅ Implement TOML deserialization tests
 
+**Structural improvements**:
+- Split `PatchFile` into `PatchMeta` (metadata) and separate patches field (Phase 6.7)
+- `ModDefinition` now has `patch_meta: Option<PatchMeta>` and `patches: Option<IndexMap<String, Patch>>`
+- TOML structure uses `[patch_meta]` section for on_error and conditions
+- Test code updated to load patches as part of ModDefinition
+
 **New additions from scrutiny feedback**:
-- Top-level on_error field (file-level error handling, not within [patches] table)
-- Top-level condition field (file-level conditionals - if fail, entire file skipped)
+- Top-level on_error field in `[patch_meta]` (file-level error handling)
+- Top-level condition field in `[patch_meta.condition]` (file-level conditionals)
 - Conditional patching support (PatchCondition, KeyCheck, ValueCheck)
 - AddSectionPatch.on_exists field for collision handling
 - Renamed from [patch.*] to [patches.*] syntax
