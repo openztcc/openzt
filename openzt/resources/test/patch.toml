@@ -1,9 +1,9 @@
-# Top-level configuration
+# Patch metadata section
+[patch_meta]
 on_error = "continue"
 
-# Top-level conditions (commented out for test - would skip entire file)
-# [condition]
-# Top-level target required for key_exists/value_equals
+# patch_meta.condition is optional
+# [patch_meta.condition]
 # target = "config/settings.ini"
 # mod_loaded = "RequiredExpansion"
 

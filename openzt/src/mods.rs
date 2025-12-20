@@ -174,8 +174,10 @@ pub enum Ordering {
 pub struct ModDefinition {
     habitats: Option<HashMap<String, IconDefinition>>,
     locations: Option<HashMap<String, IconDefinition>>,
-    // We probably need to separate this into Option<PatchMeta> and Option<Hashmap<String, Patch>>
-    patches: Option<PatchFile>,
+
+    // Patch system - split into metadata and patches
+    patch_meta: Option<PatchMeta>,
+    patches: Option<IndexMap<String, Patch>>,  // MUST use IndexMap for order preservation
 }
 
 impl ModDefinition {
@@ -203,18 +205,28 @@ pub struct IconDefinition {
 // Patch System Data Structures
 // ============================================================================
 
+/// Metadata for patch configuration
+///
+/// Contains file-level error handling and conditional evaluation settings
+/// that apply to all patches in a mod definition.
 #[derive(Deserialize, Debug, Clone)]
-pub struct PatchFile {
-    /// Top-level on_error directive for file-level error handling
+pub struct PatchMeta {
+    /// File-level on_error directive for error handling
     #[serde(default = "default_on_error")]
     pub on_error: ErrorHandling,
 
-    /// Top-level conditions - if these fail, entire file is skipped
+    /// File-level conditions - if these fail, all patches are skipped
     #[serde(default)]
     pub condition: Option<PatchCondition>,
+}
 
-    /// Named patches (preserves insertion order via IndexMap)
-    pub patches: IndexMap<String, Patch>,
+impl Default for PatchMeta {
+    fn default() -> Self {
+        PatchMeta {
+            on_error: ErrorHandling::Continue,
+            condition: None,
+        }
+    }
 }
 
 fn default_on_error() -> ErrorHandling {
@@ -532,15 +544,18 @@ mod mod_loading_tests {
 
     #[test]
     fn test_parse_patches() {
-        let patches: super::PatchFile = toml::from_str(include_str!("../resources/test/patch.toml")).unwrap();
-        assert_eq!(patches.patches.len(), 10);
+        let mod_def: super::ModDefinition = toml::from_str(include_str!("../resources/test/patch.toml")).unwrap();
+        let patch_meta = mod_def.patch_meta.expect("patch_meta should be present");
+        let patches = mod_def.patches.expect("patches should be present");
+
+        assert_eq!(patches.len(), 10);
 
         // Test file-level config
-        assert_eq!(patches.on_error, super::ErrorHandling::Continue);
-        assert!(patches.condition.is_none());
+        assert_eq!(patch_meta.on_error, super::ErrorHandling::Continue);
+        assert!(patch_meta.condition.is_none());
 
         // Test merge patch (defaults to patch_priority)
-        let merge_patch = patches.patches.get("merge_blackbuck_ai").expect("merge_blackbuck_ai patch not found");
+        let merge_patch = patches.get("merge_blackbuck_ai").expect("merge_blackbuck_ai patch not found");
         match merge_patch {
             super::Patch::Merge(patch) => {
                 assert_eq!(patch.target, "animals/blckbuck.ai");
@@ -552,7 +567,7 @@ mod mod_loading_tests {
         }
 
         // Test replace patch
-        let replace_patch = patches.patches.get("replace_blackbuck_ai").expect("replace_blackbuck_ai patch not found");
+        let replace_patch = patches.get("replace_blackbuck_ai").expect("replace_blackbuck_ai patch not found");
         match replace_patch {
             super::Patch::Replace(patch) => {
                 assert_eq!(patch.target, "animals/blckbuck.ai");
@@ -563,7 +578,7 @@ mod mod_loading_tests {
         }
 
         // Test delete patch
-        let delete_patch = patches.patches.get("remove_old_animal").expect("remove_old_animal patch not found");
+        let delete_patch = patches.get("remove_old_animal").expect("remove_old_animal patch not found");
         match delete_patch {
             super::Patch::Delete(patch) => {
                 assert_eq!(patch.target, "animals/oldanimal.ai");
@@ -573,7 +588,7 @@ mod mod_loading_tests {
         }
 
         // Test set_key patch
-        let set_key_patch = patches.patches.get("update_resolution").expect("update_resolution patch not found");
+        let set_key_patch = patches.get("update_resolution").expect("update_resolution patch not found");
         match set_key_patch {
             super::Patch::SetKey(patch) => {
                 assert_eq!(patch.target, "config/settings.ini");
@@ -586,7 +601,7 @@ mod mod_loading_tests {
         }
 
         // Test conditional patch with mod_loaded
-        let conditional_patch = patches.patches.get("conditional_mod_loaded").expect("conditional_mod_loaded patch not found");
+        let conditional_patch = patches.get("conditional_mod_loaded").expect("conditional_mod_loaded patch not found");
         match conditional_patch {
             super::Patch::SetKey(patch) => {
                 assert_eq!(patch.target, "config/settings.ini");
@@ -602,7 +617,7 @@ mod mod_loading_tests {
         }
 
         // Test conditional patch with key_exists
-        let conditional_patch = patches.patches.get("conditional_key_exists").expect("conditional_key_exists patch not found");
+        let conditional_patch = patches.get("conditional_key_exists").expect("conditional_key_exists patch not found");
         match conditional_patch {
             super::Patch::SetKey(patch) => {
                 assert_eq!(patch.target, "config/settings.ini");
@@ -617,7 +632,7 @@ mod mod_loading_tests {
         }
 
         // Test conditional patch with value_equals
-        let conditional_patch = patches.patches.get("conditional_value_equals").expect("conditional_value_equals patch not found");
+        let conditional_patch = patches.get("conditional_value_equals").expect("conditional_value_equals patch not found");
         match conditional_patch {
             super::Patch::SetKey(patch) => {
                 assert_eq!(patch.target, "config/settings.ini");
@@ -633,7 +648,7 @@ mod mod_loading_tests {
         }
 
         // Test add_section patch with on_exists
-        let add_section_patch = patches.patches.get("add_section_with_on_exists").expect("add_section_with_on_exists patch not found");
+        let add_section_patch = patches.get("add_section_with_on_exists").expect("add_section_with_on_exists patch not found");
         match add_section_patch {
             super::Patch::AddSection(patch) => {
                 assert_eq!(patch.target, "config/settings.ini");
@@ -647,7 +662,7 @@ mod mod_loading_tests {
         }
 
         // Test set_palette patch
-        let set_palette_patch = patches.patches.get("set_elephant_palette")
+        let set_palette_patch = patches.get("set_elephant_palette")
             .expect("set_elephant_palette patch not found");
         match set_palette_patch {
             super::Patch::SetPalette(patch) => {
@@ -659,7 +674,7 @@ mod mod_loading_tests {
         }
 
         // Test set_palette patch with condition
-        let conditional_palette = patches.patches.get("conditional_palette_swap")
+        let conditional_palette = patches.get("conditional_palette_swap")
             .expect("conditional_palette_swap patch not found");
         match conditional_palette {
             super::Patch::SetPalette(patch) => {
@@ -672,7 +687,7 @@ mod mod_loading_tests {
         }
 
         // Test that patches are ordered correctly (IndexMap preserves insertion order)
-        let patch_names: Vec<_> = patches.patches.keys().collect();
+        let patch_names: Vec<_> = patches.keys().collect();
         assert_eq!(patch_names[0], "merge_blackbuck_ai");
         assert_eq!(patch_names[1], "replace_blackbuck_ai");
         assert_eq!(patch_names[2], "remove_old_animal");

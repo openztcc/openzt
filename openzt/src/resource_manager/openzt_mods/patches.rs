@@ -20,7 +20,7 @@ use crate::{
         OnExists,
         Patch,
         PatchCondition,
-        PatchFile,
+        PatchMeta,
         RemoveKeyPatch,
         RemoveKeysPatch,
         RemoveSectionPatch,
@@ -772,30 +772,35 @@ enum PatchResult {
     Error(String),     // Error occurred
 }
 
-/// Apply all patches from a patch file with error handling and conditional evaluation
+/// Apply all patches with error handling and conditional evaluation
 ///
 /// # Arguments
-/// * `patch_file` - The patch file containing patches to apply
+/// * `patch_meta` - Patch metadata containing error handling and file-level conditions
+/// * `patches` - Ordered map of patches to apply (order is preserved via IndexMap)
 /// * `mod_path` - Path to the current mod being loaded
 ///
 /// # Returns
 /// * `Ok(())` if patches were applied successfully (or with continue error handling)
 /// * `Err(_)` if on_error=abort or on_error=abort_mod and an error occurred
-pub fn apply_patches(patch_file: &PatchFile, mod_path: &Path) -> anyhow::Result<()> {
+pub fn apply_patches(
+    patch_meta: &PatchMeta,
+    patches: &indexmap::IndexMap<String, Patch>,
+    mod_path: &Path
+) -> anyhow::Result<()> {
     // VALIDATE: Only 'continue' mode is currently supported
-    if patch_file.on_error != ErrorHandling::Continue {
+    if patch_meta.on_error != ErrorHandling::Continue {
         return Err(anyhow::anyhow!(
             "Unsupported on_error mode: {:?}. Only 'continue' is currently supported. \
              Snapshot/rollback features for 'abort' and 'abort_mod' will be added in a future update.",
-            patch_file.on_error
+            patch_meta.on_error
         ));
     }
 
     info!("Applying patch file with {} patches (on_error: {:?})",
-          patch_file.patches.len(), patch_file.on_error);
+          patches.len(), patch_meta.on_error);
 
     // Step 1: Evaluate top-level conditions
-    if let Some(top_level_condition) = &patch_file.condition {
+    if let Some(top_level_condition) = &patch_meta.condition {
         // Check mod_loaded at file level
         if let Some(required_mod) = &top_level_condition.mod_loaded {
             if !is_mod_loaded(required_mod) {
@@ -826,7 +831,7 @@ pub fn apply_patches(patch_file: &PatchFile, mod_path: &Path) -> anyhow::Result<
     let mut patches_skipped = 0;
     let mut patches_failed = 0;
 
-    for (patch_name, patch) in &patch_file.patches {
+    for (patch_name, patch) in patches {
         info!("Processing patch '{}'", patch_name);
 
         // Evaluate patch-level conditions
@@ -839,7 +844,7 @@ pub fn apply_patches(patch_file: &PatchFile, mod_path: &Path) -> anyhow::Result<
                 let error_msg = format!("Error evaluating condition: {}", e);
                 error!("Patch '{}': {}", patch_name, error_msg);
 
-                match patch_file.on_error {
+                match patch_meta.on_error {
                     ErrorHandling::Continue => {
                         results.push((patch_name.clone(), PatchResult::Error(error_msg)));
                         patches_failed += 1;
@@ -890,7 +895,7 @@ pub fn apply_patches(patch_file: &PatchFile, mod_path: &Path) -> anyhow::Result<
                 let error_msg = format!("{}", e);
                 error!("Patch '{}' failed: {}", patch_name, error_msg);
 
-                match patch_file.on_error {
+                match patch_meta.on_error {
                     ErrorHandling::Continue => {
                         results.push((patch_name.clone(), PatchResult::Error(error_msg)));
                         patches_failed += 1;

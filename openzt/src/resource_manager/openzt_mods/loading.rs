@@ -100,9 +100,10 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Re
             let mod_def = load_def(&mod_id, file_name, &file_map)?;
 
             // Apply patches from this definition file if present
-            if let Some(patch_file) = mod_def.patches() {
-                info!("Found {} patches in {}", patch_file.patches.len(), file_name);
-                if let Err(e) = super::patches::apply_patches(patch_file, resource) {
+            if let Some(patches) = mod_def.patches() {
+                let patch_meta = mod_def.patch_meta().as_ref().cloned().unwrap_or_default();
+                info!("Found {} patches in {}", patches.len(), file_name);
+                if let Err(e) = super::patches::apply_patches(&patch_meta, patches, resource) {
                     error!("Failed to apply patches from {}: {}", file_name, e);
                     return Err(e);
                 }
