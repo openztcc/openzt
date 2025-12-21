@@ -48,6 +48,13 @@ Design and implement a comprehensive TOML schema for patch operations on Zoo Tyc
   - Update `ModDefinition` to use `patch_meta` and `patches` fields
   - Refactor test code to load patches as part of ModDefinition
   - Update TOML structure to use `[patch_meta]` section
+- **Phase 6.8: Variable Substitution** ✅ (Commit 0e830ba)
+  - Implement `{variable}` syntax in patch values
+  - Support habitat, location, and string variable types
+  - Current mod and cross-mod reference support
+  - Variable resolution in set_key, set_keys, append_value, append_values, add_section operations
+  - Comprehensive error handling for undefined variables, invalid syntax, and mod loading issues
+  - Unit tests for parsing and substitution logic
 - Phase 7: Comprehensive integration tests (including conditionals, error modes, on_exists)
 
 ## Requirements Summary
@@ -139,6 +146,49 @@ merge_mode = "patch_priority"  # or "base_priority" (defaults to "patch_priority
 operation = "delete"
 target = "animals/oldanimal.ai"
 ```
+
+### Variable Substitution
+
+Patch values support variable substitution using `{variable}` syntax (added in Phase 6.8). Variables are resolved at patch application time:
+
+**Variable Types**:
+- `{habitat.name}` - Current mod's habitat string ID
+- `{location.name}` - Current mod's location string ID
+- `{string.id}` - String content from registry
+- `{mod.habitat.name}` - Cross-mod habitat reference
+- `{mod.location.name}` - Cross-mod location reference
+
+**Examples**:
+```toml
+# Reference habitat ID
+[patches.set_habitat]
+operation = "set_key"
+target = "animals/elephant.ai"
+section = "Habitat"
+key = "cHabitat"
+value = "{habitat.savanna}"  # Resolves to habitat's string ID
+
+# Cross-mod reference
+[patches.cross_mod_habitat]
+operation = "set_key"
+target = "animals/alien.ai"
+section = "Habitat"
+key = "cHabitat"
+value = "{lunar.habitat.crater}"  # Reference another mod's habitat
+
+# Multiple variables
+[patches.configure_exhibit]
+operation = "set_keys"
+target = "exhibits/moon.cfg"
+section = "Config"
+keys = {
+    cHabitat = "{habitat.lunar}",
+    cLocation = "{location.moon}",
+    NameID = "{string.10500}"
+}
+```
+
+**Supported in**: set_key, set_keys, append_value, append_values, add_section operations
 
 ### Element-Level Operations (INI files only)
 
@@ -326,6 +376,23 @@ pub struct ModDefinition {
     // Patch system - split into metadata and patches
     patch_meta: Option<PatchMeta>,
     patches: Option<IndexMap<String, Patch>>,  // MUST use IndexMap for order preservation
+}
+
+// Variable substitution types (in openzt/src/resource_manager/openzt_mods/patches.rs)
+enum VariableType {
+    Habitat,   // {habitat.name} or {mod.habitat.name}
+    Location,  // {location.name} or {mod.location.name}
+    String,    // {string.id}
+}
+
+struct ParsedVariable {
+    var_type: VariableType,
+    mod_id: Option<String>,  // None = current mod, Some = cross-mod reference
+    identifier: String,      // habitat/location name or string ID
+}
+
+pub struct SubstitutionContext {
+    pub current_mod_id: String,
 }
 
 /// Metadata for patch configuration
@@ -571,17 +638,17 @@ value = "swim"  # Destroys walk/eat/sleep
 5. Add logging for each operation
 
 ### Phase 4: Element-Level Operations ✅ (COMPLETED)
-**File**: `openzt/src/resource_manager/legacy_loading.rs`
-1. ✅ Implement `apply_set_key_patch()` - load INI, modify, save back (lines 435-450)
-2. ✅ Implement `apply_set_keys_patch()` - batch key updates (lines 462-479)
-3. ✅ Implement `apply_append_value_patch()` - add to array (lines 491-506)
-4. ✅ Implement `apply_append_values_patch()` - add multiple values (lines 518-536)
-5. ✅ Implement `apply_remove_key_patch()` - remove key (lines 548-569)
-6. ✅ Implement `apply_remove_keys_patch()` - batch key removal (lines 581-611)
-7. ✅ Implement `apply_add_section_patch()` - create section with keys, on_exists handling (lines 623-671)
-8. ✅ Implement `apply_clear_section_patch()` - clear all keys (lines 683-705)
-9. ✅ Implement `apply_remove_section_patch()` - remove section (lines 717-738)
-10. ✅ Helper functions for INI loading/saving (lines 369-423)
+**File**: `openzt/src/resource_manager/legacy_loading.rs` → `openzt/src/resource_manager/openzt_mods/patches.rs`
+1. ✅ Implement `apply_set_key_patch()` - load INI, modify, save back (with variable substitution support)
+2. ✅ Implement `apply_set_keys_patch()` - batch key updates (with variable substitution support)
+3. ✅ Implement `apply_append_value_patch()` - add to array (with variable substitution support)
+4. ✅ Implement `apply_append_values_patch()` - add multiple values (with variable substitution support)
+5. ✅ Implement `apply_remove_key_patch()` - remove key
+6. ✅ Implement `apply_remove_keys_patch()` - batch key removal
+7. ✅ Implement `apply_add_section_patch()` - create section with keys, on_exists handling (with variable substitution support)
+8. ✅ Implement `apply_clear_section_patch()` - clear all keys
+9. ✅ Implement `apply_remove_section_patch()` - remove section
+10. ✅ Helper functions for INI loading/saving
 
 ### Phase 5: Resource Map Updates
 **File**: `openzt/src/resource_manager/lazyresourcemap.rs`
@@ -633,13 +700,21 @@ value = "swim"  # Destroys walk/eat/sleep
    - Error cases: target has extension, palette wrong extension, files not found
    - Animation parsing validation (invalid animation file)
    - Conditional palette swapping
+12. Test variable substitution:
+   - Current mod habitat/location/string references
+   - Cross-mod habitat/location references
+   - Mixed content (variables + literal text)
+   - Multiple variables in one value
+   - Error cases: undefined variables, invalid syntax, unclosed braces, mod not loaded
+   - Variable substitution in all supported operations (set_key, set_keys, append_value, append_values, add_section)
 
 ## Critical Files
 
 - `openzt/src/mods.rs` - Patch struct definitions and deserialization
-- `openzt/src/resource_manager/legacy_loading.rs` - Patch application orchestration (TODO at line 97)
+- `openzt/src/resource_manager/openzt_mods/patches.rs` - Patch application orchestration, variable substitution system
 - `openzt-configparser/src/ini.rs` - INI parser enhancements
 - `openzt/src/resource_manager/lazyresourcemap.rs` - Resource update methods
+- `openzt/src/resource_manager/openzt_mods/habitats_locations.rs` - Habitat/location ID resolution for variables
 - `openzt/resources/test/patch.toml` - Updated test examples
 
 ## Design Rationale
@@ -666,6 +741,16 @@ value = "swim"  # Destroys walk/eat/sleep
 **Separate set_key/set_keys operations**: Balance readability (single) with efficiency (batch)
 
 **Element operations specify intent explicitly**: Operations like `append_value` clearly indicate array modification, while `set_key` indicates replacement, avoiding ambiguity about merge behavior
+
+**Variable substitution design** (Phase 6.8):
+- **Curly brace syntax** `{variable}` is familiar from shell scripting, template systems, and other configuration formats
+- **Dot-separated components** make parsing simple and unambiguous (`habitat.name` vs `mod.habitat.name`)
+- **Resolution at patch application time** ensures variables refer to the correct runtime state (after mods are loaded)
+- **Context-aware resolution** allows relative references (current mod) and absolute references (cross-mod)
+- **Type safety** via enum discriminants prevents mixing habitat/location/string lookups
+- **Early validation** with clear error messages helps modders debug issues before game launch
+- **Limited scope** (only in value fields of specific operations) keeps implementation simple and predictable
+- **String registry integration** enables dynamic text content in patches without hardcoding strings
 
 ## Future Extensions
 

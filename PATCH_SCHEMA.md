@@ -65,6 +65,14 @@ This document describes the patch system TOML schema for OpenZT, which allows mo
    - Updated TOML structure to use `[patch_meta]` section
    - All tests passing, builds successfully
 
+6.8. **Phase 6.8: Variable Substitution** ✅ (COMPLETED - Commit 0e830ba)
+   - Implemented `{variable}` syntax for dynamic value substitution in patches
+   - Support for habitat, location, and string variable types
+   - Current mod (`{habitat.name}`) and cross-mod (`{mod.habitat.name}`) references
+   - Integration with habitat/location registries and string registry
+   - Variables work in: set_key, set_keys, append_value, append_values, add_section
+   - Comprehensive error handling and unit tests
+
 ### 🚧 Remaining Work
 
 6.6. **Phase 6.6: Snapshot/Rollback & Dry-Run** (not yet implemented)
@@ -194,6 +202,110 @@ palette = "animals/elephant/hd.pal"
 condition.mod_loaded = "HDTexturePack"
 ```
 
+### Variable Substitution
+
+**Added in OpenZT v0.1** (Commit 0e830ba)
+
+Patch values support variable substitution using `{variable}` syntax. Variables are resolved at patch application time and replaced with their actual values.
+
+#### Variable Types
+
+1. **Habitat Variables** - Resolve to habitat string IDs
+   ```toml
+   value = "{habitat.swamp}"           # Current mod's habitat
+   value = "{lunar.habitat.crater}"    # Cross-mod habitat reference
+   ```
+
+2. **Location Variables** - Resolve to location string IDs
+   ```toml
+   value = "{location.moon}"           # Current mod's location
+   value = "{lunar.location.base}"     # Cross-mod location reference
+   ```
+
+3. **String Variables** - Resolve to string content from registry
+   ```toml
+   value = "{string.9500}"             # String from registry by ID
+   ```
+
+#### Syntax
+
+- **Current mod reference**: `{type.name}` (e.g., `{habitat.swamp}`)
+- **Cross-mod reference**: `{mod.type.name}` (e.g., `{lunar.habitat.crater}`)
+
+#### Supported Operations
+
+Variable substitution works in these patch operations:
+- `set_key` - Single key value substitution
+- `set_keys` - Multiple key values substitution
+- `append_value` - Single value substitution
+- `append_values` - Multiple values substitution
+- `add_section` - All key values in the section
+
+#### Example Usage
+
+```toml
+# Reference habitat ID in animal config
+[patches.assign_elephant_habitat]
+operation = "set_key"
+target = "animals/elephant.ai"
+section = "Habitat"
+key = "cHabitat"
+value = "{habitat.savanna}"  # Resolves to habitat's string ID
+
+# Cross-mod habitat reference
+[patches.use_lunar_habitat]
+operation = "set_key"
+target = "animals/alien.ai"
+section = "Habitat"
+key = "cHabitat"
+value = "{lunar.habitat.crater}"  # Reference another mod's habitat
+
+# Multiple variables in one patch
+[patches.configure_exhibit]
+operation = "set_keys"
+target = "exhibits/moon.cfg"
+section = "Config"
+keys = {
+    cHabitat = "{habitat.lunar}",
+    cLocation = "{location.moon}",
+    NameID = "{string.10500}"
+}
+
+# Mixed content with variables
+[patches.set_description]
+operation = "set_key"
+target = "animals/elephant.ai"
+section = "Info"
+key = "Description"
+value = "Lives in {habitat.savanna} - {string.9500}"
+```
+
+#### Error Handling
+
+- **Undefined variable**: Patch fails with error indicating which variable couldn't be resolved
+- **Invalid syntax**: Parser error with details about expected format
+- **Unclosed braces**: Error indicating malformed variable reference
+- **Mod not loaded**: Error when referencing cross-mod variable from unloaded mod
+- **Invalid string ID**: Error when string ID is not numeric or not found in registry
+
+#### Implementation Notes
+
+- Variables are resolved during patch application (not during TOML parsing)
+- Resolution happens in the context of the current mod being loaded
+- Cross-mod references require the referenced mod to be loaded earlier in mod load order
+- Variable names are case-sensitive
+- Multiple variables can be used in a single value string
+- Variables can be mixed with literal text
+
+**Implementation Details** (in `openzt/src/resource_manager/openzt_mods/patches.rs`):
+- `parse_variable()` - Parses `{variable}` syntax into structured format
+- `resolve_variable()` - Looks up habitat/location/string values from registries
+- `substitute_variables()` - Performs full string substitution with all variables
+- `SubstitutionContext` - Tracks current mod ID for relative variable resolution
+- Integration with `get_habitat_id()`, `get_location_id()`, and `get_string_from_registry()`
+
+The substitution system includes comprehensive unit tests covering parsing, resolution, and error cases.
+
 ### Element-Level Operations (INI Files Only)
 
 #### Set Single Key-Value
@@ -204,6 +316,14 @@ target = "config/settings.ini"
 section = "Graphics"
 key = "Resolution"
 value = "1920x1080"
+
+# With variable substitution
+[patches.set_habitat]
+operation = "set_key"
+target = "animals/elephant.ai"
+section = "Habitat"
+key = "cHabitat"
+value = "{habitat.savanna}"  # Resolves to habitat's string ID
 ```
 
 #### Set Multiple Keys in Section
@@ -504,6 +624,36 @@ Each operation struct contains:
 - Metadata is stored separately as `patch_meta: Option<PatchMeta>`
 - The `IndexMap` preserves patch order while allowing access by name for logging
 - If only `patches` is specified without `patch_meta`, default values are used (on_error=Continue, no conditions)
+
+### Variable Substitution Types
+
+```rust
+// In openzt/src/resource_manager/openzt_mods/patches.rs
+
+/// Variable types that can be substituted in patch values
+enum VariableType {
+    Habitat,   // Resolves to habitat string ID
+    Location,  // Resolves to location string ID
+    String,    // Resolves to string content from registry
+}
+
+/// Parsed variable reference from {variable} syntax
+struct ParsedVariable {
+    var_type: VariableType,
+    mod_id: Option<String>,  // None = current mod, Some = cross-mod reference
+    identifier: String,      // habitat/location name or string ID
+}
+
+/// Context for variable substitution during patch application
+pub struct SubstitutionContext {
+    pub current_mod_id: String,
+}
+```
+
+**Key Functions**:
+- `parse_variable(var_str: &str) -> Result<ParsedVariable>` - Parse `{variable}` syntax
+- `resolve_variable(var: &ParsedVariable, context: &SubstitutionContext) -> Result<String>` - Resolve variable to value
+- `substitute_variables(input: &str, context: &SubstitutionContext) -> Result<String>` - Perform full substitution
 
 ## Future Extensions
 
