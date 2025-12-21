@@ -6,6 +6,7 @@ use serde::{
     de::{self, Deserializer, Visitor},
     Deserialize,
 };
+use tracing::warn;
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -46,7 +47,7 @@ pub struct Meta {
     #[serde(default = "default_ztd_type")]
     ztd_type: ZtdType,
     link: Option<String>,
-    #[serde(default = "default_empty_dependencies")]
+    #[serde(default = "default_empty_dependencies", deserialize_with = "deserialize_dependencies")]
     dependencies: Vec<Dependencies>,
 }
 
@@ -56,6 +57,45 @@ fn default_ztd_type() -> ZtdType {
 
 fn default_empty_dependencies() -> Vec<Dependencies> {
     Vec::new()
+}
+
+fn deserialize_dependencies<'de, D>(deserializer: D) -> Result<Vec<Dependencies>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct DependenciesVisitor;
+
+    impl<'de> Visitor<'de> for DependenciesVisitor {
+        type Value = Vec<Dependencies>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("an array of dependency objects")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut deps = Vec::new();
+
+            while let Some(content) = seq.next_element::<serde::__private::de::Content>()? {
+                // Try to deserialize as Dependencies
+                match Dependencies::deserialize(
+                    serde::__private::de::ContentDeserializer::<A::Error>::new(content)
+                ) {
+                    Ok(dep) => deps.push(dep),
+                    Err(e) => {
+                        // Log warning for invalid dependency and skip it
+                        warn!("Skipping invalid dependency entry: {}", e);
+                    }
+                }
+            }
+
+            Ok(deps)
+        }
+    }
+
+    deserializer.deserialize_seq(DependenciesVisitor)
 }
 
 #[derive(Deserialize, Default, PartialEq, Debug, Clone)]
@@ -152,7 +192,7 @@ fn default_as_false() -> bool {
 pub struct Dependencies {
     mod_id: String,
     name: String,
-    #[serde(deserialize_with = "deserialize_version_option")]
+    #[serde(default, deserialize_with = "deserialize_version_option")]
     min_version: Option<Version>,
     #[serde(default = "default_as_false")]
     optional: bool,
@@ -485,6 +525,34 @@ mod mod_loading_tests {
         assert_eq!(dep.min_version.unwrap(), Version { major: 1, minor: 1, patch: 2 });
         assert!(dep.optional);
         assert_eq!(dep.ordering, super::Ordering::Before);
+    }
+
+    #[test]
+    fn test_parse_meta_zb() {
+        // Test that empty dependency objects are skipped with a warning
+        let meta: super::Meta = toml::from_str(include_str!("../resources/test/meta_zb.toml")).unwrap();
+        assert_eq!(meta.dependencies.len(), 0);
+    }
+
+    #[test]
+    fn test_lenient_dependency_parsing() {
+        // Test that the parser handles mixed valid/invalid dependencies gracefully
+        // This uses inline table syntax where we can have an empty table {}
+        let toml_str = r#"
+name = "test mod"
+description = "test"
+authors = ["test"]
+mod_id = "test.mod"
+version = "1.0.0"
+dependencies = [
+    {},
+    { mod_id = "valid.mod", name = "Valid Mod" }
+]
+"#;
+        let meta: super::Meta = toml::from_str(toml_str).unwrap();
+        // Empty dependency should be skipped with a warning, only valid one should remain
+        assert_eq!(meta.dependencies.len(), 1);
+        assert_eq!(meta.dependencies[0].mod_id, "valid.mod");
     }
 
     #[test]
