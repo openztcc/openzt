@@ -17,31 +17,35 @@ OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It pr
 
 ## Development Commands
 
+**IMPORTANT**: Always use `./openzt.bat` for cargo actions on the openzt crate (build, check, clippy, docs). This ensures correct toolchain selection and target configuration.
+
 ### Build Commands
 ```bash
 # Build only (no game launch)
-openzt.bat build                           # Debug with command-console
-openzt.bat build --release                 # Release with command-console
-openzt.bat build --stable                  # Debug with stable Rust (no console)
-openzt.bat build --test                    # Debug test build
-openzt.bat build --test --release          # Release test build
-openzt.bat build --loader                  # Debug + loader
+./openzt.bat build                           # Debug with command-console
+./openzt.bat build --release                 # Release with command-console
+./openzt.bat build --stable                  # Debug with stable Rust (no console)
+./openzt.bat build --test                    # Debug test build
+./openzt.bat build --test --release          # Release test build
+./openzt.bat build --loader                  # Debug + loader
 
-# Build and run - DLL copy method (default)
-openzt.bat run                             # Debug with command-console
-openzt.bat run --release                   # Release with command-console
-openzt.bat run --test                      # Debug test build
-openzt.bat run --test --release            # Release test build
-openzt.bat run --stable                    # Debug with stable Rust
+# Build and run
+./openzt.bat run                             # Debug with command-console
+./openzt.bat run --release                   # Release with command-console
+./openzt.bat run --stable                    # Debug with stable Rust (Currently broken; DO NOT USE)
 
-# Build and run - loader injection method
-openzt.bat run --loader                    # Debug via loader injection
-openzt.bat run --loader --release          # Release via loader injection
-openzt.bat run --loader --pause            # Debug, run loader exe (for debugger)
-openzt.bat run --loader --pause --release  # Release, run loader exe (for debugger)
+./openzt.bat run --loader                    # Debug via loader injection
+./openzt.bat run --loader --release          # Release via loader injection
+./openzt.bat run --loader --pause            # Debug, run loader exe (for debugger)
+./openzt.bat run --loader --pause --release  # Release, run loader exe (for debugger)
+
+# Code quality checks
+./openzt.bat check                           # Run cargo check on openzt
+./openzt.bat clippy                          # Run cargo clippy on openzt
+./openzt.bat test                            # Run cargo test on openzt
 
 # Documentation
-openzt.bat docs
+./openzt.bat docs
 ```
 
 ### Lua Console (Runtime Scripting)

@@ -103,7 +103,7 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Re
             if let Some(patches) = mod_def.patches() {
                 let patch_meta = mod_def.patch_meta().as_ref().cloned().unwrap_or_default();
                 info!("Found {} patches in {}", patches.len(), file_name);
-                if let Err(e) = super::patches::apply_patches(&patch_meta, patches, resource) {
+                if let Err(e) = super::patches::apply_patches(&patch_meta, patches, resource, &mod_id) {
                     error!("Failed to apply patches from {}: {}", file_name, e);
                     return Err(e);
                 }
@@ -154,7 +154,7 @@ pub fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, 
                 mod_id,
                 include_str!("../../../resources/include/infoimg-habitat.ani").to_string(),
             )?;
-            add_location_or_habitat(habitat_def.name(), &base_resource_id)?;
+            add_location_or_habitat(mod_id, habitat_def.name(), &base_resource_id, true)?;
         }
     }
 
@@ -169,7 +169,7 @@ pub fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, 
                 mod_id,
                 include_str!("../../../resources/include/infoimg-location.ani").to_string(),
             )?;
-            add_location_or_habitat(location_def.name(), &base_resource_id)?;
+            add_location_or_habitat(mod_id, location_def.name(), &base_resource_id, false)?;
         }
     }
     Ok(defs)

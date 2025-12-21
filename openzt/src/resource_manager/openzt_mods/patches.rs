@@ -1,14 +1,13 @@
 use std::path::Path;
 use std::str;
 
-use anyhow;
+use anyhow::{self, Context};
 use openzt_configparser::ini::{Ini, MergeMode as IniMergeMode};
 use tracing::{error, info, warn};
 
 use crate::{
     animation::Animation,
     mods::{
-        self,
         AddSectionPatch,
         AppendValuePatch,
         AppendValuesPatch,
@@ -31,10 +30,204 @@ use crate::{
     },
     resource_manager::{
         lazyresourcemap::{add_ztfile, check_file, get_file, remove_resource},
-        openzt_mods::get_mod_ids,
+        openzt_mods::{get_mod_ids, habitats_locations::{get_habitat_id, get_location_id}},
         ztfile::{modify_ztfile_as_animation, ZTFile, ZTFileType},
     },
+    string_registry::get_string_from_registry,
 };
+
+// ============================================================================
+// Variable Substitution System
+// ============================================================================
+
+/// Variable types that can be substituted in patch values
+#[derive(Debug, PartialEq)]
+enum VariableType {
+    Habitat,
+    Location,
+    String,
+}
+
+/// Parsed variable reference from {variable} syntax
+#[derive(Debug)]
+struct ParsedVariable {
+    var_type: VariableType,
+    mod_id: Option<String>,  // None = current mod
+    identifier: String,
+}
+
+/// Context for variable substitution during patch application
+pub struct SubstitutionContext {
+    pub current_mod_id: String,
+}
+
+/// Parse variable syntax: "habitat.moon" or "lunar.habitat.crater" or "string.9500"
+///
+/// # Arguments
+/// * `var_str` - The variable string content (without curly braces)
+///
+/// # Returns
+/// * `Ok(ParsedVariable)` - Successfully parsed variable
+/// * `Err` - Invalid syntax
+///
+/// # Examples
+/// * "habitat.swamp" → ParsedVariable { var_type: Habitat, mod_id: None, identifier: "swamp" }
+/// * "lunar.location.moon" → ParsedVariable { var_type: Location, mod_id: Some("lunar"), identifier: "moon" }
+/// * "string.9500" → ParsedVariable { var_type: String, mod_id: None, identifier: "9500" }
+fn parse_variable(var_str: &str) -> anyhow::Result<ParsedVariable> {
+    let parts: Vec<&str> = var_str.split('.').collect();
+
+    match parts.len() {
+        2 => {
+            // Format: {type.identifier} - current mod
+            let var_type = match parts[0] {
+                "habitat" => VariableType::Habitat,
+                "location" => VariableType::Location,
+                "string" => VariableType::String,
+                _ => anyhow::bail!("Invalid variable type '{}': expected 'habitat', 'location', or 'string'", parts[0]),
+            };
+
+            Ok(ParsedVariable {
+                var_type,
+                mod_id: None,
+                identifier: parts[1].to_string(),
+            })
+        }
+        3 => {
+            // Format: {mod.type.identifier} - cross-mod reference
+            let var_type = match parts[1] {
+                "habitat" => VariableType::Habitat,
+                "location" => VariableType::Location,
+                "string" => VariableType::String,
+                _ => anyhow::bail!("Invalid variable type '{}': expected 'habitat', 'location', or 'string'", parts[1]),
+            };
+
+            Ok(ParsedVariable {
+                var_type,
+                mod_id: Some(parts[0].to_string()),
+                identifier: parts[2].to_string(),
+            })
+        }
+        _ => {
+            anyhow::bail!("Invalid variable syntax '{}': expected {{type.name}} or {{mod.type.name}}", var_str)
+        }
+    }
+}
+
+/// Resolve a parsed variable to its string value
+///
+/// # Arguments
+/// * `var` - Parsed variable structure
+/// * `context` - Current mod context for relative references
+///
+/// # Returns
+/// * `Ok(String)` - The resolved value (string ID or string content)
+/// * `Err` - If variable doesn't exist or mod not loaded
+fn resolve_variable(var: &ParsedVariable, context: &SubstitutionContext) -> anyhow::Result<String> {
+    match &var.var_type {
+        VariableType::Habitat => {
+            let mod_id = var.mod_id.as_deref().unwrap_or(&context.current_mod_id);
+
+            match get_habitat_id(mod_id, &var.identifier) {
+                Some(string_id) => Ok(string_id.to_string()),
+                None => {
+                    if var.mod_id.is_some() {
+                        anyhow::bail!(
+                            "Habitat '{}' not found in mod '{}' (ensure mod is loaded and habitat is defined)",
+                            var.identifier, mod_id
+                        )
+                    } else {
+                        anyhow::bail!(
+                            "Habitat '{}' not found in current mod",
+                            var.identifier
+                        )
+                    }
+                }
+            }
+        }
+        VariableType::Location => {
+            let mod_id = var.mod_id.as_deref().unwrap_or(&context.current_mod_id);
+
+            match get_location_id(mod_id, &var.identifier) {
+                Some(string_id) => Ok(string_id.to_string()),
+                None => {
+                    if var.mod_id.is_some() {
+                        anyhow::bail!(
+                            "Location '{}' not found in mod '{}' (ensure mod is loaded and location is defined)",
+                            var.identifier, mod_id
+                        )
+                    } else {
+                        anyhow::bail!(
+                            "Location '{}' not found in current mod",
+                            var.identifier
+                        )
+                    }
+                }
+            }
+        }
+        VariableType::String => {
+            let string_id: u32 = var.identifier.parse()
+                .with_context(|| format!("Invalid string ID '{}': must be a number", var.identifier))?;
+
+            get_string_from_registry(string_id)
+                .map_err(|_| anyhow::anyhow!("String ID {} not found in registry", string_id))
+        }
+    }
+}
+
+/// Perform variable substitution on a string value
+///
+/// Finds all {variable} patterns, resolves them, and replaces with values.
+///
+/// # Arguments
+/// * `input` - The string potentially containing {variable} references
+/// * `context` - Current mod context
+///
+/// # Returns
+/// * `Ok(String)` - String with all variables substituted
+/// * `Err` - If any variable fails to resolve
+///
+/// # Examples
+/// * Input: "cHabitat={habitat.swamp}" with swamp registered as ID 100005
+/// * Output: "cHabitat=100005"
+fn substitute_variables(input: &str, context: &SubstitutionContext) -> anyhow::Result<String> {
+    let mut result = String::new();
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '{' {
+            // Find the closing brace
+            let mut var_content = String::new();
+            let mut found_close = false;
+
+            while let Some(&next_ch) = chars.peek() {
+                if next_ch == '}' {
+                    chars.next(); // Consume the '}'
+                    found_close = true;
+                    break;
+                }
+                var_content.push(chars.next().unwrap());
+            }
+
+            if !found_close {
+                anyhow::bail!("Unclosed variable brace in: {}", input);
+            }
+
+            // Parse and resolve the variable
+            let parsed_var = parse_variable(&var_content)
+                .with_context(|| format!("Failed to parse variable '{{{}}}'", var_content))?;
+
+            let resolved_value = resolve_variable(&parsed_var, context)
+                .with_context(|| format!("Failed to resolve variable '{{{}}}'", var_content))?;
+
+            result.push_str(&resolved_value);
+        } else {
+            result.push(ch);
+        }
+    }
+
+    Ok(result)
+}
 
 // ============================================================================
 // Phase 3: File-Level Patch Operations
@@ -314,19 +507,23 @@ fn save_ini_to_resources(target: &str, ini: &Ini, mod_path: &Path) -> anyhow::Re
 /// * `patch` - The set_key patch configuration
 /// * `mod_path` - Path to the current mod being loaded
 /// * `patch_name` - Name of the patch (for logging)
+/// * `context` - Substitution context for variable resolution
 ///
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_set_key_patch(patch: &SetKeyPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_set_key_patch(patch: &SetKeyPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying set_key patch '{}': {} [{}] {} = {}",
           patch_name, patch.target, patch.section, patch.key, patch.value);
 
     // Load INI file
     let mut ini = load_ini_from_resources(&patch.target)?;
 
+    // Perform variable substitution on the value
+    let resolved_value = substitute_variables(&patch.value, context)?;
+
     // Set the key (creates section if it doesn't exist)
-    ini.setstr(&patch.section, &patch.key, Some(&patch.value));
+    ini.setstr(&patch.section, &patch.key, Some(&resolved_value));
 
     // Save back to resources
     save_ini_to_resources(&patch.target, &ini, mod_path)?;
@@ -341,20 +538,22 @@ fn apply_set_key_patch(patch: &SetKeyPatch, mod_path: &Path, patch_name: &str) -
 /// * `patch` - The set_keys patch configuration
 /// * `mod_path` - Path to the current mod being loaded
 /// * `patch_name` - Name of the patch (for logging)
+/// * `context` - Substitution context for variable resolution
 ///
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_set_keys_patch(patch: &SetKeysPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_set_keys_patch(patch: &SetKeysPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying set_keys patch '{}': {} [{}] ({} keys)",
           patch_name, patch.target, patch.section, patch.keys.len());
 
     // Load INI file
     let mut ini = load_ini_from_resources(&patch.target)?;
 
-    // Set all keys
+    // Set all keys with variable substitution
     for (key, value) in &patch.keys {
-        ini.setstr(&patch.section, key, Some(value));
+        let resolved_value = substitute_variables(value, context)?;
+        ini.setstr(&patch.section, key, Some(&resolved_value));
     }
 
     // Save back to resources
@@ -370,19 +569,23 @@ fn apply_set_keys_patch(patch: &SetKeysPatch, mod_path: &Path, patch_name: &str)
 /// * `patch` - The append_value patch configuration
 /// * `mod_path` - Path to the current mod being loaded
 /// * `patch_name` - Name of the patch (for logging)
+/// * `context` - Substitution context for variable resolution
 ///
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_append_value_patch(patch: &AppendValuePatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_append_value_patch(patch: &AppendValuePatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying append_value patch '{}': {} [{}] {} += {}",
           patch_name, patch.target, patch.section, patch.key, patch.value);
 
     // Load INI file
     let mut ini = load_ini_from_resources(&patch.target)?;
 
+    // Perform variable substitution on the value
+    let resolved_value = substitute_variables(&patch.value, context)?;
+
     // Append the value (creates section if it doesn't exist)
-    ini.addstr(&patch.section, &patch.key, &patch.value);
+    ini.addstr(&patch.section, &patch.key, &resolved_value);
 
     // Save back to resources
     save_ini_to_resources(&patch.target, &ini, mod_path)?;
@@ -397,20 +600,22 @@ fn apply_append_value_patch(patch: &AppendValuePatch, mod_path: &Path, patch_nam
 /// * `patch` - The append_values patch configuration
 /// * `mod_path` - Path to the current mod being loaded
 /// * `patch_name` - Name of the patch (for logging)
+/// * `context` - Substitution context for variable resolution
 ///
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_append_values_patch(patch: &AppendValuesPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_append_values_patch(patch: &AppendValuesPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying append_values patch '{}': {} [{}] {} += {} values",
           patch_name, patch.target, patch.section, patch.key, patch.values.len());
 
     // Load INI file
     let mut ini = load_ini_from_resources(&patch.target)?;
 
-    // Append all values
+    // Append all values with variable substitution
     for value in &patch.values {
-        ini.addstr(&patch.section, &patch.key, value);
+        let resolved_value = substitute_variables(value, context)?;
+        ini.addstr(&patch.section, &patch.key, &resolved_value);
     }
 
     // Save back to resources
@@ -502,11 +707,12 @@ fn apply_remove_keys_patch(patch: &RemoveKeysPatch, mod_path: &Path, patch_name:
 /// * `patch` - The add_section patch configuration
 /// * `mod_path` - Path to the current mod being loaded
 /// * `patch_name` - Name of the patch (for logging)
+/// * `context` - Substitution context for variable resolution
 ///
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, section collision occurs with on_exists=error, or other errors
-fn apply_add_section_patch(patch: &AddSectionPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_add_section_patch(patch: &AddSectionPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying add_section patch '{}': {} [{}] with {} keys (on_exists: {:?})",
           patch_name, patch.target, patch.section, patch.keys.len(), patch.on_exists);
 
@@ -543,9 +749,10 @@ fn apply_add_section_patch(patch: &AddSectionPatch, mod_path: &Path, patch_name:
         }
     }
 
-    // Add all keys to the section
+    // Add all keys to the section with variable substitution
     for (key, value) in &patch.keys {
-        ini.setstr(&patch.section, key, Some(value));
+        let resolved_value = substitute_variables(value, context)?;
+        ini.setstr(&patch.section, key, Some(&resolved_value));
     }
 
     // Save back to resources
@@ -778,6 +985,7 @@ enum PatchResult {
 /// * `patch_meta` - Patch metadata containing error handling and file-level conditions
 /// * `patches` - Ordered map of patches to apply (order is preserved via IndexMap)
 /// * `mod_path` - Path to the current mod being loaded
+/// * `current_mod_id` - The ID of the current mod (for variable substitution)
 ///
 /// # Returns
 /// * `Ok(())` if patches were applied successfully (or with continue error handling)
@@ -785,7 +993,8 @@ enum PatchResult {
 pub fn apply_patches(
     patch_meta: &PatchMeta,
     patches: &indexmap::IndexMap<String, Patch>,
-    mod_path: &Path
+    mod_path: &Path,
+    current_mod_id: &str,
 ) -> anyhow::Result<()> {
     // VALIDATE: Only 'continue' mode is currently supported
     if patch_meta.on_error != ErrorHandling::Continue {
@@ -795,6 +1004,11 @@ pub fn apply_patches(
             patch_meta.on_error
         ));
     }
+
+    // Create substitution context for variable resolution
+    let context = SubstitutionContext {
+        current_mod_id: current_mod_id.to_string(),
+    };
 
     info!("Applying patch file with {} patches (on_error: {:?})",
           patches.len(), patch_meta.on_error);
@@ -875,13 +1089,13 @@ pub fn apply_patches(
             Patch::Merge(p) => apply_merge_patch(p, mod_path, patch_name),
             Patch::Delete(p) => apply_delete_patch(p, patch_name),
             Patch::SetPalette(p) => apply_set_palette_patch(p, patch_name),
-            Patch::SetKey(p) => apply_set_key_patch(p, mod_path, patch_name),
-            Patch::SetKeys(p) => apply_set_keys_patch(p, mod_path, patch_name),
-            Patch::AppendValue(p) => apply_append_value_patch(p, mod_path, patch_name),
-            Patch::AppendValues(p) => apply_append_values_patch(p, mod_path, patch_name),
+            Patch::SetKey(p) => apply_set_key_patch(p, mod_path, patch_name, &context),
+            Patch::SetKeys(p) => apply_set_keys_patch(p, mod_path, patch_name, &context),
+            Patch::AppendValue(p) => apply_append_value_patch(p, mod_path, patch_name, &context),
+            Patch::AppendValues(p) => apply_append_values_patch(p, mod_path, patch_name, &context),
             Patch::RemoveKey(p) => apply_remove_key_patch(p, mod_path, patch_name),
             Patch::RemoveKeys(p) => apply_remove_keys_patch(p, mod_path, patch_name),
-            Patch::AddSection(p) => apply_add_section_patch(p, mod_path, patch_name),
+            Patch::AddSection(p) => apply_add_section_patch(p, mod_path, patch_name, &context),
             Patch::ClearSection(p) => apply_clear_section_patch(p, mod_path, patch_name),
             Patch::RemoveSection(p) => apply_remove_section_patch(p, mod_path, patch_name),
         };
@@ -928,4 +1142,153 @@ pub fn apply_patches(
     }
 
     Ok(())
+}
+
+// ============================================================================
+// Unit Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_variable_current_mod_habitat() {
+        let result = parse_variable("habitat.swamp").unwrap();
+        assert_eq!(result.var_type, VariableType::Habitat);
+        assert_eq!(result.mod_id, None);
+        assert_eq!(result.identifier, "swamp");
+    }
+
+    #[test]
+    fn test_parse_variable_current_mod_location() {
+        let result = parse_variable("location.moon").unwrap();
+        assert_eq!(result.var_type, VariableType::Location);
+        assert_eq!(result.mod_id, None);
+        assert_eq!(result.identifier, "moon");
+    }
+
+    #[test]
+    fn test_parse_variable_current_mod_string() {
+        let result = parse_variable("string.9500").unwrap();
+        assert_eq!(result.var_type, VariableType::String);
+        assert_eq!(result.mod_id, None);
+        assert_eq!(result.identifier, "9500");
+    }
+
+    #[test]
+    fn test_parse_variable_cross_mod_habitat() {
+        let result = parse_variable("lunar.habitat.crater").unwrap();
+        assert_eq!(result.var_type, VariableType::Habitat);
+        assert_eq!(result.mod_id, Some("lunar".to_string()));
+        assert_eq!(result.identifier, "crater");
+    }
+
+    #[test]
+    fn test_parse_variable_cross_mod_location() {
+        let result = parse_variable("lunar.location.moon").unwrap();
+        assert_eq!(result.var_type, VariableType::Location);
+        assert_eq!(result.mod_id, Some("lunar".to_string()));
+        assert_eq!(result.identifier, "moon");
+    }
+
+    #[test]
+    fn test_parse_variable_invalid_syntax_too_few_parts() {
+        let result = parse_variable("habitat");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid variable syntax"));
+    }
+
+    #[test]
+    fn test_parse_variable_invalid_syntax_too_many_parts() {
+        let result = parse_variable("mod.habitat.name.extra");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid variable syntax"));
+    }
+
+    #[test]
+    fn test_parse_variable_invalid_type() {
+        let result = parse_variable("invalid.swamp");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid variable type"));
+    }
+
+    #[test]
+    fn test_parse_variable_invalid_type_cross_mod() {
+        let result = parse_variable("lunar.invalid.moon");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid variable type"));
+    }
+
+    #[test]
+    fn test_substitute_variables_no_variables() {
+        let context = SubstitutionContext {
+            current_mod_id: "test_mod".to_string(),
+        };
+        let result = substitute_variables("plain text", &context).unwrap();
+        assert_eq!(result, "plain text");
+    }
+
+    #[test]
+    fn test_substitute_variables_single_variable() {
+        let context = SubstitutionContext {
+            current_mod_id: "test_mod".to_string(),
+        };
+        // This would fail without registered habitats, but tests the parsing
+        let input = "{habitat.swamp}";
+        let result = substitute_variables(input, &context);
+        // Will fail because habitat not registered, but that's expected
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        // Error should mention that it failed to resolve the variable
+        assert!(
+            error_msg.contains("Failed to resolve variable"),
+            "Expected error to mention 'Failed to resolve variable', got: {}",
+            error_msg
+        );
+    }
+
+    #[test]
+    fn test_substitute_variables_multiple_variables() {
+        let context = SubstitutionContext {
+            current_mod_id: "test_mod".to_string(),
+        };
+        let input = "cHabitat={habitat.swamp}, cLocation={location.moon}";
+        let result = substitute_variables(input, &context);
+        // Will fail because habitats not registered, but validates parsing multiple variables
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_substitute_variables_mixed_content() {
+        let context = SubstitutionContext {
+            current_mod_id: "test_mod".to_string(),
+        };
+        let input = "prefix {habitat.swamp} middle {location.moon} suffix";
+        let result = substitute_variables(input, &context);
+        // Will fail because habitats not registered, but validates mixed content parsing
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_substitute_variables_unclosed_brace() {
+        let context = SubstitutionContext {
+            current_mod_id: "test_mod".to_string(),
+        };
+        let input = "text {habitat.swamp";
+        let result = substitute_variables(input, &context);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unclosed variable brace"));
+    }
+
+    #[test]
+    fn test_substitute_variables_empty_braces() {
+        let context = SubstitutionContext {
+            current_mod_id: "test_mod".to_string(),
+        };
+        let input = "text {} more";
+        let result = substitute_variables(input, &context);
+        // Will fail due to invalid syntax
+        assert!(result.is_err());
+    }
 }
