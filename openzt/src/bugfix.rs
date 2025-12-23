@@ -8,7 +8,7 @@ const ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_1: u32 = 0x4a1fc0;
 const ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2: u32 = 0x4a1fe7;
 // const ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_1: u32 = ;
 
-const LOWERCASE_LOOKUP_TABLE_SIGNED_CHAR_BUG: u32 = 0x529cc7;
+const LOWERCASE_LOOKUP_TABLE_SIGNED_CHAR_BUG: [u32; 6] = [0x00529cc7, 0x004036b9, 0x004039e9, 0x00404240, 0x0040697f, 0x00528d0f];
 
 pub fn init() {
     if let Err(e) = fix_zoowall_map_edge_crash() {
@@ -40,8 +40,10 @@ fn fix_fence_one_tile_from_map_edge_crash() -> anyhow::Result<()> {
 }
 
 fn fix_lowercase_lookup_table_signed_char_bug() -> anyhow::Result<()> {
-    // This changes a movsx to a movzx to fix signed char bug in lowercase lookup table
-    save_to_protected_memory::<u8>(LOWERCASE_LOOKUP_TABLE_SIGNED_CHAR_BUG, 0xB6)?;
+    for address in LOWERCASE_LOOKUP_TABLE_SIGNED_CHAR_BUG {
+        // This changes a movsx to a movzx to fix signed char bug in lowercase lookup table
+        save_to_protected_memory::<u8>(address, 0xB6)?;
+    }
     Ok(())
 }
 
