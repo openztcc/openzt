@@ -8,12 +8,18 @@ const ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_1: u32 = 0x4a1fc0;
 const ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2: u32 = 0x4a1fe7;
 // const ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_1: u32 = ;
 
+const LOWERCASE_LOOKUP_TABLE_SIGNED_CHAR_BUG: u32 = 0x529cc7;
+
 pub fn init() {
     if let Err(e) = fix_zoowall_map_edge_crash() {
         error!("Failed to fix ZooWall map edge crash: {}", e);
     }
     if let Err(e) = fix_fence_one_tile_from_map_edge_crash() {
         error!("Failed to fix ZooFence one tile from map edge crash: {}", e);
+    }
+
+    if let Err(e) = fix_lowercase_lookup_table_signed_char_bug() {
+        error!("Failed to fix lowercase lookup table signed char bug: {}", e);
     }
 }
 
@@ -30,6 +36,12 @@ fn fix_fence_one_tile_from_map_edge_crash() -> anyhow::Result<()> {
     save_to_protected_memory::<u8>(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2, 0x85)?;
     save_to_protected_memory::<u8>(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2 + 1, 0xC0)?;
     patch_nop(ZOOFENCE_ONE_TILE_FROM_MAP_EDGE_CRASH_ADDRESS_2 + 2)?;
+    Ok(())
+}
+
+fn fix_lowercase_lookup_table_signed_char_bug() -> anyhow::Result<()> {
+    // This changes a movsx to a movzx to fix signed char bug in lowercase lookup table
+    save_to_protected_memory::<u8>(LOWERCASE_LOOKUP_TABLE_SIGNED_CHAR_BUG, 0xB6)?;
     Ok(())
 }
 
