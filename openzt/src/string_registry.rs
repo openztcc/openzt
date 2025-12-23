@@ -87,7 +87,7 @@ fn command_get_string(args: Vec<&str>) -> Result<String, CommandError> {
             return Err(Into::into("String not found"));
         }
         let string_slice = &buffer[..length as usize];
-        Ok(String::from_utf8_lossy(string_slice).to_string())
+        Ok(crate::encoding_utils::decode_game_text(string_slice))
     }
 }
 

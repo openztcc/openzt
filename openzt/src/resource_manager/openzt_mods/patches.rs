@@ -270,7 +270,7 @@ fn apply_replace_patch(patch: &ReplacePatch, mod_path: &Path, patch_name: &str) 
         ZTFileType::Ini | ZTFileType::Ai | ZTFileType::Ani | ZTFileType::Cfg
         | ZTFileType::Lyt | ZTFileType::Scn | ZTFileType::Uca | ZTFileType::Ucs
         | ZTFileType::Ucb | ZTFileType::Txt | ZTFileType::Toml => {
-            let content = String::from_utf8(source_data)?;
+            let content = crate::encoding_utils::decode_game_text(&source_data);
             let content_len = content.len() as u32;
             let c_string = std::ffi::CString::new(content)?;
             ZTFile::Text(c_string, file_type, content_len)
@@ -315,10 +315,10 @@ fn apply_merge_patch(patch: &MergePatch, mod_path: &Path, patch_name: &str) -> a
     // Load target INI file
     let target_file = get_file(&patch.target)
         .ok_or_else(|| anyhow::anyhow!("Failed to load target file '{}'", patch.target))?;
-    let target_str = str::from_utf8(&target_file.1)?;
+    let target_str = crate::encoding_utils::decode_game_text(&target_file.1);
     let mut target_ini = Ini::new_cs();
     target_ini.set_comment_symbols(&[';', '#', ':']);
-    target_ini.read(target_str.to_string())
+    target_ini.read(target_str)
         .map_err(|e| anyhow::anyhow!("Failed to parse target INI file '{}': {}", patch.target, e))?;
 
     // Load source INI file from mod
@@ -475,10 +475,10 @@ fn load_ini_from_resources(target: &str) -> anyhow::Result<Ini> {
     // Load and parse INI file
     let target_file = get_file(target)
         .ok_or_else(|| anyhow::anyhow!("Failed to load target file '{}'", target))?;
-    let target_str = str::from_utf8(&target_file.1)?;
+    let target_str = crate::encoding_utils::decode_game_text(&target_file.1);
     let mut ini = Ini::new_cs();
     ini.set_comment_symbols(&[';', '#', ':']);
-    ini.read(target_str.to_string())
+    ini.read(target_str)
         .map_err(|e| anyhow::anyhow!("Failed to parse INI file '{}': {}", target, e))?;
 
     Ok(ini)

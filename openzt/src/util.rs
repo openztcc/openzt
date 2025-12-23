@@ -65,37 +65,39 @@ pub fn get_string_from_memory_with_size(address: u32, size: u32) -> String {
 }
 
 pub fn get_string_from_memory_bounded(start: u32, end: u32, buffer_end: u32) -> String {
-    let mut string = String::new();
+    let mut bytes = Vec::new();
     let mut char_address = start;
     while {
         let byte = get_from_memory::<u8>(char_address);
         byte != 0 && char_address < end && char_address < buffer_end
     } {
-        string.push(get_from_memory::<u8>(char_address) as char);
+        bytes.push(get_from_memory::<u8>(char_address));
         char_address += 1;
     }
-    string
+    crate::encoding_utils::decode_game_text(&bytes)
 }
 
 pub fn get_string_from_memory(address: u32) -> String {
     debug!("decoding string at address: {:p}", address as *const ());
-    let mut string = String::new();
+    let mut bytes = Vec::new();
     let mut char_address = address;
     while {
         let byte = get_from_memory::<u8>(char_address);
         byte != 0
     } {
-        string.push(get_from_memory::<u8>(char_address) as char);
+        bytes.push(get_from_memory::<u8>(char_address));
         char_address += 1;
     }
-    debug!("decoded: {}", string);
-    string
+    let decoded = crate::encoding_utils::decode_game_text(&bytes);
+    debug!("decoded: {}", decoded);
+    decoded
 }
 
 pub fn save_string_to_memory(address: u32, string: &str) {
+    let encoded_bytes = crate::encoding_utils::encode_to_ansi(string);
     let mut char_address = address;
-    for c in string.chars() {
-        save_to_memory::<u8>(char_address, c as u8);
+    for byte in encoded_bytes {
+        save_to_memory::<u8>(char_address, byte);
         char_address += 1;
     }
     save_to_memory::<u8>(char_address, 0);

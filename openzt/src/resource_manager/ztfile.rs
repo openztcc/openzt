@@ -248,11 +248,12 @@ where
 {
     modify_ztfile(file_name, |file: &mut BFResourcePtr| {
         let c_string = unsafe { CString::from_raw(file.data_ptr as *mut i8) };
-        let c_string_as_string = c_string.to_string_lossy().to_string();
+        let bytes = c_string.as_bytes();
+        let decoded_string = crate::encoding_utils::decode_game_text(bytes);
         let mut cfg = Ini::new_cs();
         cfg.set_comment_symbols(&[';', '#', ':']);
 
-        cfg.read(c_string_as_string).map_err(|s| anyhow!("Error reading ini: {}", s))?;
+        cfg.read(decoded_string).map_err(|s| anyhow!("Error reading ini: {}", s))?;
 
         modifier(&mut cfg)?;
 

@@ -47,6 +47,9 @@ mod string_registry;
 /// Helper methods for parsing binary data, including reading and writing binary data to and from buffers.
 mod binary_parsing;
 
+/// Encoding utilities for handling text from game files with various encodings (UTF-8, Windows ANSI code pages).
+mod encoding_utils;
+
 /// ZTAF Animation file format parsing, writing and some modification methods.
 ///
 /// Based on documentation at <https://github.com/jbostoen/ZTStudio/wiki/ZT1-Graphics-Explained>

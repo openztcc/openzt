@@ -135,9 +135,7 @@ pub fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, 
         .get(file_name)
         .with_context(|| format!("Error finding file {} in resource map for mod {}", file_name, mod_id))?;
 
-    let intermediate_string = str::from_utf8(file)
-        .with_context(|| format!("Error converting file {} to utf8 for mod {}", file_name, mod_id))?
-        .to_string();
+    let intermediate_string = crate::encoding_utils::decode_game_text(file);
 
     let defs = toml::from_str::<mods::ModDefinition>(&intermediate_string).with_context(|| format!("Error parsing defs from OpenZT mod: {}", file_name))?;
 
