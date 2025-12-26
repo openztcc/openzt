@@ -90,6 +90,10 @@ mod scripting;
 #[cfg(feature = "reimplementation-tests")]
 pub mod reimplementation_tests;
 
+/// Integration tests for patch system (requires game environment)
+#[cfg(feature = "patch-integration-tests")]
+pub mod patch_integration_tests;
+
 #[cfg(target_os = "windows")]
 use windows::Win32::System::{Console::{AllocConsole, FreeConsole}};
 

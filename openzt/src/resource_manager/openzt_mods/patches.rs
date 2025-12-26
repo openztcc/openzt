@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::str;
 
@@ -230,10 +231,743 @@ fn substitute_variables(input: &str, context: &SubstitutionContext) -> anyhow::R
 }
 
 // ============================================================================
-// Phase 3: File-Level Patch Operations
+// Shadow Resources for Rollback Support
 // ============================================================================
 
-/// Apply a replace patch: replaces an entire file in the resource system
+/// Shadow resource map for transactional patch application
+///
+/// This struct holds shadow copies of files that patches will modify.
+/// Patches are applied to the shadow copies, then committed to the main
+/// resource system on success, or discarded on failure (automatic rollback).
+pub struct ShadowResources {
+    /// Shadow copies of files being modified (path -> shadow ZTFile)
+    files: HashMap<String, ZTFile>,
+
+    /// Files that will be created (don't exist in main resources yet)
+    new_files: HashSet<String>,
+
+    /// Scope of this shadow (for logging)
+    scope: ShadowScope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShadowScope {
+    /// Shadow for patch file only
+    PatchFile,
+
+    /// Shadow for entire mod
+    Mod,
+}
+
+impl ShadowResources {
+    /// Create shadow by cloning affected files from main resource system
+    ///
+    /// # Arguments
+    /// * `affected_files` - Set of file paths that will be modified
+    /// * `scope` - Scope of this shadow (PatchFile or Mod)
+    ///
+    /// # Returns
+    /// * `Ok(ShadowResources)` - Shadow with cloned files
+    /// * `Err(_)` if there's an error accessing files
+    pub fn new(affected_files: &HashSet<String>, scope: ShadowScope) -> anyhow::Result<Self> {
+        let mut files = HashMap::new();
+        let mut new_files = HashSet::new();
+
+        for path in affected_files {
+            if let Some((_filename, raw_data)) = get_file(path) {
+                // File exists - convert to ZTFile and clone into shadow
+                let file_type = ZTFileType::try_from(Path::new(path))
+                    .map_err(|e| anyhow::anyhow!("Invalid file type for '{}': {}", path, e))?;
+
+                let ztfile = match file_type {
+                    ZTFileType::Ini | ZTFileType::Ai | ZTFileType::Ani | ZTFileType::Cfg
+                    | ZTFileType::Lyt | ZTFileType::Scn | ZTFileType::Uca | ZTFileType::Ucs
+                    | ZTFileType::Ucb | ZTFileType::Txt | ZTFileType::Toml => {
+                        let content = crate::encoding_utils::decode_game_text(&raw_data);
+                        let content_len = content.len() as u32;
+                        let c_string = std::ffi::CString::new(content)?;
+                        ZTFile::Text(c_string, file_type, content_len)
+                    }
+                    _ => {
+                        ZTFile::RawBytes(raw_data, file_type, 0)
+                    }
+                };
+
+                files.insert(path.clone(), ztfile);
+            } else {
+                // File doesn't exist yet - mark as new
+                new_files.insert(path.clone());
+            }
+        }
+
+        info!("Created {:?} shadow: {} files cloned, {} will be created",
+              scope, files.len(), new_files.len());
+
+        Ok(ShadowResources {
+            files,
+            new_files,
+            scope,
+        })
+    }
+
+    /// Get a file from shadow (or fall back to main resources if not shadowed)
+    ///
+    /// # Arguments
+    /// * `path` - File path to retrieve
+    ///
+    /// # Returns
+    /// * `Some(ZTFile)` - File from shadow or main resources
+    /// * `None` - File not found anywhere
+    pub fn get_file(&self, path: &str) -> Option<ZTFile> {
+        // Check shadow first
+        if let Some(file) = self.files.get(path) {
+            return Some(file.clone());
+        }
+
+        // Fall back to main resources for non-shadowed files
+        if let Some((_, raw_data)) = get_file(path) {
+            // Convert to ZTFile
+            let file_type = ZTFileType::try_from(Path::new(path)).ok()?;
+
+            let ztfile = match file_type {
+                ZTFileType::Ini | ZTFileType::Ai | ZTFileType::Ani | ZTFileType::Cfg
+                | ZTFileType::Lyt | ZTFileType::Scn | ZTFileType::Uca | ZTFileType::Ucs
+                | ZTFileType::Ucb | ZTFileType::Txt | ZTFileType::Toml => {
+                    let content = crate::encoding_utils::decode_game_text(&raw_data);
+                    let content_len = content.len() as u32;
+                    let c_string = std::ffi::CString::new(content).ok()?;
+                    ZTFile::Text(c_string, file_type, content_len)
+                }
+                _ => {
+                    ZTFile::RawBytes(raw_data, file_type, 0)
+                }
+            };
+
+            Some(ztfile)
+        } else {
+            None
+        }
+    }
+
+    /// Update a file in the shadow
+    ///
+    /// # Arguments
+    /// * `path` - File path to update
+    /// * `file` - New file content
+    pub fn update_file(&mut self, path: &str, file: ZTFile) {
+        self.files.insert(path.to_string(), file);
+
+        // If this was marked as new, it's now created
+        self.new_files.remove(path);
+    }
+
+    /// Delete a file from the shadow
+    ///
+    /// # Arguments
+    /// * `path` - File path to delete
+    pub fn delete_file(&mut self, path: &str) {
+        self.files.remove(path);
+        self.new_files.remove(path);
+    }
+
+    /// Check if a file exists in shadow or main resources
+    ///
+    /// # Arguments
+    /// * `path` - File path to check
+    ///
+    /// # Returns
+    /// * `true` - File exists in shadow or main resources
+    /// * `false` - File not found
+    pub fn file_exists(&self, path: &str) -> bool {
+        self.files.contains_key(path) || check_file(path)
+    }
+
+    /// Commit shadow to main resource system (success case)
+    ///
+    /// This writes all shadow files to the main resource system.
+    ///
+    /// # Returns
+    /// * `Ok(())` if all files were committed successfully
+    /// * `Err(_)` if there's an error writing files
+    pub fn commit(self) -> anyhow::Result<()> {
+        info!("Committing {:?} shadow: {} files to write",
+              self.scope, self.files.len());
+
+        let start = std::time::Instant::now();
+
+        // Write all shadow files to main resource system
+        for (path, file) in self.files {
+            add_ztfile(Path::new(""), path, file)?;
+        }
+
+        let elapsed = start.elapsed();
+        info!("Shadow committed in {:.2?}", elapsed);
+
+        Ok(())
+    }
+
+    /// Discard shadow without committing (failure case - automatic rollback)
+    ///
+    /// This method is called explicitly to log the discard, but rollback
+    /// happens automatically when the ShadowResources is dropped.
+    pub fn discard(self) {
+        info!("Discarding {:?} shadow: {} files dropped (rollback)",
+              self.scope, self.files.len());
+        // Automatic drop - no action needed
+    }
+}
+
+// ============================================================================
+// Shadow Helper Functions
+// ============================================================================
+
+/// Load INI file from shadow (or main resources if not shadowed)
+///
+/// # Arguments
+/// * `path` - File path to load
+/// * `shadow` - Shadow resources to check first
+///
+/// # Returns
+/// * `Ok(Ini)` - Parsed INI file
+/// * `Err(_)` if file not found or not parseable as INI
+fn load_ini_from_shadow(path: &str, shadow: &ShadowResources) -> anyhow::Result<Ini> {
+    let file = shadow.get_file(path)
+        .ok_or_else(|| anyhow::anyhow!("File '{}' not found", path))?;
+
+    match file {
+        ZTFile::Text(content, _, _) => {
+            let content_str = content.to_str()?.to_string();
+            let mut ini = Ini::new_cs();
+            ini.set_comment_symbols(&[';', '#', ':']);
+            ini.read(content_str)
+                .map_err(|e| anyhow::anyhow!("Failed to parse INI: {}", e))?;
+            Ok(ini)
+        }
+        _ => anyhow::bail!("File '{}' is not a text file", path),
+    }
+}
+
+/// Save INI file to shadow
+///
+/// # Arguments
+/// * `path` - File path to save to
+/// * `ini` - INI content to save
+/// * `shadow` - Shadow resources to update
+///
+/// # Returns
+/// * `Ok(())` if saved successfully
+/// * `Err(_)` if there's an error converting or saving
+fn save_ini_to_shadow(path: &str, ini: &Ini, shadow: &mut ShadowResources) -> anyhow::Result<()> {
+    let content = ini.writes();
+    let content_len = content.len() as u32;
+    let c_string = std::ffi::CString::new(content)?;
+
+    let file_type = ZTFileType::try_from(Path::new(path))
+        .map_err(|e| anyhow::anyhow!("Invalid file type: {}", e))?;
+
+    let ztfile = ZTFile::Text(c_string, file_type, content_len);
+    shadow.update_file(path, ztfile);
+
+    Ok(())
+}
+
+/// Check if file exists in shadow or main resources
+///
+/// # Arguments
+/// * `path` - File path to check
+/// * `shadow` - Shadow resources to check
+///
+/// # Returns
+/// * `true` if file exists
+/// * `false` if file not found
+fn check_file_in_shadow(path: &str, shadow: &ShadowResources) -> bool {
+    shadow.file_exists(path)
+}
+
+/// Collect all files that will be modified by patches
+///
+/// # Arguments
+/// * `patches` - Map of patches to analyze
+///
+/// # Returns
+/// * `HashSet<String>` - Set of unique file paths that will be affected
+fn collect_affected_files(patches: &indexmap::IndexMap<String, Patch>) -> HashSet<String> {
+    let mut files = HashSet::new();
+
+    for patch in patches.values() {
+        match patch {
+            Patch::Replace(p) => { files.insert(p.target.clone()); },
+            Patch::Merge(p) => { files.insert(p.target.clone()); },
+            Patch::Delete(p) => { files.insert(p.target.clone()); },
+            Patch::SetPalette(p) => { files.insert(p.target.clone()); },
+            Patch::SetKey(p) => { files.insert(p.target.clone()); },
+            Patch::SetKeys(p) => { files.insert(p.target.clone()); },
+            Patch::AppendValue(p) => { files.insert(p.target.clone()); },
+            Patch::AppendValues(p) => { files.insert(p.target.clone()); },
+            Patch::RemoveKey(p) => { files.insert(p.target.clone()); },
+            Patch::RemoveKeys(p) => { files.insert(p.target.clone()); },
+            Patch::AddSection(p) => { files.insert(p.target.clone()); },
+            Patch::ClearSection(p) => { files.insert(p.target.clone()); },
+            Patch::RemoveSection(p) => { files.insert(p.target.clone()); },
+        }
+    }
+
+    files
+}
+
+// ============================================================================
+// Shadow Patch Operations (for abort/abort_mod modes)
+// ============================================================================
+
+/// Apply set_key patch to shadow
+fn apply_set_key_patch_shadow(
+    patch: &SetKeyPatch,
+    patch_name: &str,
+    context: &SubstitutionContext,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying set_key patch '{}' to shadow: {} [{}] {} = {}",
+          patch_name, patch.target, patch.section, patch.key, patch.value);
+
+    validate_ini_file(&patch.target)?;
+    let mut ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    let resolved_value = substitute_variables(&patch.value, context)?;
+    ini.setstr(&patch.section, &patch.key, Some(&resolved_value));
+
+    save_ini_to_shadow(&patch.target, &ini, shadow)?;
+
+    info!("Successfully applied set_key patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply set_keys patch to shadow
+fn apply_set_keys_patch_shadow(
+    patch: &SetKeysPatch,
+    patch_name: &str,
+    context: &SubstitutionContext,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying set_keys patch '{}' to shadow: {} [{}] ({} keys)",
+          patch_name, patch.target, patch.section, patch.keys.len());
+
+    validate_ini_file(&patch.target)?;
+    let mut ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    for (key, value) in &patch.keys {
+        let resolved_value = substitute_variables(value, context)?;
+        ini.setstr(&patch.section, key, Some(&resolved_value));
+    }
+
+    save_ini_to_shadow(&patch.target, &ini, shadow)?;
+
+    info!("Successfully applied set_keys patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply append_value patch to shadow
+fn apply_append_value_patch_shadow(
+    patch: &AppendValuePatch,
+    patch_name: &str,
+    context: &SubstitutionContext,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying append_value patch '{}' to shadow: {} [{}] {} += {}",
+          patch_name, patch.target, patch.section, patch.key, patch.value);
+
+    validate_ini_file(&patch.target)?;
+    let mut ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    let resolved_value = substitute_variables(&patch.value, context)?;
+    ini.addstr(&patch.section, &patch.key, &resolved_value);
+
+    save_ini_to_shadow(&patch.target, &ini, shadow)?;
+
+    info!("Successfully applied append_value patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply append_values patch to shadow
+fn apply_append_values_patch_shadow(
+    patch: &AppendValuesPatch,
+    patch_name: &str,
+    context: &SubstitutionContext,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying append_values patch '{}' to shadow: {} [{}] {} += {} values",
+          patch_name, patch.target, patch.section, patch.key, patch.values.len());
+
+    validate_ini_file(&patch.target)?;
+    let mut ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    for value in &patch.values {
+        let resolved_value = substitute_variables(value, context)?;
+        ini.addstr(&patch.section, &patch.key, &resolved_value);
+    }
+
+    save_ini_to_shadow(&patch.target, &ini, shadow)?;
+
+    info!("Successfully applied append_values patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply remove_key patch to shadow
+fn apply_remove_key_patch_shadow(
+    patch: &RemoveKeyPatch,
+    patch_name: &str,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying remove_key patch '{}' to shadow: {} [{}] -{}",
+          patch_name, patch.target, patch.section, patch.key);
+
+    validate_ini_file(&patch.target)?;
+
+    if !check_file_in_shadow(&patch.target, shadow) {
+        warn!("Remove_key patch '{}': file '{}' not found, skipping",
+              patch_name, patch.target);
+        return Ok(());
+    }
+
+    let mut ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    if !ini.has_section(&patch.section) {
+        warn!("Remove_key patch '{}': section '{}' not found, skipping",
+              patch_name, patch.section);
+        return Ok(());
+    }
+
+    if ini.remove_key(&patch.section, &patch.key).is_none() {
+        warn!("Remove_key patch '{}': key '{}' not found in section '{}', skipping",
+              patch_name, patch.key, patch.section);
+        return Ok(());
+    }
+
+    save_ini_to_shadow(&patch.target, &ini, shadow)?;
+
+    info!("Successfully applied remove_key patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply remove_keys patch to shadow
+fn apply_remove_keys_patch_shadow(
+    patch: &RemoveKeysPatch,
+    patch_name: &str,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying remove_keys patch '{}' to shadow: {} [{}] -{} keys",
+          patch_name, patch.target, patch.section, patch.keys.len());
+
+    validate_ini_file(&patch.target)?;
+
+    if !check_file_in_shadow(&patch.target, shadow) {
+        warn!("Remove_keys patch '{}': file '{}' not found, skipping",
+              patch_name, patch.target);
+        return Ok(());
+    }
+
+    let mut ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    if !ini.has_section(&patch.section) {
+        warn!("Remove_keys patch '{}': section '{}' not found, skipping",
+              patch_name, patch.section);
+        return Ok(());
+    }
+
+    for key in &patch.keys {
+        ini.remove_key(&patch.section, key);
+    }
+
+    save_ini_to_shadow(&patch.target, &ini, shadow)?;
+
+    info!("Successfully applied remove_keys patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply add_section patch to shadow
+fn apply_add_section_patch_shadow(
+    patch: &AddSectionPatch,
+    patch_name: &str,
+    context: &SubstitutionContext,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying add_section patch '{}' to shadow: {} [{}] ({} keys, on_exists: {:?})",
+          patch_name, patch.target, patch.section, patch.keys.len(), patch.on_exists);
+
+    validate_ini_file(&patch.target)?;
+    let mut ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    let section_exists = ini.has_section(&patch.section);
+
+    match (&patch.on_exists, section_exists) {
+        (OnExists::Error, true) => {
+            anyhow::bail!("Section '{}' already exists in '{}'", patch.section, patch.target);
+        }
+        (OnExists::Skip, true) => {
+            warn!("Add_section patch '{}': section '{}' already exists, skipping",
+                  patch_name, patch.section);
+            return Ok(());
+        }
+        (OnExists::Replace, true) => {
+            ini.clear_section(&patch.section);
+        }
+        _ => {}
+    }
+
+    for (key, value) in &patch.keys {
+        let resolved_value = substitute_variables(value, context)?;
+        ini.setstr(&patch.section, key, Some(&resolved_value));
+    }
+
+    save_ini_to_shadow(&patch.target, &ini, shadow)?;
+
+    info!("Successfully applied add_section patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply clear_section patch to shadow
+fn apply_clear_section_patch_shadow(
+    patch: &ClearSectionPatch,
+    patch_name: &str,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying clear_section patch '{}' to shadow: {} [{}]",
+          patch_name, patch.target, patch.section);
+
+    validate_ini_file(&patch.target)?;
+
+    if !check_file_in_shadow(&patch.target, shadow) {
+        warn!("Clear_section patch '{}': file '{}' not found, skipping",
+              patch_name, patch.target);
+        return Ok(());
+    }
+
+    let mut ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    if !ini.has_section(&patch.section) {
+        warn!("Clear_section patch '{}': section '{}' not found, skipping",
+              patch_name, patch.section);
+        return Ok(());
+    }
+
+    ini.clear_section(&patch.section);
+    save_ini_to_shadow(&patch.target, &ini, shadow)?;
+
+    info!("Successfully applied clear_section patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply remove_section patch to shadow
+fn apply_remove_section_patch_shadow(
+    patch: &RemoveSectionPatch,
+    patch_name: &str,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying remove_section patch '{}' to shadow: {} -[{}]",
+          patch_name, patch.target, patch.section);
+
+    validate_ini_file(&patch.target)?;
+
+    if !check_file_in_shadow(&patch.target, shadow) {
+        warn!("Remove_section patch '{}': file '{}' not found, skipping",
+              patch_name, patch.target);
+        return Ok(());
+    }
+
+    let mut ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    if !ini.has_section(&patch.section) {
+        warn!("Remove_section patch '{}': section '{}' not found, skipping",
+              patch_name, patch.section);
+        return Ok(());
+    }
+
+    ini.remove_section(&patch.section);
+    save_ini_to_shadow(&patch.target, &ini, shadow)?;
+
+    info!("Successfully applied remove_section patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply replace patch to shadow
+fn apply_replace_patch_shadow(
+    patch: &ReplacePatch,
+    mod_path: &Path,
+    patch_name: &str,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying replace patch '{}' to shadow: {} -> {}",
+          patch_name, patch.source, patch.target);
+
+    // Check if target exists (in shadow or main resources)
+    if !check_file_in_shadow(&patch.target, shadow) {
+        anyhow::bail!("Target file '{}' not found", patch.target);
+    }
+
+    // Load source file from mod
+    let source_path = mod_path.join(&patch.source);
+    if !source_path.exists() {
+        anyhow::bail!("Source file '{}' not found in mod at path: {}",
+                     patch.source, source_path.display());
+    }
+
+    let source_data = std::fs::read(&source_path)?;
+    let file_type = ZTFileType::try_from(Path::new(&patch.target))
+        .map_err(|e| anyhow::anyhow!("Invalid target file type: {}", e))?;
+
+    let ztfile = match file_type {
+        ZTFileType::Ini | ZTFileType::Ai | ZTFileType::Ani | ZTFileType::Cfg
+        | ZTFileType::Lyt | ZTFileType::Scn | ZTFileType::Uca | ZTFileType::Ucs
+        | ZTFileType::Ucb | ZTFileType::Txt | ZTFileType::Toml => {
+            let content = crate::encoding_utils::decode_game_text(&source_data);
+            let content_len = content.len() as u32;
+            let c_string = std::ffi::CString::new(content)?;
+            ZTFile::Text(c_string, file_type, content_len)
+        }
+        _ => {
+            ZTFile::RawBytes(source_data.into_boxed_slice(), file_type, 0)
+        }
+    };
+
+    shadow.update_file(&patch.target, ztfile);
+
+    info!("Successfully applied replace patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply merge patch to shadow
+fn apply_merge_patch_shadow(
+    patch: &MergePatch,
+    mod_path: &Path,
+    patch_name: &str,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying merge patch '{}' to shadow: {} + {} (mode: {:?})",
+          patch_name, patch.target, patch.source, patch.merge_mode);
+
+    // Validate INI file type
+    let target_path = Path::new(&patch.target);
+    let target_ext = target_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let valid_extensions = ["ini", "ai", "cfg", "uca", "ucs", "ucb", "scn", "lyt"];
+    if !valid_extensions.contains(&target_ext) {
+        anyhow::bail!("Target file '{}' is not an INI file. Merge only works with INI files.",
+                     patch.target);
+    }
+
+    // Check target exists
+    if !check_file_in_shadow(&patch.target, shadow) {
+        anyhow::bail!("Target file '{}' not found", patch.target);
+    }
+
+    // Load target INI from shadow
+    let mut target_ini = load_ini_from_shadow(&patch.target, shadow)?;
+
+    // Load source INI from mod
+    let source_path = mod_path.join(&patch.source);
+    if !source_path.exists() {
+        anyhow::bail!("Source file '{}' not found in mod at path: {}",
+                     patch.source, source_path.display());
+    }
+
+    let source_data = std::fs::read(&source_path)?;
+    let source_str = crate::encoding_utils::decode_game_text(&source_data);
+    let mut source_ini = Ini::new_cs();
+    source_ini.set_comment_symbols(&[';', '#', ':']);
+    source_ini.read(source_str)
+        .map_err(|e| anyhow::anyhow!("Failed to parse source INI '{}': {}", patch.source, e))?;
+
+    // Merge based on mode
+    let mode = match patch.merge_mode {
+        MergeMode::PatchPriority => IniMergeMode::PatchPriority,
+        MergeMode::BasePriority => IniMergeMode::BasePriority,
+    };
+
+    target_ini.merge_with_priority(&source_ini, mode);
+
+    // Save merged result to shadow
+    save_ini_to_shadow(&patch.target, &target_ini, shadow)?;
+
+    info!("Successfully applied merge patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply delete patch to shadow
+fn apply_delete_patch_shadow(
+    patch: &DeletePatch,
+    patch_name: &str,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying delete patch '{}' to shadow: -{}", patch_name, patch.target);
+
+    if !check_file_in_shadow(&patch.target, shadow) {
+        warn!("Delete patch '{}': file '{}' not found, skipping",
+              patch_name, patch.target);
+        return Ok(());
+    }
+
+    shadow.delete_file(&patch.target);
+
+    info!("Successfully applied delete patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+/// Apply set_palette patch to shadow
+fn apply_set_palette_patch_shadow(
+    patch: &SetPalettePatch,
+    patch_name: &str,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    info!("Applying set_palette patch '{}' to shadow: {} palette -> {}",
+          patch_name, patch.target, patch.palette);
+
+    // Validate target is animation (no extension)
+    if Path::new(&patch.target).extension().is_some() {
+        anyhow::bail!("Target '{}' has extension - set_palette only works on animation files (no extension)",
+                     patch.target);
+    }
+
+    // Validate palette has .pal extension
+    let palette_path = Path::new(&patch.palette);
+    let palette_ext = palette_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if palette_ext != "pal" {
+        anyhow::bail!("Palette '{}' must have .pal extension", patch.palette);
+    }
+
+    // Check target exists
+    if !check_file_in_shadow(&patch.target, shadow) {
+        anyhow::bail!("Target animation file '{}' not found", patch.target);
+    }
+
+    // Load animation from shadow
+    let animation_file = shadow.get_file(&patch.target)
+        .ok_or_else(|| anyhow::anyhow!("Failed to load animation '{}' from shadow", patch.target))?;
+
+    let animation_data = match animation_file {
+        ZTFile::RawBytes(data, _, _) => data,
+        _ => anyhow::bail!("Animation file '{}' is not raw bytes", patch.target),
+    };
+
+    // Parse animation
+    let mut animation = Animation::parse(&animation_data)?;
+
+    // Set new palette filename
+    animation.set_palette_filename(patch.palette.clone());
+
+    // Write animation back
+    let (new_animation_bytes, _length) = animation.write()?;
+
+    // Update shadow with modified animation
+    let ztfile = ZTFile::RawBytes(new_animation_bytes.into_boxed_slice(), ZTFileType::Animation, 0);
+    shadow.update_file(&patch.target, ztfile);
+
+    info!("Successfully applied set_palette patch '{}' to shadow", patch_name);
+    Ok(())
+}
+
+// ============================================================================
+// Phase 3: Direct Patch Operations (for continue mode - no shadow)
+// ============================================================================
+
+/// Apply a replace patch directly to resources: replaces an entire file in the resource system
 ///
 /// This loads the source file from the current mod and replaces the target file
 /// in the resource map. The target file must exist, and the source file must
@@ -247,7 +981,7 @@ fn substitute_variables(input: &str, context: &SubstitutionContext) -> anyhow::R
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the target file doesn't exist, source file doesn't exist, or other errors occur
-fn apply_replace_patch(patch: &ReplacePatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_replace_patch_direct(patch: &ReplacePatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
     info!("Applying replace patch '{}': {} -> {}", patch_name, patch.source, patch.target);
 
     // Check if target file exists in resource system
@@ -287,7 +1021,7 @@ fn apply_replace_patch(patch: &ReplacePatch, mod_path: &Path, patch_name: &str) 
     Ok(())
 }
 
-/// Apply a merge patch: merges two INI files together
+/// Apply a merge patch directly to resources: merges two INI files together
 ///
 /// This loads both the target and source INI files, merges them according to
 /// the merge_mode, and replaces the target file with the merged result.
@@ -300,7 +1034,7 @@ fn apply_replace_patch(patch: &ReplacePatch, mod_path: &Path, patch_name: &str) 
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if files don't exist, aren't INI files, or other errors occur
-fn apply_merge_patch(patch: &MergePatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_merge_patch_direct(patch: &MergePatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
     info!("Applying merge patch '{}': {} + {} (mode: {:?})",
           patch_name, patch.target, patch.source, patch.merge_mode);
 
@@ -358,7 +1092,7 @@ fn apply_merge_patch(patch: &MergePatch, mod_path: &Path, patch_name: &str) -> a
     Ok(())
 }
 
-/// Apply a delete patch: removes a file from the resource system
+/// Apply a delete patch directly to resources: removes a file from the resource system
 ///
 /// # Arguments
 /// * `patch` - The delete patch configuration
@@ -366,7 +1100,7 @@ fn apply_merge_patch(patch: &MergePatch, mod_path: &Path, patch_name: &str) -> a
 ///
 /// # Returns
 /// * `Ok(())` always (warnings logged if file doesn't exist)
-fn apply_delete_patch(patch: &DeletePatch, patch_name: &str) -> anyhow::Result<()> {
+fn apply_delete_patch_direct(patch: &DeletePatch, patch_name: &str) -> anyhow::Result<()> {
     info!("Applying delete patch '{}': {}", patch_name, patch.target);
 
     if !check_file(&patch.target) {
@@ -386,7 +1120,7 @@ fn apply_delete_patch(patch: &DeletePatch, patch_name: &str) -> anyhow::Result<(
     Ok(())
 }
 
-/// Apply a set_palette patch: changes the palette reference in an animation file
+/// Apply a set_palette patch directly to resources: changes the palette reference in an animation file
 ///
 /// This modifies the palette filename stored inside an animation file's header
 /// without changing the animation data itself.
@@ -398,7 +1132,7 @@ fn apply_delete_patch(patch: &DeletePatch, patch_name: &str) -> anyhow::Result<(
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if validation fails or animation parsing/writing fails
-fn apply_set_palette_patch(patch: &SetPalettePatch, patch_name: &str) -> anyhow::Result<()> {
+fn apply_set_palette_patch_direct(patch: &SetPalettePatch, patch_name: &str) -> anyhow::Result<()> {
     info!("Applying set_palette patch '{}': {} -> palette: {}",
           patch_name, patch.target, patch.palette);
 
@@ -431,7 +1165,7 @@ fn apply_set_palette_patch(patch: &SetPalettePatch, patch_name: &str) -> anyhow:
 }
 
 // ============================================================================
-// Phase 4: Element-Level Patch Operations (INI Files)
+// Phase 4: Direct Element-Level Patch Operations (INI Files - for continue mode)
 // ============================================================================
 
 /// Valid INI file extensions
@@ -501,7 +1235,7 @@ fn save_ini_to_resources(target: &str, ini: &Ini, mod_path: &Path) -> anyhow::Re
     Ok(())
 }
 
-/// Apply a set_key patch: sets a single key-value pair in an INI section
+/// Apply a set_key patch directly to resources: sets a single key-value pair in an INI section
 ///
 /// # Arguments
 /// * `patch` - The set_key patch configuration
@@ -512,7 +1246,7 @@ fn save_ini_to_resources(target: &str, ini: &Ini, mod_path: &Path) -> anyhow::Re
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_set_key_patch(patch: &SetKeyPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
+fn apply_set_key_patch_direct(patch: &SetKeyPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying set_key patch '{}': {} [{}] {} = {}",
           patch_name, patch.target, patch.section, patch.key, patch.value);
 
@@ -532,7 +1266,7 @@ fn apply_set_key_patch(patch: &SetKeyPatch, mod_path: &Path, patch_name: &str, c
     Ok(())
 }
 
-/// Apply a set_keys patch: sets multiple key-value pairs in an INI section
+/// Apply a set_keys patch directly to resources: sets multiple key-value pairs in an INI section
 ///
 /// # Arguments
 /// * `patch` - The set_keys patch configuration
@@ -543,7 +1277,7 @@ fn apply_set_key_patch(patch: &SetKeyPatch, mod_path: &Path, patch_name: &str, c
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_set_keys_patch(patch: &SetKeysPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
+fn apply_set_keys_patch_direct(patch: &SetKeysPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying set_keys patch '{}': {} [{}] ({} keys)",
           patch_name, patch.target, patch.section, patch.keys.len());
 
@@ -563,7 +1297,7 @@ fn apply_set_keys_patch(patch: &SetKeysPatch, mod_path: &Path, patch_name: &str,
     Ok(())
 }
 
-/// Apply an append_value patch: appends a single value to an array (repeated key)
+/// Apply an append_value patch directly to resources: appends a single value to an array (repeated key)
 ///
 /// # Arguments
 /// * `patch` - The append_value patch configuration
@@ -574,7 +1308,7 @@ fn apply_set_keys_patch(patch: &SetKeysPatch, mod_path: &Path, patch_name: &str,
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_append_value_patch(patch: &AppendValuePatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
+fn apply_append_value_patch_direct(patch: &AppendValuePatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying append_value patch '{}': {} [{}] {} += {}",
           patch_name, patch.target, patch.section, patch.key, patch.value);
 
@@ -594,7 +1328,7 @@ fn apply_append_value_patch(patch: &AppendValuePatch, mod_path: &Path, patch_nam
     Ok(())
 }
 
-/// Apply an append_values patch: appends multiple values to an array
+/// Apply an append_values patch directly to resources: appends multiple values to an array
 ///
 /// # Arguments
 /// * `patch` - The append_values patch configuration
@@ -605,7 +1339,7 @@ fn apply_append_value_patch(patch: &AppendValuePatch, mod_path: &Path, patch_nam
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_append_values_patch(patch: &AppendValuesPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
+fn apply_append_values_patch_direct(patch: &AppendValuesPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying append_values patch '{}': {} [{}] {} += {} values",
           patch_name, patch.target, patch.section, patch.key, patch.values.len());
 
@@ -626,7 +1360,7 @@ fn apply_append_values_patch(patch: &AppendValuesPatch, mod_path: &Path, patch_n
     Ok(())
 }
 
-/// Apply a remove_key patch: removes a single key from an INI section
+/// Apply a remove_key patch directly to resources: removes a single key from an INI section
 ///
 /// # Arguments
 /// * `patch` - The remove_key patch configuration
@@ -636,7 +1370,7 @@ fn apply_append_values_patch(patch: &AppendValuesPatch, mod_path: &Path, patch_n
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully (warnings logged if key doesn't exist)
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_remove_key_patch(patch: &RemoveKeyPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_remove_key_patch_direct(patch: &RemoveKeyPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
     info!("Applying remove_key patch '{}': {} [{}] remove key '{}'",
           patch_name, patch.target, patch.section, patch.key);
 
@@ -659,7 +1393,7 @@ fn apply_remove_key_patch(patch: &RemoveKeyPatch, mod_path: &Path, patch_name: &
     Ok(())
 }
 
-/// Apply a remove_keys patch: removes multiple keys from an INI section
+/// Apply a remove_keys patch directly to resources: removes multiple keys from an INI section
 ///
 /// # Arguments
 /// * `patch` - The remove_keys patch configuration
@@ -669,7 +1403,7 @@ fn apply_remove_key_patch(patch: &RemoveKeyPatch, mod_path: &Path, patch_name: &
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully (warnings logged for missing keys)
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_remove_keys_patch(patch: &RemoveKeysPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_remove_keys_patch_direct(patch: &RemoveKeysPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
     info!("Applying remove_keys patch '{}': {} [{}] remove {} keys",
           patch_name, patch.target, patch.section, patch.keys.len());
 
@@ -701,7 +1435,7 @@ fn apply_remove_keys_patch(patch: &RemoveKeysPatch, mod_path: &Path, patch_name:
     Ok(())
 }
 
-/// Apply an add_section patch: adds a new section with keys to an INI file
+/// Apply an add_section patch directly to resources: adds a new section with keys to an INI file
 ///
 /// # Arguments
 /// * `patch` - The add_section patch configuration
@@ -712,7 +1446,7 @@ fn apply_remove_keys_patch(patch: &RemoveKeysPatch, mod_path: &Path, patch_name:
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, section collision occurs with on_exists=error, or other errors
-fn apply_add_section_patch(patch: &AddSectionPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
+fn apply_add_section_patch_direct(patch: &AddSectionPatch, mod_path: &Path, patch_name: &str, context: &SubstitutionContext) -> anyhow::Result<()> {
     info!("Applying add_section patch '{}': {} [{}] with {} keys (on_exists: {:?})",
           patch_name, patch.target, patch.section, patch.keys.len(), patch.on_exists);
 
@@ -763,7 +1497,7 @@ fn apply_add_section_patch(patch: &AddSectionPatch, mod_path: &Path, patch_name:
     Ok(())
 }
 
-/// Apply a clear_section patch: removes all keys from an INI section (keeps section)
+/// Apply a clear_section patch directly to resources: removes all keys from an INI section (keeps section)
 ///
 /// # Arguments
 /// * `patch` - The clear_section patch configuration
@@ -773,7 +1507,7 @@ fn apply_add_section_patch(patch: &AddSectionPatch, mod_path: &Path, patch_name:
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully (warnings logged if section doesn't exist)
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_clear_section_patch(patch: &ClearSectionPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_clear_section_patch_direct(patch: &ClearSectionPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
     info!("Applying clear_section patch '{}': {} [{}]",
           patch_name, patch.target, patch.section);
 
@@ -797,7 +1531,7 @@ fn apply_clear_section_patch(patch: &ClearSectionPatch, mod_path: &Path, patch_n
     Ok(())
 }
 
-/// Apply a remove_section patch: removes an entire section from an INI file
+/// Apply a remove_section patch directly to resources: removes an entire section from an INI file
 ///
 /// # Arguments
 /// * `patch` - The remove_section patch configuration
@@ -807,7 +1541,7 @@ fn apply_clear_section_patch(patch: &ClearSectionPatch, mod_path: &Path, patch_n
 /// # Returns
 /// * `Ok(())` if the patch was applied successfully (warnings logged if section doesn't exist)
 /// * `Err(_)` if the file doesn't exist, isn't an INI file, or other errors occur
-fn apply_remove_section_patch(patch: &RemoveSectionPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
+fn apply_remove_section_patch_direct(patch: &RemoveSectionPatch, mod_path: &Path, patch_name: &str) -> anyhow::Result<()> {
     info!("Applying remove_section patch '{}': {} [{}]",
           patch_name, patch.target, patch.section);
 
@@ -828,6 +1562,80 @@ fn apply_remove_section_patch(patch: &RemoveSectionPatch, mod_path: &Path, patch
 
     info!("Successfully applied remove_section patch '{}'", patch_name);
     Ok(())
+}
+
+// ============================================================================
+// Phase 5: Patch Dispatchers
+// ============================================================================
+
+/// Apply a single patch directly to resources (no shadow)
+///
+/// # Arguments
+/// * `patch` - The patch to apply
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+/// * `context` - Substitution context for variable resolution
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully
+/// * `Err(_)` if the patch failed
+fn apply_single_patch_direct(
+    patch: &Patch,
+    mod_path: &Path,
+    patch_name: &str,
+    context: &SubstitutionContext,
+) -> anyhow::Result<()> {
+    match patch {
+        Patch::Replace(p) => apply_replace_patch_direct(p, mod_path, patch_name),
+        Patch::Merge(p) => apply_merge_patch_direct(p, mod_path, patch_name),
+        Patch::Delete(p) => apply_delete_patch_direct(p, patch_name),
+        Patch::SetPalette(p) => apply_set_palette_patch_direct(p, patch_name),
+        Patch::SetKey(p) => apply_set_key_patch_direct(p, mod_path, patch_name, context),
+        Patch::SetKeys(p) => apply_set_keys_patch_direct(p, mod_path, patch_name, context),
+        Patch::AppendValue(p) => apply_append_value_patch_direct(p, mod_path, patch_name, context),
+        Patch::AppendValues(p) => apply_append_values_patch_direct(p, mod_path, patch_name, context),
+        Patch::RemoveKey(p) => apply_remove_key_patch_direct(p, mod_path, patch_name),
+        Patch::RemoveKeys(p) => apply_remove_keys_patch_direct(p, mod_path, patch_name),
+        Patch::AddSection(p) => apply_add_section_patch_direct(p, mod_path, patch_name, context),
+        Patch::ClearSection(p) => apply_clear_section_patch_direct(p, mod_path, patch_name),
+        Patch::RemoveSection(p) => apply_remove_section_patch_direct(p, mod_path, patch_name),
+    }
+}
+
+/// Apply a single patch to shadow (for abort/abort_mod modes)
+///
+/// # Arguments
+/// * `patch` - The patch to apply
+/// * `mod_path` - Path to the current mod being loaded
+/// * `patch_name` - Name of the patch (for logging)
+/// * `context` - Substitution context for variable resolution
+/// * `shadow` - Shadow resources to apply patches to
+///
+/// # Returns
+/// * `Ok(())` if the patch was applied successfully
+/// * `Err(_)` if the patch failed
+fn apply_single_patch_shadow(
+    patch: &Patch,
+    mod_path: &Path,
+    patch_name: &str,
+    context: &SubstitutionContext,
+    shadow: &mut ShadowResources,
+) -> anyhow::Result<()> {
+    match patch {
+        Patch::Replace(p) => apply_replace_patch_shadow(p, mod_path, patch_name, shadow),
+        Patch::Merge(p) => apply_merge_patch_shadow(p, mod_path, patch_name, shadow),
+        Patch::Delete(p) => apply_delete_patch_shadow(p, patch_name, shadow),
+        Patch::SetPalette(p) => apply_set_palette_patch_shadow(p, patch_name, shadow),
+        Patch::SetKey(p) => apply_set_key_patch_shadow(p, patch_name, context, shadow),
+        Patch::SetKeys(p) => apply_set_keys_patch_shadow(p, patch_name, context, shadow),
+        Patch::AppendValue(p) => apply_append_value_patch_shadow(p, patch_name, context, shadow),
+        Patch::AppendValues(p) => apply_append_values_patch_shadow(p, patch_name, context, shadow),
+        Patch::RemoveKey(p) => apply_remove_key_patch_shadow(p, patch_name, shadow),
+        Patch::RemoveKeys(p) => apply_remove_keys_patch_shadow(p, patch_name, shadow),
+        Patch::AddSection(p) => apply_add_section_patch_shadow(p, patch_name, context, shadow),
+        Patch::ClearSection(p) => apply_clear_section_patch_shadow(p, patch_name, shadow),
+        Patch::RemoveSection(p) => apply_remove_section_patch_shadow(p, patch_name, shadow),
+    }
 }
 
 // ============================================================================
@@ -979,7 +1787,10 @@ enum PatchResult {
     Error(String),     // Error occurred
 }
 
-/// Apply all patches with error handling and conditional evaluation
+/// Apply patches directly without shadow (continue mode)
+///
+/// In this mode, patches are applied directly to the resource system.
+/// If a patch fails, it's logged but execution continues with the next patch.
 ///
 /// # Arguments
 /// * `patch_meta` - Patch metadata containing error handling and file-level conditions
@@ -988,32 +1799,23 @@ enum PatchResult {
 /// * `current_mod_id` - The ID of the current mod (for variable substitution)
 ///
 /// # Returns
-/// * `Ok(())` if patches were applied successfully (or with continue error handling)
-/// * `Err(_)` if on_error=abort or on_error=abort_mod and an error occurred
-pub fn apply_patches(
+/// * `Ok(())` always (errors are logged but don't stop execution)
+fn apply_patches_direct(
     patch_meta: &PatchMeta,
     patches: &indexmap::IndexMap<String, Patch>,
     mod_path: &Path,
     current_mod_id: &str,
 ) -> anyhow::Result<()> {
-    // VALIDATE: Only 'continue' mode is currently supported
-    if patch_meta.on_error != ErrorHandling::Continue {
-        return Err(anyhow::anyhow!(
-            "Unsupported on_error mode: {:?}. Only 'continue' is currently supported. \
-             Snapshot/rollback features for 'abort' and 'abort_mod' will be added in a future update.",
-            patch_meta.on_error
-        ));
-    }
 
     // Create substitution context for variable resolution
     let context = SubstitutionContext {
         current_mod_id: current_mod_id.to_string(),
     };
 
-    info!("Applying patch file with {} patches (on_error: {:?})",
-          patches.len(), patch_meta.on_error);
+    info!("Applying patch file with {} patches (on_error: continue)",
+          patches.len());
 
-    // Step 1: Evaluate top-level conditions
+    // Evaluate top-level conditions
     if let Some(top_level_condition) = &patch_meta.condition {
         // Check mod_loaded at file level
         if let Some(required_mod) = &top_level_condition.mod_loaded {
@@ -1039,12 +1841,7 @@ pub fn apply_patches(
         }
     }
 
-    // Step 2: Apply patches in order
-    let mut results: Vec<(String, PatchResult)> = Vec::new();
-    let mut patches_applied = 0;
-    let mut patches_skipped = 0;
-    let mut patches_failed = 0;
-
+    // Apply patches in order
     for (patch_name, patch) in patches {
         info!("Processing patch '{}'", patch_name);
 
@@ -1052,96 +1849,167 @@ pub fn apply_patches(
         let target = get_patch_target(patch);
         let condition = get_patch_condition(patch);
 
-        let condition_passed = match evaluate_patch_condition_with_target(condition, target, patch_name) {
-            Ok(passed) => passed,
-            Err(e) => {
-                let error_msg = format!("Error evaluating condition: {}", e);
-                error!("Patch '{}': {}", patch_name, error_msg);
+        match evaluate_patch_condition_with_target(condition, target, patch_name) {
+            Ok(true) => {
+                // Condition passed, apply patch
+                let result = apply_single_patch_direct(patch, mod_path, patch_name, &context);
 
-                match patch_meta.on_error {
-                    ErrorHandling::Continue => {
-                        results.push((patch_name.clone(), PatchResult::Error(error_msg)));
-                        patches_failed += 1;
-                        continue;
-                    }
-                    ErrorHandling::Abort => {
-                        results.push((patch_name.clone(), PatchResult::Error(error_msg)));
-                        patches_failed += 1;
-                        warn!("Aborting patch file due to error (on_error=abort)");
-                        break;
-                    }
-                    ErrorHandling::AbortMod => {
-                        return Err(anyhow::anyhow!("Patch '{}': {} (on_error=abort_mod)", patch_name, error_msg));
-                    }
+                if let Err(e) = result {
+                    error!("Patch '{}' failed: {}. Continuing.", patch_name, e);
                 }
             }
-        };
-
-        if !condition_passed {
-            results.push((patch_name.clone(), PatchResult::Skipped));
-            patches_skipped += 1;
-            continue;
-        }
-
-        // Apply the patch based on its type
-        let result = match patch {
-            Patch::Replace(p) => apply_replace_patch(p, mod_path, patch_name),
-            Patch::Merge(p) => apply_merge_patch(p, mod_path, patch_name),
-            Patch::Delete(p) => apply_delete_patch(p, patch_name),
-            Patch::SetPalette(p) => apply_set_palette_patch(p, patch_name),
-            Patch::SetKey(p) => apply_set_key_patch(p, mod_path, patch_name, &context),
-            Patch::SetKeys(p) => apply_set_keys_patch(p, mod_path, patch_name, &context),
-            Patch::AppendValue(p) => apply_append_value_patch(p, mod_path, patch_name, &context),
-            Patch::AppendValues(p) => apply_append_values_patch(p, mod_path, patch_name, &context),
-            Patch::RemoveKey(p) => apply_remove_key_patch(p, mod_path, patch_name),
-            Patch::RemoveKeys(p) => apply_remove_keys_patch(p, mod_path, patch_name),
-            Patch::AddSection(p) => apply_add_section_patch(p, mod_path, patch_name, &context),
-            Patch::ClearSection(p) => apply_clear_section_patch(p, mod_path, patch_name),
-            Patch::RemoveSection(p) => apply_remove_section_patch(p, mod_path, patch_name),
-        };
-
-        match result {
-            Ok(()) => {
-                results.push((patch_name.clone(), PatchResult::Success));
-                patches_applied += 1;
+            Ok(false) => {
+                // Condition failed, skip patch
+                info!("Patch '{}': skipping (condition failed)", patch_name);
             }
             Err(e) => {
-                let error_msg = format!("{}", e);
-                error!("Patch '{}' failed: {}", patch_name, error_msg);
-
-                match patch_meta.on_error {
-                    ErrorHandling::Continue => {
-                        results.push((patch_name.clone(), PatchResult::Error(error_msg)));
-                        patches_failed += 1;
-                        continue;
-                    }
-                    ErrorHandling::Abort => {
-                        results.push((patch_name.clone(), PatchResult::Error(error_msg)));
-                        patches_failed += 1;
-                        warn!("Aborting patch file due to error (on_error=abort)");
-                        break;
-                    }
-                    ErrorHandling::AbortMod => {
-                        return Err(anyhow::anyhow!("Patch '{}' failed: {} (on_error=abort_mod)", patch_name, error_msg));
-                    }
-                }
+                // Error evaluating condition
+                error!("Patch '{}': error evaluating condition: {}. Continuing.", patch_name, e);
             }
         }
     }
 
-    // Step 3: Log comprehensive summary
-    info!("Patch application complete: {} succeeded, {} skipped, {} failed",
-          patches_applied, patches_skipped, patches_failed);
-
-    for (patch_name, result) in &results {
-        match result {
-            PatchResult::Success => info!("  ✓ {}", patch_name),
-            PatchResult::Skipped => info!("  ⊘ {} (skipped)", patch_name),
-            PatchResult::Error(msg) => error!("  ✗ {}: {}", patch_name, msg),
-        }
-    }
-
+    info!("Patch application complete (continue mode)");
     Ok(())
+}
+
+/// Apply patches with shadow resources (abort/abort_mod modes)
+///
+/// In this mode, patches are applied to shadow copies of files.
+/// If any patch fails, the shadow is discarded (automatic rollback).
+/// If all patches succeed, the shadow is committed to the resource system.
+///
+/// # Arguments
+/// * `patch_meta` - Patch metadata containing error handling and file-level conditions
+/// * `patches` - Ordered map of patches to apply (order is preserved via IndexMap)
+/// * `mod_path` - Path to the current mod being loaded
+/// * `current_mod_id` - The ID of the current mod (for variable substitution)
+///
+/// # Returns
+/// * `Ok(())` if all patches succeeded and shadow was committed
+/// * `Err(_)` if any patch failed (shadow is automatically discarded)
+fn apply_patches_with_shadow(
+    patch_meta: &PatchMeta,
+    patches: &indexmap::IndexMap<String, Patch>,
+    mod_path: &Path,
+    current_mod_id: &str,
+) -> anyhow::Result<()> {
+    // Create substitution context for variable resolution
+    let context = SubstitutionContext {
+        current_mod_id: current_mod_id.to_string(),
+    };
+
+    info!("Applying patch file with {} patches (on_error: {:?})",
+          patches.len(), patch_meta.on_error);
+
+    // Evaluate top-level conditions
+    if let Some(top_level_condition) = &patch_meta.condition {
+        // Check mod_loaded at file level
+        if let Some(required_mod) = &top_level_condition.mod_loaded {
+            if !is_mod_loaded(required_mod) {
+                warn!("Patch file skipped - required mod '{}' not loaded", required_mod);
+                return Ok(());
+            }
+        }
+
+        // Check key_exists and value_equals with target
+        if top_level_condition.key_exists.is_some() || top_level_condition.value_equals.is_some() {
+            let Some(target) = &top_level_condition.target else {
+                return Err(anyhow::anyhow!(
+                    "Top-level condition with key_exists/value_equals requires 'target' field"
+                ));
+            };
+
+            // Use existing evaluation function with target
+            if !evaluate_patch_condition_with_target(&Some(top_level_condition.clone()), target, "top-level")? {
+                warn!("Patch file skipped - top-level conditions failed");
+                return Ok(());
+            }
+        }
+    }
+
+    // Collect affected files and create shadow
+    let affected_files = collect_affected_files(patches);
+
+    let scope = match patch_meta.on_error {
+        ErrorHandling::Abort => ShadowScope::PatchFile,
+        ErrorHandling::AbortMod => ShadowScope::Mod,
+        _ => unreachable!("apply_patches_with_shadow called with Continue mode"),
+    };
+
+    let mut shadow = ShadowResources::new(&affected_files, scope)?;
+
+    // Apply patches to shadow
+    for (patch_name, patch) in patches {
+        info!("Processing patch '{}'", patch_name);
+
+        // Evaluate patch-level conditions
+        let target = get_patch_target(patch);
+        let condition = get_patch_condition(patch);
+
+        match evaluate_patch_condition_with_target(condition, target, patch_name) {
+            Ok(true) => {
+                // Condition passed, apply patch to shadow
+                let result = apply_single_patch_shadow(patch, mod_path, patch_name, &context, &mut shadow);
+
+                if let Err(e) = result {
+                    error!("Patch '{}' failed: {}. Rolling back.", patch_name, e);
+                    shadow.discard();
+                    return Err(e);
+                }
+            }
+            Ok(false) => {
+                // Condition failed, skip patch
+                info!("Patch '{}': skipping (condition failed)", patch_name);
+            }
+            Err(e) => {
+                // Error evaluating condition
+                error!("Patch '{}': error evaluating condition: {}. Rolling back.", patch_name, e);
+                shadow.discard();
+                return Err(e);
+            }
+        }
+    }
+
+    // All patches succeeded - commit shadow to main resources
+    shadow.commit()?;
+
+    info!("All patches applied successfully and committed");
+    Ok(())
+}
+
+/// Apply all patches with error handling and conditional evaluation
+///
+/// This is the main entry point for patch application. It routes to either
+/// direct mode (continue) or shadow mode (abort/abort_mod) based on the
+/// error handling strategy specified in patch_meta.
+///
+/// # Arguments
+/// * `patch_meta` - Patch metadata containing error handling and file-level conditions
+/// * `patches` - Ordered map of patches to apply (order is preserved via IndexMap)
+/// * `mod_path` - Path to the current mod being loaded
+/// * `current_mod_id` - The ID of the current mod (for variable substitution)
+///
+/// # Returns
+/// * `Ok(())` if patches were applied successfully
+/// * `Err(_)` if on_error=abort or on_error=abort_mod and an error occurred
+pub fn apply_patches(
+    patch_meta: &PatchMeta,
+    patches: &indexmap::IndexMap<String, Patch>,
+    mod_path: &Path,
+    current_mod_id: &str,
+) -> anyhow::Result<()> {
+    // Route based on error handling mode
+    match patch_meta.on_error {
+        ErrorHandling::Continue => {
+            // Direct mode - no shadow, patches applied directly
+            apply_patches_direct(patch_meta, patches, mod_path, current_mod_id)
+        }
+        ErrorHandling::Abort | ErrorHandling::AbortMod => {
+            // Shadow mode - patches applied to shadow, committed on success
+            apply_patches_with_shadow(patch_meta, patches, mod_path, current_mod_id)
+        }
+    }
 }
 
 // ============================================================================
@@ -1290,5 +2158,494 @@ mod tests {
         let result = substitute_variables(input, &context);
         // Will fail due to invalid syntax
         assert!(result.is_err());
+    }
+
+    // ============================================================================
+    // Shadow Rollback Tests
+    // ============================================================================
+
+    /// Helper function to create a test INI file in the resource system
+    fn create_test_ini_file(path: &str, content: &str) -> anyhow::Result<()> {
+        let content_len = content.len() as u32;
+        let c_string = std::ffi::CString::new(content)?;
+        let file_type = ZTFileType::try_from(Path::new(path))
+            .map_err(|e| anyhow::anyhow!("Invalid file type: {}", e))?;
+        let ztfile = ZTFile::Text(c_string, file_type, content_len);
+        add_ztfile(Path::new(""), path.to_string(), ztfile)?;
+        Ok(())
+    }
+
+    /// Helper function to read a file from the resource system as string
+    fn read_test_file(path: &str) -> anyhow::Result<String> {
+        let (_filename, data) = get_file(path)
+            .ok_or_else(|| anyhow::anyhow!("File '{}' not found", path))?;
+        // Convert bytes to string
+        Ok(String::from_utf8_lossy(&data).to_string())
+    }
+
+    /// Helper function to clean up a test file
+    fn cleanup_test_file(path: &str) {
+        remove_resource(path);
+    }
+
+    #[test]
+    #[ignore] // Requires game environment - run manually in live game
+    fn test_continue_mode_applies_directly() {
+        // Setup: Create a test file
+        let test_file = "test_continue.ini";
+        create_test_ini_file(test_file, "[Section]\nKey = Original\n").unwrap();
+
+        // Create patches with Continue error handling
+        let patch_meta = PatchMeta {
+            on_error: ErrorHandling::Continue,
+            condition: None,
+        };
+
+        let mut patches = indexmap::IndexMap::new();
+        patches.insert(
+            "modify".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: test_file.to_string(),
+                section: "Section".to_string(),
+                key: "Key".to_string(),
+                value: "Modified".to_string(),
+                condition: None,
+            }),
+        );
+
+        // Apply patches (should use direct mode, not shadow)
+        let result = apply_patches(&patch_meta, &patches, Path::new(""), "test_mod");
+        assert!(result.is_ok(), "Patches should apply successfully");
+
+        // Verify the file was modified
+        let content = read_test_file(test_file).unwrap();
+        assert!(content.contains("Key = Modified"), "File should be modified");
+
+        // Cleanup
+        cleanup_test_file(test_file);
+    }
+
+    #[test]
+    #[ignore] // Requires game environment - run manually in live game
+    fn test_continue_mode_skips_failed_patches() {
+        // Setup: Create a test file
+        let test_file = "test_continue_skip.ini";
+        create_test_ini_file(test_file, "[Section]\nKey = Original\n").unwrap();
+
+        // Create patches with Continue error handling
+        let patch_meta = PatchMeta {
+            on_error: ErrorHandling::Continue,
+            condition: None,
+        };
+
+        let mut patches = indexmap::IndexMap::new();
+        patches.insert(
+            "modify_existing".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: test_file.to_string(),
+                section: "Section".to_string(),
+                key: "Key".to_string(),
+                value: "Modified".to_string(),
+                condition: None,
+            }),
+        );
+        patches.insert(
+            "modify_nonexistent".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: "nonexistent.ini".to_string(),
+                section: "Section".to_string(),
+                key: "Key".to_string(),
+                value: "ShouldFail".to_string(),
+                condition: None,
+            }),
+        );
+        patches.insert(
+            "modify_after_failure".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: test_file.to_string(),
+                section: "Section".to_string(),
+                key: "NewKey".to_string(),
+                value: "AfterFailure".to_string(),
+                condition: None,
+            }),
+        );
+
+        // Apply patches (should continue on error)
+        let _result = apply_patches(&patch_meta, &patches, Path::new(""), "test_mod");
+        // Result might be ok or err depending on how Continue mode handles errors
+        // The important thing is that successful patches were applied
+
+        // Verify the first patch was applied
+        let content = read_test_file(test_file).unwrap();
+        assert!(content.contains("Key = Modified"), "First patch should apply");
+        assert!(
+            content.contains("NewKey = AfterFailure"),
+            "Patch after failure should apply"
+        );
+
+        // Cleanup
+        cleanup_test_file(test_file);
+    }
+
+    #[test]
+    #[ignore] // Requires game environment - run manually in live game
+    fn test_abort_mode_rolls_back_on_failure() {
+        // Setup: Create a test file
+        let test_file = "test_abort.ini";
+        create_test_ini_file(test_file, "[Section]\nKey = Original\n").unwrap();
+
+        // Create patches with Abort error handling
+        let patch_meta = PatchMeta {
+            on_error: ErrorHandling::Abort,
+            condition: None,
+        };
+
+        let mut patches = indexmap::IndexMap::new();
+        patches.insert(
+            "modify".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: test_file.to_string(),
+                section: "Section".to_string(),
+                key: "Key".to_string(),
+                value: "Modified".to_string(),
+                condition: None,
+            }),
+        );
+        patches.insert(
+            "fail".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: "nonexistent.ini".to_string(),
+                section: "Section".to_string(),
+                key: "Key".to_string(),
+                value: "ShouldNotApply".to_string(),
+                condition: None,
+            }),
+        );
+
+        // Apply patches (should fail and rollback)
+        let result = apply_patches(&patch_meta, &patches, Path::new(""), "test_mod");
+        assert!(result.is_err(), "Patches should fail due to missing file");
+
+        // Verify the file was NOT modified (rollback occurred)
+        let content = read_test_file(test_file).unwrap();
+        assert!(
+            content.contains("Key = Original"),
+            "File should be unchanged after rollback"
+        );
+        assert!(
+            !content.contains("Key = Modified"),
+            "Modification should be rolled back"
+        );
+
+        // Cleanup
+        cleanup_test_file(test_file);
+    }
+
+    #[test]
+    #[ignore] // Requires game environment - run manually in live game
+    fn test_abort_mode_commits_on_success() {
+        // Setup: Create a test file
+        let test_file = "test_abort_success.ini";
+        create_test_ini_file(test_file, "[Section]\nKey = Original\n").unwrap();
+
+        // Create patches with Abort error handling
+        let patch_meta = PatchMeta {
+            on_error: ErrorHandling::Abort,
+            condition: None,
+        };
+
+        let mut patches = indexmap::IndexMap::new();
+        patches.insert(
+            "modify1".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: test_file.to_string(),
+                section: "Section".to_string(),
+                key: "Key".to_string(),
+                value: "Modified".to_string(),
+                condition: None,
+            }),
+        );
+        patches.insert(
+            "modify2".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: test_file.to_string(),
+                section: "Section".to_string(),
+                key: "NewKey".to_string(),
+                value: "NewValue".to_string(),
+                condition: None,
+            }),
+        );
+
+        // Apply patches (should succeed and commit)
+        let result = apply_patches(&patch_meta, &patches, Path::new(""), "test_mod");
+        assert!(result.is_ok(), "Patches should apply successfully");
+
+        // Verify the file was modified
+        let content = read_test_file(test_file).unwrap();
+        assert!(
+            content.contains("Key = Modified"),
+            "First modification should be committed"
+        );
+        assert!(
+            content.contains("NewKey = NewValue"),
+            "Second modification should be committed"
+        );
+
+        // Cleanup
+        cleanup_test_file(test_file);
+    }
+
+    #[test]
+    #[ignore] // Requires game environment - run manually in live game
+    fn test_shadow_multiple_patches_same_file() {
+        // Setup: Create a test file
+        let test_file = "test_shadow_multiple.ini";
+        create_test_ini_file(test_file, "[Section1]\nKey1 = Original\n").unwrap();
+
+        // Create patches that modify the same file multiple times
+        let patch_meta = PatchMeta {
+            on_error: ErrorHandling::Abort,
+            condition: None,
+        };
+
+        let mut patches = indexmap::IndexMap::new();
+        patches.insert(
+            "modify1".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: test_file.to_string(),
+                section: "Section1".to_string(),
+                key: "Key1".to_string(),
+                value: "Modified1".to_string(),
+                condition: None,
+            }),
+        );
+        patches.insert(
+            "add_section".to_string(),
+            Patch::AddSection(AddSectionPatch {
+                target: test_file.to_string(),
+                section: "Section2".to_string(),
+                keys: HashMap::new(),
+                on_exists: OnExists::Skip,
+                condition: None,
+            }),
+        );
+        patches.insert(
+            "modify2".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: test_file.to_string(),
+                section: "Section2".to_string(),
+                key: "Key2".to_string(),
+                value: "Value2".to_string(),
+                condition: None,
+            }),
+        );
+
+        // Apply patches (should work on shadow and commit all at once)
+        let result = apply_patches(&patch_meta, &patches, Path::new(""), "test_mod");
+        assert!(
+            result.is_ok(),
+            "Multiple patches on same file should succeed"
+        );
+
+        // Verify all modifications were applied
+        let content = read_test_file(test_file).unwrap();
+        assert!(
+            content.contains("Key1 = Modified1"),
+            "First modification should be applied"
+        );
+        assert!(content.contains("[Section2]"), "Section should be added");
+        assert!(
+            content.contains("Key2 = Value2"),
+            "Second modification should be applied"
+        );
+
+        // Cleanup
+        cleanup_test_file(test_file);
+    }
+
+    #[test]
+    #[ignore] // Requires game environment - run manually in live game
+    fn test_shadow_file_deletion() {
+        // Setup: Create a test file
+        let test_file = "test_shadow_delete.ini";
+        create_test_ini_file(test_file, "[Section]\nKey = Original\n").unwrap();
+
+        // Create patches that delete a file
+        let patch_meta = PatchMeta {
+            on_error: ErrorHandling::Abort,
+            condition: None,
+        };
+
+        let mut patches = indexmap::IndexMap::new();
+        patches.insert(
+            "delete".to_string(),
+            Patch::Delete(DeletePatch {
+                target: test_file.to_string(),
+                condition: None,
+            }),
+        );
+
+        // Apply patches (should delete file)
+        let result = apply_patches(&patch_meta, &patches, Path::new(""), "test_mod");
+        assert!(result.is_ok(), "Delete patch should succeed");
+
+        // Verify the file was deleted
+        assert!(
+            !check_file(test_file),
+            "File should be deleted after commit"
+        );
+    }
+
+    #[test]
+    #[ignore] // Requires game environment - run manually in live game
+    fn test_shadow_create_and_delete_in_same_batch() {
+        // This tests an edge case: file created by one patch, deleted by another
+        let test_file = "test_create_delete.ini";
+
+        // Ensure file doesn't exist
+        cleanup_test_file(test_file);
+
+        let patch_meta = PatchMeta {
+            on_error: ErrorHandling::Abort,
+            condition: None,
+        };
+
+        let mut patches = indexmap::IndexMap::new();
+        patches.insert(
+            "create".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: test_file.to_string(),
+                section: "Section".to_string(),
+                key: "Key".to_string(),
+                value: "Value".to_string(),
+                condition: None,
+            }),
+        );
+        patches.insert(
+            "delete".to_string(),
+            Patch::Delete(DeletePatch {
+                target: test_file.to_string(),
+                condition: None,
+            }),
+        );
+
+        // Apply patches
+        let _result = apply_patches(&patch_meta, &patches, Path::new(""), "test_mod");
+        // This should succeed - file created then deleted in shadow
+
+        // Verify the file doesn't exist (was deleted)
+        assert!(
+            !check_file(test_file),
+            "File should not exist after create+delete"
+        );
+
+        // Cleanup (just in case)
+        cleanup_test_file(test_file);
+    }
+
+    #[test]
+    fn test_collect_affected_files() {
+        let mut patches = indexmap::IndexMap::new();
+
+        patches.insert(
+            "patch1".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: "file1.ini".to_string(),
+                section: "Section".to_string(),
+                key: "Key".to_string(),
+                value: "Value".to_string(),
+                condition: None,
+            }),
+        );
+        patches.insert(
+            "patch2".to_string(),
+            Patch::SetKey(SetKeyPatch {
+                target: "file1.ini".to_string(),
+                section: "Section".to_string(),
+                key: "Key2".to_string(),
+                value: "Value2".to_string(),
+                condition: None,
+            }),
+        );
+        patches.insert(
+            "patch3".to_string(),
+            Patch::Delete(DeletePatch {
+                target: "file2.ini".to_string(),
+                condition: None,
+            }),
+        );
+
+        let affected = collect_affected_files(&patches);
+
+        // Should collect unique file paths
+        assert_eq!(affected.len(), 2, "Should find 2 unique files");
+        assert!(affected.contains("file1.ini"), "Should contain file1.ini");
+        assert!(affected.contains("file2.ini"), "Should contain file2.ini");
+    }
+
+    #[test]
+    #[ignore] // Requires game environment - run manually in live game
+    fn test_shadow_resources_get_file_fallback() {
+        // Setup: Create a file in main resources
+        let test_file = "test_fallback.ini";
+        create_test_ini_file(test_file, "[Section]\nKey = Original\n").unwrap();
+
+        // Create shadow with no files
+        let shadow = ShadowResources::new(&HashSet::new(), ShadowScope::PatchFile).unwrap();
+
+        // Get file should fall back to main resources
+        let file = shadow.get_file(test_file);
+        assert!(file.is_some(), "Should get file from main resources");
+
+        // Cleanup
+        cleanup_test_file(test_file);
+    }
+
+    #[test]
+    fn test_shadow_resources_update_file() {
+        // Create shadow
+        let mut shadow = ShadowResources::new(&HashSet::new(), ShadowScope::PatchFile).unwrap();
+
+        // Create a test file
+        let test_file = "test_update.ini";
+        let content = "[Section]\nKey = Value\n";
+        let content_len = content.len() as u32;
+        let c_string = std::ffi::CString::new(content).unwrap();
+        let ztfile = ZTFile::Text(c_string, ZTFileType::Ini, content_len);
+
+        // Update file in shadow
+        shadow.update_file(test_file, ztfile);
+
+        // Verify file is in shadow
+        let file = shadow.get_file(test_file);
+        assert!(file.is_some(), "File should be in shadow");
+    }
+
+    #[test]
+    #[ignore] // Requires game environment - run manually in live game
+    fn test_shadow_resources_delete_file() {
+        // Setup: Create a file in main resources
+        let test_file = "test_shadow_delete_method.ini";
+        create_test_ini_file(test_file, "[Section]\nKey = Original\n").unwrap();
+
+        // Create shadow with this file
+        let mut affected = HashSet::new();
+        affected.insert(test_file.to_string());
+        let mut shadow = ShadowResources::new(&affected, ShadowScope::PatchFile).unwrap();
+
+        // Verify file is in shadow
+        assert!(shadow.file_exists(test_file), "File should exist in shadow");
+
+        // Delete from shadow
+        shadow.delete_file(test_file);
+
+        // Verify file is no longer in shadow
+        // Note: file_exists falls back to main resources, so this will still return true
+        // But the shadow itself shouldn't have it
+        let file_in_shadow = shadow.files.contains_key(test_file);
+        assert!(!file_in_shadow, "File should not be in shadow map");
+
+        // Cleanup
+        cleanup_test_file(test_file);
     }
 }

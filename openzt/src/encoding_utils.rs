@@ -1,6 +1,6 @@
 use encoding_rs::Encoding;
 use std::sync::LazyLock;
-use tracing::warn;
+use tracing::{info, warn};
 
 /// The system's ANSI code page encoding, detected at runtime
 static SYSTEM_ENCODING: LazyLock<&'static Encoding> = LazyLock::new(|| {
@@ -38,6 +38,8 @@ fn get_system_ansi_encoding() -> &'static Encoding {
     use windows::Win32::Globalization::GetACP;
 
     let code_page = unsafe { GetACP() };
+
+    info!("Detected system ANSI code page: {}", code_page);
 
     match code_page {
         1250 => encoding_rs::WINDOWS_1250, // Central/Eastern Europe

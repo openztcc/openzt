@@ -18,6 +18,7 @@ mod zoo_resource_mgr {
     use openzt_detour::gen::bfresourcemgr::{CONSTRUCTOR, ADD_PATH};
     use openzt_detour::gen::bfresource::{ATTEMPT, PREPARE};
     use openzt_detour::gen::ztui_general::GET_INFO_IMAGE_NAME;
+    use openzt_detour::gen::standalone::DIR_SEARCH;
 
     use crate::{
         resource_manager::{
@@ -26,7 +27,7 @@ mod zoo_resource_mgr {
             legacy_loading::{load_resources, OPENZT_DIR0},
             openzt_mods::get_location_or_habitat_by_id,
         },
-        util::{get_ini_path, get_string_from_memory, save_to_memory},
+        util::{get_ini_path, get_string_from_memory, save_to_memory, get_from_memory},
     };
 
     ///When Zoo Tycoon tries to load a resource we check if it's a resource we've already loaded and return that instead
@@ -139,4 +140,27 @@ mod zoo_resource_mgr {
             None => unsafe { GET_INFO_IMAGE_NAME_DETOUR.call(id) },
         }
     }
+
+    // #[detour(DIR_SEARCH)]
+    // unsafe extern "cdecl" fn zoo_standalone_dir_search(dir_name: u32) -> u32 {
+    //     let result = unsafe { DIR_SEARCH_DETOUR.call(dir_name) };
+    //     info!("Standalone::dir_search({}) -> {:X}", get_string_from_memory(get_from_memory(dir_name)), result);
+    //     info!("{:x} {:x} {:x}", get_from_memory::<u32>(result), get_from_memory::<u32>(result + 4), get_from_memory::<u32>(result + 8));
+    //     info!("{}", get_string_from_memory(get_from_memory(result)));
+    //     let mut start = get_from_memory::<u32>(result);
+    //     let end = get_from_memory::<u32>(result + 4);
+    //     while start < end {
+    //         let dir_string = get_string_from_memory(start);
+    //         info!("  Found dir: {}", dir_string);
+    //         start += 0x108;
+    //     }
+
+    //     result
+    // }
+
+    // struct SparseFileInfo {
+    //     file_name_ptr: u32,
+    //     padding: [u8; 0x104],
+    // }
+
 }
