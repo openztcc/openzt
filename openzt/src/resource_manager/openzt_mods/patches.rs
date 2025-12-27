@@ -246,6 +246,9 @@ pub struct ShadowResources {
     /// Files that will be created (don't exist in main resources yet)
     pub new_files: HashSet<String>,
 
+    /// Files that should be deleted from main resources on commit
+    deleted_files: HashSet<String>,
+
     /// Scope of this shadow (for logging)
     scope: ShadowScope,
 }
@@ -306,6 +309,7 @@ impl ShadowResources {
         Ok(ShadowResources {
             files,
             new_files,
+            deleted_files: HashSet::new(),
             scope,
         })
     }
@@ -368,6 +372,8 @@ impl ShadowResources {
     pub fn delete_file(&mut self, path: &str) {
         self.files.remove(path);
         self.new_files.remove(path);
+        // Mark file for deletion from main resources on commit
+        self.deleted_files.insert(path.to_string());
     }
 
     /// Check if a file exists in shadow or main resources
@@ -376,9 +382,15 @@ impl ShadowResources {
     /// * `path` - File path to check
     ///
     /// # Returns
-    /// * `true` - File exists in shadow or main resources
-    /// * `false` - File not found
+    /// * `true` - File exists in shadow or main resources (and not deleted)
+    /// * `false` - File not found or marked for deletion
     pub fn file_exists(&self, path: &str) -> bool {
+        // If file is marked for deletion, it doesn't exist
+        if self.deleted_files.contains(path) {
+            return false;
+        }
+
+        // Check shadow or main resources
         self.files.contains_key(path) || check_file(path)
     }
 
@@ -390,14 +402,19 @@ impl ShadowResources {
     /// * `Ok(())` if all files were committed successfully
     /// * `Err(_)` if there's an error writing files
     pub fn commit(self) -> anyhow::Result<()> {
-        info!("Committing {:?} shadow: {} files to write",
-              self.scope, self.files.len());
+        info!("Committing {:?} shadow: {} files to write, {} to delete",
+              self.scope, self.files.len(), self.deleted_files.len());
 
         let start = std::time::Instant::now();
 
         // Write all shadow files to main resource system
         for (path, file) in self.files {
             add_ztfile(Path::new(""), path, file)?;
+        }
+
+        // Delete files marked for deletion
+        for path in self.deleted_files {
+            remove_resource(&path);
         }
 
         let elapsed = start.elapsed();
@@ -411,8 +428,8 @@ impl ShadowResources {
     /// This method is called explicitly to log the discard, but rollback
     /// happens automatically when the ShadowResources is dropped.
     pub fn discard(self) {
-        info!("Discarding {:?} shadow: {} files dropped (rollback)",
-              self.scope, self.files.len());
+        info!("Discarding {:?} shadow: {} files dropped, {} deletions cancelled (rollback)",
+              self.scope, self.files.len(), self.deleted_files.len());
         // Automatic drop - no action needed
     }
 }

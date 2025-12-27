@@ -111,7 +111,8 @@ fn test_continue_mode_applies_directly() -> TestResult {
     match read_test_file(test_file) {
         Ok(content) => {
             cleanup_test_file(test_file);
-            if content.contains("Key = Modified") {
+            // INI library writes without spaces: Key=Modified
+            if content.contains("Key=Modified") || content.contains("Key = Modified") {
                 TestResult::pass(test_name)
             } else {
                 TestResult::fail(test_name, format!("File not modified. Content: {}", content))
@@ -177,10 +178,11 @@ fn test_continue_mode_skips_failed_patches() -> TestResult {
     match read_test_file(test_file) {
         Ok(content) => {
             cleanup_test_file(test_file);
-            if !content.contains("Key = Modified") {
+            // INI library writes without spaces: Key=Modified
+            if !content.contains("Key=Modified") && !content.contains("Key = Modified") {
                 return TestResult::fail(test_name, "First patch should have applied".to_string());
             }
-            if !content.contains("NewKey = AfterFailure") {
+            if !content.contains("NewKey=AfterFailure") && !content.contains("NewKey = AfterFailure") {
                 return TestResult::fail(test_name, "Patch after failure should have applied".to_string());
             }
             TestResult::pass(test_name)
@@ -241,10 +243,11 @@ fn test_abort_mode_rolls_back_on_failure() -> TestResult {
     match read_test_file(test_file) {
         Ok(content) => {
             cleanup_test_file(test_file);
-            if !content.contains("Key = Original") {
+            // INI library writes without spaces: Key=Original
+            if !content.contains("Key=Original") && !content.contains("Key = Original") {
                 return TestResult::fail(test_name, "File should be unchanged after rollback".to_string());
             }
-            if content.contains("Key = Modified") {
+            if content.contains("Key=Modified") || content.contains("Key = Modified") {
                 return TestResult::fail(test_name, "Modification should have been rolled back".to_string());
             }
             TestResult::pass(test_name)
@@ -302,10 +305,11 @@ fn test_abort_mode_commits_on_success() -> TestResult {
     match read_test_file(test_file) {
         Ok(content) => {
             cleanup_test_file(test_file);
-            if !content.contains("Key = Modified") {
+            // INI library writes without spaces: Key=Modified
+            if !content.contains("Key=Modified") && !content.contains("Key = Modified") {
                 return TestResult::fail(test_name, "First modification should be committed".to_string());
             }
-            if !content.contains("NewKey = NewValue") {
+            if !content.contains("NewKey=NewValue") && !content.contains("NewKey = NewValue") {
                 return TestResult::fail(test_name, "Second modification should be committed".to_string());
             }
             TestResult::pass(test_name)
@@ -373,13 +377,14 @@ fn test_shadow_multiple_patches_same_file() -> TestResult {
     match read_test_file(test_file) {
         Ok(content) => {
             cleanup_test_file(test_file);
-            if !content.contains("Key1 = Modified1") {
+            // INI library writes without spaces: Key1=Modified1
+            if !content.contains("Key1=Modified1") && !content.contains("Key1 = Modified1") {
                 return TestResult::fail(test_name, "First modification should be applied".to_string());
             }
             if !content.contains("[Section2]") {
                 return TestResult::fail(test_name, "Section should be added".to_string());
             }
-            if !content.contains("Key2 = Value2") {
+            if !content.contains("Key2=Value2") && !content.contains("Key2 = Value2") {
                 return TestResult::fail(test_name, "Second modification should be applied".to_string());
             }
             TestResult::pass(test_name)
