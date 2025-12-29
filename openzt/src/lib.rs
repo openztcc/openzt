@@ -81,7 +81,7 @@ mod util;
 mod settings;
 
 /// Scripting module for OpenZT using the mlua library. Contains functions for loading and running Lua scripts, and registering Rust functions to be called from Lua.
-mod scripting;
+pub mod scripting;
 
 /// RPC server for testing OpenZT functionality
 #[cfg(feature = "reimplementation-tests")]

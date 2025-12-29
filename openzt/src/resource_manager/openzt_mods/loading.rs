@@ -42,6 +42,26 @@ pub fn get_mod_ids() -> Vec<String> {
     binding.iter().cloned().collect()
 }
 
+/// Category of definition file based on its contents
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DefFileCategory {
+    NoPatch,   // Habitats/locations only, no patches
+    Mixed,     // Both habitats/locations AND patches
+    PatchOnly, // Patches only, no habitats/locations
+}
+
+/// Classify a definition file based on its contents
+fn classify_def_file(mod_def: &mods::ModDefinition) -> DefFileCategory {
+    let has_patches = mod_def.patches().as_ref().map(|p| !p.is_empty()).unwrap_or(false);
+    let has_other = mod_def.habitats().is_some() || mod_def.locations().is_some();
+
+    match (has_patches, has_other) {
+        (false, _) => DefFileCategory::NoPatch,
+        (true, true) => DefFileCategory::Mixed,
+        (true, false) => DefFileCategory::PatchOnly,
+    }
+}
+
 // TODO: We should use '/' as separator instead of '.' to match other resource ids
 pub fn openzt_base_resource_id(mod_id: &String, resource_type: ResourceType, resource_name: &String) -> String {
     let resource_type_name = resource_type.to_string();
@@ -93,20 +113,63 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Re
         file_map.insert(file_name, file_buffer);
     }
 
-    let keys = file_map.keys().clone();
+    // Collect all defs/ files and sort alphabetically (case-insensitive)
+    let mut def_files: Vec<String> = file_map.keys().filter(|name| name.starts_with("defs/")).cloned().collect();
 
-    for file_name in keys {
-        if file_name.starts_with("defs/") {
-            let mod_def = load_def(&mod_id, file_name, &file_map)?;
+    // Sort case-insensitively, then by original case for stability
+    def_files.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
 
-            // Apply patches from this definition file if present
-            if let Some(patches) = mod_def.patches() {
-                let patch_meta = mod_def.patch_meta().as_ref().cloned().unwrap_or_default();
-                info!("Found {} patches in {}", patches.len(), file_name);
-                if let Err(e) = super::patches::apply_patches(&patch_meta, patches, resource, &mod_id) {
-                    error!("Failed to apply patches from {}: {}", file_name, e);
-                    return Err(e);
-                }
+    // Helper struct to store parsed file info
+    struct DefFileInfo {
+        filename: String,
+        mod_def: mods::ModDefinition,
+        category: DefFileCategory,
+    }
+
+    // Pre-parse all files to classify them
+    let mut file_infos: Vec<DefFileInfo> = Vec::new();
+    for file_name in def_files {
+        let mod_def = parse_def(&mod_id, &file_name, &file_map)?;
+        let category = classify_def_file(&mod_def);
+        file_infos.push(DefFileInfo {
+            filename: file_name,
+            mod_def,
+            category,
+        });
+    }
+
+    // Sort by category (NoPatch -> Mixed -> PatchOnly), then alphabetically within category
+    file_infos.sort_by(|a, b| {
+        use DefFileCategory::*;
+        let category_order = |cat: &DefFileCategory| match cat {
+            NoPatch => 0,
+            Mixed => 1,
+            PatchOnly => 2,
+        };
+
+        category_order(&a.category)
+            .cmp(&category_order(&b.category))
+            .then_with(|| a.filename.to_lowercase().cmp(&b.filename.to_lowercase()))
+            .then_with(|| a.filename.cmp(&b.filename))
+    });
+
+    // Process files in sorted order
+    for file_info in file_infos {
+        info!(
+            "Loading {} (category: {:?})",
+            file_info.filename, file_info.category
+        );
+
+        // Load habitats/locations first (before patches)
+        load_habitats_locations(&mod_id, &file_info.mod_def, &file_map)?;
+
+        // Then apply patches if present
+        if let Some(patches) = file_info.mod_def.patches() {
+            let patch_meta = file_info.mod_def.patch_meta().as_ref().cloned().unwrap_or_default();
+            info!("Found {} patches in {}", patches.len(), file_info.filename);
+            if let Err(e) = super::patches::apply_patches(&patch_meta, patches, resource, &mod_id) {
+                error!("Failed to apply patches from {}: {}", file_info.filename, e);
+                return Err(e);
             }
         }
     }
@@ -128,8 +191,9 @@ impl fmt::Display for ResourceType {
     }
 }
 
-pub fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
-    info!("Loading defs {} from {}", file_name, mod_id);
+/// Parse a definition file from TOML without side effects
+pub fn parse_def(mod_id: &str, file_name: &str, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
+    info!("Parsing defs {} from {}", file_name, mod_id);
 
     let file = file_map
         .get(file_name)
@@ -137,39 +201,57 @@ pub fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, 
 
     let intermediate_string = crate::encoding_utils::decode_game_text(file);
 
-    let defs = toml::from_str::<mods::ModDefinition>(&intermediate_string).with_context(|| format!("Error parsing defs from OpenZT mod: {}", file_name))?;
+    let defs = toml::from_str::<mods::ModDefinition>(&intermediate_string)
+        .with_context(|| format!("Error parsing defs from OpenZT mod: {}", file_name))?;
 
-    info!("Loading defs: {}", defs.len());
+    info!("Parsed defs: {}", defs.len());
 
+    Ok(defs)
+}
+
+/// Load habitats and locations from a ModDefinition into the resource system
+pub fn load_habitats_locations(
+    mod_id: &str,
+    mod_def: &mods::ModDefinition,
+    file_map: &HashMap<String, Box<[u8]>>,
+) -> anyhow::Result<()> {
     // Habitats
-    if let Some(habitats) = defs.habitats() {
+    if let Some(habitats) = mod_def.habitats() {
         for (habitat_name, habitat_def) in habitats.iter() {
-            let base_resource_id = openzt_base_resource_id(mod_id, ResourceType::Habitat, habitat_name);
+            let base_resource_id = openzt_base_resource_id(&mod_id.to_string(), ResourceType::Habitat, habitat_name);
             load_icon_definition(
                 &base_resource_id,
                 habitat_def,
                 file_map,
-                mod_id,
+                &mod_id.to_string(),
                 include_str!("../../../resources/include/infoimg-habitat.ani").to_string(),
             )?;
-            add_location_or_habitat(mod_id, habitat_def.name(), &base_resource_id, true)?;
+            add_location_or_habitat(&mod_id.to_string(), habitat_def.name(), &base_resource_id, true)?;
         }
     }
 
     // Locations
-    if let Some(locations) = defs.locations() {
+    if let Some(locations) = mod_def.locations() {
         for (location_name, location_def) in locations.iter() {
-            let base_resource_id = openzt_base_resource_id(mod_id, ResourceType::Location, location_name);
+            let base_resource_id = openzt_base_resource_id(&mod_id.to_string(), ResourceType::Location, location_name);
             load_icon_definition(
                 &base_resource_id,
                 location_def,
                 file_map,
-                mod_id,
+                &mod_id.to_string(),
                 include_str!("../../../resources/include/infoimg-location.ani").to_string(),
             )?;
-            add_location_or_habitat(mod_id, location_def.name(), &base_resource_id, false)?;
+            add_location_or_habitat(&mod_id.to_string(), location_def.name(), &base_resource_id, false)?;
         }
     }
+
+    Ok(())
+}
+
+/// Legacy function that combines parsing and loading - kept for backwards compatibility
+pub fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
+    let defs = parse_def(mod_id, file_name, file_map)?;
+    load_habitats_locations(mod_id, &defs, file_map)?;
     Ok(defs)
 }
 
@@ -270,3 +352,96 @@ fn load_icon_definition(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+
+    /// Helper function to create a minimal IconDefinition for testing
+    fn create_test_icon_def() -> mods::IconDefinition {
+        mods::IconDefinition::new_test("test".to_string(), "test/icon".to_string(), "test/icon.pal".to_string())
+    }
+
+    /// Helper function to create a minimal Patch for testing
+    fn create_test_patch() -> mods::Patch {
+        mods::Patch::Delete(mods::DeletePatch {
+            target: "test.ai".to_string(),
+            condition: None,
+        })
+    }
+
+    #[test]
+    fn test_classify_nopatch_file() {
+        let mut habitats = HashMap::new();
+        habitats.insert("savanna".to_string(), create_test_icon_def());
+
+        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, None);
+
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
+    }
+
+    #[test]
+    fn test_classify_mixed_file() {
+        let mut habitats = HashMap::new();
+        habitats.insert("savanna".to_string(), create_test_icon_def());
+
+        let mut patches = IndexMap::new();
+        patches.insert("patch1".to_string(), create_test_patch());
+
+        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, Some(patches));
+
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::Mixed);
+    }
+
+    #[test]
+    fn test_classify_patchonly_file() {
+        let mut patches = IndexMap::new();
+        patches.insert("patch1".to_string(), create_test_patch());
+
+        let mod_def = mods::ModDefinition::new_test(None, None, None, Some(patches));
+
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::PatchOnly);
+    }
+
+    #[test]
+    fn test_classify_empty_file() {
+        let mod_def = mods::ModDefinition::new_test(None, None, None, None);
+
+        // Empty file is treated as NoPatch
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
+    }
+
+    #[test]
+    fn test_classify_empty_patches_collection() {
+        let patches = IndexMap::new(); // Empty but present
+
+        let mod_def = mods::ModDefinition::new_test(None, None, None, Some(patches));
+
+        // Empty patches collection should not count as "has patches"
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
+    }
+
+    #[test]
+    fn test_case_insensitive_sorting() {
+        let mut files = vec![
+            "defs/ZEBRA.toml".to_string(),
+            "defs/animal.toml".to_string(),
+            "defs/Elephant.toml".to_string(),
+            "defs/bear.toml".to_string(),
+        ];
+
+        files.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
+
+        assert_eq!(
+            files,
+            vec![
+                "defs/animal.toml",
+                "defs/bear.toml",
+                "defs/Elephant.toml",
+                "defs/ZEBRA.toml",
+            ]
+        );
+    }
+}
+

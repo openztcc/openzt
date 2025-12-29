@@ -1,0 +1,16 @@
+# Mixed category file - has both habitat and patches
+
+[habitats.test_habitat_b]
+name = "Test Habitat B"
+icon_path = "resources/test/icon"
+icon_palette_path = "resources/test/icon.pal"
+
+[patch_meta]
+on_error = "continue"
+
+[patches.test_patch]
+operation = "set_key"
+target = "animals/test.ai"
+section = "Habitat"
+key = "cHabitat"
+value = "{habitat.test_habitat_b}"

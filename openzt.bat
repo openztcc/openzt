@@ -257,7 +257,6 @@ echo.
 echo Launching Zoo Tycoon...
 start "Zoo Tycoon" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"
 
-pause
 GOTO :EOF
 
 REM ============================================================

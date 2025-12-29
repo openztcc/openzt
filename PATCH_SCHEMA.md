@@ -502,6 +502,12 @@ value = "15"
 - **Target not found**: Error - cannot modify non-existent file
 - **Animation parsing fails**: Error - file is not a valid animation or is corrupted
 
+### Multiple Merge Operations
+- **Same target, different priorities**: When multiple patches merge the same file with different merge modes, the result depends on execution order
+- **Example**: If `a-merge.toml` merges with `patch_priority` and `b-merge.toml` merges with `base_priority`, alphabetical ordering means `a-merge.toml` runs first
+- **Semantics**: The first merge applies, then the second merge treats the result of the first as "base" content
+- **Recommendation**: Use file naming to control order explicitly (e.g., `00-base-merge.toml`, `01-override-merge.toml`) or avoid multiple merges to the same file with different priorities
+
 ## Implementation Notes
 
 ### Patch Naming
@@ -510,10 +516,54 @@ value = "15"
 - Names should be descriptive (e.g., `fix_elephant_speed` not `patch1`)
 - Names use snake_case by convention but any valid TOML key is allowed
 
+### Definition File Loading Order
+
+Within a single mod, definition files in the `defs/` directory are loaded in a **deterministic order**:
+
+1. **Files without patches** (only habitats/locations) - alphabetical order (case-insensitive)
+2. **Files with patches and other content** (mixed) - alphabetical order (case-insensitive)
+3. **Patch-only files** - alphabetical order (case-insensitive)
+
+Within each group, files are sorted alphabetically with case-insensitive comparison.
+
+**Implications**:
+- Habitats and locations defined in files without patches are registered before patch-only files run
+- Patches in the same file can reference habitats defined in that file (habitats are registered before patches within each file)
+- Patch-only files can safely reference habitats/locations from files in groups 1 or 2
+- Variable substitution like `{habitat.savanna}` works correctly if the habitat is defined in an earlier group
+
+**Order Control**:
+Modders can control execution order by naming files appropriately:
+- `00-base-habitats.toml` (loads first in group 1)
+- `01-mixed-content.toml` (loads first in group 2)
+- `zz-final-patches.toml` (loads last in group 3)
+
+**Within a file**: Habitats/locations are always registered BEFORE patches are applied from that same file.
+
+**Example Loading Sequence**:
+```
+defs/
+├── animals.toml           (Group 1: NoPatch - has habitats only)
+├── locations.toml         (Group 1: NoPatch - has locations only)
+├── mixed-content.toml     (Group 2: Mixed - has habitats AND patches)
+├── more-mixed.toml        (Group 2: Mixed - has locations AND patches)
+├── a-patches.toml         (Group 3: PatchOnly - patches only)
+└── z-final-patches.toml   (Group 3: PatchOnly - patches only)
+
+Loading order:
+1. animals.toml (habitats registered)
+2. locations.toml (locations registered)
+3. mixed-content.toml (habitats registered, then patches applied)
+4. more-mixed.toml (locations registered, then patches applied)
+5. a-patches.toml (patches applied)
+6. z-final-patches.toml (patches applied)
+```
+
 ### Patch Application Order
 - Patches execute in mod load order (based on zoo.ini path order)
 - No explicit priority field - load order determines execution
-- Within a mod, patches execute in the order they appear in patch.toml (preserved by `IndexMap`)
+- Within a mod, definition files execute in the deterministic order described above
+- Within a definition file, patches execute in the order they appear in the file (preserved by `IndexMap`)
 
 ### Case Sensitivity
 - INI operations are case-insensitive by default (matching Zoo Tycoon behavior)

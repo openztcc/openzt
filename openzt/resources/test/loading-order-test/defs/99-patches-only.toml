@@ -1,0 +1,11 @@
+# PatchOnly category file - patches only, no habitats/locations
+
+[patch_meta]
+on_error = "continue"
+
+[patches.test_cross_file_reference]
+operation = "set_key"
+target = "animals/test.ai"
+section = "Habitat"
+key = "cAlternateHabitat"
+value = "{habitat.test_habitat_a}"

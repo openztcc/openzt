@@ -764,3 +764,32 @@ dependencies = [
         assert_eq!(patch_names[9], "conditional_palette_swap");
     }
 }
+
+// Test helpers for creating test instances
+#[cfg(test)]
+impl IconDefinition {
+    pub fn new_test(name: String, icon_path: String, icon_palette_path: String) -> Self {
+        IconDefinition {
+            name,
+            icon_path,
+            icon_palette_path,
+        }
+    }
+}
+
+#[cfg(test)]
+impl ModDefinition {
+    pub fn new_test(
+        habitats: Option<std::collections::HashMap<String, IconDefinition>>,
+        locations: Option<std::collections::HashMap<String, IconDefinition>>,
+        patch_meta: Option<PatchMeta>,
+        patches: Option<indexmap::IndexMap<String, Patch>>,
+    ) -> Self {
+        ModDefinition {
+            habitats,
+            locations,
+            patch_meta,
+            patches,
+        }
+    }
+}

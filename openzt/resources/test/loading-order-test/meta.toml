@@ -1,0 +1,7 @@
+[meta]
+id = "loading_order_test"
+name = "Loading Order Test Mod"
+version = "1.0.0"
+authors = ["OpenZT Test Suite"]
+description = "Test mod for verifying deterministic loading order"
+ztd_type = "openzt"
