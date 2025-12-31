@@ -42,9 +42,32 @@ pub fn get_mod_ids() -> Vec<String> {
     binding.iter().cloned().collect()
 }
 
+// === Load Order Tracking (for implementation tests) ===
+#[cfg(feature = "implementation-tests")]
+#[derive(Debug, Clone)]
+pub struct LoadEvent {
+    pub mod_id: String,
+    pub filename: String,
+    pub category: DefFileCategory,
+    pub timestamp: std::time::Instant,
+}
+
+#[cfg(feature = "implementation-tests")]
+pub static LOAD_ORDER_TRACKER: LazyLock<Mutex<Vec<LoadEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+#[cfg(feature = "implementation-tests")]
+pub fn clear_load_tracker() {
+    LOAD_ORDER_TRACKER.lock().unwrap().clear();
+}
+
+#[cfg(feature = "implementation-tests")]
+pub fn get_load_events() -> Vec<LoadEvent> {
+    LOAD_ORDER_TRACKER.lock().unwrap().clone()
+}
+
 /// Category of definition file based on its contents
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DefFileCategory {
+pub enum DefFileCategory {
     NoPatch,   // Habitats/locations only, no patches
     Mixed,     // Both habitats/locations AND patches
     PatchOnly, // Patches only, no habitats/locations
@@ -73,13 +96,18 @@ pub fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTFile
     format!("{}.{}", base_resource_id, file_type)
 }
 
-pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Result<mods::ZtdType> {
-    let archive_name = archive.name().to_string();
-    let Ok(meta_file) = archive.by_name("meta.toml") else {
-        return Ok(mods::ZtdType::Legacy);
-    };
+/// Load an OpenZT mod from a file map (shared implementation)
+fn load_open_zt_mod_internal(
+    file_map: HashMap<String, Box<[u8]>>,
+    archive_name: &str,
+    resource: &Path,
+) -> anyhow::Result<mods::ZtdType> {
+    let meta_file = file_map
+        .get("meta.toml")
+        .ok_or_else(|| anyhow!("meta.toml not found in {}", archive_name))?;
 
-    let meta = toml::from_str::<mods::Meta>(&String::try_from(meta_file).with_context(|| format!("error reading meta.toml from {}", &archive_name))?)
+    let meta_str = String::from_utf8_lossy(meta_file.as_ref());
+    let meta = toml::from_str::<mods::Meta>(&meta_str)
         .with_context(|| "Failed to parse meta.toml")?;
 
     if meta.ztd_type() == &mods::ZtdType::Legacy {
@@ -93,25 +121,6 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Re
     }
 
     info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
-
-    let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
-
-    for i in 0..archive.len() {
-        let mut file = archive
-            .by_index(i)
-            // TODO: Create type that wraps ZipArchive and provide archive name for better error reporting
-            .with_context(|| format!("Error reading zip file at index {} from file {}", i, archive_name))?;
-
-        if file.is_dir() {
-            continue;
-        }
-        let file_name = file.name().to_string();
-
-        let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
-        file.read_exact(&mut file_buffer).with_context(|| format!("Error reading file: {}", file_name))?;
-
-        file_map.insert(file_name, file_buffer);
-    }
 
     // Collect all defs/ files and sort alphabetically (case-insensitive)
     let mut def_files: Vec<String> = file_map.keys().filter(|name| name.starts_with("defs/")).cloned().collect();
@@ -160,6 +169,18 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Re
             file_info.filename, file_info.category
         );
 
+        // Track loading order for implementation tests
+        #[cfg(feature = "implementation-tests")]
+        {
+            let event = LoadEvent {
+                mod_id: mod_id.clone(),
+                filename: file_info.filename.clone(),
+                category: file_info.category,
+                timestamp: std::time::Instant::now(),
+            };
+            LOAD_ORDER_TRACKER.lock().unwrap().push(event);
+        }
+
         // Load habitats/locations first (before patches)
         load_habitats_locations(&mod_id, &file_info.mod_def, &file_map)?;
 
@@ -175,6 +196,62 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Re
     }
 
     Ok(meta.ztd_type().clone())
+}
+
+pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Result<mods::ZtdType> {
+    let archive_name = archive.name().to_string();
+
+    // Early exit: check if meta.toml exists in the archive
+    let Ok(meta_file) = archive.by_name("meta.toml") else {
+        return Ok(mods::ZtdType::Legacy);
+    };
+
+    // Build file map from archive
+    let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
+
+    // Add meta.toml to file map (we already read it for the early check)
+    let meta_bytes = String::try_from(meta_file)
+        .with_context(|| format!("error reading meta.toml from {}", archive_name))?
+        .into_bytes()
+        .into_boxed_slice();
+    file_map.insert("meta.toml".to_string(), meta_bytes);
+
+    // Read remaining files from archive
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .with_context(|| format!("Error reading zip file at index {} from file {}", i, archive_name))?;
+
+        if file.is_dir() {
+            continue;
+        }
+
+        let file_name = file.name().to_string();
+
+        // Skip meta.toml since we already added it
+        if file_name == "meta.toml" {
+            continue;
+        }
+
+        let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
+        file.read_exact(&mut file_buffer)
+            .with_context(|| format!("Error reading file: {}", file_name))?;
+
+        file_map.insert(file_name, file_buffer);
+    }
+
+    // Call shared implementation
+    load_open_zt_mod_internal(file_map, &archive_name, resource)
+}
+
+/// Load an OpenZT mod from an in-memory file map (for testing)
+#[cfg(feature = "implementation-tests")]
+pub fn load_open_zt_mod_from_memory(
+    file_map: HashMap<String, Box<[u8]>>,
+    mod_name: &str,
+    resource: &Path,
+) -> anyhow::Result<mods::ZtdType> {
+    load_open_zt_mod_internal(file_map, mod_name, resource)
 }
 
 pub enum ResourceType {
@@ -226,7 +303,7 @@ pub fn load_habitats_locations(
                 &mod_id.to_string(),
                 include_str!("../../../resources/include/infoimg-habitat.ani").to_string(),
             )?;
-            add_location_or_habitat(&mod_id.to_string(), habitat_def.name(), &base_resource_id, true)?;
+            add_location_or_habitat(&mod_id.to_string(), &habitat_name.to_string(), &base_resource_id, true)?;
         }
     }
 
@@ -241,7 +318,7 @@ pub fn load_habitats_locations(
                 &mod_id.to_string(),
                 include_str!("../../../resources/include/infoimg-location.ani").to_string(),
             )?;
-            add_location_or_habitat(&mod_id.to_string(), location_def.name(), &base_resource_id, false)?;
+            add_location_or_habitat(&mod_id.to_string(), &location_name.to_string(), &base_resource_id, false)?;
         }
     }
 

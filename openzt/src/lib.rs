@@ -117,7 +117,23 @@ mod zoo_init {
         match init_console() {
             Ok(_) => {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
-                tracing_subscriber::fmt().with_ansi(enable_ansi).init();
+
+                // Set up file appender - truncate file on startup
+                let log_file = std::fs::File::create("openzt.log")
+                    .expect("Failed to create openzt.log");
+                let (non_blocking_file, guard) = tracing_appender::non_blocking(log_file);
+
+                // Set up layered logging to both console and file
+                use tracing_subscriber::layer::SubscriberExt;
+                use tracing_subscriber::util::SubscriberInitExt;
+
+                tracing_subscriber::registry()
+                    .with(tracing_subscriber::fmt::layer().with_ansi(enable_ansi).with_writer(std::io::stdout))
+                    .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(non_blocking_file))
+                    .init();
+
+                // Leak the guard to keep the worker thread alive for the DLL lifetime
+                Box::leak(Box::new(guard));
             },
             Err(e) => {
                 info!("Failed to initialize console: {}", e);

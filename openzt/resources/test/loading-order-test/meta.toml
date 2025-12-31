@@ -1,7 +1,6 @@
-[meta]
-id = "loading_order_test"
 name = "Loading Order Test Mod"
-version = "1.0.0"
-authors = ["OpenZT Test Suite"]
 description = "Test mod for verifying deterministic loading order"
+authors = ["OpenZT Test Suite"]
+mod_id = "loading_order_test"
+version = "1.0.0"
 ztd_type = "openzt"

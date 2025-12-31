@@ -5,6 +5,7 @@ use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DET
 #[cfg(target_os = "windows")]
 #[no_mangle]
 extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
+    // DO NOT uncomment any of the logs here, they will cause crashes
     match reason {
         DLL_PROCESS_ATTACH => {
 
@@ -15,7 +16,7 @@ extern "system" fn DllMain(module: u8, reason: u32, _reserved: u8) -> i32 {
             // info!("DllMain: DLL_PROCESS_DETACH: {}, {} {}", module, reason, _reserved);
         }
         DLL_THREAD_ATTACH => {
-            info!("DllMain: DLL_THREAD_ATTACH: {}, {} {}", module, reason, _reserved);
+            // info!("DllMain: DLL_THREAD_ATTACH: {}, {} {}", module, reason, _reserved);
         }
         DLL_THREAD_DETACH => {
             // info!("DllMain: DLL_THREAD_DETACH: {}, {} {}", module, reason, _reserved);

@@ -10,30 +10,7 @@ use crate::resource_manager::{
     ztfile::{ZTFile, ZTFileType},
 };
 
-/// Result of a single test
-pub struct TestResult {
-    pub name: String,
-    pub passed: bool,
-    pub error: Option<String>,
-}
-
-impl TestResult {
-    fn pass(name: &str) -> Self {
-        TestResult {
-            name: name.to_string(),
-            passed: true,
-            error: None,
-        }
-    }
-
-    fn fail(name: &str, error: String) -> Self {
-        TestResult {
-            name: name.to_string(),
-            passed: false,
-            error: Some(error),
-        }
-    }
-}
+use super::TestResult;
 
 /// Helper function to create a test INI file in the resource system
 fn create_test_ini_file(path: &str, content: &str) -> anyhow::Result<()> {

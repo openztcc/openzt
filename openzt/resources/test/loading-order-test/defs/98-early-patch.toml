@@ -1,0 +1,12 @@
+# PatchOnly category file - tests patch execution order
+# This patch sets LoadOrder to "First" and should be overwritten by 99-patches-only.toml
+
+[patch_meta]
+on_error = "continue"
+
+[patches.early_patch]
+operation = "set_key"
+target = "animals/test_order.ai"
+section = "Test"
+key = "LoadOrder"
+value = "First"

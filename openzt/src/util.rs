@@ -78,7 +78,6 @@ pub fn get_string_from_memory_bounded(start: u32, end: u32, buffer_end: u32) -> 
 }
 
 pub fn get_string_from_memory(address: u32) -> String {
-    debug!("decoding string at address: {:p}", address as *const ());
     let mut bytes = Vec::new();
     let mut char_address = address;
     while {
@@ -89,7 +88,6 @@ pub fn get_string_from_memory(address: u32) -> String {
         char_address += 1;
     }
     let decoded = crate::encoding_utils::decode_game_text(&bytes);
-    debug!("decoded: {}", decoded);
     decoded
 }
 
