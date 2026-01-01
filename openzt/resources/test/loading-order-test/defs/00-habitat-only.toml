@@ -1,0 +1,6 @@
+# NoPatch category file - habitats only, no patches
+
+[habitats.test_habitat_a]
+name = "Test Habitat A"
+icon_path = "resources/test/icon"
+icon_palette_path = "resources/test/icon.pal"

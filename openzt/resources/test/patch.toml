@@ -1,20 +1,71 @@
-[patches.test]
-type="file"
-operation="merge"
-file_path="animals/blckbuck.ai"
-source="resources/patches/blckbuck.ai"
-[patches.test2]
-type="file"
-operation="replace"
-file_path="animals/blckbuck.ai"
-source="resources/patches/blckbuck.ai"
-[patches.test3]
-type="openzt"
-operation="replace"
-resource_id="openzt.mods.finn.moon.location.moon"
-source="resources/patches/moon.ani"
-[patches.test4]
-type="location"
-operation="attach"
-animal="3hhkj312"
-habitat="openzt.mods.finn.moon.location.moon"
+# Patch metadata section
+[patch_meta]
+on_error = "continue"
+
+# patch_meta.condition is optional
+# [patch_meta.condition]
+# target = "config/settings.ini"
+# mod_loaded = "RequiredExpansion"
+
+[patches.merge_blackbuck_ai]
+operation = "merge"
+target = "animals/blckbuck.ai"
+source = "resources/patches/blckbuck.ai"
+
+[patches.replace_blackbuck_ai]
+operation = "replace"
+target = "animals/blckbuck.ai"
+source = "resources/patches/blckbuck.ai"
+
+[patches.remove_old_animal]
+operation = "delete"
+target = "animals/oldanimal.ai"
+
+[patches.update_resolution]
+operation = "set_key"
+target = "config/settings.ini"
+section = "Graphics"
+key = "Resolution"
+value = "1920x1080"
+
+[patches.conditional_mod_loaded]
+operation = "set_key"
+target = "config/settings.ini"
+section = "Features"
+key = "AdvancedAI"
+value = "true"
+condition.mod_loaded = "AdvancedAI"
+
+[patches.conditional_key_exists]
+operation = "set_key"
+target = "config/settings.ini"
+section = "Graphics"
+key = "AntiAliasing"
+value = "4x"
+condition.key_exists = { section = "Graphics", key = "AntiAliasing" }
+
+[patches.conditional_value_equals]
+operation = "set_key"
+target = "config/settings.ini"
+section = "Graphics"
+key = "TextureQuality"
+value = "high"
+condition.value_equals = { section = "Graphics", key = "TextureQuality", value = "medium" }
+
+[patches.add_section_with_on_exists]
+operation = "add_section"
+target = "config/settings.ini"
+section = "NewFeature"
+keys = { Enabled = "true", Value = "100" }
+on_exists = "merge"
+
+[patches.set_elephant_palette]
+operation = "set_palette"
+target = "animals/elephant/adult/male/n"
+palette = "animals/elephant/new_palette.pal"
+
+[patches.conditional_palette_swap]
+operation = "set_palette"
+target = "animals/tiger/adult/n"
+palette = "resources/tiger_hd.pal"
+condition.mod_loaded = "HDTexturesMod"

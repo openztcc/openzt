@@ -10,7 +10,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use openzt_configparser::ini::{Ini, WriteOptions};
 use std::sync::LazyLock;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::{
     animation::Animation,
@@ -42,22 +42,72 @@ pub fn get_mod_ids() -> Vec<String> {
     binding.iter().cloned().collect()
 }
 
+// === Load Order Tracking (for implementation tests) ===
+#[cfg(feature = "implementation-tests")]
+#[derive(Debug, Clone)]
+pub struct LoadEvent {
+    pub mod_id: String,
+    pub filename: String,
+    pub category: DefFileCategory,
+    pub timestamp: std::time::Instant,
+}
+
+#[cfg(feature = "implementation-tests")]
+pub static LOAD_ORDER_TRACKER: LazyLock<Mutex<Vec<LoadEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+#[cfg(feature = "implementation-tests")]
+pub fn clear_load_tracker() {
+    LOAD_ORDER_TRACKER.lock().unwrap().clear();
+}
+
+#[cfg(feature = "implementation-tests")]
+pub fn get_load_events() -> Vec<LoadEvent> {
+    LOAD_ORDER_TRACKER.lock().unwrap().clone()
+}
+
+/// Category of definition file based on its contents
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefFileCategory {
+    NoPatch,   // Habitats/locations only, no patches
+    Mixed,     // Both habitats/locations AND patches
+    PatchOnly, // Patches only, no habitats/locations
+}
+
+/// Classify a definition file based on its contents
+fn classify_def_file(mod_def: &mods::ModDefinition) -> DefFileCategory {
+    let has_patches = mod_def.patches().as_ref().map(|p| !p.is_empty()).unwrap_or(false);
+    let has_other = mod_def.habitats().is_some() || mod_def.locations().is_some();
+
+    match (has_patches, has_other) {
+        (false, _) => DefFileCategory::NoPatch,
+        (true, true) => DefFileCategory::Mixed,
+        (true, false) => DefFileCategory::PatchOnly,
+    }
+}
+
+// TODO: We should use '/' as separator instead of '.' to match other resource ids
 pub fn openzt_base_resource_id(mod_id: &String, resource_type: ResourceType, resource_name: &String) -> String {
     let resource_type_name = resource_type.to_string();
     format!("openzt.mods.{}.{}.{}", mod_id, resource_type_name, resource_name)
 }
 
+// TODO: We should use '/' as separator instead of '.' to match other resource ids
 pub fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTFileType) -> String {
     format!("{}.{}", base_resource_id, file_type)
 }
 
-pub fn load_open_zt_mod(archive: &mut ZtdArchive) -> anyhow::Result<mods::ZtdType> {
-    let archive_name = archive.name().to_string();
-    let Ok(meta_file) = archive.by_name("meta.toml") else {
-        return Ok(mods::ZtdType::Legacy);
-    };
+/// Load an OpenZT mod from a file map (shared implementation)
+fn load_open_zt_mod_internal(
+    file_map: HashMap<String, Box<[u8]>>,
+    archive_name: &str,
+    resource: &Path,
+) -> anyhow::Result<mods::ZtdType> {
+    let meta_file = file_map
+        .get("meta.toml")
+        .ok_or_else(|| anyhow!("meta.toml not found in {}", archive_name))?;
 
-    let meta = toml::from_str::<mods::Meta>(&String::try_from(meta_file).with_context(|| format!("error reading meta.toml from {}", &archive_name))?)
+    let meta_str = String::from_utf8_lossy(meta_file.as_ref());
+    let meta = toml::from_str::<mods::Meta>(&meta_str)
         .with_context(|| "Failed to parse meta.toml")?;
 
     if meta.ztd_type() == &mods::ZtdType::Legacy {
@@ -72,34 +122,136 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive) -> anyhow::Result<mods::ZtdTyp
 
     info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
 
+    // Collect all defs/ files and sort alphabetically (case-insensitive)
+    let mut def_files: Vec<String> = file_map.keys().filter(|name| name.starts_with("defs/")).cloned().collect();
+
+    // Sort case-insensitively, then by original case for stability
+    def_files.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
+
+    // Helper struct to store parsed file info
+    struct DefFileInfo {
+        filename: String,
+        mod_def: mods::ModDefinition,
+        category: DefFileCategory,
+    }
+
+    // Pre-parse all files to classify them
+    let mut file_infos: Vec<DefFileInfo> = Vec::new();
+    for file_name in def_files {
+        let mod_def = parse_def(&mod_id, &file_name, &file_map)?;
+        let category = classify_def_file(&mod_def);
+        file_infos.push(DefFileInfo {
+            filename: file_name,
+            mod_def,
+            category,
+        });
+    }
+
+    // Sort by category (NoPatch -> Mixed -> PatchOnly), then alphabetically within category
+    file_infos.sort_by(|a, b| {
+        use DefFileCategory::*;
+        let category_order = |cat: &DefFileCategory| match cat {
+            NoPatch => 0,
+            Mixed => 1,
+            PatchOnly => 2,
+        };
+
+        category_order(&a.category)
+            .cmp(&category_order(&b.category))
+            .then_with(|| a.filename.to_lowercase().cmp(&b.filename.to_lowercase()))
+            .then_with(|| a.filename.cmp(&b.filename))
+    });
+
+    // Process files in sorted order
+    for file_info in file_infos {
+        info!(
+            "Loading {} (category: {:?})",
+            file_info.filename, file_info.category
+        );
+
+        // Track loading order for implementation tests
+        #[cfg(feature = "implementation-tests")]
+        {
+            let event = LoadEvent {
+                mod_id: mod_id.clone(),
+                filename: file_info.filename.clone(),
+                category: file_info.category,
+                timestamp: std::time::Instant::now(),
+            };
+            LOAD_ORDER_TRACKER.lock().unwrap().push(event);
+        }
+
+        // Load habitats/locations first (before patches)
+        load_habitats_locations(&mod_id, &file_info.mod_def, &file_map)?;
+
+        // Then apply patches if present
+        if let Some(patches) = file_info.mod_def.patches() {
+            let patch_meta = file_info.mod_def.patch_meta().as_ref().cloned().unwrap_or_default();
+            info!("Found {} patches in {}", patches.len(), file_info.filename);
+            if let Err(e) = super::patches::apply_patches(&patch_meta, patches, resource, &mod_id) {
+                error!("Failed to apply patches from {}: {}", file_info.filename, e);
+                return Err(e);
+            }
+        }
+    }
+
+    Ok(meta.ztd_type().clone())
+}
+
+pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Result<mods::ZtdType> {
+    let archive_name = archive.name().to_string();
+
+    // Early exit: check if meta.toml exists in the archive
+    let Ok(meta_file) = archive.by_name("meta.toml") else {
+        return Ok(mods::ZtdType::Legacy);
+    };
+
+    // Build file map from archive
     let mut file_map: HashMap<String, Box<[u8]>> = HashMap::new();
 
+    // Add meta.toml to file map (we already read it for the early check)
+    let meta_bytes = String::try_from(meta_file)
+        .with_context(|| format!("error reading meta.toml from {}", archive_name))?
+        .into_bytes()
+        .into_boxed_slice();
+    file_map.insert("meta.toml".to_string(), meta_bytes);
+
+    // Read remaining files from archive
     for i in 0..archive.len() {
         let mut file = archive
             .by_index(i)
-            // TODO: Create type that wraps ZipArchive and provide archive name for better error reporting
             .with_context(|| format!("Error reading zip file at index {} from file {}", i, archive_name))?;
 
         if file.is_dir() {
             continue;
         }
+
         let file_name = file.name().to_string();
 
+        // Skip meta.toml since we already added it
+        if file_name == "meta.toml" {
+            continue;
+        }
+
         let mut file_buffer = vec![0; file.size() as usize].into_boxed_slice();
-        file.read_exact(&mut file_buffer).with_context(|| format!("Error reading file: {}", file_name))?;
+        file.read_exact(&mut file_buffer)
+            .with_context(|| format!("Error reading file: {}", file_name))?;
 
         file_map.insert(file_name, file_buffer);
     }
 
-    let keys = file_map.keys().clone();
+    // Call shared implementation
+    load_open_zt_mod_internal(file_map, &archive_name, resource)
+}
 
-    for file_name in keys {
-        if file_name.starts_with("defs/") {
-            load_def(&mod_id, file_name, &file_map)?;
-        }
-    }
-
-    Ok(meta.ztd_type().clone())
+/// Load an OpenZT mod from an in-memory file map (for testing)
+#[cfg(feature = "implementation-tests")]
+pub fn load_open_zt_mod_from_memory(
+    file_map: HashMap<String, Box<[u8]>>,
+    mod_name: &str,
+    resource: &Path,
+) -> anyhow::Result<mods::ZtdType> {
+    load_open_zt_mod_internal(file_map, mod_name, resource)
 }
 
 pub enum ResourceType {
@@ -116,50 +268,67 @@ impl fmt::Display for ResourceType {
     }
 }
 
-pub fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
-    info!("Loading defs {} from {}", file_name, mod_id);
+/// Parse a definition file from TOML without side effects
+pub fn parse_def(mod_id: &str, file_name: &str, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
+    info!("Parsing defs {} from {}", file_name, mod_id);
 
     let file = file_map
         .get(file_name)
         .with_context(|| format!("Error finding file {} in resource map for mod {}", file_name, mod_id))?;
 
-    let intermediate_string = str::from_utf8(file)
-        .with_context(|| format!("Error converting file {} to utf8 for mod {}", file_name, mod_id))?
-        .to_string();
+    let intermediate_string = crate::encoding_utils::decode_game_text(file);
 
-    let defs = toml::from_str::<mods::ModDefinition>(&intermediate_string).with_context(|| format!("Error parsing defs from OpenZT mod: {}", file_name))?;
+    let defs = toml::from_str::<mods::ModDefinition>(&intermediate_string)
+        .with_context(|| format!("Error parsing defs from OpenZT mod: {}", file_name))?;
 
-    info!("Loading defs: {}", defs.len());
+    info!("Parsed defs: {}", defs.len());
 
+    Ok(defs)
+}
+
+/// Load habitats and locations from a ModDefinition into the resource system
+pub fn load_habitats_locations(
+    mod_id: &str,
+    mod_def: &mods::ModDefinition,
+    file_map: &HashMap<String, Box<[u8]>>,
+) -> anyhow::Result<()> {
     // Habitats
-    if let Some(habitats) = defs.habitats() {
+    if let Some(habitats) = mod_def.habitats() {
         for (habitat_name, habitat_def) in habitats.iter() {
-            let base_resource_id = openzt_base_resource_id(mod_id, ResourceType::Habitat, habitat_name);
+            let base_resource_id = openzt_base_resource_id(&mod_id.to_string(), ResourceType::Habitat, habitat_name);
             load_icon_definition(
                 &base_resource_id,
                 habitat_def,
                 file_map,
-                mod_id,
+                &mod_id.to_string(),
                 include_str!("../../../resources/include/infoimg-habitat.ani").to_string(),
             )?;
-            add_location_or_habitat(habitat_def.name(), &base_resource_id)?;
+            add_location_or_habitat(&mod_id.to_string(), &habitat_name.to_string(), &base_resource_id, true)?;
         }
     }
 
     // Locations
-    if let Some(locations) = defs.locations() {
+    if let Some(locations) = mod_def.locations() {
         for (location_name, location_def) in locations.iter() {
-            let base_resource_id = openzt_base_resource_id(mod_id, ResourceType::Location, location_name);
+            let base_resource_id = openzt_base_resource_id(&mod_id.to_string(), ResourceType::Location, location_name);
             load_icon_definition(
                 &base_resource_id,
                 location_def,
                 file_map,
-                mod_id,
+                &mod_id.to_string(),
                 include_str!("../../../resources/include/infoimg-location.ani").to_string(),
             )?;
-            add_location_or_habitat(location_def.name(), &base_resource_id)?;
+            add_location_or_habitat(&mod_id.to_string(), &location_name.to_string(), &base_resource_id, false)?;
         }
     }
+
+    Ok(())
+}
+
+/// Legacy function that combines parsing and loading - kept for backwards compatibility
+pub fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
+    let defs = parse_def(mod_id, file_name, file_map)?;
+    load_habitats_locations(mod_id, &defs, file_map)?;
     Ok(defs)
 }
 
@@ -260,3 +429,96 @@ fn load_icon_definition(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+
+    /// Helper function to create a minimal IconDefinition for testing
+    fn create_test_icon_def() -> mods::IconDefinition {
+        mods::IconDefinition::new_test("test".to_string(), "test/icon".to_string(), "test/icon.pal".to_string())
+    }
+
+    /// Helper function to create a minimal Patch for testing
+    fn create_test_patch() -> mods::Patch {
+        mods::Patch::Delete(mods::DeletePatch {
+            target: "test.ai".to_string(),
+            condition: None,
+        })
+    }
+
+    #[test]
+    fn test_classify_nopatch_file() {
+        let mut habitats = HashMap::new();
+        habitats.insert("savanna".to_string(), create_test_icon_def());
+
+        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, None);
+
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
+    }
+
+    #[test]
+    fn test_classify_mixed_file() {
+        let mut habitats = HashMap::new();
+        habitats.insert("savanna".to_string(), create_test_icon_def());
+
+        let mut patches = IndexMap::new();
+        patches.insert("patch1".to_string(), create_test_patch());
+
+        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, Some(patches));
+
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::Mixed);
+    }
+
+    #[test]
+    fn test_classify_patchonly_file() {
+        let mut patches = IndexMap::new();
+        patches.insert("patch1".to_string(), create_test_patch());
+
+        let mod_def = mods::ModDefinition::new_test(None, None, None, Some(patches));
+
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::PatchOnly);
+    }
+
+    #[test]
+    fn test_classify_empty_file() {
+        let mod_def = mods::ModDefinition::new_test(None, None, None, None);
+
+        // Empty file is treated as NoPatch
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
+    }
+
+    #[test]
+    fn test_classify_empty_patches_collection() {
+        let patches = IndexMap::new(); // Empty but present
+
+        let mod_def = mods::ModDefinition::new_test(None, None, None, Some(patches));
+
+        // Empty patches collection should not count as "has patches"
+        assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
+    }
+
+    #[test]
+    fn test_case_insensitive_sorting() {
+        let mut files = vec![
+            "defs/ZEBRA.toml".to_string(),
+            "defs/animal.toml".to_string(),
+            "defs/Elephant.toml".to_string(),
+            "defs/bear.toml".to_string(),
+        ];
+
+        files.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
+
+        assert_eq!(
+            files,
+            vec![
+                "defs/animal.toml",
+                "defs/bear.toml",
+                "defs/Elephant.toml",
+                "defs/ZEBRA.toml",
+            ]
+        );
+    }
+}
+

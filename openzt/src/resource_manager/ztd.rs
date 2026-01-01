@@ -95,9 +95,7 @@ impl ZtdFile<'_> {
             .read_exact(&mut buffer)
             .with_context(|| format!("Error reading file: {}", self.inner.name()))?;
 
-        Ok(str::from_utf8(&buffer)
-            .with_context(|| format!("Error converting file {} to utf8", self.inner.name()))?
-            .to_string())
+        Ok(crate::encoding_utils::decode_game_text(&buffer))
     }
 }
 
@@ -110,8 +108,6 @@ impl TryFrom<ZtdFile<'_>> for String {
             .read_exact(&mut buffer)
             .with_context(|| format!("Error reading file: {}", file.inner.name()))?;
 
-        Ok(str::from_utf8(&buffer)
-            .with_context(|| format!("Error converting file {} to utf8", file.inner.name()))?
-            .to_string())
+        Ok(crate::encoding_utils::decode_game_text(&buffer))
     }
 }

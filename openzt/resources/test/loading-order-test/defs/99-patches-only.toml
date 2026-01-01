@@ -1,0 +1,19 @@
+# PatchOnly category file - patches only, no habitats/locations
+# Tests cross-file habitat references and patch execution order
+
+[patch_meta]
+on_error = "continue"
+
+[patches.test_cross_file_reference]
+operation = "set_key"
+target = "animals/test.ai"
+section = "Habitat"
+key = "cAlternateHabitat"
+value = "{habitat.test_habitat_a}"
+
+[patches.late_patch]
+operation = "set_key"
+target = "animals/test_order.ai"
+section = "Test"
+key = "LoadOrder"
+value = "Second"

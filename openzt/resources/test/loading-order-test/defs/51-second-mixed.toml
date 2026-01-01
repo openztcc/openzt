@@ -1,0 +1,17 @@
+# Mixed category file - has both location and patches
+# Tests alphabetical sorting within Mixed category
+
+[locations.test_location_d]
+name = "Test Location D"
+icon_path = "resources/test/icon"
+icon_palette_path = "resources/test/icon.pal"
+
+[patch_meta]
+on_error = "continue"
+
+[patches.second_mixed_patch]
+operation = "set_key"
+target = "animals/test.ai"
+section = "Habitat"
+key = "cSecondHabitat"
+value = "{habitat.test_habitat_c}"

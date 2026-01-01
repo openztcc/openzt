@@ -17,31 +17,35 @@ OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It pr
 
 ## Development Commands
 
+**IMPORTANT**: Always use `./openzt.bat` for cargo actions on the openzt crate (build, check, clippy, docs). This ensures correct toolchain selection and target configuration.
+
 ### Build Commands
 ```bash
 # Build only (no game launch)
-openzt.bat build                           # Debug with command-console
-openzt.bat build --release                 # Release with command-console
-openzt.bat build --stable                  # Debug with stable Rust (no console)
-openzt.bat build --test                    # Debug test build
-openzt.bat build --test --release          # Release test build
-openzt.bat build --loader                  # Debug + loader
+./openzt.bat build                           # Debug with command-console
+./openzt.bat build --release                 # Release with command-console
+./openzt.bat build --stable                  # Debug with stable Rust (no console)
+./openzt.bat build --test                    # Debug test build
+./openzt.bat build --test --release          # Release test build
+./openzt.bat build --loader                  # Debug + loader
 
-# Build and run - DLL copy method (default)
-openzt.bat run                             # Debug with command-console
-openzt.bat run --release                   # Release with command-console
-openzt.bat run --test                      # Debug test build
-openzt.bat run --test --release            # Release test build
-openzt.bat run --stable                    # Debug with stable Rust
+# Build and run
+./openzt.bat run                             # Debug with command-console
+./openzt.bat run --release                   # Release with command-console
+./openzt.bat run --stable                    # Debug with stable Rust (Currently broken; DO NOT USE)
 
-# Build and run - loader injection method
-openzt.bat run --loader                    # Debug via loader injection
-openzt.bat run --loader --release          # Release via loader injection
-openzt.bat run --loader --pause            # Debug, run loader exe (for debugger)
-openzt.bat run --loader --pause --release  # Release, run loader exe (for debugger)
+./openzt.bat run --loader                    # Debug via loader injection
+./openzt.bat run --loader --release          # Release via loader injection
+./openzt.bat run --loader --pause            # Debug, run loader exe (for debugger)
+./openzt.bat run --loader --pause --release  # Release, run loader exe (for debugger)
+
+# Code quality checks
+./openzt.bat check                           # Run cargo check on openzt
+./openzt.bat clippy                          # Run cargo clippy on openzt
+./openzt.bat test                            # Run cargo test on openzt
 
 # Documentation
-openzt.bat docs
+./openzt.bat docs
 ```
 
 ### Lua Console (Runtime Scripting)
@@ -181,13 +185,128 @@ resource_manager::add_handler("bfb", Box::new(BfbHandler));
 
 ## Testing
 
-No automated game testing framework exists. Manual testing required:
+### Implementation Tests
 
-1. Build the DLL
-2. Test via loader OR manual installation
-3. Verify features work in-game
-4. Test console commands if applicable
-5. Check for game crashes or memory issues
+OpenZT includes an implementation testing framework that runs tests in a live game environment. These tests verify mod loading, patch application, and resource management using the actual game engine.
+
+**Running Implementation Tests**:
+```bash
+# Run all implementation tests (game launches and exits automatically)
+./openzt.bat run --release -- --features implementation-tests
+
+# Check test results
+cat "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_implementation_tests.log"
+
+# Check detailed OpenZT logs (patch application, errors, etc.)
+cat "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt.log"
+```
+
+**Test Output**:
+```
+=== OpenZT Implementation Tests ===
+
+Running patch rollback tests...
+  ✓ test_continue_mode_applies_directly
+  ✓ test_abort_mode_rolls_back_on_failure
+  ... (9 tests)
+
+Running loading order tests...
+  ✓ test_category_ordering
+  ✓ test_cross_file_habitat_reference
+  ... (8 tests)
+
+Results: 17 passed, 0 failed
+ALL TESTS PASSED
+```
+
+**Test Categories**:
+
+1. **Patch Rollback Tests** (`openzt/src/implementation_tests/patch_rollback.rs`)
+   - Test patch error handling modes (continue, abort, abort_mod)
+   - Verify shadow resource system for transactional patch application
+   - Test patch operations (set_key, merge, delete, etc.)
+
+2. **Loading Order Tests** (`openzt/src/implementation_tests/loading_order.rs`)
+   - Verify deterministic mod definition file loading order
+   - Test category ordering (NoPatch → Mixed → PatchOnly)
+   - Verify alphabetical sorting within categories
+   - Test cross-file habitat/location references in patches
+
+**Creating New Tests**:
+
+1. Add test functions to appropriate test module:
+```rust
+pub fn run_all_tests() -> Vec<TestResult> {
+    vec![
+        test_existing_feature(),
+        test_your_new_feature(),  // Add here
+    ]
+}
+
+fn test_your_new_feature() -> TestResult {
+    let test_name = "test_your_new_feature";
+
+    // Setup test data
+    // ...
+
+    // Perform test operations
+    // ...
+
+    // Verify results
+    if expected == actual {
+        TestResult::pass(test_name)
+    } else {
+        TestResult::fail(test_name, format!("Expected {}, got {}", expected, actual))
+    }
+}
+```
+
+2. For tests requiring mod resources, use the embedded test mod pattern:
+```rust
+// In loading_order.rs - embed test TOML files
+const DEF_FILE: &str = include_str!("../../resources/test/your-test/defs/test.toml");
+
+// Add to create_test_mod_file_map()
+file_map.insert(
+    "defs/test.toml".to_string(),
+    DEF_FILE.as_bytes().to_vec().into_boxed_slice(),
+);
+```
+
+3. Create test resource files in `openzt/resources/test/your-test/`:
+```
+your-test/
+├── meta.toml
+└── defs/
+    └── test.toml
+```
+
+**Embedded Test Mod Pattern**:
+
+Implementation tests use an embedded mod approach where test resources are compiled directly into the binary:
+
+- Test files are embedded using `include_str!()` and `include_bytes!()`
+- No ZIP file creation or installation required
+- Changes to test resources take effect on next build
+- Zero runtime overhead - resources are in memory at compile time
+
+**Important Notes**:
+
+- Tests run in a live game environment with initialized memory structures
+- The game launches and exits automatically when tests complete
+- Test log is always written to `C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_implementation_tests.log`
+- Load order tracking is only enabled with `implementation-tests` feature flag
+- Tests create temporary files (e.g., `animals/test.ai`) for verification
+- **Habitat/Location Registration**: Always use the TOML key identifier (e.g., "test_habitat_a"), NOT the display name (e.g., "Test Habitat A") when looking up habitats/locations in tests
+
+### Manual Testing
+
+For features not covered by implementation tests:
+
+1. Build and run with `./openzt.bat run --release`
+2. Verify features work in-game
+3. Test console commands if applicable
+4. Check for game crashes or memory issues
 
 ## Code Quality
 

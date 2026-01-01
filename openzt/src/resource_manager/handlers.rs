@@ -190,11 +190,8 @@ impl Handler {
                     let mut ini = Ini::new_cs();
                     ini.set_comment_symbols(&[';', '#', ':']);
 
-                    let Ok(input_string) = str::from_utf8(&file) else {
-                        error!("Error converting file to string: {}", file_name);
-                        return;
-                    };
-                    if let Err(e) = ini.read(input_string.to_string()) {
+                    let input_string = crate::encoding_utils::decode_game_text(&file);
+                    if let Err(e) = ini.read(input_string) {
                         error!("Error reading ini {}: {}", file_name, e);
                         return;
                     }

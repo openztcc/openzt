@@ -7,6 +7,8 @@ use tracing::info;
 ///
 /// # Usage
 /// ```rust
+/// use openztlib::lua_fn;
+/// 
 /// // No arguments
 /// lua_fn!("my_func", "Does something", "my_func()", || {
 ///     Ok("result")

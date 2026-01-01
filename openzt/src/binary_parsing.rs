@@ -83,7 +83,7 @@ pub fn write_le_primitive<T: EndianWrite>(vec: &mut Vec<u8>, value: T, accumulat
 pub fn read_string(bytes: &[u8], index: &mut usize, length: usize) -> String {
     let string_bytes = &bytes[*index..*index + length - 1];
     *index += length;
-    String::from_utf8(string_bytes.to_vec()).unwrap()
+    crate::encoding_utils::decode_game_text(string_bytes)
 }
 
 pub fn write_string(vec: &mut Vec<u8>, string: &str, accumulator: &mut usize) -> Result<(), std::ffi::NulError> {

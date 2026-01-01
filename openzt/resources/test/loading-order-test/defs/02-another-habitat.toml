@@ -1,0 +1,6 @@
+# NoPatch category file - additional habitat for testing alphabetical sorting
+
+[habitats.test_habitat_c]
+name = "Test Habitat C"
+icon_path = "resources/test/icon"
+icon_palette_path = "resources/test/icon.pal"

@@ -1,0 +1,6 @@
+# NoPatch category file - tests case-insensitive sorting (capital C comes after lowercase 0-9)
+
+[habitats.test_habitat_caps]
+name = "Test Habitat Capitals"
+icon_path = "resources/test/icon"
+icon_palette_path = "resources/test/icon.pal"

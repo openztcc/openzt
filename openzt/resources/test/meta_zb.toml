@@ -1,0 +1,9 @@
+name="Palette Edits: Bengal Tiger"
+description="A small mod that edits the palette and various related graphics for the Bengal tiger, turning it orange to better match the real animal."
+authors=["Serpyderpy"]
+mod_id="serpyderpy.palette_edits_bengal"
+version="1.0.0"
+link=""
+dependencies=[
+    {}
+]

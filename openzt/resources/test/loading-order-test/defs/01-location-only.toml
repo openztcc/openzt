@@ -1,0 +1,6 @@
+# NoPatch category file - locations only, no patches
+
+[locations.test_location_a]
+name = "Test Location A"
+icon_path = "resources/test/icon"
+icon_palette_path = "resources/test/icon.pal"

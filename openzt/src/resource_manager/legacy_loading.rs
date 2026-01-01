@@ -8,17 +8,19 @@ use std::{
 use openzt_configparser::ini::Ini;
 use std::sync::LazyLock;
 use regex::Regex;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use walkdir::WalkDir;
 use zip::read::ZipFile;
 
 use super::ztd::ZtdArchive;
 use crate::{
+    animation::Animation,
     mods,
     resource_manager::{
         handlers::{get_handlers, RunStage},
         lazyresourcemap::{add_lazy, get_file, get_file_names, get_num_resources},
-        openzt_mods::{get_num_mod_ids, load_open_zt_mod},
+        openzt_mods::{get_num_mod_ids, get_mod_ids, load_open_zt_mod},
+        ztfile::{ZTFile, ZTFileType},
     },
 };
 
@@ -93,8 +95,8 @@ pub fn load_resources(paths: Vec<String>) {
         }
     }
 
-    // TODO: Implement patching
-    // apply_patches();
+    // Patches are now applied per-mod in handle_ztd()
+    // See handle_ztd() for patch orchestration
 
     info!("Running AfterOpenZTMods handlers");
     for handler in get_handlers().iter() {
@@ -138,7 +140,7 @@ fn handle_ztd(resource: &Path) -> anyhow::Result<i32> {
     let mut load_count = 0;
     let mut zip = ZtdArchive::new(resource)?;
 
-    let ztd_type = load_open_zt_mod(&mut zip)?;
+    let ztd_type = load_open_zt_mod(&mut zip, resource)?;
 
     if ztd_type == mods::ZtdType::Openzt {
         return Ok(0);
@@ -164,11 +166,8 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
         };
         let mut ini = Ini::new_cs();
         ini.set_comment_symbols(&[';', '#', ':']);
-        let Ok(input_string) = str::from_utf8(&file) else {
-            error!("Error converting file to string: {}", file_name);
-            return Vec::new();
-        };
-        if let Err(e) = ini.read(input_string.to_string()) {
+        let input_string = crate::encoding_utils::decode_game_text(&file);
+        if let Err(e) = ini.read(input_string) {
             error!("Error reading ini {}: {}", file_name, e);
             return Vec::new();
         }
@@ -180,7 +179,7 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
             LegacyCfgType::Fence => parse_simple_cfg(&ini, "fences"),  //parse_subtypes_cfg(&ini, "fences"),
             LegacyCfgType::Filter => parse_simple_cfg(&ini, "filter"), //parse_subtypes_cfg(&ini, "filter"),
             LegacyCfgType::Food => parse_simple_cfg(&ini, "food"),
-            LegacyCfgType::Free => parse_simple_cfg(&ini, "freeform"),
+            LegacyCfgType::Freeform => parse_simple_cfg(&ini, "freeform"),
             // LegacyCfgType::Fringe => Vec::new(),
             LegacyCfgType::Guest => parse_simple_cfg(&ini, "guest"),
             // LegacyCfgType::Help => Vec::new(),
@@ -235,7 +234,7 @@ enum LegacyCfgType {
     Fence,
     Filter,
     Food,
-    Free,
+    Freeform,
     Fringe,
     Guest,
     Help,
@@ -287,7 +286,7 @@ fn map_legacy_cfg_type(file_type_str: &str, file_name: String) -> Result<LegacyC
             file_name,
         }),
         "free" => Ok(LegacyCfg {
-            cfg_type: LegacyCfgType::Free,
+            cfg_type: LegacyCfgType::Freeform,
             file_name,
         }),
         "fringe" => Ok(LegacyCfg {

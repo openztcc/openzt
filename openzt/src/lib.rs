@@ -1,8 +1,5 @@
 #![allow(dead_code)]
-#![cfg_attr(
-  feature = "command-console",
-  feature(lazy_cell)
-)]
+#![cfg_attr(any(feature = "command-console", feature = "implementation-tests"), feature(lazy_cell))]
 /// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this
 /// allowed customization via zoo.ini, but in practice it appears unused.
 mod bfregistry;
@@ -47,6 +44,9 @@ mod string_registry;
 /// Helper methods for parsing binary data, including reading and writing binary data to and from buffers.
 mod binary_parsing;
 
+/// Encoding utilities for handling text from game files with various encodings (UTF-8, Windows ANSI code pages).
+mod encoding_utils;
+
 /// ZTAF Animation file format parsing, writing and some modification methods.
 ///
 /// Based on documentation at <https://github.com/jbostoen/ZTStudio/wiki/ZT1-Graphics-Explained>
@@ -81,11 +81,19 @@ mod util;
 mod settings;
 
 /// Scripting module for OpenZT using the mlua library. Contains functions for loading and running Lua scripts, and registering Rust functions to be called from Lua.
-mod scripting;
+pub mod scripting;
 
 /// RPC server for testing OpenZT functionality
 #[cfg(feature = "reimplementation-tests")]
 pub mod reimplementation_tests;
+
+/// Integration tests for patch system (requires game environment)
+#[cfg(feature = "patch-integration-tests")]
+pub mod patch_integration_tests;
+
+/// Implementation tests that run via detours in live game (for CI)
+#[cfg(feature = "implementation-tests")]
+pub mod implementation_tests;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::System::{Console::{AllocConsole, FreeConsole}};
@@ -109,7 +117,23 @@ mod zoo_init {
         match init_console() {
             Ok(_) => {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
-                tracing_subscriber::fmt().with_ansi(enable_ansi).init();
+
+                // Set up file appender - truncate file on startup
+                let log_file = std::fs::File::create("openzt.log")
+                    .expect("Failed to create openzt.log");
+                let (non_blocking_file, guard) = tracing_appender::non_blocking(log_file);
+
+                // Set up layered logging to both console and file
+                use tracing_subscriber::layer::SubscriberExt;
+                use tracing_subscriber::util::SubscriberInitExt;
+
+                tracing_subscriber::registry()
+                    .with(tracing_subscriber::fmt::layer().with_ansi(enable_ansi).with_writer(std::io::stdout))
+                    .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(non_blocking_file))
+                    .init();
+
+                // Leak the guard to keep the worker thread alive for the DLL lifetime
+                Box::leak(Box::new(guard));
             },
             Err(e) => {
                 info!("Failed to initialize console: {}", e);
@@ -152,6 +176,13 @@ mod zoo_init {
 
 #[cfg(target_os = "windows")]
 pub fn init() {
+    // If implementation tests are enabled, run those instead of the main game
+    #[cfg(feature = "implementation-tests")]
+    {
+        implementation_tests::init();
+        return;
+    }
+
     // Initialize the detours
     unsafe {
         zoo_init::init_detours().expect("Failed to initialize detours");

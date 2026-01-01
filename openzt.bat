@@ -16,6 +16,9 @@ IF "%~1"=="build" GOTO parse_build_flags
 IF "%~1"=="run" GOTO parse_run_flags
 IF "%~1"=="docs" GOTO docs
 IF "%~1"=="console" GOTO console
+IF "%~1"=="check" GOTO check
+IF "%~1"=="clippy" GOTO clippy
+IF "%~1"=="test" GOTO test
 
 echo Error: Unknown subcommand "%~1"
 echo.
@@ -254,7 +257,6 @@ echo.
 echo Launching Zoo Tycoon...
 start "Zoo Tycoon" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"
 
-pause
 GOTO :EOF
 
 REM ============================================================
@@ -306,6 +308,63 @@ IF !errorlevel! NEQ 0 (
 GOTO :EOF
 
 REM ============================================================
+REM Check Function
+REM ============================================================
+
+:check
+echo Running cargo check on openzt...
+cargo +nightly check --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+
+IF !errorlevel! NEQ 0 (
+    echo.
+    echo Cargo check failed
+    pause
+    exit /b !errorlevel!
+)
+
+echo.
+echo Cargo check passed
+GOTO :EOF
+
+REM ============================================================
+REM Clippy Function
+REM ============================================================
+
+:clippy
+echo Running cargo clippy on openzt...
+cargo +nightly clippy --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+
+IF !errorlevel! NEQ 0 (
+    echo.
+    echo Clippy found issues
+    pause
+    exit /b !errorlevel!
+)
+
+echo.
+echo Clippy passed
+GOTO :EOF
+
+REM ============================================================
+REM Test Function
+REM ============================================================
+
+:test
+echo Running cargo test on openzt...
+cargo +nightly test --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+
+IF !errorlevel! NEQ 0 (
+    echo.
+    echo Tests failed
+    pause
+    exit /b !errorlevel!
+)
+
+echo.
+echo Tests passed
+GOTO :EOF
+
+REM ============================================================
 REM Help Function
 REM ============================================================
 
@@ -317,6 +376,9 @@ echo.
 echo Subcommands:
 echo   build     Build the DLL only
 echo   run       Build the DLL and launch the game
+echo   check     Run cargo check on openzt crate
+echo   clippy    Run cargo clippy on openzt crate
+echo   test      Run cargo test on openzt crate
 echo   docs      Generate and open documentation
 echo   console   Open interactive Lua console or run oneshot command
 echo   help      Show this help message
@@ -342,6 +404,9 @@ echo   openzt.bat run --loader              Build + run via loader injection
 echo   openzt.bat run --loader --pause      Build + run loader exe (for debugger)
 echo   openzt.bat run --test                Build test DLL and launch game
 echo   openzt.bat build --stable            Build debug without command-console
+echo   openzt.bat check                     Run cargo check on openzt
+echo   openzt.bat clippy                    Run cargo clippy on openzt
+echo   openzt.bat test                      Run cargo test on openzt
 echo   openzt.bat docs                      Generate and open docs
 echo   openzt.bat console                   Open interactive Lua console
 echo   openzt.bat console --oneshot "help()"          Run single Lua command and exit

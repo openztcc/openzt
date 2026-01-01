@@ -2,11 +2,11 @@ mod bfresourcemgr;
 mod commands;
 mod handlers;
 mod hooks;
-mod lazyresourcemap;
+pub(crate) mod lazyresourcemap;
 mod legacy_loading;
-mod openzt_mods;
+pub(crate) mod openzt_mods;
 mod ztd;
-mod ztfile;
+pub(crate) mod ztfile;
 
 use commands::init_commands;
 pub use handlers::{add_handler, Handler, RunStage};
