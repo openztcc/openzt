@@ -10,6 +10,7 @@ use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 #[cfg(target_os = "windows")]
 use crate::detour_mod;
 
+pub mod dependency_resolution;
 pub mod loading_order;
 pub mod patch_rollback;
 
@@ -191,12 +192,28 @@ mod detour_zoo_main {
         write_log("=== OpenZT Implementation Tests ===");
         write_log("");
 
-        // Run patch rollback tests
-        write_log("Running patch rollback tests...");
-        let patch_results = super::patch_rollback::run_all_tests();
+        // Run dependency resolution tests
+        write_log("Running dependency resolution tests...");
+        let dependency_results = super::dependency_resolution::run_all_tests();
 
         let mut total_passed = 0;
         let mut total_failed = 0;
+
+        for result in &dependency_results {
+            if result.passed {
+                write_log(&format!("  ✓ {}", result.name));
+                total_passed += 1;
+            } else {
+                write_log(&format!("  ✗ {} - {}", result.name, result.error.as_ref().unwrap_or(&"Unknown error".to_string())));
+                total_failed += 1;
+            }
+        }
+
+        write_log("");
+
+        // Run patch rollback tests
+        write_log("Running patch rollback tests...");
+        let patch_results = super::patch_rollback::run_all_tests();
 
         for result in &patch_results {
             if result.passed {

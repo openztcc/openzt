@@ -56,24 +56,56 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     resources
 }
 
-pub fn load_resources(paths: Vec<String>) {
+pub fn load_resources(paths: Vec<String>, mod_order: &[String]) {
     use std::time::Instant;
+    use std::collections::HashMap;
+
     let now = Instant::now();
     let mut resource_count = 0;
 
+    // Build a mapping from mod_id to .ztd file path for ordered loading
+    let mut mod_to_path: HashMap<String, PathBuf> = HashMap::new();
+    let mut legacy_resources: Vec<PathBuf> = Vec::new();
+
+    // Discover all .ztd files and categorize them
     paths.iter().rev().for_each(|path| {
         let resources = get_ztd_resources(Path::new(path), false);
         resources.iter().for_each(|resource| {
-            info!("Loading resource: {}", resource.display());
-            let file_name = resource.to_str().unwrap_or_default().to_lowercase();
-            if file_name.ends_with(".ztd") {
-                match handle_ztd(resource) {
-                    Ok(count) => resource_count += count,
-                    Err(err) => error!("Error loading ztd: {} -> {}", file_name, err),
-                }
+            // Try to read mod_id from meta.toml
+            if let Ok(Some(mod_id)) = get_mod_id_from_archive(resource) {
+                // Only add if not already present (earlier paths take precedence)
+                mod_to_path.entry(mod_id).or_insert_with(|| resource.clone());
+            } else {
+                // Legacy mod (no meta.toml)
+                legacy_resources.push(resource.clone());
             }
         });
     });
+
+    // Load legacy mods FIRST (before OpenZT mods)
+    // This allows OpenZT mods to patch and modify legacy mod behavior
+    for resource in legacy_resources {
+        info!("Loading legacy resource: {}", resource.display());
+        let file_name = resource.to_str().unwrap_or_default().to_lowercase();
+        match handle_ztd(&resource) {
+            Ok(count) => resource_count += count,
+            Err(err) => error!("Error loading ztd: {} -> {}", file_name, err),
+        }
+    }
+
+    // Then load OpenZT mods in the specified dependency-resolved order
+    for mod_id in mod_order {
+        if let Some(resource) = mod_to_path.get(mod_id) {
+            info!("Loading ordered mod '{}' from: {}", mod_id, resource.display());
+            let file_name = resource.to_str().unwrap_or_default().to_lowercase();
+            match handle_ztd(resource) {
+                Ok(count) => resource_count += count,
+                Err(err) => error!("Error loading ztd: {} -> {}", file_name, err),
+            }
+        } else {
+            warn!("Mod '{}' in load order but not found in resource paths", mod_id);
+        }
+    }
 
     let elapsed = now.elapsed();
     info!(
@@ -134,6 +166,32 @@ pub fn load_resources(paths: Vec<String>) {
 
     let elapsed = now.elapsed();
     info!("Extra handling took an extra: {:.2?}", elapsed);
+}
+
+/// Get mod_id from a .ztd archive by reading meta.toml
+///
+/// Returns None if no meta.toml exists (legacy mod)
+fn get_mod_id_from_archive(archive_path: &Path) -> anyhow::Result<Option<String>> {
+    let mut archive = ZtdArchive::new(archive_path)?;
+
+    // Check if meta.toml exists
+    let Ok(meta_file) = archive.by_name("meta.toml") else {
+        // No meta.toml = legacy mod
+        return Ok(None);
+    };
+
+    // Parse just enough to get mod_id
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct MinimalMeta {
+        mod_id: String,
+    }
+
+    let meta_str = String::try_from(meta_file)?;
+    let meta: MinimalMeta = toml::from_str(&meta_str)?;
+
+    Ok(Some(meta.mod_id))
 }
 
 fn handle_ztd(resource: &Path) -> anyhow::Result<i32> {

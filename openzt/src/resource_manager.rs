@@ -8,6 +8,22 @@ pub(crate) mod openzt_mods;
 mod ztd;
 pub(crate) mod ztfile;
 
+// Export for implementation tests
+#[cfg(feature = "implementation-tests")]
+pub mod dependency_resolver;
+#[cfg(feature = "implementation-tests")]
+pub mod mod_config;
+#[cfg(feature = "implementation-tests")]
+pub mod validation;
+
+// Private modules when not testing
+#[cfg(not(feature = "implementation-tests"))]
+mod dependency_resolver;
+#[cfg(not(feature = "implementation-tests"))]
+mod mod_config;
+#[cfg(not(feature = "implementation-tests"))]
+mod validation;
+
 use commands::init_commands;
 pub use handlers::{add_handler, Handler, RunStage};
 use hooks::init_hooks;

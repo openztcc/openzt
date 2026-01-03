@@ -103,7 +103,7 @@ pub enum ZtdType {
     Openzt,
 }
 
-#[derive(Debug, PartialEq, Clone, Getters)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Getters)]
 #[get = "pub"]
 pub struct Version {
     major: u32,
@@ -125,6 +125,12 @@ impl FromStr for Version {
             minor: parts[1].parse()?,
             patch: parts[2].parse()?,
         })
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
 
