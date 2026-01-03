@@ -122,8 +122,8 @@ fn read_meta_from_archive(archive_path: &Path) -> anyhow::Result<Option<mods::Me
     Ok(Some(meta))
 }
 
-// === Load Order Tracking (for implementation tests) ===
-#[cfg(feature = "implementation-tests")]
+// === Load Order Tracking (for integration tests) ===
+#[cfg(feature = "integration-tests")]
 #[derive(Debug, Clone)]
 pub struct LoadEvent {
     pub mod_id: String,
@@ -132,15 +132,15 @@ pub struct LoadEvent {
     pub timestamp: std::time::Instant,
 }
 
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 pub static LOAD_ORDER_TRACKER: LazyLock<Mutex<Vec<LoadEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 pub fn clear_load_tracker() {
     LOAD_ORDER_TRACKER.lock().unwrap().clear();
 }
 
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 pub fn get_load_events() -> Vec<LoadEvent> {
     LOAD_ORDER_TRACKER.lock().unwrap().clone()
 }
@@ -249,8 +249,8 @@ fn load_open_zt_mod_internal(
             file_info.filename, file_info.category
         );
 
-        // Track loading order for implementation tests
-        #[cfg(feature = "implementation-tests")]
+        // Track loading order for integration tests
+        #[cfg(feature = "integration-tests")]
         {
             let event = LoadEvent {
                 mod_id: mod_id.clone(),
@@ -325,7 +325,7 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Re
 }
 
 /// Load an OpenZT mod from an in-memory file map (for testing)
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 pub fn load_open_zt_mod_from_memory(
     file_map: HashMap<String, Box<[u8]>>,
     mod_name: &str,

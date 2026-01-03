@@ -17,4 +17,4 @@ crate-type = ["cdylib"]
 
 [features]
 command-console = ["openzt/command-console"]
-implementation-tests = ["openzt/implementation-tests"]
+integration-tests = ["openzt/integration-tests"]
