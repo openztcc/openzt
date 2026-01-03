@@ -349,7 +349,7 @@ fn test_new_mod_insertion() -> TestResult {
     TestResult::pass(test_name)
 }
 
-/// Test disabled mods are excluded from order
+/// Test disabled mods stay in order but new disabled mods are not added
 fn test_disabled_mods_excluded() -> TestResult {
     let test_name = "test_disabled_mods_excluded";
 
@@ -363,23 +363,50 @@ fn test_disabled_mods_excluded() -> TestResult {
 
     let resolver = DependencyResolver::new(mods);
 
-    // Disable mod B
-    let disabled = vec!["test.dependency.mod_b".to_string()];
-    let result = resolver.resolve_order(&[], &disabled);
+    // B is in existing order but disabled - should stay in order
+    // C is new and disabled - should NOT be added
+    let existing = vec![
+        "test.dependency.mod_a".to_string(),
+        "test.dependency.mod_b".to_string(),
+    ];
+    let disabled = vec![
+        "test.dependency.mod_b".to_string(),
+        "test.dependency.mod_c".to_string(),
+    ];
+    let result = resolver.resolve_order(&existing, &disabled);
 
-    // Should have A and C, but not B
-    if result.order.contains(&"test.dependency.mod_b".to_string()) {
+    // Should have A and B (B is disabled but stays in order)
+    // C is new and disabled, so should not be added
+    if !result.order.contains(&"test.dependency.mod_b".to_string()) {
         return TestResult::fail(
             test_name,
-            "Disabled mod_b should not be in order".to_string(),
+            "Disabled mod_b should stay in order (already exists)".to_string(),
         );
     }
 
-    if !result.order.contains(&"test.dependency.mod_a".to_string()) ||
-       !result.order.contains(&"test.dependency.mod_c".to_string()) {
+    if result.order.contains(&"test.dependency.mod_c".to_string()) {
         return TestResult::fail(
             test_name,
-            "Non-disabled mods should be in order".to_string(),
+            "New disabled mod_c should not be added to order".to_string(),
+        );
+    }
+
+    if !result.order.contains(&"test.dependency.mod_a".to_string()) {
+        return TestResult::fail(
+            test_name,
+            "Enabled mod_a should be in order".to_string(),
+        );
+    }
+
+    // Expected order: A, B (C not added because it's new and disabled)
+    let expected = vec![
+        "test.dependency.mod_a".to_string(),
+        "test.dependency.mod_b".to_string(),
+    ];
+    if result.order != expected {
+        return TestResult::fail(
+            test_name,
+            format!("Expected order {:?}, got {:?}", expected, result.order),
         );
     }
 

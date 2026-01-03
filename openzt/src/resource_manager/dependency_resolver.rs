@@ -46,10 +46,13 @@ impl DependencyResolver {
     ///
     /// # Arguments
     /// * `existing_order` - Current mod order from openzt.toml (user-controlled)
-    /// * `disabled_mods` - Mods that should not be loaded
+    /// * `disabled_mods` - Mods that should not be loaded (but kept in order)
     ///
     /// # Returns
     /// Resolution result with final order and any warnings
+    ///
+    /// Note: Disabled mods are kept in the order list but not processed for dependencies.
+    /// They will be filtered out during actual mod loading.
     pub fn resolve_order(
         &self,
         existing_order: &[String],
@@ -57,31 +60,27 @@ impl DependencyResolver {
     ) -> ResolutionResult {
         let mut warnings = Vec::new();
 
-        // Filter out disabled mods
+        // Disabled mods should be kept in order but not processed
         let disabled_set: HashSet<_> = disabled_mods.iter().cloned().collect();
-        let available_mods: HashMap<_, _> = self.mods.iter()
-            .filter(|(id, _)| !disabled_set.contains(*id))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
 
-        // Identify new mods (not in existing order)
+        // Identify new mods (not in existing order and not disabled)
         let existing_set: HashSet<_> = existing_order.iter().cloned().collect();
-        let mut new_mods: Vec<_> = available_mods.keys()
-            .filter(|id| !existing_set.contains(*id))
+        let mut new_mods: Vec<_> = self.mods.keys()
+            .filter(|id| !existing_set.contains(*id) && !disabled_set.contains(*id))
             .cloned()
             .collect();
 
         // Sort new mods alphabetically for deterministic processing
         new_mods.sort();
 
-        // Remove mods from order that no longer exist
+        // Keep existing order, only remove mods that no longer exist in discovered mods
         let valid_existing_order: Vec<_> = existing_order.iter()
-            .filter(|id| available_mods.contains_key(*id))
+            .filter(|id| self.mods.contains_key(*id))
             .cloned()
             .collect();
 
         if new_mods.is_empty() {
-            // No new mods, return validated existing order
+            // No new mods, return validated existing order (including disabled ones)
             return ResolutionResult {
                 order: valid_existing_order,
                 warnings,
@@ -90,8 +89,13 @@ impl DependencyResolver {
 
         info!("Discovered {} new mod(s): {:?}", new_mods.len(), new_mods);
 
-        // Build dependency graph for all mods
-        let graph = self.build_dependency_graph(&available_mods);
+        // Build dependency graph only for enabled mods
+        let enabled_mods: HashMap<_, _> = self.mods.iter()
+            .filter(|(id, _)| !disabled_set.contains(*id))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        let graph = self.build_dependency_graph(&enabled_mods);
 
         // Detect cycles in new mods
         let cycles = self.detect_cycles_in_subgraph(&graph, &new_mods);
@@ -107,7 +111,7 @@ impl DependencyResolver {
             &valid_existing_order,
             &new_mods,
             &graph,
-            &available_mods,
+            &enabled_mods,
             &cycles,
         );
 
@@ -714,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn test_disabled_mods_not_in_order() {
+    fn test_disabled_mods_stay_in_order() {
         let mut mods = HashMap::new();
 
         let meta_a = create_test_meta(r#"
@@ -733,15 +737,29 @@ mod tests {
             version = "1.0.0"
         "#);
 
+        let meta_c = create_test_meta(r#"
+            name = "Mod C"
+            description = "Test mod C"
+            authors = ["Test"]
+            mod_id = "test.mod_c"
+            version = "1.0.0"
+        "#);
+
         mods.insert("test.mod_a".to_string(), meta_a);
         mods.insert("test.mod_b".to_string(), meta_b);
+        mods.insert("test.mod_c".to_string(), meta_c);
 
         let resolver = DependencyResolver::new(mods);
-        let disabled = vec!["test.mod_b".to_string()];
-        let result = resolver.resolve_order(&[], &disabled);
 
-        // Only mod_a should be in the order
-        assert_eq!(result.order, vec!["test.mod_a"]);
+        // B is in existing order but disabled - should stay in order
+        // C is new and disabled - should NOT be added
+        let existing = vec!["test.mod_a".to_string(), "test.mod_b".to_string()];
+        let disabled = vec!["test.mod_b".to_string(), "test.mod_c".to_string()];
+        let result = resolver.resolve_order(&existing, &disabled);
+
+        // Both A and B should be in order (B is disabled but stays in order)
+        // C is new and disabled, so not added
+        assert_eq!(result.order, vec!["test.mod_a", "test.mod_b"]);
         assert!(result.warnings.is_empty());
     }
 

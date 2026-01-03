@@ -182,8 +182,20 @@ mod zoo_resource_mgr {
                 }
             }
 
-            // Load resources in resolved order
-            load_resources(paths, &resolution_result.order);
+            // Filter out disabled mods for actual loading
+            // (they remain in openzt.toml order but are not loaded)
+            let disabled_set: std::collections::HashSet<_> = config.mod_loading.disabled.iter().collect();
+            let enabled_order: Vec<String> = resolution_result.order.iter()
+                .filter(|mod_id| !disabled_set.contains(mod_id))
+                .cloned()
+                .collect();
+
+            if !config.mod_loading.disabled.is_empty() {
+                info!("Disabled mods (not loading): {:?}", config.mod_loading.disabled);
+            }
+
+            // Load resources in resolved order (excluding disabled mods)
+            load_resources(paths, &enabled_order);
             info!("Resources loaded");
         }
         return_value
