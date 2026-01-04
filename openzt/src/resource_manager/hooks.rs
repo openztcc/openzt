@@ -12,7 +12,7 @@ mod zoo_resource_mgr {
     use std::ffi::CString;
     use std::time::Instant;
 
-    use tracing::info;
+    use tracing::{info, warn, error, debug};
 
     use openzt_configparser::ini::Ini;
     use openzt_detour::gen::bfresourcemgr::{CONSTRUCTOR, ADD_PATH};
@@ -151,17 +151,23 @@ mod zoo_resource_mgr {
                 use crate::resource_manager::dependency_resolver::ResolutionWarning;
                 match warning {
                     ResolutionWarning::CircularDependency { cycle } => {
-                        info!("WARNING: Circular dependency detected: {:?}", cycle);
-                        info!("  These mods will be loaded at the end of the order");
+                        warn!("Circular dependency detected (with optional deps): {:?}", cycle);
+                    }
+                    ResolutionWarning::TrulyCyclicDependency { cycle } => {
+                        error!("Truly cyclic dependency detected (required deps only): {:?}", cycle);
+                        error!("  These mods will be loaded at the end of the order");
+                    }
+                    ResolutionWarning::FormerlyCyclicDependency { mod_id, reason } => {
+                        info!("Mod '{}' had cycle resolved: {}", mod_id, reason);
                     }
                     ResolutionWarning::MissingOptionalDependency { mod_id, missing } => {
-                        info!("INFO: Mod '{}' has optional dependency '{}' which is not present", mod_id, missing);
+                        debug!("Mod '{}' has optional dependency '{}' which is not present", mod_id, missing);
                     }
                     ResolutionWarning::MissingRequiredDependency { mod_id, missing } => {
-                        info!("WARNING: Mod '{}' requires '{}' which is not present", mod_id, missing);
+                        warn!("Mod '{}' requires '{}' which is not present", mod_id, missing);
                     }
                     ResolutionWarning::ConflictingConstraints { mod_id, details } => {
-                        info!("WARNING: Mod '{}' has conflicting constraints: {}", mod_id, details);
+                        warn!("Mod '{}' has conflicting constraints: {}", mod_id, details);
                     }
                 }
             }

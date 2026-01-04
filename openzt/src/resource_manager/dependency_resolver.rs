@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use tracing::{warn, info, debug};
+use tracing::{warn, info, debug, error};
 use crate::mods::{Meta, Ordering};
 
 /// Result of dependency resolution
@@ -13,9 +13,20 @@ pub struct ResolutionResult {
 #[derive(Debug, Clone)]
 pub enum ResolutionWarning {
     CircularDependency { cycle: Vec<String> },
+    TrulyCyclicDependency { cycle: Vec<String> },
+    FormerlyCyclicDependency { mod_id: String, reason: String },
     MissingOptionalDependency { mod_id: String, missing: String },
     MissingRequiredDependency { mod_id: String, missing: String },
     ConflictingConstraints { mod_id: String, details: String },
+}
+
+/// Controls which dependencies to include when building the graph
+#[derive(Debug, Clone, Copy)]
+enum DependencyInclusionMode {
+    /// Include both required and optional dependencies
+    All,
+    /// Include only required dependencies
+    RequiredOnly,
 }
 
 /// Dependency graph for mod load order resolution
@@ -95,14 +106,37 @@ impl DependencyResolver {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
 
-        let graph = self.build_dependency_graph(&enabled_mods);
+        let graph = self.build_dependency_graph(&enabled_mods, DependencyInclusionMode::All);
 
-        // Detect cycles in new mods
-        let cycles = self.detect_cycles_in_subgraph(&graph, &new_mods);
-        for cycle in &cycles {
-            warn!("Circular dependency detected: {:?}", cycle);
+        // Two-stage cycle detection
+        let (truly_cyclic, formerly_cyclic, stage1_cycles, stage2_cycles) = self.detect_cycles_two_stage(
+            &graph,
+            &new_mods,
+            &enabled_mods,
+        );
+
+        // Generate warnings for Stage 1 cycles (warning level)
+        for cycle in &stage1_cycles {
+            warn!("Circular dependency detected (with optional deps): {:?}", cycle);
             warnings.push(ResolutionWarning::CircularDependency {
                 cycle: cycle.clone(),
+            });
+        }
+
+        // Generate errors for Stage 2 cycles (error level)
+        for cycle in &stage2_cycles {
+            error!("Truly cyclic dependency (required deps only): {:?}", cycle);
+            warnings.push(ResolutionWarning::TrulyCyclicDependency {
+                cycle: cycle.clone(),
+            });
+        }
+
+        // Generate warnings for formerly cyclic mods (info/warning level)
+        for mod_id in &formerly_cyclic {
+            info!("Mod '{}' cycle resolved by ignoring optional dependencies", mod_id);
+            warnings.push(ResolutionWarning::FormerlyCyclicDependency {
+                mod_id: mod_id.clone(),
+                reason: "Cycle resolved by ignoring optional dependencies".to_string(),
             });
         }
 
@@ -112,7 +146,8 @@ impl DependencyResolver {
             &new_mods,
             &graph,
             &enabled_mods,
-            &cycles,
+            &truly_cyclic,
+            &formerly_cyclic,
         );
 
         warnings.extend(insert_warnings);
@@ -124,7 +159,7 @@ impl DependencyResolver {
     }
 
     /// Build dependency graph from mod metadata
-    fn build_dependency_graph(&self, mods: &HashMap<String, Meta>) -> DependencyGraph {
+    fn build_dependency_graph(&self, mods: &HashMap<String, Meta>, mode: DependencyInclusionMode) -> DependencyGraph {
         let mut before_deps: HashMap<String, Vec<String>> = HashMap::new();
         let mut after_deps: HashMap<String, Vec<String>> = HashMap::new();
         let mut optional: HashMap<String, HashSet<String>> = HashMap::new();
@@ -132,6 +167,22 @@ impl DependencyResolver {
         for (mod_id, meta) in mods {
             for dep in meta.dependencies() {
                 let dep_mod_id = dep.mod_id();
+
+                // Check if we should include this dependency based on the mode
+                let should_include = match mode {
+                    DependencyInclusionMode::All => true,
+                    DependencyInclusionMode::RequiredOnly => !dep.optional(),
+                };
+
+                if !should_include {
+                    // Track optional deps even if we're not including their edges
+                    if *dep.optional() {
+                        optional.entry(mod_id.clone())
+                            .or_default()
+                            .insert(dep_mod_id.clone());
+                    }
+                    continue;
+                }
 
                 match dep.ordering() {
                     Ordering::Before => {
@@ -196,6 +247,78 @@ impl DependencyResolver {
             .collect()
     }
 
+    /// Two-stage cycle detection:
+    /// 1. Detect cycles with all dependencies (required + optional)
+    /// 2. For cyclic mods, re-check with only required dependencies
+    ///
+    /// Returns: (truly_cyclic_mods, formerly_cyclic_mods, stage1_cycles, stage2_cycles)
+    fn detect_cycles_two_stage(
+        &self,
+        all_deps_graph: &DependencyGraph,
+        mods_to_check: &[String],
+        all_mods: &HashMap<String, Meta>,
+    ) -> (Vec<String>, Vec<String>, Vec<Vec<String>>, Vec<Vec<String>>) {
+        // Stage 1: Detect cycles with ALL dependencies
+        let stage1_cycles = self.detect_cycles_in_subgraph(all_deps_graph, mods_to_check);
+
+        if stage1_cycles.is_empty() {
+            // No cycles at all
+            return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        }
+
+        // Collect all mods involved in Stage 1 cycles
+        let stage1_cyclic_mods: HashSet<String> = stage1_cycles.iter()
+            .flat_map(|cycle| cycle.iter().cloned())
+            .collect();
+
+        info!("Stage 1: Detected {} cycle(s) involving {} mods (with optional deps)",
+              stage1_cycles.len(), stage1_cyclic_mods.len());
+
+        for cycle in &stage1_cycles {
+            debug!("  Stage 1 cycle: {:?}", cycle);
+        }
+
+        // Stage 2: Build required-only graph for cyclic mods
+        let cyclic_mods_only: HashMap<String, Meta> = all_mods.iter()
+            .filter(|(id, _)| stage1_cyclic_mods.contains(*id))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        info!("Stage 2: Re-checking {} mods with required-only dependencies...",
+              stage1_cyclic_mods.len());
+
+        let required_only_graph = self.build_dependency_graph(
+            &cyclic_mods_only,
+            DependencyInclusionMode::RequiredOnly
+        );
+
+        let cyclic_mod_ids: Vec<_> = stage1_cyclic_mods.iter().cloned().collect();
+        let stage2_cycles = self.detect_cycles_in_subgraph(&required_only_graph, &cyclic_mod_ids);
+
+        info!("Stage 2: Detected {} cycle(s) with {} mods still cyclic",
+              stage2_cycles.len(),
+              stage2_cycles.iter().flat_map(|c| c.iter()).count());
+
+        for cycle in &stage2_cycles {
+            debug!("  Stage 2 cycle: {:?}", cycle);
+        }
+
+        // Categorize: mods in Stage 2 cycles are truly cyclic, others are formerly cyclic
+        let stage2_cyclic_mods: HashSet<String> = stage2_cycles.iter()
+            .flat_map(|cycle| cycle.iter().cloned())
+            .collect();
+
+        let truly_cyclic: Vec<_> = stage2_cyclic_mods.iter().cloned().collect();
+        let formerly_cyclic: Vec<_> = stage1_cyclic_mods.difference(&stage2_cyclic_mods)
+            .cloned()
+            .collect();
+
+        info!("Result: {} truly cyclic, {} formerly cyclic (resolved)",
+              truly_cyclic.len(), formerly_cyclic.len());
+
+        (truly_cyclic, formerly_cyclic, stage1_cycles, stage2_cycles)
+    }
+
     /// Tarjan's algorithm recursive step
     fn tarjan_strongconnect(
         &self,
@@ -255,36 +378,46 @@ impl DependencyResolver {
         new_mods: &[String],
         graph: &DependencyGraph,
         all_mods: &HashMap<String, Meta>,
-        cycles: &[Vec<String>],
+        truly_cyclic: &[String],
+        formerly_cyclic: &[String],
     ) -> (Vec<String>, Vec<ResolutionWarning>) {
         let mut order = existing_order.to_vec();
         let mut warnings = Vec::new();
 
-        // Identify mods in cycles
-        let cyclic_mods: HashSet<String> = cycles.iter()
-            .flat_map(|cycle| cycle.iter().cloned())
-            .collect();
+        // Build sets for efficient lookup
+        let truly_cyclic_set: HashSet<_> = truly_cyclic.iter().cloned().collect();
+        let formerly_cyclic_set: HashSet<_> = formerly_cyclic.iter().cloned().collect();
 
-        // Separate cyclic from acyclic new mods
-        let mut acyclic_new_mods: Vec<_> = new_mods.iter()
-            .filter(|id| !cyclic_mods.contains(*id))
+        // Categorize new mods into three groups
+        let mut never_cyclic: Vec<_> = new_mods.iter()
+            .filter(|id| !truly_cyclic_set.contains(*id) && !formerly_cyclic_set.contains(*id))
             .cloned()
             .collect();
 
-        let mut cyclic_new_mods: Vec<_> = new_mods.iter()
-            .filter(|id| cyclic_mods.contains(*id))
-            .cloned()
+        let mut formerly_cyclic_sorted = formerly_cyclic.to_vec();
+        let mut truly_cyclic_sorted = truly_cyclic.to_vec();
+
+        // Sort all for determinism
+        never_cyclic.sort();
+        formerly_cyclic_sorted.sort();
+        truly_cyclic_sorted.sort();
+
+        // Build required-only graph for formerly cyclic mods
+        let formerly_cyclic_mods: HashMap<_, _> = all_mods.iter()
+            .filter(|(id, _)| formerly_cyclic_set.contains(*id))
+            .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
 
-        // Sort both lists for deterministic behavior
-        acyclic_new_mods.sort();
-        cyclic_new_mods.sort();
+        let required_only_graph = self.build_dependency_graph(
+            &formerly_cyclic_mods,
+            DependencyInclusionMode::RequiredOnly
+        );
 
-        // Insert acyclic mods using topological constraints
+        // Insert never-cyclic mods first (using full graph)
         // Track the number of mods inserted at the beginning to maintain alphabetical order
         let mut insert_offset = 0;
 
-        for mod_id in acyclic_new_mods {
+        for mod_id in never_cyclic {
             let (position, insert_warnings) = self.find_insert_position(
                 &mod_id,
                 &order,
@@ -309,9 +442,34 @@ impl DependencyResolver {
             }
         }
 
-        // Append cyclic mods at the end (already sorted alphabetically)
-        for mod_id in cyclic_new_mods {
-            info!("Inserting cyclic mod '{}' at end of load order", mod_id);
+        // Insert formerly cyclic mods (using required-only graph)
+        for mod_id in formerly_cyclic_sorted {
+            info!("Inserting formerly cyclic mod '{}' (acyclic without optional deps)", mod_id);
+
+            let (position, insert_warnings) = self.find_insert_position(
+                &mod_id,
+                &order,
+                &required_only_graph,  // Use required-only graph!
+                all_mods,
+            );
+            warnings.extend(insert_warnings);
+
+            let actual_position = if position == 0 && insert_offset > 0 {
+                position + insert_offset
+            } else {
+                position
+            };
+
+            order.insert(actual_position, mod_id);
+
+            if position == 0 {
+                insert_offset += 1;
+            }
+        }
+
+        // Append truly cyclic mods at end (already sorted alphabetically)
+        for mod_id in truly_cyclic_sorted {
+            info!("Inserting truly cyclic mod '{}' at end (cyclic even without optional deps)", mod_id);
             order.push(mod_id);
         }
 
@@ -596,14 +754,16 @@ mod tests {
         assert!(result.order.contains(&"test.mod_b".to_string()));
         assert!(result.order.contains(&"test.mod_c".to_string()));
 
-        // Should have circular dependency warning
-        assert_eq!(result.warnings.len(), 1);
-        match &result.warnings[0] {
-            ResolutionWarning::CircularDependency { cycle } => {
-                assert_eq!(cycle.len(), 3);
-            }
-            _ => panic!("Expected CircularDependency warning"),
-        }
+        // Should have warnings from both stages (all required deps, so truly cyclic)
+        // Stage 1: CircularDependency (cycle with optional deps)
+        // Stage 2: TrulyCyclicDependency (cycle still exists with required-only)
+        assert_eq!(result.warnings.len(), 2);
+
+        let has_stage1_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::CircularDependency { cycle } if cycle.len() == 3));
+        let has_stage2_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::TrulyCyclicDependency { cycle } if cycle.len() == 3));
+
+        assert!(has_stage1_warning, "Expected CircularDependency warning from Stage 1");
+        assert!(has_stage2_warning, "Expected TrulyCyclicDependency warning from Stage 2");
     }
 
     #[test]
