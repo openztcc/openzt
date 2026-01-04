@@ -12,7 +12,7 @@ mod zoo_resource_mgr {
     use std::ffi::CString;
     use std::time::Instant;
 
-    use tracing::info;
+    use tracing::{info, warn, error, debug};
 
     use openzt_configparser::ini::Ini;
     use openzt_detour::gen::bfresourcemgr::{CONSTRUCTOR, ADD_PATH};
@@ -25,7 +25,10 @@ mod zoo_resource_mgr {
             bfresourcemgr::BFResourcePtr,
             lazyresourcemap::{check_file, get_file_ptr},
             legacy_loading::{load_resources, OPENZT_DIR0},
-            openzt_mods::get_location_or_habitat_by_id,
+            openzt_mods::{get_location_or_habitat_by_id, discover_mods},
+            mod_config::{load_openzt_config, save_openzt_config},
+            dependency_resolver::DependencyResolver,
+            validation::{validate_load_order, log_validation_result},
         },
         util::{get_ini_path, get_string_from_memory, save_to_memory, get_from_memory},
     };
@@ -127,7 +130,78 @@ mod zoo_resource_mgr {
             }
 
             info!("Loading resources from: {:?}", paths);
-            load_resources(paths);
+
+            // Load OpenZT configuration
+            let mut config = load_openzt_config();
+
+            // Discover all mods
+            info!("Discovering mods...");
+            let discovered_mods = discover_mods(&paths);
+            info!("Discovered {} mod(s)", discovered_mods.len());
+
+            // Resolve dependencies and determine load order
+            let resolver = DependencyResolver::new(discovered_mods.clone());
+            let resolution_result = resolver.resolve_order(
+                &config.mod_loading.order,
+                &config.mod_loading.disabled,
+            );
+
+            // Log any dependency resolution warnings
+            for warning in &resolution_result.warnings {
+                use crate::resource_manager::dependency_resolver::ResolutionWarning;
+                match warning {
+                    ResolutionWarning::CircularDependency { cycle } => {
+                        warn!("Circular dependency detected (with optional deps): {:?}", cycle);
+                    }
+                    ResolutionWarning::TrulyCyclicDependency { cycle } => {
+                        error!("Truly cyclic dependency detected (required deps only): {:?}", cycle);
+                        error!("  These mods will be loaded at the end of the order");
+                    }
+                    ResolutionWarning::FormerlyCyclicDependency { mod_id, reason } => {
+                        info!("Mod '{}' had cycle resolved: {}", mod_id, reason);
+                    }
+                    ResolutionWarning::MissingOptionalDependency { mod_id, missing } => {
+                        debug!("Mod '{}' has optional dependency '{}' which is not present", mod_id, missing);
+                    }
+                    ResolutionWarning::MissingRequiredDependency { mod_id, missing } => {
+                        warn!("Mod '{}' requires '{}' which is not present", mod_id, missing);
+                    }
+                    ResolutionWarning::ConflictingConstraints { mod_id, details } => {
+                        warn!("Mod '{}' has conflicting constraints: {}", mod_id, details);
+                    }
+                }
+            }
+
+            // Validate load order if configured
+            if config.mod_loading.warn_on_conflicts {
+                let validation_result = validate_load_order(&resolution_result.order, &discovered_mods);
+                log_validation_result(&validation_result);
+            }
+
+            // Check if we need to update openzt.toml
+            let needs_update = resolution_result.order != config.mod_loading.order;
+            if needs_update {
+                info!("Load order changed, updating openzt.toml");
+                config.mod_loading.order = resolution_result.order.clone();
+                if let Err(e) = save_openzt_config(&config) {
+                    info!("WARNING: Failed to save openzt.toml: {}", e);
+                }
+            }
+
+            // Filter out disabled mods for actual loading
+            // (they remain in openzt.toml order but are not loaded)
+            let disabled_set: std::collections::HashSet<_> = config.mod_loading.disabled.iter().collect();
+            let enabled_order: Vec<String> = resolution_result.order.iter()
+                .filter(|mod_id| !disabled_set.contains(mod_id))
+                .cloned()
+                .collect();
+
+            if !config.mod_loading.disabled.is_empty() {
+                info!("Disabled mods (not loading): {:?}", config.mod_loading.disabled);
+            }
+
+            // Load resources in resolved order (excluding disabled mods)
+            load_resources(paths, &enabled_order);
             info!("Resources loaded");
         }
         return_value

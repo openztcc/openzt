@@ -10,7 +10,7 @@ use super::TestResult;
 // Embedded Test Resources
 // ============================================================================
 
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 mod embedded_resources {
     // Meta file
     pub const META_TOML: &str = include_str!("../../resources/test/loading-order-test/meta.toml");
@@ -31,7 +31,7 @@ mod embedded_resources {
 }
 
 /// Create an in-memory file map for the test mod (mimics ZIP structure)
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 pub fn create_test_mod_file_map() -> std::collections::HashMap<String, Box<[u8]>> {
     use embedded_resources::*;
 

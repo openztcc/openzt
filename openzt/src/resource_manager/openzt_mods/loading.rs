@@ -42,8 +42,88 @@ pub fn get_mod_ids() -> Vec<String> {
     binding.iter().cloned().collect()
 }
 
-// === Load Order Tracking (for implementation tests) ===
-#[cfg(feature = "implementation-tests")]
+/// Discover all OpenZT mods from .ztd archives without loading them
+///
+/// Returns a map of mod_id -> Meta for all mods found in the resource paths
+/// This is used for dependency resolution before actual mod loading
+pub fn discover_mods(paths: &[String]) -> HashMap<String, mods::Meta> {
+    use crate::resource_manager::ztd::ZtdArchive;
+    use std::path::PathBuf;
+
+    let mut discovered = HashMap::new();
+
+    // Iterate through resource paths to find .ztd files
+    for path_str in paths.iter().rev() {
+        let path = PathBuf::from(path_str);
+
+        if !path.exists() {
+            continue;
+        }
+
+        // Read directory entries
+        let Ok(entries) = std::fs::read_dir(&path) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let file_path = entry.path();
+
+            // Only process .ztd files
+            if file_path.extension().and_then(|s| s.to_str()) != Some("ztd") {
+                continue;
+            }
+
+            // Try to read meta.toml from the archive
+            match read_meta_from_archive(&file_path) {
+                Ok(Some(meta)) => {
+                    let mod_id = meta.mod_id().to_string();
+
+                    // Skip if we already found this mod (earlier paths take precedence)
+                    if !discovered.contains_key(&mod_id) {
+                        info!("Discovered mod: {} ({})", meta.name(), mod_id);
+                        discovered.insert(mod_id, meta);
+                    }
+                }
+                Ok(None) => {
+                    // Legacy mod (no meta.toml), skip
+                }
+                Err(e) => {
+                    error!("Failed to read meta from {:?}: {}", file_path, e);
+                }
+            }
+        }
+    }
+
+    discovered
+}
+
+/// Read and parse meta.toml from a .ztd archive
+///
+/// Returns None if no meta.toml exists (legacy mod)
+fn read_meta_from_archive(archive_path: &Path) -> anyhow::Result<Option<mods::Meta>> {
+    use crate::resource_manager::ztd::ZtdArchive;
+
+    let mut archive = ZtdArchive::new(archive_path)
+        .with_context(|| format!("Failed to open archive: {:?}", archive_path))?;
+
+    // Check if meta.toml exists
+    let Ok(meta_file) = archive.by_name("meta.toml") else {
+        // No meta.toml = legacy mod
+        return Ok(None);
+    };
+
+    // Parse meta.toml
+    let meta_str = String::try_from(meta_file)
+        .with_context(|| format!("Failed to read meta.toml from {:?}", archive_path))?;
+
+    let meta = toml::from_str::<mods::Meta>(&meta_str)
+        .with_context(|| format!("Failed to parse meta.toml from {:?}", archive_path))?;
+
+    Ok(Some(meta))
+}
+
+// === Load Order Tracking (for integration tests) ===
+#[cfg(feature = "integration-tests")]
 #[derive(Debug, Clone)]
 pub struct LoadEvent {
     pub mod_id: String,
@@ -52,15 +132,15 @@ pub struct LoadEvent {
     pub timestamp: std::time::Instant,
 }
 
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 pub static LOAD_ORDER_TRACKER: LazyLock<Mutex<Vec<LoadEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 pub fn clear_load_tracker() {
     LOAD_ORDER_TRACKER.lock().unwrap().clear();
 }
 
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 pub fn get_load_events() -> Vec<LoadEvent> {
     LOAD_ORDER_TRACKER.lock().unwrap().clone()
 }
@@ -169,8 +249,8 @@ fn load_open_zt_mod_internal(
             file_info.filename, file_info.category
         );
 
-        // Track loading order for implementation tests
-        #[cfg(feature = "implementation-tests")]
+        // Track loading order for integration tests
+        #[cfg(feature = "integration-tests")]
         {
             let event = LoadEvent {
                 mod_id: mod_id.clone(),
@@ -245,7 +325,7 @@ pub fn load_open_zt_mod(archive: &mut ZtdArchive, resource: &Path) -> anyhow::Re
 }
 
 /// Load an OpenZT mod from an in-memory file map (for testing)
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 pub fn load_open_zt_mod_from_memory(
     file_map: HashMap<String, Box<[u8]>>,
     mod_name: &str,

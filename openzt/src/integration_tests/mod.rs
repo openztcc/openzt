@@ -10,6 +10,7 @@ use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 #[cfg(target_os = "windows")]
 use crate::detour_mod;
 
+pub mod dependency_resolution;
 pub mod loading_order;
 pub mod patch_rollback;
 
@@ -124,7 +125,7 @@ fn setup_test_files() -> anyhow::Result<()> {
 }
 
 /// Load the embedded test mod into the game
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 fn load_test_mod() -> anyhow::Result<()> {
     use crate::resource_manager::openzt_mods::load_open_zt_mod_from_memory;
     use std::path::Path;
@@ -150,10 +151,10 @@ mod detour_zoo_main {
 
     #[detour(LOAD_LANG_DLLS)]
     unsafe extern "thiscall" fn detour_target(_this: u32) -> u32 {
-        info!("Implementation tests starting...");
+        info!("Integration tests starting...");
 
         // Clear load order tracker
-        #[cfg(feature = "implementation-tests")]
+        #[cfg(feature = "integration-tests")]
         crate::resource_manager::openzt_mods::loading::clear_load_tracker();
 
         // Setup test target files for loading order tests
@@ -170,7 +171,7 @@ mod detour_zoo_main {
 
         // Read filepath from environment variable with default
         let test_log_path = std::env::var("OPENZT_TEST_LOG")
-            .unwrap_or_else(|_| "C:\\Program Files (x86)\\Microsoft Games\\Zoo Tycoon\\openzt_implementation_tests.log".to_string());
+            .unwrap_or_else(|_| "C:\\Program Files (x86)\\Microsoft Games\\Zoo Tycoon\\openzt_integration_tests.log".to_string());
 
         // Create or truncate the file
         let mut test_log = match OpenOptions::new().create(true).write(true).truncate(true).open(&test_log_path) {
@@ -188,15 +189,31 @@ mod detour_zoo_main {
             }
         };
 
-        write_log("=== OpenZT Implementation Tests ===");
+        write_log("=== OpenZT Integration Tests ===");
+        write_log("");
+
+        // Run dependency resolution tests
+        write_log("Running dependency resolution tests...");
+        let dependency_results = super::dependency_resolution::run_all_tests();
+
+        let mut total_passed = 0;
+        let mut total_failed = 0;
+
+        for result in &dependency_results {
+            if result.passed {
+                write_log(&format!("  ✓ {}", result.name));
+                total_passed += 1;
+            } else {
+                write_log(&format!("  ✗ {} - {}", result.name, result.error.as_ref().unwrap_or(&"Unknown error".to_string())));
+                total_failed += 1;
+            }
+        }
+
         write_log("");
 
         // Run patch rollback tests
         write_log("Running patch rollback tests...");
         let patch_results = super::patch_rollback::run_all_tests();
-
-        let mut total_passed = 0;
-        let mut total_failed = 0;
 
         for result in &patch_results {
             if result.passed {

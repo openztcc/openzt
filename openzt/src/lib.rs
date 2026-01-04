@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-#![cfg_attr(any(feature = "command-console", feature = "implementation-tests"), feature(lazy_cell))]
+#![cfg_attr(any(feature = "command-console", feature = "integration-tests"), feature(lazy_cell))]
 /// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this
 /// allowed customization via zoo.ini, but in practice it appears unused.
 mod bfregistry;
@@ -91,9 +91,9 @@ pub mod reimplementation_tests;
 #[cfg(feature = "patch-integration-tests")]
 pub mod patch_integration_tests;
 
-/// Implementation tests that run via detours in live game (for CI)
-#[cfg(feature = "implementation-tests")]
-pub mod implementation_tests;
+/// Integration tests that run via detours in live game (for CI)
+#[cfg(feature = "integration-tests")]
+pub mod integration_tests;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::System::{Console::{AllocConsole, FreeConsole}};
@@ -176,10 +176,10 @@ mod zoo_init {
 
 #[cfg(target_os = "windows")]
 pub fn init() {
-    // If implementation tests are enabled, run those instead of the main game
-    #[cfg(feature = "implementation-tests")]
+    // If integration tests are enabled, run those instead of the main game
+    #[cfg(feature = "integration-tests")]
     {
-        implementation_tests::init();
+        integration_tests::init();
         return;
     }
 

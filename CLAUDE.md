@@ -185,17 +185,17 @@ resource_manager::add_handler("bfb", Box::new(BfbHandler));
 
 ## Testing
 
-### Implementation Tests
+### Integration Tests
 
-OpenZT includes an implementation testing framework that runs tests in a live game environment. These tests verify mod loading, patch application, and resource management using the actual game engine.
+OpenZT includes an integration testing framework that runs tests in a live game environment. These tests verify mod loading, patch application, and resource management using the actual game engine.
 
-**Running Implementation Tests**:
+**Running Integration Tests**:
 ```bash
-# Run all implementation tests (game launches and exits automatically)
-./openzt.bat run --release -- --features implementation-tests
+# Run all integration tests (game launches and exits automatically)
+./openzt.bat run --release -- --features integration-tests
 
 # Check test results
-cat "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_implementation_tests.log"
+cat "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_integration_tests.log"
 
 # Check detailed OpenZT logs (patch application, errors, etc.)
 cat "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt.log"
@@ -203,7 +203,7 @@ cat "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt.log"
 
 **Test Output**:
 ```
-=== OpenZT Implementation Tests ===
+=== OpenZT Integration Tests ===
 
 Running patch rollback tests...
   ✓ test_continue_mode_applies_directly
@@ -221,12 +221,12 @@ ALL TESTS PASSED
 
 **Test Categories**:
 
-1. **Patch Rollback Tests** (`openzt/src/implementation_tests/patch_rollback.rs`)
+1. **Patch Rollback Tests** (`openzt/src/integration_tests/patch_rollback.rs`)
    - Test patch error handling modes (continue, abort, abort_mod)
    - Verify shadow resource system for transactional patch application
    - Test patch operations (set_key, merge, delete, etc.)
 
-2. **Loading Order Tests** (`openzt/src/implementation_tests/loading_order.rs`)
+2. **Loading Order Tests** (`openzt/src/integration_tests/loading_order.rs`)
    - Verify deterministic mod definition file loading order
    - Test category ordering (NoPatch → Mixed → PatchOnly)
    - Verify alphabetical sorting within categories
@@ -283,7 +283,7 @@ your-test/
 
 **Embedded Test Mod Pattern**:
 
-Implementation tests use an embedded mod approach where test resources are compiled directly into the binary:
+Integration tests use an embedded mod approach where test resources are compiled directly into the binary:
 
 - Test files are embedded using `include_str!()` and `include_bytes!()`
 - No ZIP file creation or installation required
@@ -294,14 +294,14 @@ Implementation tests use an embedded mod approach where test resources are compi
 
 - Tests run in a live game environment with initialized memory structures
 - The game launches and exits automatically when tests complete
-- Test log is always written to `C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_implementation_tests.log`
-- Load order tracking is only enabled with `implementation-tests` feature flag
+- Test log is always written to `C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_integration_tests.log`
+- Load order tracking is only enabled with `integration-tests` feature flag
 - Tests create temporary files (e.g., `animals/test.ai`) for verification
 - **Habitat/Location Registration**: Always use the TOML key identifier (e.g., "test_habitat_a"), NOT the display name (e.g., "Test Habitat A") when looking up habitats/locations in tests
 
 ### Manual Testing
 
-For features not covered by implementation tests:
+For features not covered by integration tests:
 
 1. Build and run with `./openzt.bat run --release`
 2. Verify features work in-game
