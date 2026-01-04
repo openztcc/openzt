@@ -319,6 +319,72 @@ impl DependencyResolver {
         (truly_cyclic, formerly_cyclic, stage1_cycles, stage2_cycles)
     }
 
+    /// Topologically sort a list of mods using Kahn's algorithm
+    /// Returns mods in dependency order (mods with no deps first)
+    fn topological_sort(&self, mods: &[String], graph: &DependencyGraph) -> Vec<String> {
+        let mod_set: HashSet<_> = mods.iter().cloned().collect();
+
+        // Calculate in-degree for each mod (number of dependencies)
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        for mod_id in mods {
+            in_degree.insert(mod_id.clone(), 0);
+        }
+
+        // Count in-degrees based on before_deps (things this mod depends on)
+        for mod_id in mods {
+            if let Some(deps) = graph.before_deps.get(mod_id) {
+                for dep in deps {
+                    if mod_set.contains(dep) {
+                        *in_degree.entry(mod_id.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        // Start with mods that have no dependencies
+        let mut queue: Vec<_> = in_degree.iter()
+            .filter(|(_, &degree)| degree == 0)
+            .map(|(id, _)| id.clone())
+            .collect();
+        queue.sort(); // Alphabetical for determinism
+
+        let mut result = Vec::new();
+
+        while !queue.is_empty() {
+            // Remove from front to maintain order (FIFO)
+            let mod_id = queue.remove(0);
+            result.push(mod_id.clone());
+
+            // Reduce in-degree for mods that depend on this one
+            if let Some(dependents) = graph.after_deps.get(&mod_id) {
+                for dependent in dependents {
+                    if !mod_set.contains(dependent) {
+                        continue;
+                    }
+
+                    if let Some(degree) = in_degree.get_mut(dependent) {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push(dependent.clone());
+                            queue.sort(); // Keep alphabetical
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we didn't process all mods, there's still a cycle (shouldn't happen for formerly cyclic)
+        // Fall back to alphabetical order
+        if result.len() != mods.len() {
+            debug!("Topological sort incomplete, falling back to alphabetical order");
+            let mut fallback = mods.to_vec();
+            fallback.sort();
+            return fallback;
+        }
+
+        result
+    }
+
     /// Tarjan's algorithm recursive step
     fn tarjan_strongconnect(
         &self,
@@ -442,29 +508,14 @@ impl DependencyResolver {
             }
         }
 
-        // Insert formerly cyclic mods (using required-only graph)
-        for mod_id in formerly_cyclic_sorted {
+        // Topologically sort formerly cyclic mods using required-only dependencies
+        let formerly_cyclic_order = self.topological_sort(&formerly_cyclic_sorted, &required_only_graph);
+
+        // Insert all formerly cyclic mods as a group in their sorted order
+        // They go after never-cyclic mods but before truly cyclic mods
+        for mod_id in formerly_cyclic_order {
             info!("Inserting formerly cyclic mod '{}' (acyclic without optional deps)", mod_id);
-
-            let (position, insert_warnings) = self.find_insert_position(
-                &mod_id,
-                &order,
-                &required_only_graph,  // Use required-only graph!
-                all_mods,
-            );
-            warnings.extend(insert_warnings);
-
-            let actual_position = if position == 0 && insert_offset > 0 {
-                position + insert_offset
-            } else {
-                position
-            };
-
-            order.insert(actual_position, mod_id);
-
-            if position == 0 {
-                insert_offset += 1;
-            }
+            order.push(mod_id);
         }
 
         // Append truly cyclic mods at end (already sorted alphabetically)

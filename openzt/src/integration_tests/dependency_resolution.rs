@@ -9,7 +9,7 @@ use std::collections::HashMap;
 // Embedded Test Resources for Dependency Tests
 // ============================================================================
 
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 mod embedded_resources {
     // Test Mod A - No dependencies (base mod)
     pub const META_MOD_A: &str = r#"
@@ -114,10 +114,180 @@ mod_id = "test.dependency.mod_h"
 version = "1.0.0"
 ztd_type = "openzt"
 "#;
+
+    // Two-Stage Cycle Detection Test Mods
+
+    // Mod I - Optional cycle with J (I -(optional)→ J)
+    pub const META_MOD_I: &str = r#"
+name = "Test Mod I"
+description = "Optional cycle test mod I"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_i"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_j", name = "Test Mod J", optional = true, ordering = "after" }
+]
+"#;
+
+    // Mod J - Optional cycle with I (J -(optional)→ I)
+    pub const META_MOD_J: &str = r#"
+name = "Test Mod J"
+description = "Optional cycle test mod J"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_j"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_i", name = "Test Mod I", optional = true, ordering = "after" }
+]
+"#;
+
+    // Mod K - Mixed cycle: K -(required)→ L
+    pub const META_MOD_K: &str = r#"
+name = "Test Mod K"
+description = "Mixed cycle test mod K"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_k"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_l", name = "Test Mod L", ordering = "after" }
+]
+"#;
+
+    // Mod L - Mixed cycle: L -(optional)→ M
+    pub const META_MOD_L: &str = r#"
+name = "Test Mod L"
+description = "Mixed cycle test mod L"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_l"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_m", name = "Test Mod M", optional = true, ordering = "after" }
+]
+"#;
+
+    // Mod M - Mixed cycle: M -(required)→ K (completes cycle)
+    pub const META_MOD_M: &str = r#"
+name = "Test Mod M"
+description = "Mixed cycle test mod M"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_m"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_k", name = "Test Mod K", ordering = "after" }
+]
+"#;
+
+    // Mod N - Triangle with optional: N -(required)→ O
+    pub const META_MOD_N: &str = r#"
+name = "Test Mod N"
+description = "Triangle test mod N"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_n"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_o", name = "Test Mod O", ordering = "after" }
+]
+"#;
+
+    // Mod O - Triangle with optional: O -(required)→ P
+    pub const META_MOD_O: &str = r#"
+name = "Test Mod O"
+description = "Triangle test mod O"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_o"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_p", name = "Test Mod P", ordering = "after" }
+]
+"#;
+
+    // Mod P - Triangle with optional: P -(optional)→ N (completes optional cycle)
+    pub const META_MOD_P: &str = r#"
+name = "Test Mod P"
+description = "Triangle test mod P"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_p"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_n", name = "Test Mod N", optional = true, ordering = "after" }
+]
+"#;
+
+    // Mod Q - Chain with optional: Q -(required)→ R
+    pub const META_MOD_Q: &str = r#"
+name = "Test Mod Q"
+description = "Chain test mod Q"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_q"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_r", name = "Test Mod R", ordering = "after" }
+]
+"#;
+
+    // Mod R - Chain with optional: R -(required)→ S
+    pub const META_MOD_R: &str = r#"
+name = "Test Mod R"
+description = "Chain test mod R"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_r"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_s", name = "Test Mod S", ordering = "after" }
+]
+"#;
+
+    // Mod S - Chain with optional: S -(required)→ T
+    pub const META_MOD_S: &str = r#"
+name = "Test Mod S"
+description = "Chain test mod S"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_s"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_t", name = "Test Mod T", ordering = "after" }
+]
+"#;
+
+    // Mod T - Chain with optional: T -(optional)→ Q (completes optional cycle)
+    pub const META_MOD_T: &str = r#"
+name = "Test Mod T"
+description = "Chain test mod T"
+authors = ["OpenZT Test Suite"]
+mod_id = "test.dependency.mod_t"
+version = "1.0.0"
+ztd_type = "openzt"
+
+dependencies = [
+    { mod_id = "test.dependency.mod_q", name = "Test Mod Q", optional = true, ordering = "after" }
+]
+"#;
 }
 
 /// Create test mod metadata map for dependency tests
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 fn create_test_mods() -> HashMap<String, &'static str> {
     use embedded_resources::*;
     let mut mods = HashMap::new();
@@ -130,12 +300,24 @@ fn create_test_mods() -> HashMap<String, &'static str> {
     mods.insert("test.dependency.mod_f".to_string(), META_MOD_F);
     mods.insert("test.dependency.mod_g".to_string(), META_MOD_G);
     mods.insert("test.dependency.mod_h".to_string(), META_MOD_H);
+    mods.insert("test.dependency.mod_i".to_string(), META_MOD_I);
+    mods.insert("test.dependency.mod_j".to_string(), META_MOD_J);
+    mods.insert("test.dependency.mod_k".to_string(), META_MOD_K);
+    mods.insert("test.dependency.mod_l".to_string(), META_MOD_L);
+    mods.insert("test.dependency.mod_m".to_string(), META_MOD_M);
+    mods.insert("test.dependency.mod_n".to_string(), META_MOD_N);
+    mods.insert("test.dependency.mod_o".to_string(), META_MOD_O);
+    mods.insert("test.dependency.mod_p".to_string(), META_MOD_P);
+    mods.insert("test.dependency.mod_q".to_string(), META_MOD_Q);
+    mods.insert("test.dependency.mod_r".to_string(), META_MOD_R);
+    mods.insert("test.dependency.mod_s".to_string(), META_MOD_S);
+    mods.insert("test.dependency.mod_t".to_string(), META_MOD_T);
 
     mods
 }
 
 /// Parse test mods into Meta objects
-#[cfg(feature = "implementation-tests")]
+#[cfg(feature = "integration-tests")]
 fn parse_test_mods() -> HashMap<String, crate::mods::Meta> {
     let test_mods = create_test_mods();
     let mut parsed = HashMap::new();
@@ -167,6 +349,11 @@ pub fn run_all_tests() -> Vec<TestResult> {
         test_new_mod_insertion(),
         test_disabled_mods_excluded(),
         test_validation_detects_violations(),
+        // Two-stage cycle detection tests
+        test_optional_dependency_cycle(),
+        test_mixed_cycle_resolution(),
+        test_triangle_with_optional(),
+        test_large_cycle_one_optional(),
     ]
 }
 
@@ -437,6 +624,263 @@ fn test_validation_detects_violations() -> TestResult {
         return TestResult::fail(
             test_name,
             "Expected warnings for ordering violation".to_string(),
+        );
+    }
+
+    TestResult::pass(test_name)
+}
+
+// ============================================================================
+// Two-Stage Cycle Detection Tests
+// ============================================================================
+
+/// Test I <-(optional)-> J: Both mods have optional deps on each other
+/// Expected: Stage 1 cycle detected, Stage 2 no cycle (formerly cyclic)
+fn test_optional_dependency_cycle() -> TestResult {
+    let test_name = "test_optional_dependency_cycle";
+
+    let all_mods = parse_test_mods();
+
+    // Use mods I and J (optional cycle)
+    let mut mods = HashMap::new();
+    mods.insert("test.dependency.mod_i".to_string(), all_mods["test.dependency.mod_i"].clone());
+    mods.insert("test.dependency.mod_j".to_string(), all_mods["test.dependency.mod_j"].clone());
+
+    let resolver = DependencyResolver::new(mods);
+    let result = resolver.resolve_order(&[], &[]);
+
+    // Should have both mods in alphabetical order
+    if result.order.len() != 2 {
+        return TestResult::fail(
+            test_name,
+            format!("Expected 2 mods in order, got {}", result.order.len()),
+        );
+    }
+
+    // Both should be formerly cyclic (not truly cyclic)
+    // Should have Stage 1 CircularDependency warning but NO TrulyCyclicDependency warning
+    let has_stage1_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::CircularDependency { .. }));
+    let has_stage2_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::TrulyCyclicDependency { .. }));
+    let has_formerly_cyclic = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::FormerlyCyclicDependency { .. }));
+
+    if !has_stage1_warning {
+        return TestResult::fail(
+            test_name,
+            "Expected CircularDependency warning from Stage 1".to_string(),
+        );
+    }
+
+    if has_stage2_warning {
+        return TestResult::fail(
+            test_name,
+            "Should NOT have TrulyCyclicDependency warning (optional deps only)".to_string(),
+        );
+    }
+
+    if !has_formerly_cyclic {
+        return TestResult::fail(
+            test_name,
+            "Expected FormerlyCyclicDependency warnings".to_string(),
+        );
+    }
+
+    // Mods should NOT be at the end (they're formerly cyclic, inserted normally)
+    // They should be at the beginning in alphabetical order
+    let expected = vec![
+        "test.dependency.mod_i".to_string(),
+        "test.dependency.mod_j".to_string(),
+    ];
+
+    if result.order != expected {
+        return TestResult::fail(
+            test_name,
+            format!("Expected order {:?} (formerly cyclic, alphabetical), got {:?}", expected, result.order),
+        );
+    }
+
+    TestResult::pass(test_name)
+}
+
+/// Test K -> L -(optional)-> M -> K: Mixed cycle with one optional edge
+/// Expected: All formerly cyclic, proper topological order without the optional edge
+fn test_mixed_cycle_resolution() -> TestResult {
+    let test_name = "test_mixed_cycle_resolution";
+
+    let all_mods = parse_test_mods();
+
+    // Use mods K, L, M (mixed cycle: K -(required)-> L -(optional)-> M -(required)-> K)
+    let mut mods = HashMap::new();
+    mods.insert("test.dependency.mod_k".to_string(), all_mods["test.dependency.mod_k"].clone());
+    mods.insert("test.dependency.mod_l".to_string(), all_mods["test.dependency.mod_l"].clone());
+    mods.insert("test.dependency.mod_m".to_string(), all_mods["test.dependency.mod_m"].clone());
+
+    let resolver = DependencyResolver::new(mods);
+    let result = resolver.resolve_order(&[], &[]);
+
+    // Should have all 3 mods
+    if result.order.len() != 3 {
+        return TestResult::fail(
+            test_name,
+            format!("Expected 3 mods in order, got {}", result.order.len()),
+        );
+    }
+
+    // Should have Stage 1 warning but NO Stage 2 warning
+    let has_stage1_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::CircularDependency { .. }));
+    let has_stage2_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::TrulyCyclicDependency { .. }));
+
+    if !has_stage1_warning {
+        return TestResult::fail(
+            test_name,
+            "Expected CircularDependency warning from Stage 1".to_string(),
+        );
+    }
+
+    if has_stage2_warning {
+        return TestResult::fail(
+            test_name,
+            "Should NOT have TrulyCyclicDependency warning (cycle broken by optional)".to_string(),
+        );
+    }
+
+    // Without the optional edge L->M, the required-only graph is:
+    // K -> L (K depends on L)
+    // M -> K (M depends on K)
+    // No edge from L to M
+    // So: K requires L to be before it, M requires K to be before it
+    // Valid order: L, K, M
+    let expected = vec![
+        "test.dependency.mod_l".to_string(),
+        "test.dependency.mod_k".to_string(),
+        "test.dependency.mod_m".to_string(),
+    ];
+
+    if result.order != expected {
+        return TestResult::fail(
+            test_name,
+            format!("Expected order {:?}, got {:?}", expected, result.order),
+        );
+    }
+
+    TestResult::pass(test_name)
+}
+
+/// Test N -> O -> P -(optional)-> N: Triangle with optional back-edge
+/// Expected: All formerly cyclic, order N, O, P
+fn test_triangle_with_optional() -> TestResult {
+    let test_name = "test_triangle_with_optional";
+
+    let all_mods = parse_test_mods();
+
+    // Use mods N, O, P (triangle: N -(required)-> O -(required)-> P -(optional)-> N)
+    let mut mods = HashMap::new();
+    mods.insert("test.dependency.mod_n".to_string(), all_mods["test.dependency.mod_n"].clone());
+    mods.insert("test.dependency.mod_o".to_string(), all_mods["test.dependency.mod_o"].clone());
+    mods.insert("test.dependency.mod_p".to_string(), all_mods["test.dependency.mod_p"].clone());
+
+    let resolver = DependencyResolver::new(mods);
+    let result = resolver.resolve_order(&[], &[]);
+
+    // Should have all 3 mods
+    if result.order.len() != 3 {
+        return TestResult::fail(
+            test_name,
+            format!("Expected 3 mods in order, got {}", result.order.len()),
+        );
+    }
+
+    // Should have Stage 1 warning but NO Stage 2 warning
+    let has_stage1_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::CircularDependency { .. }));
+    let has_stage2_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::TrulyCyclicDependency { .. }));
+
+    if !has_stage1_warning {
+        return TestResult::fail(
+            test_name,
+            "Expected CircularDependency warning from Stage 1".to_string(),
+        );
+    }
+
+    if has_stage2_warning {
+        return TestResult::fail(
+            test_name,
+            "Should NOT have TrulyCyclicDependency warning (cycle broken by optional)".to_string(),
+        );
+    }
+
+    // Without the optional edge P->N, the order should be: P, O, N
+    // (P has no deps, O depends on P, N depends on O)
+    let expected = vec![
+        "test.dependency.mod_p".to_string(),
+        "test.dependency.mod_o".to_string(),
+        "test.dependency.mod_n".to_string(),
+    ];
+
+    if result.order != expected {
+        return TestResult::fail(
+            test_name,
+            format!("Expected order {:?}, got {:?}", expected, result.order),
+        );
+    }
+
+    TestResult::pass(test_name)
+}
+
+/// Test Q -> R -> S -> T -(optional)-> Q: Long chain with one optional back-edge
+/// Expected: All formerly cyclic, order Q, R, S, T
+fn test_large_cycle_one_optional() -> TestResult {
+    let test_name = "test_large_cycle_one_optional";
+
+    let all_mods = parse_test_mods();
+
+    // Use mods Q, R, S, T (chain: Q -> R -> S -> T -(optional)-> Q)
+    let mut mods = HashMap::new();
+    mods.insert("test.dependency.mod_q".to_string(), all_mods["test.dependency.mod_q"].clone());
+    mods.insert("test.dependency.mod_r".to_string(), all_mods["test.dependency.mod_r"].clone());
+    mods.insert("test.dependency.mod_s".to_string(), all_mods["test.dependency.mod_s"].clone());
+    mods.insert("test.dependency.mod_t".to_string(), all_mods["test.dependency.mod_t"].clone());
+
+    let resolver = DependencyResolver::new(mods);
+    let result = resolver.resolve_order(&[], &[]);
+
+    // Should have all 4 mods
+    if result.order.len() != 4 {
+        return TestResult::fail(
+            test_name,
+            format!("Expected 4 mods in order, got {}", result.order.len()),
+        );
+    }
+
+    // Should have Stage 1 warning but NO Stage 2 warning
+    let has_stage1_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::CircularDependency { .. }));
+    let has_stage2_warning = result.warnings.iter().any(|w| matches!(w, ResolutionWarning::TrulyCyclicDependency { .. }));
+
+    if !has_stage1_warning {
+        return TestResult::fail(
+            test_name,
+            "Expected CircularDependency warning from Stage 1".to_string(),
+        );
+    }
+
+    if has_stage2_warning {
+        return TestResult::fail(
+            test_name,
+            "Should NOT have TrulyCyclicDependency warning (cycle broken by optional)".to_string(),
+        );
+    }
+
+    // Without the optional edge T->Q, the order should be: T, S, R, Q
+    // (T has no deps, S depends on T, R depends on S, Q depends on R)
+    let expected = vec![
+        "test.dependency.mod_t".to_string(),
+        "test.dependency.mod_s".to_string(),
+        "test.dependency.mod_r".to_string(),
+        "test.dependency.mod_q".to_string(),
+    ];
+
+    if result.order != expected {
+        return TestResult::fail(
+            test_name,
+            format!("Expected order {:?}, got {:?}", expected, result.order),
         );
     }
 
