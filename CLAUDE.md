@@ -39,6 +39,11 @@ OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It pr
 ./openzt.bat run --loader --pause            # Debug, run loader exe (for debugger)
 ./openzt.bat run --loader --pause --release  # Release, run loader exe (for debugger)
 
+# Build and run with --wait flag (waits for game to exit before returning)
+./openzt.bat run --wait                      # Debug, wait for exit
+./openzt.bat run --release --wait            # Release, wait for exit
+./openzt.bat run --loader --wait             # Loader injection, wait for exit
+
 # Code quality checks
 ./openzt.bat check                           # Run cargo check on openzt
 ./openzt.bat clippy                          # Run cargo clippy on openzt
@@ -194,6 +199,9 @@ OpenZT includes an integration testing framework that runs tests in a live game 
 # Run all integration tests (game launches and exits automatically)
 ./openzt.bat run --release -- --features integration-tests
 
+# Run integration tests and wait for completion (useful for automation/CI)
+./openzt.bat run --release --wait -- --features integration-tests
+
 # Check test results
 cat "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_integration_tests.log"
 
@@ -294,6 +302,7 @@ Integration tests use an embedded mod approach where test resources are compiled
 
 - Tests run in a live game environment with initialized memory structures
 - The game launches and exits automatically when tests complete
+- Use the `--wait` flag to wait for the game to exit before returning control (recommended for automated workflows and CI)
 - Test log is always written to `C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_integration_tests.log`
 - Load order tracking is only enabled with `integration-tests` feature flag
 - Tests create temporary files (e.g., `animals/test.ai`) for verification

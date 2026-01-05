@@ -44,6 +44,7 @@ SET TEST_FLAG=
 SET STABLE_FLAG=
 SET LOADER_FLAG=
 SET PAUSE_FLAG=
+SET WAIT_FLAG=
 SET CARGO_ARGS=
 SET PARSING_CARGO_ARGS=
 
@@ -71,6 +72,11 @@ IF "%~1"=="--loader" (
 )
 IF "%~1"=="--pause" (
     SET PAUSE_FLAG=1
+    SHIFT
+    GOTO parse_loop
+)
+IF "%~1"=="--wait" (
+    SET WAIT_FLAG=1
     SHIFT
     GOTO parse_loop
 )
@@ -181,6 +187,25 @@ IF DEFINED RUN_AFTER_BUILD GOTO copy_and_run
 GOTO :EOF
 
 REM ============================================================
+REM Check if Zoo Tycoon is Already Running
+REM ============================================================
+
+:check_zoo_running
+IF NOT DEFINED WAIT_FLAG GOTO :EOF
+
+REM Check if zoo.exe is already running
+tasklist /FI "IMAGENAME eq zoo.exe" 2>NUL | find /I /N "zoo.exe">NUL
+IF "%ERRORLEVEL%"=="0" (
+    echo.
+    echo WARNING: Zoo Tycoon is already running.
+    echo The new instance may fail to launch, or the wait may attach to the existing process.
+    echo.
+    timeout /t 3 /nobreak >NUL
+)
+
+GOTO :EOF
+
+REM ============================================================
 REM Copy and Run Function
 REM ============================================================
 
@@ -214,12 +239,28 @@ IF DEFINED LOADER_FLAG (
     REM Run via loader
     IF DEFINED PAUSE_FLAG (
         echo.
-        echo Running openzt-loader.exe directly ^(for debugger attachment^)...
+        IF DEFINED WAIT_FLAG (
+            echo Running openzt-loader.exe directly ^(for debugger attachment^) and waiting for exit...
+        ) ELSE (
+            echo Running openzt-loader.exe directly ^(for debugger attachment^)...
+        )
         target\i686-pc-windows-msvc\!BUILD_TYPE!\openzt-loader.exe --dll-path=^"target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!^"
+        IF DEFINED WAIT_FLAG (
+            echo.
+            echo Loader has exited.
+        )
     ) ELSE (
         echo.
-        echo Running via openzt-loader ^(cargo run^)...
+        IF DEFINED WAIT_FLAG (
+            echo Running via openzt-loader ^(cargo run^) and waiting for exit...
+        ) ELSE (
+            echo Running via openzt-loader ^(cargo run^)...
+        )
         cargo !LOADER_TOOLCHAIN! run !BUILD_FLAGS! --manifest-path openzt-loader/Cargo.toml -- --dll-path=^"target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!^" --listen --resume
+        IF DEFINED WAIT_FLAG (
+            echo.
+            echo Loader has exited.
+        )
     )
 
     pause
@@ -252,10 +293,20 @@ IF !errorlevel! NEQ 0 (
     exit /b !errorlevel!
 )
 
+REM Check for already running game if --wait is enabled
+IF DEFINED WAIT_FLAG CALL :check_zoo_running
+
 REM Launch game
 echo.
-echo Launching Zoo Tycoon...
-start "Zoo Tycoon" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"
+IF DEFINED WAIT_FLAG (
+    echo Launching Zoo Tycoon and waiting for exit...
+    start "Zoo Tycoon" /WAIT "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"
+    echo.
+    echo Zoo Tycoon has exited.
+) ELSE (
+    echo Launching Zoo Tycoon...
+    start "Zoo Tycoon" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"
+)
 
 GOTO :EOF
 
@@ -389,6 +440,7 @@ echo   --test         Build the test DLL (openzt-test-dll)
 echo   --stable       Build with stable Rust toolchain (disables command-console)
 echo   --loader       Use openzt-loader for DLL injection (instead of copy)
 echo   --pause        (with --loader) Run loader exe directly for debugger
+echo   --wait         Wait for Zoo Tycoon to exit before returning
 echo   -- ^<args^>      Forward additional arguments to cargo
 echo.
 echo Note: command-console feature is enabled by default for non-test builds
@@ -411,5 +463,8 @@ echo   openzt.bat docs                      Generate and open docs
 echo   openzt.bat console                   Open interactive Lua console
 echo   openzt.bat console --oneshot "help()"          Run single Lua command and exit
 echo   openzt.bat console --oneshot "add_cash(10000)" Add cash via oneshot command
+echo   openzt.bat run --wait                Build debug, launch game, wait for exit
+echo   openzt.bat run --release --wait      Build release, launch game, wait for exit
+echo   openzt.bat run --loader --wait       Build + run via loader, wait for exit
 echo.
 GOTO :EOF
