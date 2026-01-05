@@ -118,22 +118,52 @@ mod zoo_init {
             Ok(_) => {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
 
-                // Set up file appender - truncate file on startup
-                let log_file = std::fs::File::create("openzt.log")
-                    .expect("Failed to create openzt.log");
-                let (non_blocking_file, guard) = tracing_appender::non_blocking(log_file);
+                // Load config to determine logging settings
+                let config = resource_manager::mod_config::load_openzt_config();
 
-                // Set up layered logging to both console and file
+                // Convert log level from config to LevelFilter
+                let log_level = config.logging.level.to_level_filter();
+
+                // Set up layered logging
                 use tracing_subscriber::layer::SubscriberExt;
                 use tracing_subscriber::util::SubscriberInitExt;
+                use tracing_subscriber::Layer;
 
-                tracing_subscriber::registry()
-                    .with(tracing_subscriber::fmt::layer().with_ansi(enable_ansi).with_writer(std::io::stdout))
-                    .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(non_blocking_file))
-                    .init();
+                // Always log to console
+                let console_layer = tracing_subscriber::fmt::layer()
+                    .with_ansi(enable_ansi)
+                    .with_writer(std::io::stdout)
+                    .with_filter(log_level);
 
-                // Leak the guard to keep the worker thread alive for the DLL lifetime
-                Box::leak(Box::new(guard));
+                // Conditionally add file logging based on config
+                if config.logging.log_to_file {
+                    // Set up file appender - truncate file on startup
+                    let log_file = std::fs::File::create("openzt.log")
+                        .expect("Failed to create openzt.log");
+                    let (non_blocking_file, guard) = tracing_appender::non_blocking(log_file);
+
+                    let file_layer = tracing_subscriber::fmt::layer()
+                        .with_ansi(false)
+                        .with_writer(non_blocking_file)
+                        .with_filter(log_level);
+
+                    tracing_subscriber::registry()
+                        .with(console_layer)
+                        .with(file_layer)
+                        .init();
+
+                    // Leak the guard to keep the worker thread alive for the DLL lifetime
+                    Box::leak(Box::new(guard));
+
+                    info!("Logging initialized: level={:?}, log_to_file=true", config.logging.level);
+                } else {
+                    // File logging disabled - only log to console
+                    tracing_subscriber::registry()
+                        .with(console_layer)
+                        .init();
+
+                    info!("Logging initialized: level={:?}, log_to_file=false", config.logging.level);
+                }
             },
             Err(e) => {
                 info!("Failed to initialize console: {}", e);
