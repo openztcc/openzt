@@ -89,7 +89,14 @@ impl LazyResourceMap {
         let file_type = match ZTFileType::try_from(Path::new(&file_name)) {
             Ok(file_type) => file_type,
             Err(e) => {
-                error!("Error inserting file: {} error: {}", file_name, e);
+                // Skip logging errors for known vanilla Zoo Tycoon files with unsupported types
+                let known_vanilla_files = [
+                    "objects/ddogstnd/fancyblg_icons.zip",
+                    "bfupdateres.h"
+                ];
+                if !known_vanilla_files.iter().any(|&f| file_name.eq_ignore_ascii_case(f)) {
+                    error!("Error inserting file: {} error: {}", file_name, e);
+                }
                 return;
             }
         };
