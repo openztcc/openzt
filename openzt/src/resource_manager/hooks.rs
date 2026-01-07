@@ -26,7 +26,7 @@ mod zoo_resource_mgr {
             lazyresourcemap::{check_file, get_file_ptr},
             legacy_loading::{load_resources, OPENZT_DIR0},
             openzt_mods::{get_location_or_habitat_by_id, discover_mods},
-            mod_config::{load_openzt_config, save_openzt_config},
+            mod_config::{get_openzt_config, save_openzt_config},
             dependency_resolver::DependencyResolver,
             validation::{validate_load_order, log_validation_result},
         },
@@ -73,6 +73,7 @@ mod zoo_resource_mgr {
             let mut bfrp = unsafe { Box::from_raw(ptr as *mut BFResourcePtr) };
 
             if bfrp.num_refs < 100 {
+                debug!("Resource '{}' ref have been lost {}", file_name_string, 100 - bfrp.num_refs);
                 bfrp.num_refs = 100;
             }
 
@@ -132,7 +133,7 @@ mod zoo_resource_mgr {
             info!("Loading resources from: {:?}", paths);
 
             // Load OpenZT configuration
-            let mut config = load_openzt_config();
+            let mut config = get_openzt_config();
 
             // Discover all mods
             info!("Discovering mods...");

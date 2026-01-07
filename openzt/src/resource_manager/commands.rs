@@ -3,7 +3,7 @@ use crate::{
     lua_fn,
     resource_manager::{
         bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory},
-        lazyresourcemap::get_file_names,
+        lazyresourcemap::{decrement_ref, get_cache_stats, get_file_names, get_ref_count, increment_ref, unload_all_resources},
         openzt_mods::{get_location_habitat_ids, get_mod_ids},
     },
     string_registry::get_string_from_registry,
@@ -66,6 +66,46 @@ pub fn init_commands() {
         match command_list_openzt_locations_habitats(vec![]) {
             Ok(result) => Ok((Some(result), None::<String>)),
             Err(e) => Ok((None::<String>, Some(e.to_string())))
+        }
+    });
+
+    // unload_resources() - no args
+    lua_fn!("unload_resources", "Unload all loaded resources to free memory", "unload_resources()", || {
+        unload_all_resources();
+        Ok((Some("All resources unloaded".to_string()), None::<String>))
+    });
+
+    // cache_stats() - no args
+    lua_fn!("cache_stats", "Show resource cache statistics", "cache_stats()", || {
+        let stats = get_cache_stats();
+        Ok((Some(format!(
+            "Loaded: {} resources\nMemory: {} MB ({} bytes)",
+            stats.loaded_resources, stats.total_memory_mb, stats.total_memory_bytes
+        )), None::<String>))
+    });
+
+    // increment_ref(file_name) - string arg
+    lua_fn!("increment_ref", "Increment reference count for a resource", "increment_ref(file_name)", |file_name: String| {
+        if increment_ref(&file_name) {
+            Ok((Some(format!("Incremented ref count for: {}", file_name)), None::<String>))
+        } else {
+            Ok((None::<String>, Some(format!("Resource not found: {}", file_name))))
+        }
+    });
+
+    // decrement_ref(file_name) - string arg
+    lua_fn!("decrement_ref", "Decrement reference count for a resource", "decrement_ref(file_name)", |file_name: String| {
+        match decrement_ref(&file_name) {
+            Some(new_count) => Ok((Some(format!("Decremented ref count for: {} (new count: {})", file_name, new_count)), None::<String>)),
+            None => Ok((None::<String>, Some(format!("Resource not found: {}", file_name)))),
+        }
+    });
+
+    // get_ref_count(file_name) - string arg
+    lua_fn!("get_ref_count", "Get reference count for a resource", "get_ref_count(file_name)", |file_name: String| {
+        match get_ref_count(&file_name) {
+            Some(count) => Ok((Some(format!("Ref count for {}: {}", file_name, count)), None::<String>)),
+            None => Ok((None::<String>, Some(format!("Resource not found: {}", file_name)))),
         }
     });
 }
