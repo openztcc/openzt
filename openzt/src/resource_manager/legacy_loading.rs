@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io,
     path::{Path, PathBuf},
     str,
@@ -56,7 +57,7 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     resources
 }
 
-pub fn load_resources(paths: Vec<String>, mod_order: &[String]) {
+pub fn load_resources(paths: Vec<String>, mod_order: &[String], discovered_mods: &HashMap<String, (String, mods::Meta)>) {
     use std::time::Instant;
     use std::collections::HashMap;
 
@@ -64,19 +65,45 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String]) {
     let mut resource_count = 0;
 
     // Build a mapping from mod_id to .ztd file path for ordered loading
+    // Also categorize mods into legacy vs OpenZT (including mixed/legacy ztd_type)
     let mut mod_to_path: HashMap<String, PathBuf> = HashMap::new();
     let mut legacy_resources: Vec<PathBuf> = Vec::new();
 
-    // Discover all .ztd files and categorize them
     paths.iter().rev().for_each(|path| {
         let resources = get_ztd_resources(Path::new(path), false);
         resources.iter().for_each(|resource| {
-            // Try to read mod_id from meta.toml
-            if let Ok(Some(mod_id)) = get_mod_id_from_archive(resource) {
-                // Only add if not already present (earlier paths take precedence)
-                mod_to_path.entry(mod_id).or_insert_with(|| resource.clone());
+            let file_name = resource.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+
+            // Check if this is an OpenZT mod by looking up in discovered_mods
+            let is_openzt_mod = discovered_mods.values().any(|(archive_name, _)| {
+                archive_name == file_name
+            });
+
+            if is_openzt_mod {
+                // OpenZT mod - find the mod_id and check ztd_type
+                for (mod_id, (archive_name, meta)) in discovered_mods.iter() {
+                    if archive_name == file_name {
+                        let ztd_type = meta.ztd_type();
+                        match ztd_type {
+                            mods::ZtdType::Combined => {
+                                // Combined mods: handle_ztd() processes both OpenZT AND legacy in a single call
+                                // Only add to mod_to_path for ordered loading
+                                mod_to_path.entry(mod_id.clone()).or_insert_with(|| resource.clone());
+                            }
+                            mods::ZtdType::Legacy => {
+                                // Legacy-only ztd_type - treat as pure legacy
+                                legacy_resources.push(resource.clone());
+                            }
+                            mods::ZtdType::Openzt => {
+                                // Pure OpenZT mod - add to ordered loading only
+                                mod_to_path.entry(mod_id.clone()).or_insert_with(|| resource.clone());
+                            }
+                        }
+                        break;
+                    }
+                }
             } else {
-                // Legacy mod (no meta.toml)
+                // True legacy mod (no meta.toml)
                 legacy_resources.push(resource.clone());
             }
         });
@@ -166,32 +193,6 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String]) {
 
     let elapsed = now.elapsed();
     info!("Extra handling took an extra: {:.2?}", elapsed);
-}
-
-/// Get mod_id from a .ztd archive by reading meta.toml
-///
-/// Returns None if no meta.toml exists (legacy mod)
-fn get_mod_id_from_archive(archive_path: &Path) -> anyhow::Result<Option<String>> {
-    let mut archive = ZtdArchive::new(archive_path)?;
-
-    // Check if meta.toml exists
-    let Ok(meta_file) = archive.by_name("meta.toml") else {
-        // No meta.toml = legacy mod
-        return Ok(None);
-    };
-
-    // Parse just enough to get mod_id
-    use serde::Deserialize;
-
-    #[derive(Deserialize)]
-    struct MinimalMeta {
-        mod_id: String,
-    }
-
-    let meta_str = String::try_from(meta_file)?;
-    let meta: MinimalMeta = toml::from_str(&meta_str)?;
-
-    Ok(Some(meta.mod_id))
 }
 
 fn handle_ztd(resource: &Path) -> anyhow::Result<i32> {

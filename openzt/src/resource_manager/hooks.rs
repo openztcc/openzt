@@ -11,6 +11,7 @@ pub fn init_hooks() {
 mod zoo_resource_mgr {
     use std::ffi::CString;
     use std::time::Instant;
+    use std::collections::HashMap;
 
     use tracing::{info, warn, error, debug};
 
@@ -20,6 +21,7 @@ mod zoo_resource_mgr {
     use openzt_detour::gen::ztui_general::GET_INFO_IMAGE_NAME;
 
     use crate::{
+        mods,
         resource_manager::{
             bfresourcemgr::BFResourcePtr,
             lazyresourcemap::{check_file, get_file_ptr},
@@ -140,7 +142,12 @@ mod zoo_resource_mgr {
             info!("Discovered {} mod(s)", discovered_mods.len());
 
             // Resolve dependencies and determine load order
-            let resolver = DependencyResolver::new(discovered_mods.clone());
+            // Extract just the Meta structs for the resolver (convert from tuple)
+            let resolver_mods: HashMap<String, mods::Meta> = discovered_mods
+                .iter()
+                .map(|(id, (_, meta))| (id.clone(), meta.clone()))
+                .collect();
+            let resolver = DependencyResolver::new(resolver_mods.clone());
             let resolution_result = resolver.resolve_order(
                 &config.mod_loading.order,
                 &config.mod_loading.disabled,
@@ -174,7 +181,7 @@ mod zoo_resource_mgr {
 
             // Validate load order if configured
             if config.mod_loading.warn_on_conflicts {
-                let validation_result = validate_load_order(&resolution_result.order, &discovered_mods);
+                let validation_result = validate_load_order(&resolution_result.order, &resolver_mods);
                 log_validation_result(&validation_result);
             }
 
@@ -201,7 +208,7 @@ mod zoo_resource_mgr {
             }
 
             // Load resources in resolved order (excluding disabled mods)
-            load_resources(paths, &enabled_order);
+            load_resources(paths, &enabled_order, &discovered_mods);
             info!("Resources loaded");
         }
         return_value

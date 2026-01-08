@@ -44,9 +44,9 @@ pub fn get_mod_ids() -> Vec<String> {
 
 /// Discover all OpenZT mods from .ztd archives without loading them
 ///
-/// Returns a map of mod_id -> Meta for all mods found in the resource paths
+/// Returns a map of mod_id -> (archive_name, Meta) for all mods found in the resource paths
 /// This is used for dependency resolution before actual mod loading
-pub fn discover_mods(paths: &[String]) -> HashMap<String, mods::Meta> {
+pub fn discover_mods(paths: &[String]) -> HashMap<String, (String, mods::Meta)> {
     use std::path::PathBuf;
 
     let mut discovered = HashMap::new();
@@ -76,6 +76,10 @@ pub fn discover_mods(paths: &[String]) -> HashMap<String, mods::Meta> {
             match read_meta_from_archive(&file_path) {
                 Ok(Some(meta)) => {
                     let mod_id = meta.mod_id().to_string();
+                    let archive_name = file_path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
 
                     // Skip if we already found this mod (earlier paths take precedence)
                     if !discovered.contains_key(&mod_id) {
@@ -88,7 +92,7 @@ pub fn discover_mods(paths: &[String]) -> HashMap<String, mods::Meta> {
                         let _guard = span.enter();
 
                         info!("Discovered mod: {} ({})", meta.name(), mod_id);
-                        discovered.insert(mod_id, meta);
+                        discovered.insert(mod_id, (archive_name, meta));
                     }
                 }
                 Ok(None) => {
