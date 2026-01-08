@@ -18,7 +18,6 @@ mod zoo_resource_mgr {
     use openzt_detour::gen::bfresourcemgr::{CONSTRUCTOR, ADD_PATH};
     use openzt_detour::gen::bfresource::{ATTEMPT, PREPARE};
     use openzt_detour::gen::ztui_general::GET_INFO_IMAGE_NAME;
-    use openzt_detour::gen::standalone::DIR_SEARCH;
 
     use crate::{
         resource_manager::{
@@ -30,7 +29,7 @@ mod zoo_resource_mgr {
             dependency_resolver::DependencyResolver,
             validation::{validate_load_order, log_validation_result},
         },
-        util::{get_ini_path, get_string_from_memory, save_to_memory, get_from_memory},
+        util::{get_ini_path, get_string_from_memory, save_to_memory},
     };
 
     ///When Zoo Tycoon tries to load a resource we check if it's a resource we've already loaded and return that instead

@@ -197,12 +197,17 @@ fn get_mod_id_from_archive(archive_path: &Path) -> anyhow::Result<Option<String>
 fn handle_ztd(resource: &Path) -> anyhow::Result<i32> {
     let mut load_count = 0;
     let mut zip = ZtdArchive::new(resource)?;
+    let archive_name = zip.name().to_string();
 
     let ztd_type = load_open_zt_mod(&mut zip, resource)?;
 
     if ztd_type == mods::ZtdType::Openzt {
         return Ok(0);
     }
+
+    // Add span for legacy loading - provides archive context for any errors
+    let span = tracing::info_span!("handle_ztd", archive_name = %archive_name);
+    let _guard = span.enter();
 
     let archive = Arc::new(Mutex::new(zip));
 

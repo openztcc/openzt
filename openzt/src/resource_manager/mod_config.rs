@@ -41,10 +41,12 @@ pub struct ModLoadingConfig {
 /// Log level setting for OpenZT logging
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum LogLevel {
     Trace,
     Debug,
     Info,
+    #[default]
     Warn,
     Error,
 }
@@ -62,11 +64,6 @@ impl LogLevel {
     }
 }
 
-impl Default for LogLevel {
-    fn default() -> Self {
-        LogLevel::Warn
-    }
-}
 
 /// Logging configuration section
 #[derive(Deserialize, Serialize, Debug, Clone)]
