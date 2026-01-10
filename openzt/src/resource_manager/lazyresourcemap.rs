@@ -324,7 +324,7 @@ impl LazyResourceMap {
 
     /// Unload all loaded resources
     /// Only unloads resources with ref_count == 0
-    fn unload_all_loaded() {
+    fn unload_all_loaded() -> UnloadResult {
         let mut binding = LAZY_RESOURCE_MAP.lock().unwrap();
         let keys_to_unload: Vec<String> = binding.iter()
             .filter(|(_, r)| {
@@ -359,6 +359,8 @@ impl LazyResourceMap {
             total_size,
             total_size / (1024 * 1024)
         );
+
+        UnloadResult { count, total_size }
     }
 
     /// Automatic unloading based on memory limits and stale timeout
@@ -524,10 +526,18 @@ pub struct CacheStats {
     pub total_memory_mb: u64,
 }
 
+/// Result of unloading resources
+pub struct UnloadResult {
+    pub count: usize,
+    pub total_size: u64,
+}
+
 /// Unload all loaded resources, freeing memory
-pub fn unload_all_resources() {
+///
+/// Returns the number of resources unloaded and the total size freed in bytes.
+pub fn unload_all_resources() -> UnloadResult {
     info!("Unloading all loaded resources");
-    LazyResourceMap::unload_all_loaded();
+    LazyResourceMap::unload_all_loaded()
 }
 
 /// Get current cache statistics
@@ -619,7 +629,7 @@ pub fn get_ref_count(file_name: &str) -> Option<u32> {
 /// game's resource management via detours/hooks.
 pub fn deref_resource(file_name: &str) -> bool {
     if let Some(new_count) = decrement_ref(file_name) {
-        info!("Dereferenced resource: {} (new count: {})", file_name, new_count);
+        trace!("Dereferenced resource: {} (new count: {})", file_name, new_count);
 
         // If ref count reached 0, trigger a check to see if we should unload
         if new_count == 0 {

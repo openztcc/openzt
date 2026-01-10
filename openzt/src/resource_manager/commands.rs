@@ -3,7 +3,7 @@ use crate::{
     lua_fn,
     resource_manager::{
         bfresourcemgr::{read_bf_resource_dir_contents_from_memory, read_bf_resource_mgr_from_memory},
-        lazyresourcemap::{decrement_ref, get_cache_stats, get_file_names, get_ref_count, increment_ref, unload_all_resources},
+        lazyresourcemap::{decrement_ref, get_cache_stats, get_file_names, get_ref_count, increment_ref, unload_all_resources, UnloadResult},
         openzt_mods::{get_location_habitat_ids, get_mod_ids},
     },
     string_registry::get_string_from_registry,
@@ -71,8 +71,13 @@ pub fn init_commands() {
 
     // unload_resources() - no args
     lua_fn!("unload_resources", "Unload all loaded resources to free memory", "unload_resources()", || {
-        unload_all_resources();
-        Ok((Some("All resources unloaded".to_string()), None::<String>))
+        let UnloadResult { count, total_size } = unload_all_resources();
+        Ok((Some(format!(
+            "Unloaded {} resources (freed {} bytes, {} MB)",
+            count,
+            total_size,
+            total_size / (1024 * 1024)
+        )), None::<String>))
     });
 
     // cache_stats() - no args
