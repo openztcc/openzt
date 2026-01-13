@@ -16,11 +16,12 @@ use zip::read::ZipFile;
 use super::ztd::ZtdArchive;
 use crate::{
     animation::Animation,
+    encoding_utils::decode_game_text,
     mods,
     resource_manager::{
         handlers::{get_handlers, RunStage},
         lazyresourcemap::{add_lazy, get_file, get_file_names, get_num_resources},
-        openzt_mods::{get_num_mod_ids, get_mod_ids, load_open_zt_mod},
+        openzt_mods::{get_num_mod_ids, get_mod_ids, legacy_attributes::{add_legacy_entity, LegacyEntityAttributes, LegacyEntityType, SubtypeAttributes}, load_open_zt_mod},
         ztfile::{ZTFile, ZTFileType},
     },
 };
@@ -236,6 +237,11 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
             return Vec::new();
         }
 
+        // Extract entity attributes from .ai files for supported types
+        if let Some(entity_type) = LegacyEntityType::from_legacy_cfg_type(&legacy_cfg.cfg_type) {
+            extract_legacy_entities(&ini, entity_type);
+        }
+
         match legacy_cfg.cfg_type {
             LegacyCfgType::Ambient => parse_simple_cfg(&ini, "ambient"),
             LegacyCfgType::Animal => parse_simple_cfg(&ini, "animals"), //parse_subtypes_cfg(&ini, "animals"),
@@ -290,8 +296,121 @@ fn parse_simple_cfg(file: &Ini, section_name: &str) -> Vec<String> {
     results
 }
 
+/// Extract entity attributes by loading each .ai file listed in the .cfg
+/// Also extracts subtype information from the .cfg file itself
+fn extract_legacy_entities(cfg: &Ini, entity_type: LegacyEntityType) {
+    let section_name = entity_type.section_name();
+
+    // Get the INI map to avoid temporary value issues
+    let Some(map) = cfg.get_map() else {
+        return;
+    };
+
+    // Get the section from the INI file
+    let Some(section) = map.get(section_name) else {
+        return;
+    };
+
+    // For scenery, we need to check multiple sections
+    let mut sections_to_check = vec![section_name];
+    if entity_type == LegacyEntityType::Scenery {
+        sections_to_check.push("foliage");
+        sections_to_check.push("other");
+    }
+
+    for section_name in sections_to_check {
+        let Some(section) = map.get(section_name) else {
+            continue;
+        };
+
+        // First, scan for any subtype definitions in the .cfg
+        // Format: [entityname/subtypes]
+        let mut entity_subtypes: HashMap<String, Vec<String>> = HashMap::new();
+
+        for (cfg_section_name, _) in map.iter() {
+            if let Some(entity_name) = cfg_section_name.strip_suffix("/subtypes") {
+                info!("Found subtype section for entity: {}", entity_name);
+                if let Some(subtype_section) = map.get(cfg_section_name) {
+                    let subtypes = subtype_section.keys().cloned().collect::<Vec<String>>();
+                    if !subtypes.is_empty() {
+                        entity_subtypes.insert(entity_name.to_string(), subtypes);
+                    }
+                }
+            }
+        }
+
+        // Now process the main section entries
+        for (entity_name, ai_file_paths) in section.iter() {
+            if let Some(ai_paths_vec) = ai_file_paths {
+                if let Some(ai_path) = ai_paths_vec.first() {
+                    let ai_path = ai_path.trim().trim_matches('"');
+
+                    // Load and parse the .ai file
+                    if let Some((_archive, ai_file)) = get_file(ai_path) {
+                        let mut ai_ini = Ini::new_cs();
+                        ai_ini.set_comment_symbols(&[';', '#', ':']);
+                        let ai_content = decode_game_text(&ai_file);
+
+                        if ai_ini.read(ai_content).is_ok() {
+                            match LegacyEntityAttributes::parse_from_ini(
+                                entity_name.clone(), &ai_ini, entity_type
+                            ) {
+                                Ok(mut attrs) => {
+                                    // If we have subtype information from the .cfg, validate/merge it
+                                    if let Some(subtypes) = entity_subtypes.get(entity_name) {
+                                        // Ensure all declared subtypes exist in the attributes
+                                        for subtype in subtypes {
+                                            if !attrs.subtype_attributes.contains_key(subtype) {
+                                                // Add empty entry for this subtype
+                                                attrs.subtype_attributes.insert(
+                                                    subtype.clone(),
+                                                    SubtypeAttributes {
+                                                        subtype: subtype.clone(),
+                                                        name_id: None,
+                                                    }
+                                                );
+                                            }
+                                        }
+                                    }
+
+                                    // Special case: guests have hardcoded subtypes since no .cfg sections
+                                    if entity_type == LegacyEntityType::Guest && attrs.subtype_attributes.is_empty() {
+                                        let guest_subtypes = vec!["man", "woman", "boy", "girl"];
+                                        for subtype in guest_subtypes {
+                                            attrs.subtype_attributes.insert(
+                                                subtype.to_string(),
+                                                SubtypeAttributes {
+                                                    subtype: subtype.to_string(),
+                                                    name_id: None,
+                                                }
+                                            );
+                                        }
+                                    }
+
+                                    if let Err(e) = add_legacy_entity(entity_type, entity_name.clone(), attrs) {
+                                        warn!(
+                                            "Failed to register legacy entity '{}': {}",
+                                            entity_name, e
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to parse attributes from '{}': {}",
+                                        ai_path, e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
-enum LegacyCfgType {
+pub enum LegacyCfgType {
     Ambient,
     Animal,
     Building,

@@ -31,7 +31,7 @@ use crate::{
     },
     resource_manager::{
         lazyresourcemap::{add_ztfile, check_file, get_file, remove_resource},
-        openzt_mods::{get_mod_ids, habitats_locations::{get_habitat_id, get_location_id}},
+        openzt_mods::{get_mod_ids, habitats_locations::{get_habitat_id, get_location_id}, legacy_attributes::{get_legacy_attribute_with_subtype, LegacyEntityType}},
         ztfile::{modify_ztfile_as_animation, ZTFile, ZTFileType},
     },
     string_registry::get_string_from_registry,
@@ -47,6 +47,7 @@ enum VariableType {
     Habitat,
     Location,
     String,
+    Legacy,  // NEW: Legacy Zoo Tycoon entity attributes
 }
 
 /// Parsed variable reference from {variable} syntax
@@ -55,6 +56,16 @@ struct ParsedVariable {
     var_type: VariableType,
     mod_id: Option<String>,  // None = current mod
     identifier: String,
+    legacy_parts: Option<LegacyVariableParts>,  // NEW: For legacy entity attributes
+}
+
+/// Parsed parts for legacy entity variable references
+#[derive(Debug)]
+struct LegacyVariableParts {
+    entity_type: LegacyEntityType,
+    entity_name: String,
+    subtype: Option<String>,  // NEW: Optional subtype
+    attribute: String,
 }
 
 /// Context for variable substitution during patch application
@@ -92,25 +103,89 @@ fn parse_variable(var_str: &str) -> anyhow::Result<ParsedVariable> {
                 var_type,
                 mod_id: None,
                 identifier: parts[1].to_string(),
+                legacy_parts: None,
             })
         }
         3 => {
-            // Format: {mod.type.identifier} - cross-mod reference
-            let var_type = match parts[1] {
-                "habitat" => VariableType::Habitat,
-                "location" => VariableType::Location,
-                "string" => VariableType::String,
-                _ => anyhow::bail!("Invalid variable type '{}': expected 'habitat', 'location', or 'string'", parts[1]),
-            };
+            // Check for legacy variable syntax: {legacy.type.name} (default subtype)
+            if parts[0] == "legacy" {
+                let entity_type: LegacyEntityType = parts[1].parse()?;
+                Ok(ParsedVariable {
+                    var_type: VariableType::Legacy,
+                    mod_id: None,
+                    identifier: parts[2].to_string(),
+                    legacy_parts: Some(LegacyVariableParts {
+                        entity_type,
+                        entity_name: parts[2].to_string(),
+                        subtype: None,  // Will use default
+                        attribute: "name_id".to_string(),
+                    }),
+                })
+            } else {
+                // Cross-mod reference: {mod.type.identifier}
+                let var_type = match parts[1] {
+                    "habitat" => VariableType::Habitat,
+                    "location" => VariableType::Location,
+                    "string" => VariableType::String,
+                    _ => anyhow::bail!("Invalid variable type '{}': expected 'habitat', 'location', or 'string'", parts[1]),
+                };
 
-            Ok(ParsedVariable {
-                var_type,
-                mod_id: Some(parts[0].to_string()),
-                identifier: parts[2].to_string(),
-            })
+                Ok(ParsedVariable {
+                    var_type,
+                    mod_id: Some(parts[0].to_string()),
+                    identifier: parts[2].to_string(),
+                    legacy_parts: None,
+                })
+            }
+        }
+        4 => {
+            // NEW: Format: {legacy.type.name.attribute} - explicit attribute, default subtype
+            // OR: {legacy.type.name.subtype} - no attribute, invalid
+            if parts[0] == "legacy" {
+                let entity_type: LegacyEntityType = parts[1].parse()?;
+
+                // Check if parts[3] is a known attribute or a subtype
+                if parts[3] == "name_id" {
+                    Ok(ParsedVariable {
+                        var_type: VariableType::Legacy,
+                        mod_id: None,
+                        identifier: parts[2].to_string(),
+                        legacy_parts: Some(LegacyVariableParts {
+                            entity_type,
+                            entity_name: parts[2].to_string(),
+                            subtype: None,  // Use default
+                            attribute: parts[3].to_string(),
+                        }),
+                    })
+                } else {
+                    // Assume it's a subtype - but we need 5 parts for subtype+attribute
+                    anyhow::bail!("Invalid variable syntax '{}': expected {{legacy.type.name.subtype.attribute}} for subtype references", var_str)
+                }
+            } else {
+                anyhow::bail!("Invalid variable syntax")
+            }
+        }
+        5 => {
+            // NEW: Format: {legacy.type.name.subtype.attribute} - explicit subtype
+            if parts[0] == "legacy" {
+                let entity_type: LegacyEntityType = parts[1].parse()?;
+                Ok(ParsedVariable {
+                    var_type: VariableType::Legacy,
+                    mod_id: None,
+                    identifier: parts[2].to_string(),
+                    legacy_parts: Some(LegacyVariableParts {
+                        entity_type,
+                        entity_name: parts[2].to_string(),
+                        subtype: Some(parts[3].to_string()),
+                        attribute: parts[4].to_string(),
+                    }),
+                })
+            } else {
+                anyhow::bail!("Invalid variable syntax")
+            }
         }
         _ => {
-            anyhow::bail!("Invalid variable syntax '{}': expected {{type.name}} or {{mod.type.name}}", var_str)
+            anyhow::bail!("Invalid variable syntax '{}': expected {{type.name}}, {{mod.type.name}}, {{legacy.type.name.attribute}}, or {{legacy.type.name.subtype.attribute}}", var_str)
         }
     }
 }
@@ -172,6 +247,36 @@ fn resolve_variable(var: &ParsedVariable, context: &SubstitutionContext) -> anyh
 
             get_string_from_registry(string_id)
                 .map_err(|_| anyhow::anyhow!("String ID {} not found in registry", string_id))
+        }
+        VariableType::Legacy => {
+            // NEW: Resolve legacy entity attribute
+            let parts = var.legacy_parts.as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Legacy variable missing parts"))?;
+
+            // Only name_id is supported in initial implementation
+            if parts.attribute != "name_id" {
+                anyhow::bail!(
+                    "Unsupported attribute '{}'. Only 'name_id' is currently supported.",
+                    parts.attribute
+                );
+            }
+
+            // Determine which subtype to use
+            let subtype_to_use = if let Some(ref st) = parts.subtype {
+                Some(st.as_str())
+            } else {
+                // Use default subtype for this entity type
+                parts.entity_type.default_subtype()
+            };
+
+            get_legacy_attribute_with_subtype(
+                parts.entity_type,
+                &parts.entity_name,
+                subtype_to_use,
+                &parts.attribute
+            ).map_err(|e| anyhow::anyhow!("{} (type: {}, entity: {}, subtype: {:?})",
+                e, parts.entity_type.as_str(), parts.entity_name,
+                subtype_to_use))
         }
     }
 }
