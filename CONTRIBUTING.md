@@ -1,150 +1,372 @@
-# Contributing
+# Contributing to OpenZT
+
+We welcome contributions from everyone! This document provides guidance for developing OpenZT.
+
+## Development Environment
+
+### Prerequisites
+- Rust nightly toolchain (i686-pc-windows-msvc)
+- Zoo Tycoon (2001) installed
+- Windows 32-bit development environment
+
+### Quick Setup
+
+```bash
+# Clone repository
+git clone https://github.com/openztcc/openzt.git
+cd openzt
+
+# Build release DLL
+./openzt.bat build --release
+
+# Run with game launch
+./openzt.bat run --release
+```
 
 ## Running OpenZT
 
-There are two ways to run OpenZT. The first is the rename the OpenZT dll to something like `lang301-openzt.dll` and stick it in the same directory as zoo.exe and then run Zoo Tycoon as normal.
+Build and run with `openzt.bat`:
 
-The second is to use [OpenZT Loader](https://github.com/openztcc/openzt-loader) which injects and starts Zoo Tycoon for you. With OpenZT and OpenZT-loader in the same parent directory you can run either `run-via-loader.bat` or `run-via-loader-release.bat` to start OpenZT via the loader. You can also use `run-via-loader-pause.bat` to start up OpenZT in a suspended state letting you attach a debugger and then resume.
+```bash
+# Standard build and run
+./openzt.bat run --release
 
-This second method technically loads the dll earlier than the above, so should be used if a hook is not working as expected with the above first method. Currently all OpenZT features work regardless of method but this may change in the future.
+# Wait for game to exit
+./openzt.bat run --release --wait
 
-### Running OpenZT-console
+# Build only
+./openzt.bat build --release
+```
 
-OpenZT-console does not need to be run from the same parent directory as it connects via a socket, simple run `cargo run` from the openzt-console directory after openzt has been launched. Openzt-console will work whether you have used openzt-loader or manually installed openzt.
+This copies the DLL to your Zoo Tycoon directory and launches the game.
 
-## Assets
+### Lua Console
 
-Do not commit any assets from Zoo Tycoon, this includes config files and decompiled code. OpenZT is a complete reimplementation and does not use any code or assets from the original.
+The console connects via TCP socket (port 8080) and doesn't need to be in the same directory:
 
-Assets from mods (that are original creations and not modifications of Zoo Tycoon assets or assets from other games, including models from other games rendered into sprites) may be added for testing or use in a OpenZT feature with permission from the creator, credit to said creator must also be given (for now a CREDIT.md file should be created, once custom OpenZT credits are created they should be mentioned there too).
+```bash
+# Open interactive console
+./openzt.bat console
 
-## Project layout and import modules
+# Run single command and exit
+./openzt.bat console --oneshot "help()"
+```
 
-### lib.rs
-This is the main file that handles initialising other modules and features flags.
+See [CLAUDE.md](CLAUDE.md) for a complete list of console commands.
 
-### console.rs
-Handles sending and receiving data to/from [openzt-console](https://github.com/openztcc/openzt-console), other modules can register commands via `add_to_command_register(command_name: String, command_callback: CommandCallback)` where CommandCallback looks like `type CommandCallback = fn(args: Vec<&str>) -> Result<String, &'static str>;`
+## Important Rules
 
-### resource_mgr
-Handles walking through the directories listed in `zoo.ini` and extracting all files. You can register handler functions based on file prefixes and suffixes via `add_handler(handler: Handler)` and `Handler::new(matcher_prefix: Option<String>, matcher_suffix: Option<String>, handler: HandlerFunction)` where the HandlerFunction is `pub type HandlerFunction = fn(&PathBuf, &mut ZipFile) -> ();`
-You can use a handler and the `add_txt_file_to_map_with_path_override` and `add_raw_bytes_to_map_with_path_override` functions to duplicate files into new resource paths to implement custom functionality (the expansions module uses this techniques to resize the expansion dropdown when the game starts up without resizing the dropdown for other UI elements). 
+### Assets Policy
 
-In order to modify any files that Zoo Tycoon reads you can use the `modify_ztfile_as_ini` or `modify_ztfile_as_animation` functions to programaitically modify the files before Zoo Tycoon reads them. By default all ai, ani, cfg, lyt, scn, uca, ucs and ucb files are already loaded in, to modify animations you'll first need to add a handler (via `add_handler` mentioned above) and add them to the Resource map which OpenZT attempts to read from before letting Zoo Tycoon's default REsourceManager handle things.
+**NEVER commit**:
+- Zoo Tycoon assets (models, textures, sounds, etc.)
+- Zoo Tycoon config files (zoo.ini, ai/*.ai, etc.)
+- Decompiled or disassembled game code
 
-### string_registry.rs
-Lets you add strings that will be read by Zoo Tycoon's BFApp::loadString, currently does not let you override existing strings
+OpenZT is a **clean-room reimplementation**. We do not use any original game code or assets.
+
+**Mod assets** may be committed if:
+- They are original creations (not derived from ZT or other games)
+- You have permission from the creator
+- Credit is given in a `CREDIT.md` file
+
+### Code Style
+
+- Use `./openzt.bat clippy` to check for linter warnings
+- Follow existing Rust naming conventions
+- Add comments for complex game memory structures
+
+## Architecture
+
+### Entry Point: lib.rs
+
+The `lib.rs` file handles initialization and feature flags:
+
 ```rust
-pub fn add_string_to_registry(string_val: String) -> u32 { ... }
-pub fn get_string_from_registry(string_id: u32) -> Result<String, &'static str> { ... }
+#[cfg(target_os = "windows")]
+pub fn init() {
+    #[cfg(feature = "integration-tests")]
+    {
+        integration_tests::init();
+        return;
+    }
+
+    unsafe {
+        zoo_init::init_detours().expect("Failed to initialize detours");
+    }
+}
+```
+
+### Module Pattern
+
+Each feature module has an `init()` function called from `lib.rs`:
+
+```rust
+// In lib.rs
+if cfg!(feature = "command-console") {
+    command_console::init();
+}
+resource_manager::init();
+expansions::init();
+// ... etc
+```
+
+### Adding a New Module
+
+1. Create `src/my_module.rs`
+2. Add `mod my_module;` to `lib.rs`
+3. Create an `init()` function
+4. Call it behind a feature flag if needed
+
+For complex modules, use a subdirectory:
+
+```
+src/
+├── my_module/
+│   ├── mod.rs
+│   ├── submodule_a.rs
+│   └── submodule_b.rs
 ```
 
 ## Patterns
 
-### structs
+### Structs: `#[repr(C)]`
 
-All structs need to be prefixed with `#[repr(C)]`, this prevents Rust from optimizing them.
+All structs that mirror game memory must use `#[repr(C)]`:
 
 ```rust
 #[derive(Debug)]
 #[repr(C)]
-pub struct UIElement {
+pub struct GameStruct {
     vftable: u32,
-    unknown_u32_1: u32,
-    unknown_u32_2: u32,
-    unknown_string_1: ZTString,
-    string_content: ZTString,
-    element_name: ZTString,
-    // 25 unknown u32s
-    padding: [u8; 76],
-    state: UIState,
+    unknown_field: u32,
+    string_field: ZTString,
+    // ...
 }
 ```
 
-You can then use the generic functions `get_from_memory` and `save_to_memory` to read/write the structs to/from Zoo Tycoon.
-`#[derive(Debug)]` is also useful as it allows you to print out the struct without defining a custom formatter.
+This prevents Rust from reordering fields for optimization, ensuring memory layout compatibility.
 
-### modules
-Features are split up into modules, to add a module first create a file `my_module.rs`, add the line `mod my_module` to `lib.rs`. The module can now be used by other modules. To initiate any detours or other structures a init function should be created and called behind a feature flag in `lib.rs` as below 
+### Detours
 
-```rust
-if cfg!(feature = "bugfix") {
-    info!("Feature 'bugfix' enabled");
-    bugfix::init();
-}
-```
-
-More complex modules can be split into multiple submodules in a subdirectory, see `/resource_manager/` and `/settings/` as examples, each has a respective `resource_manager.rs` and `settings.rs` file that defines the submodules
-
-### detours
-You can create a detour as follows. First, define the function signature and address as a constant in the `openzt-detour` crate (address = Ghidra offset). Then use the `#[detour_mod]` attribute on your module and `#[detour(CONSTANT_NAME)]` on your function. The calling convention (`cdecl`, `thiscall`, `stdcall`) should match the original function.
+Use the `openzt-detour` crate with procedural macros:
 
 ```rust
-// In openzt-detour/src/lib.rs
-pub const ZTUI_GENERAL_ENTITYTYPEISDISPLAYED: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u8> = 
-    FunctionDef{address: 0x004e8cc8, function_type: PhantomData};
+// 1. Define function signature in openzt-detour crate
+// In openzt-detour/src/lib.rs:
+use std::marker::PhantomData;
+use openzt_detour_macros::FunctionDef;
 
-// In your module
+pub const MY_GAME_FUNCTION: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> =
+    FunctionDef { address: 0x00412345, function_type: PhantomData };
+    // Address = Ghidra offset
+
+// 2. Create detour in your module
 use openzt_detour_macro::detour_mod;
-use openzt_detour::ZTUI_GENERAL_ENTITYTYPEISDISPLAYED;
+use openzt_detour::MY_GAME_FUNCTION;
 
 #[detour_mod]
-pub mod custom_expansion {
+pub mod my_module {
     use super::*;
 
-    #[detour(ZTUI_GENERAL_ENTITYTYPEISDISPLAYED)]
-    unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> u8 {
-        // This calls the original function using the generated _DETOUR static
-        unsafe { ZTUI_GENERAL_ENTITYTYPEISDISPLAYED_DETOUR.call(bf_entity, param_1, param_2) }
+    #[detour(MY_GAME_FUNCTION)]
+    unsafe extern "thiscall" fn my_game_function_hook(param: u32) -> u32 {
+        // Call original function
+        MY_GAME_FUNCTION_DETOUR.call(param)
     }
 }
 
+// 3. Initialize in your module's init()
 pub fn init() {
-    unsafe { custom_expansion::init_detours().unwrap() };
+    unsafe { my_module::init_detours().unwrap() };
 }
 ```
 
+**Calling conventions** must match the original:
+- `cdecl` - Most functions
+- `stdcall` - Windows API style
+- `fastcall` - First two args in ECX/EDX
+- `thiscall` - C++ member functions (ECX = this)
 
-### Lazy static
-Currently development is ongoing in multiple independent modules, this means we don't have a central game world struct, instead we have global variables like below
+### Calling Game Functions
+
+Use `FunctionDef::original()` to get a function pointer:
 
 ```rust
-static EXPANSION_ARRAY: LazyLock<Mutex<Vec<Expansion>>> = LazyLock::new(|| {
+let game_fn = unsafe { openzt_detour::MY_FUNCTION.original() };
+let result = unsafe { game_fn(param1, param2) };
+```
+
+### Global State
+
+Use `std::sync::LazyLock` for global state:
+
+```rust
+use std::sync::LazyLock;
+use std::sync::Mutex;
+
+static GLOBAL_STATE: LazyLock<Mutex<Vec<MyData>>> = LazyLock::new(|| {
     Mutex::new(Vec::new())
 });
+
+// Access
+let mut data = GLOBAL_STATE.lock().unwrap();
+data.push(MyData::new());
 ```
-The mutex is likely overkill given Zoo Tycoon is single threaded, but makes them threadsafe for future proofing.
-They can be accessed using something like `let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();`
 
-In almost all circumstances modules shouldn't access other modules LazyMutexes directly and should use wrapper functions to avoid holding the mutex from longer than neccessary.
+**Note**: The mutex may be overkill for single-threaded Zoo Tycoon, but provides future-proofing.
 
-### Calling Zoo Tycoon functions
-Occasionally you'll need to call a ZT function rather than just hooking calls coming from ZT. We use the same `FunctionDef` we use for detours by calling `FunctionDef::original()` which returns a function pointer to the original ZT function
+**Best practice**: Don't hold locks across other operations. Use wrapper functions:
 
 ```rust
-let get_element_fn = unsafe { openzt_detour::ZTUI_GET_ELEMENT.original() };
-let ui_element_addr = unsafe { get_element_fn(BFUIMGR_PTR, 0x2001) };
+pub fn add_data(item: MyData) {
+    let mut data = GLOBAL_STATE.lock().unwrap();
+    data.push(item);
+    // Lock released here
+}
 ```
 
-### Feature flags
+### Lua Function Registration
 
-Feature flags can be added under the `[features]` heading in `Cargo.toml`
+Use the `lua_fn!` macro to register Lua functions from Rust:
+
+```rust
+// In your module's init()
+lua_fn!("my_function", "Does something cool", "my_function(arg1, arg2)", |arg1: u32, arg2: String| {
+    // Your code here
+    Ok(format!("Result: {} {}", arg1, arg2))
+});
+```
+
+### Resource Handlers
+
+Register handlers for file types:
+
+```rust
+// In resource_manager initialization
+resource_manager::add_handler(
+    "bfb",  // Prefix/suffix match
+    Box::new(BfbHandler::new())
+);
+
+// Handler implementation
+pub struct BfbHandler;
+
+impl Handler for BfbHandler {
+    fn matches(&self, path: &PathBuf) -> bool {
+        // Check if file matches
+    }
+
+    fn handle(&self, path: &PathBuf, file: &mut ZipFile) {
+        // Process file
+    }
+}
+```
+
+## Feature Flags
+
+Feature flags are defined in `Cargo.toml`:
 
 ```toml
 [features]
 default = ["experimental", "ini"]
-release = ["ini"]
+release = []
 ini = []
-zoo_logging = []
+capture_ztlog = []
 experimental = []
+integration-tests = []
+command-console = []
 ```
 
-Features that are also listed after `default` are included by default when building. Those listed under `release` are included in release builds. To start with put your code behind the `experimental` feature flag. Generally we move large modules into there own feature flag before eventually removing the feature flag all together once it's tested enough to be considered stable.
+**Workflow**:
+1. Start new features behind `experimental`
+2. Move large features to their own flag when stable enough
+3. Remove flag entirely when mature
 
-To put code behind a feature flag use the `cfg!` macro
+Using feature flags:
+
 ```rust
-if cfg!(feature = "console") {
-    info!("Feature 'console' enabled");
-    zoo_console::init();
+if cfg!(feature = "my-feature") {
+    info!("Feature 'my-feature' enabled");
+    my_module::init();
 }
 ```
+
+## Testing
+
+### Unit Tests
+
+Standard Rust unit tests go in the same file:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_something() {
+        assert_eq!(2 + 2, 4);
+    }
+}
+```
+
+### Integration Tests
+
+OpenZT includes a live-game integration test framework:
+
+```bash
+# Run all integration tests
+./openzt.bat run --release -- --features integration-tests
+
+# Run with wait for automation/CI
+./openzt.bat run --release --wait -- --features integration-tests
+```
+
+Tests are located in `openzt/src/integration_tests/`:
+- `patch_rollback.rs` - Test patch system error handling
+- `loading_order.rs` - Test mod loading determinism
+
+**Adding integration tests**:
+1. Add test function to appropriate module
+2. Create test resources in `resources/test/`
+3. Use `include_str!()` / `include_bytes!()` for embedded resources
+
+See [CLAUDE.md](CLAUDE.md) for detailed integration test documentation.
+
+## Development Workflow
+
+### Code Quality Checks
+
+```bash
+# Type checking
+./openzt.bat check
+
+# Linting
+./openzt.bat clippy
+
+# Unit tests
+./openzt.bat test
+
+# Documentation
+./openzt.bat docs
+```
+
+### Git Workflow
+
+1. Create a feature branch
+2. Make your changes
+3. Run `./openzt.bat clippy` and fix warnings
+4. Commit with descriptive messages
+5. Create pull request
+
+## Additional Resources
+
+- [CLAUDE.md](CLAUDE.md) - Comprehensive developer guide
+- [openzt.bat help](./openzt.bat) - Build script documentation
+- [openzt-console README](./openzt-console/README.md) - Console details
+
+## Questions?
+
+- Open an issue on GitHub
+- Ask in discussions
+- Check existing issues and PRs for patterns
