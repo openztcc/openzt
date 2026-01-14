@@ -553,3 +553,80 @@ fn get_legacy_cfg_type(file_name: &str) -> Option<LegacyCfg> {
         _ => None,
     }
 }
+
+/// Load legacy entities from the game's installed .cfg files for integration testing.
+///
+/// This function reads legacy .cfg files directly from the game directory and extracts
+/// entity attributes. It's designed to be called from integration tests to ensure
+/// legacy entity data is available for testing.
+///
+/// # Returns
+/// * `Ok(count)` if legacy loading succeeded, where count is the number of .cfg files processed
+/// * `Err(_)` if there was an error reading or parsing the .cfg files, or if no .cfg files were found
+#[cfg(feature = "integration-tests")]
+pub fn load_legacy_entities_for_tests() -> anyhow::Result<usize> {
+    use std::fs;
+
+    // Get the Zoo Tycoon installation directory
+    let zt_dir = std::env::var("ZOO Tycoon_DIR").unwrap_or_else(|_| {
+        // Default installation path
+        "C:\\Program Files (x86)\\Microsoft Games\\Zoo Tycoon".to_string()
+    });
+
+    info!("Loading legacy entities from Zoo Tycoon directory: {}", zt_dir);
+
+    // List of .cfg files to process for legacy entity extraction
+    let cfg_files = vec![
+        "animal.cfg",
+        "bldg.cfg",
+        "fences.cfg",
+        "food.cfg",
+        "guests.cfg",
+        "items.cfg",
+        "paths.cfg",
+        "scener.cfg",
+        "staff.cfg",
+        "twall.cfg",
+    ];
+
+    let mut loaded_count = 0;
+
+    for cfg_file in cfg_files {
+        let cfg_path = std::path::Path::new(&zt_dir).join(cfg_file);
+
+        if !cfg_path.exists() {
+            continue; // Skip silently
+        }
+
+        info!("Processing {}", cfg_file);
+
+        // Read the .cfg file
+        let cfg_content = fs::read_to_string(&cfg_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", cfg_file, e))?;
+
+        // Parse the INI content
+        let mut ini = Ini::new_cs();
+        ini.set_comment_symbols(&[';', '#', ':']);
+        if ini.read(cfg_content).is_err() {
+            warn!("Failed to parse {}", cfg_file);
+            continue;
+        }
+
+        // Determine the legacy entity type from the filename
+        if let Some(legacy_cfg) = get_legacy_cfg_type(cfg_file) {
+            if let Some(entity_type) = LegacyEntityType::from_legacy_cfg_type(&legacy_cfg.cfg_type) {
+                // Extract legacy entities from this .cfg file
+                extract_legacy_entities(&ini, entity_type);
+                loaded_count += 1;
+            }
+        }
+    }
+
+    // Return error if no .cfg files were found (so test attributes will be added)
+    if loaded_count == 0 {
+        return Err(anyhow::anyhow!("No legacy .cfg files found in {}", zt_dir));
+    }
+
+    info!("Loaded legacy entities from {} .cfg files", loaded_count);
+    Ok(loaded_count)
+}

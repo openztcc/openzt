@@ -26,7 +26,7 @@ pub(crate) mod mod_config;
 use commands::init_commands;
 pub use handlers::{add_handler, Handler, RunStage};
 use hooks::init_hooks;
-pub use legacy_loading::OPENZT_DIR0;
+pub use legacy_loading::{load_legacy_entities_for_tests, OPENZT_DIR0};
 pub use ztfile::{modify_ztfile_as_animation, modify_ztfile_as_ini};
 
 ///Initializes hooks and commands for the resource manager

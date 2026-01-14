@@ -405,4 +405,322 @@ mod tests {
         assert_eq!(LegacyEntityType::Building.section_name(), "building");
         assert_eq!(LegacyEntityType::Scenery.section_name(), "objects");
     }
+
+    // =========================================================================
+    // Tests for get_name_id() with explicit subtype
+    // =========================================================================
+
+    #[test]
+    fn test_get_name_id_explicit_subtype_male() {
+        let mut attrs = LegacyEntityAttributes::new("elephant".to_string());
+        attrs.subtype_attributes.insert(
+            "m".to_string(),
+            SubtypeAttributes {
+                subtype: "m".to_string(),
+                name_id: Some(1001),
+            },
+        );
+        attrs.subtype_attributes.insert(
+            "f".to_string(),
+            SubtypeAttributes {
+                subtype: "f".to_string(),
+                name_id: Some(1002),
+            },
+        );
+
+        // Request explicit male subtype
+        assert_eq!(attrs.get_name_id(Some("m")), Some(1001));
+    }
+
+    #[test]
+    fn test_get_name_id_explicit_subtype_female() {
+        let mut attrs = LegacyEntityAttributes::new("elephant".to_string());
+        attrs.subtype_attributes.insert(
+            "m".to_string(),
+            SubtypeAttributes {
+                subtype: "m".to_string(),
+                name_id: Some(1001),
+            },
+        );
+        attrs.subtype_attributes.insert(
+            "f".to_string(),
+            SubtypeAttributes {
+                subtype: "f".to_string(),
+                name_id: Some(1002),
+            },
+        );
+
+        // Request explicit female subtype
+        assert_eq!(attrs.get_name_id(Some("f")), Some(1002));
+    }
+
+    #[test]
+    fn test_get_name_id_explicit_subtype_not_found() {
+        let mut attrs = LegacyEntityAttributes::new("elephant".to_string());
+        attrs.subtype_attributes.insert(
+            "m".to_string(),
+            SubtypeAttributes {
+                subtype: "m".to_string(),
+                name_id: Some(1001),
+            },
+        );
+
+        // Request non-existent subtype - should return first available
+        assert_eq!(attrs.get_name_id(Some("x")), Some(1001));
+    }
+
+    // =========================================================================
+    // Tests for get_name_id() with default subtype fallback (None)
+    // =========================================================================
+
+    #[test]
+    fn test_get_name_id_none_returns_first_available() {
+        let mut attrs = LegacyEntityAttributes::new("elephant".to_string());
+        attrs.subtype_attributes.insert(
+            "m".to_string(),
+            SubtypeAttributes {
+                subtype: "m".to_string(),
+                name_id: Some(1001),
+            },
+        );
+        attrs.subtype_attributes.insert(
+            "f".to_string(),
+            SubtypeAttributes {
+                subtype: "f".to_string(),
+                name_id: Some(1002),
+            },
+        );
+
+        // Request no subtype (None) - should return first available
+        let result = attrs.get_name_id(None);
+        assert!(result == Some(1001) || result == Some(1002));
+    }
+
+    #[test]
+    fn test_get_name_id_none_single_subtype() {
+        let mut attrs = LegacyEntityAttributes::new("restroom".to_string());
+        attrs.subtype_attributes.insert(
+            "".to_string(),
+            SubtypeAttributes {
+                subtype: "".to_string(),
+                name_id: Some(5000),
+            },
+        );
+
+        // Request no subtype - should return the single available
+        assert_eq!(attrs.get_name_id(None), Some(5000));
+    }
+
+    #[test]
+    fn test_get_name_id_none_no_subtypes() {
+        let attrs = LegacyEntityAttributes::new("empty".to_string());
+
+        // No subtypes available
+        assert_eq!(attrs.get_name_id(None), None);
+    }
+
+    // =========================================================================
+    // Tests for get_name_id() with fallback when only one subtype has name_id
+    // =========================================================================
+
+    #[test]
+    fn test_get_name_id_fallback_single_name_id() {
+        let mut attrs = LegacyEntityAttributes::new("guest".to_string());
+        attrs.subtype_attributes.insert(
+            "man".to_string(),
+            SubtypeAttributes {
+                subtype: "man".to_string(),
+                name_id: Some(3001),
+            },
+        );
+        attrs.subtype_attributes.insert(
+            "woman".to_string(),
+            SubtypeAttributes {
+                subtype: "woman".to_string(),
+                name_id: None, // No name_id
+            },
+        );
+
+        // Request a subtype with no name_id - should return the first available
+        assert_eq!(attrs.get_name_id(Some("woman")), Some(3001));
+    }
+
+    #[test]
+    fn test_get_name_id_all_subtypes_no_name_id() {
+        let mut attrs = LegacyEntityAttributes::new("entity".to_string());
+        attrs.subtype_attributes.insert(
+            "a".to_string(),
+            SubtypeAttributes {
+                subtype: "a".to_string(),
+                name_id: None,
+            },
+        );
+        attrs.subtype_attributes.insert(
+            "b".to_string(),
+            SubtypeAttributes {
+                subtype: "b".to_string(),
+                name_id: None,
+            },
+        );
+
+        // All subtypes have no name_id
+        assert_eq!(attrs.get_name_id(Some("a")), None);
+        assert_eq!(attrs.get_name_id(None), None);
+    }
+
+    // =========================================================================
+    // Tests for subtype_list()
+    // =========================================================================
+
+    #[test]
+    fn test_subtype_list_no_subtypes() {
+        let mut attrs = LegacyEntityAttributes::new("restroom".to_string());
+        attrs.subtype_attributes.insert(
+            "".to_string(),
+            SubtypeAttributes {
+                subtype: "".to_string(),
+                name_id: Some(5000),
+            },
+        );
+
+        assert_eq!(attrs.subtype_list(), "");
+    }
+
+    #[test]
+    fn test_subtype_list_empty() {
+        let attrs = LegacyEntityAttributes::new("empty".to_string());
+        assert_eq!(attrs.subtype_list(), "");
+    }
+
+    #[test]
+    fn test_subtype_list_multiple_subtypes() {
+        let mut attrs = LegacyEntityAttributes::new("elephant".to_string());
+        attrs.subtype_attributes.insert(
+            "m".to_string(),
+            SubtypeAttributes {
+                subtype: "m".to_string(),
+                name_id: Some(1001),
+            },
+        );
+        attrs.subtype_attributes.insert(
+            "f".to_string(),
+            SubtypeAttributes {
+                subtype: "f".to_string(),
+                name_id: Some(1002),
+            },
+        );
+
+        // Subtypes should be sorted alphabetically
+        assert_eq!(attrs.subtype_list(), "f, m");
+    }
+
+    // =========================================================================
+    // Tests for default_subtype()
+    // =========================================================================
+
+    #[test]
+    fn test_default_subtype_animal() {
+        assert_eq!(LegacyEntityType::Animal.default_subtype(), Some("m"));
+    }
+
+    #[test]
+    fn test_default_subtype_staff() {
+        assert_eq!(LegacyEntityType::Staff.default_subtype(), Some("m"));
+    }
+
+    #[test]
+    fn test_default_subtype_fence() {
+        assert_eq!(LegacyEntityType::Fence.default_subtype(), Some("f"));
+    }
+
+    #[test]
+    fn test_default_subtype_wall() {
+        assert_eq!(LegacyEntityType::Wall.default_subtype(), Some("f"));
+    }
+
+    #[test]
+    fn test_default_subtype_guest() {
+        assert_eq!(LegacyEntityType::Guest.default_subtype(), None);
+    }
+
+    #[test]
+    fn test_default_subtype_building() {
+        assert_eq!(LegacyEntityType::Building.default_subtype(), None);
+    }
+
+    // =========================================================================
+    // Tests for has_subtypes()
+    // =========================================================================
+
+    #[test]
+    fn test_has_subtypes_true() {
+        assert!(LegacyEntityType::Animal.has_subtypes());
+        assert!(LegacyEntityType::Staff.has_subtypes());
+        assert!(LegacyEntityType::Fence.has_subtypes());
+        assert!(LegacyEntityType::Wall.has_subtypes());
+        assert!(LegacyEntityType::Guest.has_subtypes());
+    }
+
+    #[test]
+    fn test_has_subtypes_false() {
+        assert!(!LegacyEntityType::Building.has_subtypes());
+        assert!(!LegacyEntityType::Food.has_subtypes());
+        assert!(!LegacyEntityType::Item.has_subtypes());
+        assert!(!LegacyEntityType::Path.has_subtypes());
+        assert!(!LegacyEntityType::Scenery.has_subtypes());
+    }
+
+    // =========================================================================
+    // Tests for attribute_section()
+    // =========================================================================
+
+    #[test]
+    fn test_attribute_section_item() {
+        // Items use 'characteristics' (singular)
+        assert_eq!(LegacyEntityType::Item.attribute_section(), "characteristics");
+    }
+
+    #[test]
+    fn test_attribute_section_others() {
+        // Everything else uses 'Characteristics/Integers'
+        assert_eq!(LegacyEntityType::Animal.attribute_section(), "Characteristics/Integers");
+        assert_eq!(LegacyEntityType::Building.attribute_section(), "Characteristics/Integers");
+        assert_eq!(LegacyEntityType::Fence.attribute_section(), "Characteristics/Integers");
+    }
+
+    // =========================================================================
+    // Tests for get_subtypes_with_name_id()
+    // =========================================================================
+
+    #[test]
+    fn test_get_subtypes_with_name_id() {
+        let mut attrs = LegacyEntityAttributes::new("elephant".to_string());
+        attrs.subtype_attributes.insert(
+            "m".to_string(),
+            SubtypeAttributes {
+                subtype: "m".to_string(),
+                name_id: Some(1001),
+            },
+        );
+        attrs.subtype_attributes.insert(
+            "f".to_string(),
+            SubtypeAttributes {
+                subtype: "f".to_string(),
+                name_id: Some(1002),
+            },
+        );
+        attrs.subtype_attributes.insert(
+            "j".to_string(),
+            SubtypeAttributes {
+                subtype: "j".to_string(),
+                name_id: None, // No name_id
+            },
+        );
+
+        let subtypes = attrs.get_subtypes_with_name_id();
+        assert_eq!(subtypes.len(), 2);
+        assert!(subtypes.contains(&"m".to_string()));
+        assert!(subtypes.contains(&"f".to_string()));
+        assert!(!subtypes.contains(&"j".to_string()));
+    }
 }

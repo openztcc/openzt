@@ -2342,4 +2342,156 @@ mod tests {
         assert!(file.is_some(), "File should be in shadow");
     }
 
+    // =========================================================================
+    // Tests for legacy variable syntax (3, 4, and 5-part)
+    // =========================================================================
+
+    #[test]
+    fn test_parse_variable_legacy_3_part_default_subtype() {
+        // Format: {legacy.type.name} - uses default subtype for entity type
+        let result = parse_variable("legacy.animals.elephant").unwrap();
+        assert_eq!(result.var_type, VariableType::Legacy);
+        assert_eq!(result.mod_id, None);
+        assert_eq!(result.identifier, "elephant");
+
+        let legacy_parts = result.legacy_parts.unwrap();
+        assert_eq!(legacy_parts.entity_type, LegacyEntityType::Animal);
+        assert_eq!(legacy_parts.entity_name, "elephant");
+        assert_eq!(legacy_parts.subtype, None); // Will use default subtype
+        assert_eq!(legacy_parts.attribute, "name_id");
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_4_part_explicit_attribute() {
+        // Format: {legacy.type.name.attribute} - explicit attribute, default subtype
+        let result = parse_variable("legacy.buildings.restroom.name_id").unwrap();
+        assert_eq!(result.var_type, VariableType::Legacy);
+        assert_eq!(result.mod_id, None);
+        assert_eq!(result.identifier, "restroom");
+
+        let legacy_parts = result.legacy_parts.unwrap();
+        assert_eq!(legacy_parts.entity_type, LegacyEntityType::Building);
+        assert_eq!(legacy_parts.entity_name, "restroom");
+        assert_eq!(legacy_parts.subtype, None); // Use default
+        assert_eq!(legacy_parts.attribute, "name_id");
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_5_part_explicit_subtype() {
+        // Format: {legacy.type.name.subtype.attribute} - explicit subtype
+        let result = parse_variable("legacy.animals.elephant.f.name_id").unwrap();
+        assert_eq!(result.var_type, VariableType::Legacy);
+        assert_eq!(result.mod_id, None);
+        assert_eq!(result.identifier, "elephant");
+
+        let legacy_parts = result.legacy_parts.unwrap();
+        assert_eq!(legacy_parts.entity_type, LegacyEntityType::Animal);
+        assert_eq!(legacy_parts.entity_name, "elephant");
+        assert_eq!(legacy_parts.subtype, Some("f".to_string())); // Explicit female subtype
+        assert_eq!(legacy_parts.attribute, "name_id");
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_5_part_guest_subtype() {
+        // Guests have no default, must specify subtype
+        let result = parse_variable("legacy.guests.guest.man.name_id").unwrap();
+        assert_eq!(result.var_type, VariableType::Legacy);
+
+        let legacy_parts = result.legacy_parts.unwrap();
+        assert_eq!(legacy_parts.entity_type, LegacyEntityType::Guest);
+        assert_eq!(legacy_parts.entity_name, "guest");
+        assert_eq!(legacy_parts.subtype, Some("man".to_string()));
+        assert_eq!(legacy_parts.attribute, "name_id");
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_4_part_invalid_attribute() {
+        // 4-part with non-name_id attribute should fail
+        let result = parse_variable("legacy.animals.elephant.f");
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("expected") || error_msg.contains("invalid"),
+            "Expected error about invalid syntax, got: {}",
+            error_msg
+        );
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_invalid_entity_type() {
+        let result = parse_variable("legacy.invalid_type.entity.name_id");
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("Invalid legacy entity type") || error_msg.contains("invalid"),
+            "Expected error about invalid entity type, got: {}",
+            error_msg
+        );
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_too_many_parts() {
+        let result = parse_variable("legacy.animals.elephant.f.name_id.extra");
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("Invalid variable syntax"),
+            "Expected error about invalid syntax, got: {}",
+            error_msg
+        );
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_too_few_parts() {
+        // 2-part legacy input falls into the current_mod case, which doesn't recognize "legacy" as a type
+        let result = parse_variable("legacy.animals");
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        // The error will be about "legacy" not being a valid variable type (habitat/location/string)
+        assert!(
+            error_msg.contains("Invalid variable type") || error_msg.contains("Invalid variable syntax"),
+            "Expected error about invalid variable type or syntax, got: {}",
+            error_msg
+        );
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_fence_with_subtype() {
+        // Fences use 'f' as default subtype
+        let result = parse_variable("legacy.fences.atltank.name_id").unwrap();
+        assert_eq!(result.var_type, VariableType::Legacy);
+
+        let legacy_parts = result.legacy_parts.unwrap();
+        assert_eq!(legacy_parts.entity_type, LegacyEntityType::Fence);
+        assert_eq!(legacy_parts.entity_name, "atltank");
+        assert_eq!(legacy_parts.subtype, None); // Will use default 'f'
+        assert_eq!(legacy_parts.attribute, "name_id");
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_fence_explicit_glass_subtype() {
+        // Explicit 'g' (glass) subtype for fence
+        let result = parse_variable("legacy.fences.atltank.g.name_id").unwrap();
+        assert_eq!(result.var_type, VariableType::Legacy);
+
+        let legacy_parts = result.legacy_parts.unwrap();
+        assert_eq!(legacy_parts.entity_type, LegacyEntityType::Fence);
+        assert_eq!(legacy_parts.entity_name, "atltank");
+        assert_eq!(legacy_parts.subtype, Some("g".to_string()));
+        assert_eq!(legacy_parts.attribute, "name_id");
+    }
+
+    #[test]
+    fn test_parse_variable_legacy_item_no_subtype() {
+        // Items don't have subtypes
+        let result = parse_variable("legacy.items.rock.name_id").unwrap();
+        assert_eq!(result.var_type, VariableType::Legacy);
+
+        let legacy_parts = result.legacy_parts.unwrap();
+        assert_eq!(legacy_parts.entity_type, LegacyEntityType::Item);
+        assert_eq!(legacy_parts.entity_name, "rock");
+        assert_eq!(legacy_parts.subtype, None);
+        assert_eq!(legacy_parts.attribute, "name_id");
+    }
+
 }

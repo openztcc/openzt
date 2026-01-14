@@ -11,6 +11,7 @@ use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 use crate::detour_mod;
 
 pub mod dependency_resolution;
+pub mod legacy_attributes;
 pub mod loading_order;
 pub mod patch_rollback;
 
@@ -169,6 +170,61 @@ mod detour_zoo_main {
             std::process::exit(1);
         }
 
+        // Load legacy entities for integration tests (needed for legacy_attributes tests)
+        #[cfg(feature = "integration-tests")]
+        match crate::resource_manager::load_legacy_entities_for_tests() {
+            Ok(count) => {
+                info!("Loaded {} legacy .cfg files for testing", count);
+            }
+            Err(e) => {
+                info!("Note: Legacy entity loading not available ({}), adding test attributes", e);
+                // Add some test legacy attributes for testing
+                use crate::resource_manager::openzt_mods::legacy_attributes::{add_legacy_entity, LegacyEntityAttributes, LegacyEntityType, SubtypeAttributes};
+
+                // Add test elephant (animal with subtypes)
+                let mut elephant_attrs = LegacyEntityAttributes::new("elephant".to_string());
+                elephant_attrs.subtype_attributes.insert("m".to_string(), SubtypeAttributes { subtype: "m".to_string(), name_id: Some(1001) });
+                elephant_attrs.subtype_attributes.insert("f".to_string(), SubtypeAttributes { subtype: "f".to_string(), name_id: Some(1002) });
+                let _ = add_legacy_entity(LegacyEntityType::Animal, "elephant".to_string(), elephant_attrs);
+
+                // Add test zookeeper (staff with subtypes)
+                let mut zookeeper_attrs = LegacyEntityAttributes::new("zookeeper".to_string());
+                zookeeper_attrs.subtype_attributes.insert("m".to_string(), SubtypeAttributes { subtype: "m".to_string(), name_id: Some(1501) });
+                zookeeper_attrs.subtype_attributes.insert("f".to_string(), SubtypeAttributes { subtype: "f".to_string(), name_id: Some(1502) });
+                let _ = add_legacy_entity(LegacyEntityType::Staff, "zookeeper".to_string(), zookeeper_attrs);
+
+                // Add test atltank fence (insert 'f' first to ensure it's returned as default)
+                let mut fence_attrs = LegacyEntityAttributes::new("atltank".to_string());
+                fence_attrs.subtype_attributes.insert("f".to_string(), SubtypeAttributes { subtype: "f".to_string(), name_id: Some(2001) });
+                fence_attrs.subtype_attributes.insert("g".to_string(), SubtypeAttributes { subtype: "g".to_string(), name_id: Some(2002) });
+                let _ = add_legacy_entity(LegacyEntityType::Fence, "atltank".to_string(), fence_attrs);
+
+                // Add test atltank wall
+                let mut wall_attrs = LegacyEntityAttributes::new("atltank".to_string());
+                wall_attrs.subtype_attributes.insert("f".to_string(), SubtypeAttributes { subtype: "f".to_string(), name_id: Some(2501) });
+                wall_attrs.subtype_attributes.insert("g".to_string(), SubtypeAttributes { subtype: "g".to_string(), name_id: Some(2502) });
+                let _ = add_legacy_entity(LegacyEntityType::Wall, "atltank".to_string(), wall_attrs);
+
+                // Add test restroom (building without subtypes)
+                let mut restroom_attrs = LegacyEntityAttributes::new("restroom".to_string());
+                restroom_attrs.subtype_attributes.insert("".to_string(), SubtypeAttributes { subtype: "".to_string(), name_id: Some(3001) });
+                let _ = add_legacy_entity(LegacyEntityType::Building, "restroom".to_string(), restroom_attrs);
+
+                // Add test rock item
+                let mut rock_attrs = LegacyEntityAttributes::new("rock".to_string());
+                rock_attrs.subtype_attributes.insert("".to_string(), SubtypeAttributes { subtype: "".to_string(), name_id: Some(4001) });
+                let _ = add_legacy_entity(LegacyEntityType::Item, "rock".to_string(), rock_attrs);
+
+                // Add test guest
+                let mut guest_attrs = LegacyEntityAttributes::new("guest".to_string());
+                guest_attrs.subtype_attributes.insert("man".to_string(), SubtypeAttributes { subtype: "man".to_string(), name_id: Some(5001) });
+                guest_attrs.subtype_attributes.insert("woman".to_string(), SubtypeAttributes { subtype: "woman".to_string(), name_id: Some(5002) });
+                let _ = add_legacy_entity(LegacyEntityType::Guest, "guest".to_string(), guest_attrs);
+
+                info!("Test legacy attributes added");
+            }
+        }
+
         // Read filepath from environment variable with default
         let test_log_path = std::env::var("OPENZT_TEST_LOG")
             .unwrap_or_else(|_| "C:\\Program Files (x86)\\Microsoft Games\\Zoo Tycoon\\openzt_integration_tests.log".to_string());
@@ -232,6 +288,22 @@ mod detour_zoo_main {
         let loading_results = super::loading_order::run_all_tests();
 
         for result in &loading_results {
+            if result.passed {
+                write_log(&format!("  ✓ {}", result.name));
+                total_passed += 1;
+            } else {
+                write_log(&format!("  ✗ {} - {}", result.name, result.error.as_ref().unwrap_or(&"Unknown error".to_string())));
+                total_failed += 1;
+            }
+        }
+
+        write_log("");
+
+        // Run legacy attributes tests
+        write_log("Running legacy attributes tests...");
+        let legacy_attributes_results = super::legacy_attributes::run_all_tests();
+
+        for result in &legacy_attributes_results {
             if result.passed {
                 write_log(&format!("  ✓ {}", result.name));
                 total_passed += 1;
