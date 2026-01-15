@@ -44,6 +44,9 @@ OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It pr
 ./openzt.bat run --release --wait            # Release, wait for exit
 ./openzt.bat run --loader --wait             # Loader injection, wait for exit
 
+# Integration tests
+./openzt.bat integration-tests               # Run all integration tests (builds release, displays results)
+
 # Code quality checks
 ./openzt.bat check                           # Run cargo check on openzt
 ./openzt.bat clippy                          # Run cargo clippy on openzt
@@ -196,22 +199,34 @@ OpenZT includes an integration testing framework that runs tests in a live game 
 
 **Running Integration Tests**:
 ```bash
-# Run all integration tests (game launches and exits automatically)
-./openzt.bat run --release -- --features integration-tests
+# Run all integration tests (builds release, launches game, displays results automatically)
+./openzt.bat integration-tests
+```
 
-# Run integration tests and wait for completion (useful for automation/CI)
-./openzt.bat run --release --wait -- --features integration-tests
+The `integration-tests` command:
+- Builds the DLL in release mode with the `integration-tests` feature flag
+- Launches Zoo Tycoon and waits for tests to complete
+- Displays test results automatically after the game exits
+- Shows paths to log files for detailed debugging
 
-# Check test results
+**Checking Test Results**:
+```bash
+# View the integration test log
 cat "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_integration_tests.log"
 
-# Check detailed OpenZT logs (patch application, errors, etc.)
+# View detailed OpenZT logs (patch application, errors, etc.)
 cat "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt.log"
 ```
 
 **Test Output**:
 ```
 === OpenZT Integration Tests ===
+
+Running dependency resolution tests...
+  ✓ test_simple_dependency_chain
+  ✓ test_circular_dependency_handling
+  ✓ test_optional_dependency_warning
+  ... (11 tests)
 
 Running patch rollback tests...
   ✓ test_continue_mode_applies_directly
@@ -223,22 +238,43 @@ Running loading order tests...
   ✓ test_cross_file_habitat_reference
   ... (8 tests)
 
-Results: 17 passed, 0 failed
+Running legacy attributes tests...
+  ✓ test_legacy_animal_attributes_loaded
+  ✓ test_legacy_fence_attributes_loaded
+  ... (24 tests)
+
+Results: 52 passed, 0 failed
 ALL TESTS PASSED
 ```
 
 **Test Categories**:
 
-1. **Patch Rollback Tests** (`openzt/src/integration_tests/patch_rollback.rs`)
+1. **Dependency Resolution Tests** (`openzt/src/integration_tests/dependency_resolution.rs`)
+   - Test simple dependency chains
+   - Test circular dependency detection and handling
+   - Test optional dependencies and warnings
+   - Test `before` dependencies
+   - Test disabled mods exclusion
+   - Test validation of dependency violations
+
+2. **Patch Rollback Tests** (`openzt/src/integration_tests/patch_rollback.rs`)
    - Test patch error handling modes (continue, abort, abort_mod)
    - Verify shadow resource system for transactional patch application
    - Test patch operations (set_key, merge, delete, etc.)
 
-2. **Loading Order Tests** (`openzt/src/integration_tests/loading_order.rs`)
+3. **Loading Order Tests** (`openzt/src/integration_tests/loading_order.rs`)
    - Verify deterministic mod definition file loading order
    - Test category ordering (NoPatch → Mixed → PatchOnly)
    - Verify alphabetical sorting within categories
    - Test cross-file habitat/location references in patches
+
+4. **Legacy Attributes Tests** (`openzt/src/integration_tests/legacy_attributes.rs`)
+   - Test loading of legacy entity attributes from .cfg files
+   - Test default subtype assignment (animal, staff, fence, wall)
+   - Test explicit subtype specification
+   - Test patch-based legacy attribute substitution
+   - Test fallback behavior for invalid subtypes
+   - Test cNameID string ID resolution
 
 **Creating New Tests**:
 
@@ -307,6 +343,20 @@ Integration tests use an embedded mod approach where test resources are compiled
 - Load order tracking is only enabled with `integration-tests` feature flag
 - Tests create temporary files (e.g., `animals/test.ai`) for verification
 - **Habitat/Location Registration**: Always use the TOML key identifier (e.g., "test_habitat_a"), NOT the display name (e.g., "Test Habitat A") when looking up habitats/locations in tests
+
+### Game Launch Checks
+
+The build script automatically checks if Zoo Tycoon is already running before attempting to launch:
+
+```bash
+./openzt.bat run --release
+
+# If Zoo Tycoon is already running, you'll see:
+# ERROR: Zoo Tycoon is already running.
+# Please close the existing instance before launching a new one.
+```
+
+This prevents DLL copy failures due to file locks and ensures clean testing environments.
 
 ### Manual Testing
 
