@@ -11,6 +11,7 @@ use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 use crate::detour_mod;
 
 pub mod dependency_resolution;
+pub mod legacy_attributes;
 pub mod loading_order;
 pub mod patch_rollback;
 
@@ -169,6 +170,22 @@ mod detour_zoo_main {
             std::process::exit(1);
         }
 
+        // Load legacy test files and trigger legacy loading
+        #[cfg(feature = "integration-tests")]
+        {
+            info!("Loading test legacy .cfg and .ai files...");
+            // Load test files into resource system
+            if let Err(e) = crate::integration_tests::legacy_attributes::load_test_legacy_files() {
+                error!("Failed to load test legacy files: {}", e);
+                std::process::exit(1);
+            }
+            // Trigger legacy loading from test files
+            if let Err(e) = crate::resource_manager::load_legacy_entities_from_test_files() {
+                error!("Failed to load legacy entities from test files: {}", e);
+                std::process::exit(1);
+            }
+        }
+
         // Read filepath from environment variable with default
         let test_log_path = std::env::var("OPENZT_TEST_LOG")
             .unwrap_or_else(|_| "C:\\Program Files (x86)\\Microsoft Games\\Zoo Tycoon\\openzt_integration_tests.log".to_string());
@@ -232,6 +249,22 @@ mod detour_zoo_main {
         let loading_results = super::loading_order::run_all_tests();
 
         for result in &loading_results {
+            if result.passed {
+                write_log(&format!("  ✓ {}", result.name));
+                total_passed += 1;
+            } else {
+                write_log(&format!("  ✗ {} - {}", result.name, result.error.as_ref().unwrap_or(&"Unknown error".to_string())));
+                total_failed += 1;
+            }
+        }
+
+        write_log("");
+
+        // Run legacy attributes tests
+        write_log("Running legacy attributes tests...");
+        let legacy_attributes_results = super::legacy_attributes::run_all_tests();
+
+        for result in &legacy_attributes_results {
             if result.passed {
                 write_log(&format!("  ✓ {}", result.name));
                 total_passed += 1;

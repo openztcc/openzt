@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./openzt.bat console --oneshot:*)",
+      "Bash(.openzt.bat build:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(openzt.bat build:*)",
+      "Bash(./openzt.bat build:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(git commit:*)",
+      "Bash(./openzt.bat build --release:*)",
+      "Bash(find:*)",
+      "Bash(./openzt.bat test)",
+      "Bash(git show:*)",
+      "Bash(./openzt.bat check:*)",
+      "Bash(ls:*)",
+      "Bash(./openzt.bat run:*)",
+      "Bash(dir:*)",
+      "Bash(cargo test:*)",
+      "Bash(git mv:*)",
+      "Bash(findstr:*)",
+      "Bash(./openzt.bat:*)",
+      "Bash(cmd:*)",
+      "Bash(type \"C:\\Program Files (x86)\\Microsoft Games\\Zoo Tycoon\\openzt_integration_tests.log\")",
+      "Bash(cat:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

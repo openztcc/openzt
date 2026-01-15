@@ -305,6 +305,7 @@ pub mod bfeventmgr {
     pub const SAVE: FunctionDef<unsafe extern "thiscall" fn(u32, u32) -> u32> = FunctionDef{address: 0x0047afa5, function_type: PhantomData};
     pub const INIT: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> = FunctionDef{address: 0x00525f3e, function_type: PhantomData};
     pub const CONSTRUCTOR: FunctionDef<unsafe extern "thiscall" fn(u32) -> u32> = FunctionDef{address: 0x0052603f, function_type: PhantomData};
+    pub const LOAD: FunctionDef<unsafe extern "thiscall" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x00594d17, function_type: PhantomData};
 }
 
 // BFFont class functions
@@ -604,11 +605,37 @@ pub mod bfresourceptr {
     use super::*;
 
     pub const DELREF_0: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00402e47, function_type: PhantomData};
+    pub const DELREF_1: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00402e5e, function_type: PhantomData};
+    pub const DELREF_2: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00402e6a, function_type: PhantomData};
     pub const DEALLOCATE: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00402ec7, function_type: PhantomData};
-    pub const DELREF_1: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004038d9, function_type: PhantomData};
+    pub const DELREF_3: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00402f76, function_type: PhantomData};
+    pub const DELREF_4: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004038d9, function_type: PhantomData};
     pub const ALLOCATE: FunctionDef<unsafe extern "thiscall" fn(u32, i32)> = FunctionDef{address: 0x004043f4, function_type: PhantomData};
-    pub const DELREF_2: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x0040483c, function_type: PhantomData};
-    pub const DELREF_3: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x0040bcbd, function_type: PhantomData};
+    pub const DELREF_5: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x0040483c, function_type: PhantomData};
+    pub const DELREF_6: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00406b87, function_type: PhantomData};
+    pub const DELREF_7: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004072e3, function_type: PhantomData};
+    pub const DELREF_8: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00407330, function_type: PhantomData};
+    pub const DELREF_9: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00409b55, function_type: PhantomData};
+    pub const DELREF_10: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x0040bcbd, function_type: PhantomData};
+    pub const DELREF_11: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x0040c4bf, function_type: PhantomData};
+    pub const DELREF_12: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x0041e62e, function_type: PhantomData};
+    pub const DELREF_13: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004aba16, function_type: PhantomData};
+    pub const DELREF_14: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004abaef, function_type: PhantomData};
+    pub const DELREF_15: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004abc8f, function_type: PhantomData};
+    pub const DELREF_16: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004ac016, function_type: PhantomData};
+    pub const DELREF_17: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004ac060, function_type: PhantomData};
+    pub const DELREF_18: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004ad053, function_type: PhantomData};
+    pub const DELREF_19: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004ad3bd, function_type: PhantomData};
+    pub const DELREF_20: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004b31c3, function_type: PhantomData};
+    pub const DELREF_21: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004c6755, function_type: PhantomData};
+    pub const DELREF_22: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x004c67c9, function_type: PhantomData};
+    pub const DELREF_23: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00501628, function_type: PhantomData};
+    pub const DELREF_24: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00503e66, function_type: PhantomData};
+    pub const DELREF_25: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00503eb0, function_type: PhantomData};
+    pub const DELREF_26: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00504054, function_type: PhantomData};
+    pub const DELREF_27: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x0050409e, function_type: PhantomData};
+    pub const DELREF_28: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x005041ca, function_type: PhantomData};
+    pub const DELREF_29: FunctionDef<unsafe extern "thiscall" fn(u32)> = FunctionDef{address: 0x00504214, function_type: PhantomData};
 }
 
 // BFResourceZip class functions

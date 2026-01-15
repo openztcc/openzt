@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io,
     path::{Path, PathBuf},
     str,
@@ -15,11 +16,12 @@ use zip::read::ZipFile;
 use super::ztd::ZtdArchive;
 use crate::{
     animation::Animation,
+    encoding_utils::decode_game_text,
     mods,
     resource_manager::{
         handlers::{get_handlers, RunStage},
         lazyresourcemap::{add_lazy, get_file, get_file_names, get_num_resources},
-        openzt_mods::{get_num_mod_ids, get_mod_ids, load_open_zt_mod},
+        openzt_mods::{get_num_mod_ids, get_mod_ids, legacy_attributes::{add_legacy_entity, LegacyEntityAttributes, LegacyEntityType, SubtypeAttributes}, load_open_zt_mod},
         ztfile::{ZTFile, ZTFileType},
     },
 };
@@ -56,7 +58,7 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     resources
 }
 
-pub fn load_resources(paths: Vec<String>, mod_order: &[String]) {
+pub fn load_resources(paths: Vec<String>, mod_order: &[String], discovered_mods: &HashMap<String, (String, mods::Meta)>) {
     use std::time::Instant;
     use std::collections::HashMap;
 
@@ -64,19 +66,45 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String]) {
     let mut resource_count = 0;
 
     // Build a mapping from mod_id to .ztd file path for ordered loading
+    // Also categorize mods into legacy vs OpenZT (including mixed/legacy ztd_type)
     let mut mod_to_path: HashMap<String, PathBuf> = HashMap::new();
     let mut legacy_resources: Vec<PathBuf> = Vec::new();
 
-    // Discover all .ztd files and categorize them
     paths.iter().rev().for_each(|path| {
         let resources = get_ztd_resources(Path::new(path), false);
         resources.iter().for_each(|resource| {
-            // Try to read mod_id from meta.toml
-            if let Ok(Some(mod_id)) = get_mod_id_from_archive(resource) {
-                // Only add if not already present (earlier paths take precedence)
-                mod_to_path.entry(mod_id).or_insert_with(|| resource.clone());
+            let file_name = resource.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+
+            // Check if this is an OpenZT mod by looking up in discovered_mods
+            let is_openzt_mod = discovered_mods.values().any(|(archive_name, _)| {
+                archive_name == file_name
+            });
+
+            if is_openzt_mod {
+                // OpenZT mod - find the mod_id and check ztd_type
+                for (mod_id, (archive_name, meta)) in discovered_mods.iter() {
+                    if archive_name == file_name {
+                        let ztd_type = meta.ztd_type();
+                        match ztd_type {
+                            mods::ZtdType::Combined => {
+                                // Combined mods: handle_ztd() processes both OpenZT AND legacy in a single call
+                                // Only add to mod_to_path for ordered loading
+                                mod_to_path.entry(mod_id.clone()).or_insert_with(|| resource.clone());
+                            }
+                            mods::ZtdType::Legacy => {
+                                // Legacy-only ztd_type - treat as pure legacy
+                                legacy_resources.push(resource.clone());
+                            }
+                            mods::ZtdType::Openzt => {
+                                // Pure OpenZT mod - add to ordered loading only
+                                mod_to_path.entry(mod_id.clone()).or_insert_with(|| resource.clone());
+                            }
+                        }
+                        break;
+                    }
+                }
             } else {
-                // Legacy mod (no meta.toml)
+                // True legacy mod (no meta.toml)
                 legacy_resources.push(resource.clone());
             }
         });
@@ -168,41 +196,20 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String]) {
     info!("Extra handling took an extra: {:.2?}", elapsed);
 }
 
-/// Get mod_id from a .ztd archive by reading meta.toml
-///
-/// Returns None if no meta.toml exists (legacy mod)
-fn get_mod_id_from_archive(archive_path: &Path) -> anyhow::Result<Option<String>> {
-    let mut archive = ZtdArchive::new(archive_path)?;
-
-    // Check if meta.toml exists
-    let Ok(meta_file) = archive.by_name("meta.toml") else {
-        // No meta.toml = legacy mod
-        return Ok(None);
-    };
-
-    // Parse just enough to get mod_id
-    use serde::Deserialize;
-
-    #[derive(Deserialize)]
-    struct MinimalMeta {
-        mod_id: String,
-    }
-
-    let meta_str = String::try_from(meta_file)?;
-    let meta: MinimalMeta = toml::from_str(&meta_str)?;
-
-    Ok(Some(meta.mod_id))
-}
-
 fn handle_ztd(resource: &Path) -> anyhow::Result<i32> {
     let mut load_count = 0;
     let mut zip = ZtdArchive::new(resource)?;
+    let archive_name = zip.name().to_string();
 
     let ztd_type = load_open_zt_mod(&mut zip, resource)?;
 
     if ztd_type == mods::ZtdType::Openzt {
         return Ok(0);
     }
+
+    // Add span for legacy loading - provides archive context for any errors
+    let span = tracing::info_span!("handle_ztd", archive_name = %archive_name);
+    let _guard = span.enter();
 
     let archive = Arc::new(Mutex::new(zip));
 
@@ -228,6 +235,11 @@ fn parse_cfg(file_name: &String) -> Vec<String> {
         if let Err(e) = ini.read(input_string) {
             error!("Error reading ini {}: {}", file_name, e);
             return Vec::new();
+        }
+
+        // Extract entity attributes from .ai files for supported types
+        if let Some(entity_type) = LegacyEntityType::from_legacy_cfg_type(&legacy_cfg.cfg_type) {
+            extract_legacy_entities(&ini, entity_type);
         }
 
         match legacy_cfg.cfg_type {
@@ -284,8 +296,107 @@ fn parse_simple_cfg(file: &Ini, section_name: &str) -> Vec<String> {
     results
 }
 
+/// Extract entity attributes by loading each .ai file listed in the .cfg
+/// Also extracts subtype information from the .cfg file itself
+fn extract_legacy_entities(cfg: &Ini, entity_type: LegacyEntityType) {
+    let section_name = entity_type.section_name();
+
+    // Get the INI map to avoid temporary value issues
+    let Some(map) = cfg.get_map() else {
+        return;
+    };
+
+    // Get the section from the INI file
+    let Some(section) = map.get(section_name) else {
+        return;
+    };
+
+    // For scenery, we need to check multiple sections
+    let mut sections_to_check = vec![section_name];
+    if entity_type == LegacyEntityType::Scenery {
+        sections_to_check.push("foliage");
+        sections_to_check.push("other");
+    }
+
+    for section_name in sections_to_check {
+        let Some(section) = map.get(section_name) else {
+            continue;
+        };
+
+        // First, scan for any subtype definitions in the .cfg
+        // Format: [entityname/subtypes]
+        let mut entity_subtypes: HashMap<String, Vec<String>> = HashMap::new();
+
+        for (cfg_section_name, _) in map.iter() {
+            if let Some(entity_name) = cfg_section_name.strip_suffix("/subtypes") {
+                info!("Found subtype section for entity: {}", entity_name);
+                if let Some(subtype_section) = map.get(cfg_section_name) {
+                    let subtypes = subtype_section.keys().cloned().collect::<Vec<String>>();
+                    if !subtypes.is_empty() {
+                        entity_subtypes.insert(entity_name.to_string(), subtypes);
+                    }
+                }
+            }
+        }
+
+        // Now process the main section entries
+        for (entity_name, ai_file_paths) in section.iter() {
+            if let Some(ai_paths_vec) = ai_file_paths {
+                if let Some(ai_path) = ai_paths_vec.first() {
+                    let ai_path = ai_path.trim().trim_matches('"');
+
+                    // Load and parse the .ai file
+                    if let Some((_archive, ai_file)) = get_file(ai_path) {
+                        let mut ai_ini = Ini::new_cs();
+                        ai_ini.set_comment_symbols(&[';', '#', ':']);
+                        let ai_content = decode_game_text(&ai_file);
+
+                        if ai_ini.read(ai_content).is_ok() {
+                            match LegacyEntityAttributes::parse_from_ini(
+                                entity_name.clone(), &ai_ini, entity_type
+                            ) {
+                                Ok(mut attrs) => {
+                                    // If we have subtype information from the .cfg, validate/merge it
+                                    if let Some(subtypes) = entity_subtypes.get(entity_name) {
+                                        // Ensure all declared subtypes exist in the attributes
+                                        for subtype in subtypes {
+                                            if !attrs.subtype_attributes.contains_key(subtype) {
+                                                // Add empty entry for this subtype
+                                                attrs.subtype_attributes.insert(
+                                                    subtype.clone(),
+                                                    SubtypeAttributes {
+                                                        subtype: subtype.clone(),
+                                                        name_id: None,
+                                                    }
+                                                );
+                                            }
+                                        }
+                                    }
+
+                                    if let Err(e) = add_legacy_entity(entity_type, entity_name.clone(), attrs) {
+                                        warn!(
+                                            "Failed to register legacy entity '{}': {}",
+                                            entity_name, e
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to parse attributes from '{}': {}",
+                                        ai_path, e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
-enum LegacyCfgType {
+pub enum LegacyCfgType {
     Ambient,
     Animal,
     Building,
@@ -427,4 +538,130 @@ fn get_legacy_cfg_type(file_name: &str) -> Option<LegacyCfg> {
         [_, None, None, Some(file_name), Some(file_type)] => map_legacy_cfg_type(file_type.as_str(), file_name.as_str().to_string()).ok(),
         _ => None,
     }
+}
+
+/// Load legacy entities from the game's installed .cfg files for integration testing.
+///
+/// This function reads legacy .cfg files directly from the game directory and extracts
+/// entity attributes. It's designed to be called from integration tests to ensure
+/// legacy entity data is available for testing.
+///
+/// # Returns
+/// * `Ok(count)` if legacy loading succeeded, where count is the number of .cfg files processed
+/// * `Err(_)` if there was an error reading or parsing the .cfg files, or if no .cfg files were found
+#[cfg(feature = "integration-tests")]
+pub fn load_legacy_entities_for_tests() -> anyhow::Result<usize> {
+    use std::fs;
+
+    // Get the Zoo Tycoon installation directory
+    let zt_dir = std::env::var("ZOO Tycoon_DIR").unwrap_or_else(|_| {
+        // Default installation path
+        "C:\\Program Files (x86)\\Microsoft Games\\Zoo Tycoon".to_string()
+    });
+
+    info!("Loading legacy entities from Zoo Tycoon directory: {}", zt_dir);
+
+    // List of .cfg files to process for legacy entity extraction
+    let cfg_files = vec![
+        "animal.cfg",
+        "bldg.cfg",
+        "fences.cfg",
+        "food.cfg",
+        "guests.cfg",
+        "items.cfg",
+        "paths.cfg",
+        "scener.cfg",
+        "staff.cfg",
+        "twall.cfg",
+    ];
+
+    let mut loaded_count = 0;
+
+    for cfg_file in cfg_files {
+        let cfg_path = std::path::Path::new(&zt_dir).join(cfg_file);
+
+        if !cfg_path.exists() {
+            continue; // Skip silently
+        }
+
+        info!("Processing {}", cfg_file);
+
+        // Read the .cfg file
+        let cfg_content = fs::read_to_string(&cfg_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", cfg_file, e))?;
+
+        // Parse the INI content
+        let mut ini = Ini::new_cs();
+        ini.set_comment_symbols(&[';', '#', ':']);
+        if ini.read(cfg_content).is_err() {
+            warn!("Failed to parse {}", cfg_file);
+            continue;
+        }
+
+        // Determine the legacy entity type from the filename
+        if let Some(legacy_cfg) = get_legacy_cfg_type(cfg_file) {
+            if let Some(entity_type) = LegacyEntityType::from_legacy_cfg_type(&legacy_cfg.cfg_type) {
+                // Extract legacy entities from this .cfg file
+                extract_legacy_entities(&ini, entity_type);
+                loaded_count += 1;
+            }
+        }
+    }
+
+    // Return error if no .cfg files were found (so test attributes will be added)
+    if loaded_count == 0 {
+        return Err(anyhow::anyhow!("No legacy .cfg files found in {}", zt_dir));
+    }
+
+    info!("Loaded legacy entities from {} .cfg files", loaded_count);
+    Ok(loaded_count)
+}
+
+/// Load legacy entities from test .cfg files for integration testing.
+///
+/// This function is called after test .cfg and .ai files have been added to the resource
+/// system. It triggers the actual legacy loading code path to parse those files.
+#[cfg(feature = "integration-tests")]
+pub fn load_legacy_entities_from_test_files() -> anyhow::Result<()> {
+    info!("Loading legacy entities from test .cfg files...");
+
+    // Get file names from resource system that match legacy .cfg pattern
+    let cfg_files = vec![
+        "animal.cfg",
+        "bldg.cfg",
+        "fences.cfg",
+        "guests.cfg",
+        "items.cfg",
+        "staff.cfg",
+        "twall.cfg",
+    ];
+
+    let mut loaded_count = 0;
+
+    for cfg_file in cfg_files {
+        // Check if file exists in resource system
+        if let Some((filename, data)) = crate::resource_manager::lazyresourcemap::get_file(cfg_file) {
+            // Parse the .cfg file
+            let input_string = crate::encoding_utils::decode_game_text(&data);
+            let mut ini = Ini::new_cs();
+            ini.set_comment_symbols(&[';', '#', ':']);
+
+            if ini.read(input_string).is_err() {
+                warn!("Failed to parse test file: {}", cfg_file);
+                continue;
+            }
+
+            // Determine the legacy entity type from the filename
+            if let Some(legacy_cfg) = get_legacy_cfg_type(cfg_file) {
+                if let Some(entity_type) = LegacyEntityType::from_legacy_cfg_type(&legacy_cfg.cfg_type) {
+                    // Extract legacy entities from this .cfg file
+                    extract_legacy_entities(&ini, entity_type);
+                    loaded_count += 1;
+                }
+            }
+        }
+    }
+
+    info!("Loaded legacy entities from {} test .cfg files", loaded_count);
+    Ok(())
 }
