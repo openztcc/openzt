@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    io,
     path::{Path, PathBuf},
     str,
     sync::{Arc, Mutex},
@@ -11,7 +10,6 @@ use std::sync::LazyLock;
 use regex::Regex;
 use tracing::{error, info, warn};
 use walkdir::WalkDir;
-use zip::read::ZipFile;
 
 use super::ztd::ZtdArchive;
 use crate::{
@@ -25,10 +23,6 @@ use crate::{
         ztfile::{ZTFile, ZTFileType},
     },
 };
-
-pub trait FromZipFile<T> {
-    fn from_zip_file(file: &mut ZipFile) -> io::Result<T>;
-}
 
 pub const OPENZT_DIR0: &str = "openzt_resource";
 
