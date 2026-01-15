@@ -3,6 +3,8 @@ use std::sync::Mutex;
 use mlua::Lua;
 use tracing::info;
 
+use crate::resource_manager::openzt_mods::legacy_attributes::{self, LegacyEntityType};
+
 /// Macro to simplify registering Lua functions
 ///
 /// # Usage
@@ -173,4 +175,198 @@ pub fn init() {
         }
         Ok(result)
     });
+
+    // Register the get_legacy_attribute() function
+    lua_fn!("get_legacy_attribute",
+        "Get a legacy entity attribute (name_id currently supported)",
+        "get_legacy_attribute(entity_type, entity_name, [subtype], attribute)",
+        |entity_type: String, entity_name: String, args: mlua::Variadic<String>| {
+            // Parse variadic args: either (subtype, attribute) or just (attribute)
+            let (subtype, attribute) = if args.len() == 2 {
+                (Some(args[0].as_str()), args[1].as_str())
+            } else if args.len() == 1 {
+                (None, args[0].as_str())
+            } else {
+                return Ok((String::new(), "Expected 2 or 3 arguments".to_string()));
+            };
+
+            let type_result: Result<LegacyEntityType, _> = entity_type.parse();
+            let entity_type = match type_result {
+                Ok(t) => t,
+                Err(e) => return Ok((String::new(), format!("Invalid entity type: {}", e))),
+            };
+
+            match legacy_attributes::get_legacy_attribute_with_subtype(
+                entity_type, &entity_name, subtype, attribute
+            ) {
+                Ok(value) => Ok((value, String::new())),
+                Err(e) => Ok((String::new(), e.to_string())),
+            }
+        });
+
+    // Register the list_legacy_entities() function
+    lua_fn!("list_legacy_entities",
+        "List all legacy entities (optionally filtered by type)",
+        "list_legacy_entities([entity_type])",
+        |entity_type: Option<String>| {
+            use crate::resource_manager::openzt_mods::legacy_attributes::LEGACY_ATTRIBUTES_MAP;
+
+            let map = LEGACY_ATTRIBUTES_MAP.lock().unwrap();
+
+            if let Some(type_str) = entity_type {
+                // List specific type
+                let entity_type: Result<LegacyEntityType, _> = type_str.parse();
+                let entity_type = match entity_type {
+                    Ok(t) => t,
+                    Err(e) => return Ok(format!("Invalid entity type: {}", e)),
+                };
+
+                if let Some(entities) = map.get(&entity_type) {
+                    let mut result = format!("{} ({} entities):\n", type_str, entities.len());
+                    let mut entity_names: Vec<_> = entities.keys().collect();
+                    entity_names.sort();
+                    for name in entity_names {
+                        if let Some(attrs) = entities.get(name) {
+                            let subtype_list = attrs.subtype_list();
+
+                            // Check if all subtypes share the same name_id
+                            let name_ids: Vec<_> = attrs.subtype_attributes
+                                .values()
+                                .filter_map(|v| v.name_id)
+                                .collect();
+                            let all_same = name_ids.len() == 1 || name_ids.windows(2).all(|w| w[0] == w[1]);
+
+                            // Build the display string
+                            if subtype_list.is_empty() {
+                                // No subtypes - show single name_id if available
+                                if let Some(name_id) = attrs.get_name_id(None) {
+                                    result.push_str(&format!("  {} -> name_id={}\n", name, name_id));
+                                } else {
+                                    result.push_str(&format!("  {} -> (no name_id)\n", name));
+                                }
+                            } else if !name_ids.is_empty() && all_same {
+                                // Has subtypes and they all share the same name_id - show compact format
+                                result.push_str(&format!("  {} -> [{}] name_id={}\n", name, subtype_list, name_ids[0]));
+                            } else {
+                                // Has subtypes with different name_ids - show each subtype
+                                result.push_str(&format!("  {}:\n", name));
+                                let mut subtype_name_ids: Vec<(String, Option<u32>)> = attrs.subtype_attributes
+                                    .iter()
+                                    .filter(|(k, _)| !k.is_empty())
+                                    .map(|(k, v)| (k.clone(), v.name_id))
+                                    .collect();
+                                subtype_name_ids.sort();
+                                for (subtype, name_id) in subtype_name_ids {
+                                    if let Some(nid) = name_id {
+                                        result.push_str(&format!("    [{}] name_id={}\n", subtype, nid));
+                                    } else {
+                                        result.push_str(&format!("    [{}] (no name_id)\n", subtype));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Ok(result)
+                } else {
+                    Ok(format!("No entities found for type '{}'", type_str))
+                }
+            } else {
+                // List ALL entities with their attributes (for debugging)
+                let mut result = String::from("All legacy entities:\n");
+                let mut types: Vec<_> = map.keys().collect();
+                types.sort_by_key(|t| t.as_str());
+                for entity_type in types {
+                    if let Some(entities) = map.get(entity_type) {
+                        result.push_str(&format!("\n[{}] ({} entities):\n", entity_type.as_str(), entities.len()));
+                        let mut entity_names: Vec<_> = entities.keys().collect();
+                        entity_names.sort();
+                        for name in entity_names {
+                            if let Some(attrs) = entities.get(name) {
+                                let subtype_list = attrs.subtype_list();
+
+                                // Check if all subtypes share the same name_id
+                                let name_ids: Vec<_> = attrs.subtype_attributes
+                                    .values()
+                                    .filter_map(|v| v.name_id)
+                                    .collect();
+                                let all_same = name_ids.len() == 1 || name_ids.windows(2).all(|w| w[0] == w[1]);
+
+                                // Build the display string
+                                if subtype_list.is_empty() {
+                                    // No subtypes - show single name_id if available
+                                    if let Some(name_id) = attrs.get_name_id(None) {
+                                        result.push_str(&format!("  {} -> name_id={}\n", name, name_id));
+                                    } else {
+                                        result.push_str(&format!("  {} -> (no name_id)\n", name));
+                                    }
+                                } else if !name_ids.is_empty() && all_same {
+                                    // Has subtypes and they all share the same name_id - show compact format
+                                    result.push_str(&format!("  {} -> [{}] name_id={}\n", name, subtype_list, name_ids[0]));
+                                } else {
+                                    // Has subtypes with different name_ids - show each subtype
+                                    result.push_str(&format!("  {}:\n", name));
+                                    let mut subtype_name_ids: Vec<(String, Option<u32>)> = attrs.subtype_attributes
+                                        .iter()
+                                        .filter(|(k, _)| !k.is_empty())
+                                        .map(|(k, v)| (k.clone(), v.name_id))
+                                        .collect();
+                                    subtype_name_ids.sort();
+                                    for (subtype, name_id) in subtype_name_ids {
+                                        if let Some(nid) = name_id {
+                                            result.push_str(&format!("    [{}] name_id={}\n", subtype, nid));
+                                        } else {
+                                            result.push_str(&format!("    [{}] (no name_id)\n", subtype));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(result)
+            }
+        });
+
+    // Register the list_legacy_types() function
+    lua_fn!("list_legacy_types",
+        "List all available legacy entity types with counts",
+        "list_legacy_types()",
+        || {
+            use crate::resource_manager::openzt_mods::legacy_attributes::LEGACY_ATTRIBUTES_MAP;
+
+            let map = LEGACY_ATTRIBUTES_MAP.lock().unwrap();
+            let mut result = String::from("Available legacy entity types:\n");
+
+            // Sort types alphabetically
+            let mut types: Vec<_> = map.keys().collect();
+            types.sort_by_key(|t| t.as_str());
+
+            for entity_type in types {
+                if let Some(entities) = map.get(entity_type) {
+                    result.push_str(&format!("  {} ({} entities)\n", entity_type.as_str(), entities.len()));
+                }
+            }
+
+            // Also list types that have no entities
+            let all_types = &[
+                ("animals", LegacyEntityType::Animal),
+                ("buildings", LegacyEntityType::Building),
+                ("fences", LegacyEntityType::Fence),
+                ("food", LegacyEntityType::Food),
+                ("guests", LegacyEntityType::Guest),
+                ("items", LegacyEntityType::Item),
+                ("paths", LegacyEntityType::Path),
+                ("scenery", LegacyEntityType::Scenery),
+                ("staff", LegacyEntityType::Staff),
+                ("walls", LegacyEntityType::Wall),
+            ];
+
+            for (name, ty) in all_types {
+                if !map.contains_key(ty) {
+                    result.push_str(&format!("  {} (0 entities)\n", name));
+                }
+            }
+
+            Ok(result)
+        });
 }

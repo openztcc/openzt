@@ -1,0 +1,11 @@
+[m/Characteristics/Integers]
+cNameID = 1101
+cAnimalID = 2
+cMinNumber = 1
+cMaxNumber = 6
+
+[f/Characteristics/Integers]
+cNameID = 1102
+cAnimalID = 2
+cMinNumber = 1
+cMaxNumber = 6

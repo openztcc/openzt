@@ -19,6 +19,7 @@ IF "%~1"=="console" GOTO console
 IF "%~1"=="check" GOTO check
 IF "%~1"=="clippy" GOTO clippy
 IF "%~1"=="test" GOTO test
+IF "%~1"=="integration-tests" GOTO integration_tests
 
 echo Error: Unknown subcommand "%~1"
 echo.
@@ -37,6 +38,19 @@ GOTO parse_flags
 SET RUN_AFTER_BUILD=1
 SHIFT
 GOTO parse_flags
+
+REM ============================================================
+REM Integration Tests Command
+REM ============================================================
+
+:integration_tests
+SET RUN_AFTER_BUILD=1
+SET RELEASE_FLAG=1
+SET WAIT_FLAG=1
+SET CARGO_ARGS=--features integration-tests
+SET INTEGRATION_TESTS_MODE=1
+SHIFT
+GOTO build
 
 :parse_flags
 SET RELEASE_FLAG=
@@ -191,19 +205,16 @@ REM Check if Zoo Tycoon is Already Running
 REM ============================================================
 
 :check_zoo_running
-IF NOT DEFINED WAIT_FLAG GOTO :EOF
-
-REM Check if zoo.exe is already running
-tasklist /FI "IMAGENAME eq zoo.exe" 2>NUL | find /I /N "zoo.exe">NUL
+REM Check if zoo.exe is already running using PowerShell (avoids pipe issues)
+powershell -Command "Get-Process -Name zoo -ErrorAction SilentlyContinue" >NUL 2>&1
 IF "%ERRORLEVEL%"=="0" (
     echo.
-    echo WARNING: Zoo Tycoon is already running.
-    echo The new instance may fail to launch, or the wait may attach to the existing process.
+    echo ERROR: Zoo Tycoon is already running.
+    echo Please close the existing instance before launching a new one.
     echo.
-    timeout /t 3 /nobreak >NUL
+    exit /b 1
 )
-
-GOTO :EOF
+exit /b 0
 
 REM ============================================================
 REM Copy and Run Function
@@ -268,6 +279,10 @@ IF DEFINED LOADER_FLAG (
 )
 
 REM Standard DLL copy method (no loader)
+REM Check for already running game before attempting to copy
+CALL :check_zoo_running
+IF !errorlevel! NEQ 0 exit /b !errorlevel!
+
 REM Delete old DLLs
 echo.
 echo Cleaning up old DLLs...
@@ -293,9 +308,6 @@ IF !errorlevel! NEQ 0 (
     exit /b !errorlevel!
 )
 
-REM Check for already running game if --wait is enabled
-IF DEFINED WAIT_FLAG CALL :check_zoo_running
-
 REM Launch game
 echo.
 IF DEFINED WAIT_FLAG (
@@ -303,6 +315,22 @@ IF DEFINED WAIT_FLAG (
     start "Zoo Tycoon" /WAIT "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"
     echo.
     echo Zoo Tycoon has exited.
+
+    REM Display integration test results if in integration tests mode
+    IF DEFINED INTEGRATION_TESTS_MODE (
+        echo.
+        echo ============================================================
+        echo Integration Test Results
+        echo ============================================================
+        type "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_integration_tests.log"
+        echo.
+        echo ============================================================
+        echo Full logs available at:
+        echo   "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt_integration_tests.log"
+        echo   "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt.log"
+        echo ============================================================
+        echo.
+    )
 ) ELSE (
     echo Launching Zoo Tycoon...
     start "Zoo Tycoon" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"
@@ -425,14 +453,15 @@ echo.
 echo Usage: openzt.bat ^<subcommand^> [flags] [-- cargo-args]
 echo.
 echo Subcommands:
-echo   build     Build the DLL only
-echo   run       Build the DLL and launch the game
-echo   check     Run cargo check on openzt crate
-echo   clippy    Run cargo clippy on openzt crate
-echo   test      Run cargo test on openzt crate
-echo   docs      Generate and open documentation
-echo   console   Open interactive Lua console or run oneshot command
-echo   help      Show this help message
+echo   build              Build the DLL only
+echo   run                Build the DLL and launch the game
+echo   check              Run cargo check on openzt crate
+echo   clippy             Run cargo clippy on openzt crate
+echo   test               Run cargo test on openzt crate
+echo   integration-tests  Run integration tests (builds release, launches game, displays results)
+echo   docs               Generate and open documentation
+echo   console            Open interactive Lua console or run oneshot command
+echo   help               Show this help message
 echo.
 echo Build/Run Flags:
 echo   --release      Build with release optimizations
@@ -459,6 +488,7 @@ echo   openzt.bat build --stable            Build debug without command-console
 echo   openzt.bat check                     Run cargo check on openzt
 echo   openzt.bat clippy                    Run cargo clippy on openzt
 echo   openzt.bat test                      Run cargo test on openzt
+echo   openzt.bat integration-tests         Run integration tests (builds release, displays results)
 echo   openzt.bat docs                      Generate and open docs
 echo   openzt.bat console                   Open interactive Lua console
 echo   openzt.bat console --oneshot "help()"          Run single Lua command and exit

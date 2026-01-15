@@ -44,10 +44,9 @@ pub fn get_mod_ids() -> Vec<String> {
 
 /// Discover all OpenZT mods from .ztd archives without loading them
 ///
-/// Returns a map of mod_id -> Meta for all mods found in the resource paths
+/// Returns a map of mod_id -> (archive_name, Meta) for all mods found in the resource paths
 /// This is used for dependency resolution before actual mod loading
-pub fn discover_mods(paths: &[String]) -> HashMap<String, mods::Meta> {
-    use crate::resource_manager::ztd::ZtdArchive;
+pub fn discover_mods(paths: &[String]) -> HashMap<String, (String, mods::Meta)> {
     use std::path::PathBuf;
 
     let mut discovered = HashMap::new();
@@ -77,11 +76,23 @@ pub fn discover_mods(paths: &[String]) -> HashMap<String, mods::Meta> {
             match read_meta_from_archive(&file_path) {
                 Ok(Some(meta)) => {
                     let mod_id = meta.mod_id().to_string();
+                    let archive_name = file_path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
 
                     // Skip if we already found this mod (earlier paths take precedence)
                     if !discovered.contains_key(&mod_id) {
+                        let span = tracing::info_span!(
+                            "discover_mod",
+                            archive_path = %file_path.display().to_string(),
+                            mod_id = %mod_id,
+                            mod_name = %meta.name()
+                        );
+                        let _guard = span.enter();
+
                         info!("Discovered mod: {} ({})", meta.name(), mod_id);
-                        discovered.insert(mod_id, meta);
+                        discovered.insert(mod_id, (archive_name, meta));
                     }
                 }
                 Ok(None) => {
@@ -103,6 +114,10 @@ pub fn discover_mods(paths: &[String]) -> HashMap<String, mods::Meta> {
 fn read_meta_from_archive(archive_path: &Path) -> anyhow::Result<Option<mods::Meta>> {
     use crate::resource_manager::ztd::ZtdArchive;
 
+    let archive_path_str = archive_path.display().to_string();
+    let span = tracing::info_span!("read_meta_from_archive", archive_path = %archive_path_str);
+    let _guard = span.enter();
+
     let mut archive = ZtdArchive::new(archive_path)
         .with_context(|| format!("Failed to open archive: {:?}", archive_path))?;
 
@@ -118,6 +133,10 @@ fn read_meta_from_archive(archive_path: &Path) -> anyhow::Result<Option<mods::Me
 
     let meta = toml::from_str::<mods::Meta>(&meta_str)
         .with_context(|| format!("Failed to parse meta.toml from {:?}", archive_path))?;
+
+    // Record mod_id in the span for downstream error context
+    let mod_id = meta.mod_id().to_string();
+    span.record("mod_id", &mod_id);
 
     Ok(Some(meta))
 }
@@ -199,6 +218,16 @@ fn load_open_zt_mod_internal(
     if !add_new_mod_id(&mod_id) {
         return Err(anyhow!("Mod already loaded: {}", mod_id));
     }
+
+    // Create span for the entire loading process
+    let mod_name = meta.name().to_string();
+    let span = tracing::info_span!(
+        "load_openzt_mod",
+        mod_id = %mod_id,
+        mod_name = %mod_name,
+        archive_name = %archive_name
+    );
+    let _guard = span.enter();
 
     info!("Loading OpenZT mod: {} {}", meta.name(), meta.mod_id());
 
@@ -350,6 +379,9 @@ impl fmt::Display for ResourceType {
 
 /// Parse a definition file from TOML without side effects
 pub fn parse_def(mod_id: &str, file_name: &str, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
+    let span = tracing::info_span!("parse_def", mod_id = %mod_id, file_name = %file_name);
+    let _guard = span.enter();
+
     info!("Parsing defs {} from {}", file_name, mod_id);
 
     let file = file_map

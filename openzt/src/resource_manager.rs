@@ -27,6 +27,11 @@ use commands::init_commands;
 pub use handlers::{add_handler, Handler, RunStage};
 use hooks::init_hooks;
 pub use legacy_loading::OPENZT_DIR0;
+
+// Export for integration tests
+#[cfg(feature = "integration-tests")]
+pub use legacy_loading::{load_legacy_entities_for_tests, load_legacy_entities_from_test_files};
+
 pub use ztfile::{modify_ztfile_as_animation, modify_ztfile_as_ini};
 
 ///Initializes hooks and commands for the resource manager

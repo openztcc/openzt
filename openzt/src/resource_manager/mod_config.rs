@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::LazyLock;
+use std::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_subscriber::filter::LevelFilter;
 
@@ -11,6 +13,9 @@ pub struct OpenZTConfig {
 
     #[serde(default)]
     pub logging: LoggingConfig,
+
+    #[serde(default)]
+    pub resource_cache: ResourceCacheConfig,
 }
 
 /// Mod loading configuration section
@@ -36,10 +41,12 @@ pub struct ModLoadingConfig {
 /// Log level setting for OpenZT logging
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum LogLevel {
     Trace,
     Debug,
     Info,
+    #[default]
     Warn,
     Error,
 }
@@ -57,11 +64,6 @@ impl LogLevel {
     }
 }
 
-impl Default for LogLevel {
-    fn default() -> Self {
-        LogLevel::Warn
-    }
-}
 
 /// Logging configuration section
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -75,8 +77,36 @@ pub struct LoggingConfig {
     pub level: LogLevel,
 }
 
+/// Resource cache configuration section
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ResourceCacheConfig {
+    /// Maximum memory usage before unloading begins (in MB)
+    #[serde(default = "default_max_memory_mb")]
+    pub max_memory_mb: u32,
+
+    /// Target memory usage after unloading (in MB)
+    #[serde(default = "default_target_memory_mb")]
+    pub target_memory_mb: u32,
+
+    /// Unload resources not accessed within this time (in seconds)
+    #[serde(default = "default_stale_timeout_seconds")]
+    pub stale_timeout_seconds: u64,
+}
+
 fn default_true() -> bool {
     true
+}
+
+fn default_max_memory_mb() -> u32 {
+    2048 // 2GB
+}
+
+fn default_target_memory_mb() -> u32 {
+    1536 // 1.5GB
+}
+
+fn default_stale_timeout_seconds() -> u64 {
+    300 // 5 minutes
 }
 
 impl Default for OpenZTConfig {
@@ -92,6 +122,7 @@ impl Default for OpenZTConfig {
                 log_to_file: true,
                 level: LogLevel::Warn,
             },
+            resource_cache: ResourceCacheConfig::default(),
         }
     }
 }
@@ -116,6 +147,21 @@ impl Default for LoggingConfig {
     }
 }
 
+impl Default for ResourceCacheConfig {
+    fn default() -> Self {
+        ResourceCacheConfig {
+            max_memory_mb: 2048,
+            target_memory_mb: 1536,
+            stale_timeout_seconds: 300,
+        }
+    }
+}
+
+// Global cached configuration
+static CACHED_CONFIG: LazyLock<Mutex<OpenZTConfig>> = LazyLock::new(|| {
+    Mutex::new(load_openzt_config_from_disk())
+});
+
 /// Load OpenZT configuration from openzt.toml
 ///
 /// Location: <Zoo Tycoon Install>/openzt.toml
@@ -123,7 +169,7 @@ impl Default for LoggingConfig {
 /// If file doesn't exist, creates it with default values and returns default config.
 /// If file exists but is missing sections, adds missing sections with defaults.
 /// If file fails to parse, returns default config without overwriting the file.
-pub fn load_openzt_config() -> OpenZTConfig {
+fn load_openzt_config_from_disk() -> OpenZTConfig {
     let config_path = get_config_path();
 
     if !config_path.exists() {
@@ -146,6 +192,7 @@ pub fn load_openzt_config() -> OpenZTConfig {
                     // Check if sections exist
                     let has_mod_loading = toml_value.get("mod_loading").is_some();
                     let has_logging = toml_value.get("logging").is_some();
+                    let has_resource_cache = toml_value.get("resource_cache").is_some();
 
                     // Check if all fields exist within sections
                     let mod_loading_complete = if let Some(mod_loading) = toml_value.get("mod_loading") {
@@ -163,8 +210,17 @@ pub fn load_openzt_config() -> OpenZTConfig {
                         false
                     };
 
+                    let resource_cache_complete = if let Some(resource_cache) = toml_value.get("resource_cache") {
+                        resource_cache.get("max_memory_mb").is_some()
+                            && resource_cache.get("target_memory_mb").is_some()
+                            && resource_cache.get("stale_timeout_seconds").is_some()
+                    } else {
+                        false
+                    };
+
                     // Update needed if sections missing or fields incomplete
-                    !has_mod_loading || !has_logging || !mod_loading_complete || !logging_complete
+                    !has_mod_loading || !has_logging || !has_resource_cache
+                        || !mod_loading_complete || !logging_complete || !resource_cache_complete
                 }
                 Err(_) => false, // If we can't parse as Value, the full parse will fail below
             };
@@ -198,6 +254,15 @@ pub fn load_openzt_config() -> OpenZTConfig {
     }
 }
 
+/// Get the cached OpenZT configuration
+///
+/// Returns a clone of the cached config. The config is loaded once on startup
+/// and cached in memory for fast access.
+pub fn get_openzt_config() -> OpenZTConfig {
+    let config = CACHED_CONFIG.lock().unwrap();
+    config.clone()
+}
+
 /// Save OpenZT configuration to openzt.toml
 ///
 /// Uses atomic write (temp file + rename) to prevent corruption
@@ -226,6 +291,13 @@ pub fn save_openzt_config(config: &OpenZTConfig) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to rename temp config: {}", e))?;
 
     info!("Updated openzt.toml with new configuration");
+
+    // Update the cached config
+    {
+        let mut cached = CACHED_CONFIG.lock().unwrap();
+        *cached = config.clone();
+    }
+
     Ok(())
 }
 

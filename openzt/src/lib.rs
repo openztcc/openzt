@@ -119,7 +119,7 @@ mod zoo_init {
                 let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
 
                 // Load config to determine logging settings
-                let config = resource_manager::mod_config::load_openzt_config();
+                let config = resource_manager::mod_config::get_openzt_config();
 
                 // Convert log level from config to LevelFilter
                 let log_level = config.logging.level.to_level_filter();
