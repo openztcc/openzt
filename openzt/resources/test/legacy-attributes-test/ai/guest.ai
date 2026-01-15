@@ -1,0 +1,15 @@
+[test_guest_1/Characteristics/Integers]
+cNameID = 5001
+cGuestID = 1
+
+[test_guest_2/Characteristics/Integers]
+cNameID = 5002
+cGuestID = 1
+
+[test_guest_3/Characteristics/Integers]
+cNameID = 5003
+cGuestID = 1
+
+[test_guest_4/Characteristics/Integers]
+cNameID = 5004
+cGuestID = 1

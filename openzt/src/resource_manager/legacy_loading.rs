@@ -373,20 +373,6 @@ fn extract_legacy_entities(cfg: &Ini, entity_type: LegacyEntityType) {
                                         }
                                     }
 
-                                    // Special case: guests have hardcoded subtypes since no .cfg sections
-                                    if entity_type == LegacyEntityType::Guest && attrs.subtype_attributes.is_empty() {
-                                        let guest_subtypes = vec!["man", "woman", "boy", "girl"];
-                                        for subtype in guest_subtypes {
-                                            attrs.subtype_attributes.insert(
-                                                subtype.to_string(),
-                                                SubtypeAttributes {
-                                                    subtype: subtype.to_string(),
-                                                    name_id: None,
-                                                }
-                                            );
-                                        }
-                                    }
-
                                     if let Err(e) = add_legacy_entity(entity_type, entity_name.clone(), attrs) {
                                         warn!(
                                             "Failed to register legacy entity '{}': {}",
@@ -629,4 +615,53 @@ pub fn load_legacy_entities_for_tests() -> anyhow::Result<usize> {
 
     info!("Loaded legacy entities from {} .cfg files", loaded_count);
     Ok(loaded_count)
+}
+
+/// Load legacy entities from test .cfg files for integration testing.
+///
+/// This function is called after test .cfg and .ai files have been added to the resource
+/// system. It triggers the actual legacy loading code path to parse those files.
+#[cfg(feature = "integration-tests")]
+pub fn load_legacy_entities_from_test_files() -> anyhow::Result<()> {
+    info!("Loading legacy entities from test .cfg files...");
+
+    // Get file names from resource system that match legacy .cfg pattern
+    let cfg_files = vec![
+        "animal.cfg",
+        "bldg.cfg",
+        "fences.cfg",
+        "guests.cfg",
+        "items.cfg",
+        "staff.cfg",
+        "twall.cfg",
+    ];
+
+    let mut loaded_count = 0;
+
+    for cfg_file in cfg_files {
+        // Check if file exists in resource system
+        if let Some((filename, data)) = crate::resource_manager::lazyresourcemap::get_file(cfg_file) {
+            // Parse the .cfg file
+            let input_string = crate::encoding_utils::decode_game_text(&data);
+            let mut ini = Ini::new_cs();
+            ini.set_comment_symbols(&[';', '#', ':']);
+
+            if ini.read(input_string).is_err() {
+                warn!("Failed to parse test file: {}", cfg_file);
+                continue;
+            }
+
+            // Determine the legacy entity type from the filename
+            if let Some(legacy_cfg) = get_legacy_cfg_type(cfg_file) {
+                if let Some(entity_type) = LegacyEntityType::from_legacy_cfg_type(&legacy_cfg.cfg_type) {
+                    // Extract legacy entities from this .cfg file
+                    extract_legacy_entities(&ini, entity_type);
+                    loaded_count += 1;
+                }
+            }
+        }
+    }
+
+    info!("Loaded legacy entities from {} test .cfg files", loaded_count);
+    Ok(())
 }

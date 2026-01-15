@@ -9,6 +9,67 @@ use std::path::Path;
 
 use super::TestResult;
 
+// Embedded Test Resources
+#[cfg(feature = "integration-tests")]
+mod embedded_resources {
+    // .cfg files
+    pub const ANIMAL_CFG: &str = include_str!("../../resources/test/legacy-attributes-test/animal.cfg");
+    pub const BLDG_CFG: &str = include_str!("../../resources/test/legacy-attributes-test/bldg.cfg");
+    pub const FENCES_CFG: &str = include_str!("../../resources/test/legacy-attributes-test/fences.cfg");
+    pub const GUESTS_CFG: &str = include_str!("../../resources/test/legacy-attributes-test/guests.cfg");
+    pub const ITEMS_CFG: &str = include_str!("../../resources/test/legacy-attributes-test/items.cfg");
+    pub const STAFF_CFG: &str = include_str!("../../resources/test/legacy-attributes-test/staff.cfg");
+    pub const TWALL_CFG: &str = include_str!("../../resources/test/legacy-attributes-test/twall.cfg");
+
+    // .ai files
+    pub const ELEPHANT_AI: &str = include_str!("../../resources/test/legacy-attributes-test/ai/elephant.ai");
+    pub const LION_AI: &str = include_str!("../../resources/test/legacy-attributes-test/ai/lion.ai");
+    pub const RESTROOM_AI: &str = include_str!("../../resources/test/legacy-attributes-test/ai/restroom.ai");
+    pub const ATLTLTANK_FENCE_AI: &str = include_str!("../../resources/test/legacy-attributes-test/ai/atltank-fence.ai");
+    pub const ATLTLTANK_WALL_AI: &str = include_str!("../../resources/test/legacy-attributes-test/ai/atltank-wall.ai");
+    pub const ROCK_AI: &str = include_str!("../../resources/test/legacy-attributes-test/ai/rock.ai");
+    pub const GUEST_AI: &str = include_str!("../../resources/test/legacy-attributes-test/ai/guest.ai");
+    pub const ZOOKEEPER_AI: &str = include_str!("../../resources/test/legacy-attributes-test/ai/zookeeper.ai");
+}
+
+/// Load test legacy .cfg and .ai files into the resource system
+#[cfg(feature = "integration-tests")]
+pub fn load_test_legacy_files() -> anyhow::Result<()> {
+    use embedded_resources::*;
+
+    // Helper function to add a file to the resource system
+    let add_file = |path: &str, content: &str| -> anyhow::Result<()> {
+        let content_len = content.len() as u32;
+        let c_string = std::ffi::CString::new(content)?;
+        let file_type = ZTFileType::try_from(Path::new(path))
+            .map_err(|e| anyhow::anyhow!("Invalid file type: {}", e))?;
+        let ztfile = ZTFile::Text(c_string, file_type, content_len);
+        add_ztfile(Path::new(""), path.to_string(), ztfile)?;
+        Ok(())
+    };
+
+    // Add .cfg files
+    add_file("animal.cfg", ANIMAL_CFG)?;
+    add_file("bldg.cfg", BLDG_CFG)?;
+    add_file("fences.cfg", FENCES_CFG)?;
+    add_file("guests.cfg", GUESTS_CFG)?;
+    add_file("items.cfg", ITEMS_CFG)?;
+    add_file("staff.cfg", STAFF_CFG)?;
+    add_file("twall.cfg", TWALL_CFG)?;
+
+    // Add .ai files
+    add_file("ai/elephant.ai", ELEPHANT_AI)?;
+    add_file("ai/lion.ai", LION_AI)?;
+    add_file("ai/restroom.ai", RESTROOM_AI)?;
+    add_file("ai/atltank-fence.ai", ATLTLTANK_FENCE_AI)?;
+    add_file("ai/atltank-wall.ai", ATLTLTANK_WALL_AI)?;
+    add_file("ai/rock.ai", ROCK_AI)?;
+    add_file("ai/guest.ai", GUEST_AI)?;
+    add_file("ai/zookeeper.ai", ZOOKEEPER_AI)?;
+
+    Ok(())
+}
+
 /// Helper function to create a test INI file in the resource system
 fn create_test_ini_file(path: &str, content: &str) -> anyhow::Result<()> {
     let content_len = content.len() as u32;
@@ -134,8 +195,8 @@ fn test_legacy_item_attributes_loaded() -> TestResult {
 fn test_legacy_guest_attributes_loaded() -> TestResult {
     let test_name = "test_legacy_guest_attributes_loaded";
 
-    // Test that guest attributes with hardcoded subtypes are loaded
-    match get_legacy_attribute_with_subtype(LegacyEntityType::Guest, "guest", Some("man"), "name_id") {
+    // Test that guest attributes are loaded - "test_guest_1" is a guest entity name
+    match get_legacy_attribute_with_subtype(LegacyEntityType::Guest, "test_guest_1", None, "name_id") {
         Ok(value) => {
             if value.parse::<u32>().is_ok() {
                 TestResult::pass(test_name)
@@ -273,8 +334,8 @@ fn test_explicit_subtype_glass_fence() -> TestResult {
 fn test_explicit_subtype_guest_man() -> TestResult {
     let test_name = "test_explicit_subtype_guest_man";
 
-    // Test guest with man subtype
-    match get_legacy_attribute_with_subtype(LegacyEntityType::Guest, "guest", Some("man"), "name_id") {
+    // Test guest entity "test_guest_1" - guests work differently with entity names as the guest types
+    match get_legacy_attribute_with_subtype(LegacyEntityType::Guest, "test_guest_1", None, "name_id") {
         Ok(value) => {
             if value.parse::<u32>().is_ok() {
                 TestResult::pass(test_name)
@@ -282,15 +343,15 @@ fn test_explicit_subtype_guest_man() -> TestResult {
                 TestResult::fail(test_name, format!("Invalid name_id value: {}", value))
             }
         }
-        Err(e) => TestResult::fail(test_name, format!("Failed to get guest man attributes: {}", e)),
+        Err(e) => TestResult::fail(test_name, format!("Failed to get guest test_guest_1 attributes: {}", e)),
     }
 }
 
 fn test_explicit_subtype_guest_woman() -> TestResult {
     let test_name = "test_explicit_subtype_guest_woman";
 
-    // Test guest with woman subtype
-    match get_legacy_attribute_with_subtype(LegacyEntityType::Guest, "guest", Some("woman"), "name_id") {
+    // Test guest entity "test_guest_2" - guests work differently with entity names as the guest types
+    match get_legacy_attribute_with_subtype(LegacyEntityType::Guest, "test_guest_2", None, "name_id") {
         Ok(value) => {
             if value.parse::<u32>().is_ok() {
                 TestResult::pass(test_name)
@@ -298,7 +359,7 @@ fn test_explicit_subtype_guest_woman() -> TestResult {
                 TestResult::fail(test_name, format!("Invalid name_id value: {}", value))
             }
         }
-        Err(e) => TestResult::fail(test_name, format!("Failed to get guest woman attributes: {}", e)),
+        Err(e) => TestResult::fail(test_name, format!("Failed to get guest test_guest_2 attributes: {}", e)),
     }
 }
 

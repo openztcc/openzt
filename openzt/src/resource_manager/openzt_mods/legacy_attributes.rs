@@ -69,7 +69,7 @@ impl LegacyEntityType {
             Self::Building => "building",
             Self::Fence => "fences",
             Self::Food => "food",
-            Self::Guest => "guest",
+            Self::Guest => "guests", // guests.cfg uses [guests] (plural)
             Self::Item => "items",
             Self::Path => "paths",
             Self::Scenery => "objects", // Primary section for scenery
@@ -85,14 +85,13 @@ impl LegacyEntityType {
             Self::Staff => Some("m"),
             Self::Fence => Some("f"),
             Self::Wall => Some("f"),
-            Self::Guest => None, // Guests have no default - must specify
             _ => None,
         }
     }
 
     /// Check if this entity type supports subtypes
     pub fn has_subtypes(&self) -> bool {
-        matches!(self, Self::Animal | Self::Staff | Self::Fence | Self::Wall | Self::Guest)
+        matches!(self, Self::Animal | Self::Staff | Self::Fence | Self::Wall)
     }
 
     /// Get the section name for attributes in .ai files
@@ -189,8 +188,11 @@ impl LegacyEntityAttributes {
 
     /// Parse attributes from an .ai file's INI content
     /// For entities with subtypes, parses sections like "m/Characteristics/Integers"
+    ///
+    /// Note: For Guest entities, the entity_name is used to filter sections (e.g., "man" entity
+    /// only gets the "man/Characteristics/Integers" section, not all guest type sections).
     pub fn parse_from_ini(entity_name: String, ini: &Ini, entity_type: LegacyEntityType) -> anyhow::Result<Self> {
-        let mut attrs = Self::new(entity_name);
+        let mut attrs = Self::new(entity_name.clone());
 
         let section_base = entity_type.attribute_section();
 
@@ -203,6 +205,40 @@ impl LegacyEntityAttributes {
                 if let Some(subtype_section) = section_name.strip_suffix(&format!("/{}", section_base)) {
                     if !subtype_section.is_empty() {
                         let subtype = subtype_section.to_string();
+
+                        // For Guest entities, only include the section matching the entity name
+                        // because guest.ai contains sections for all guest types (man, woman, boy, girl)
+                        if entity_type == LegacyEntityType::Guest {
+                            if subtype != entity_name {
+                                continue;
+                            }
+                            // For Guest entities, convert the matching subtype to a non-subtype entity
+                            // by storing it under the empty string key instead of the subtype name
+                            if let Some(section) = map.get(section_name) {
+                                let mut subtype_attrs = SubtypeAttributes {
+                                    subtype: String::new(), // Empty string for non-subtype entities
+                                    name_id: None,
+                                };
+
+                                for (key, values) in section.iter() {
+                                    if let Some(values_vec) = values {
+                                        if let Some(value) = values_vec.first() {
+                                            match key.as_str() {
+                                                "cNameID" | "nameID" => {  // Support both formats
+                                                    subtype_attrs.name_id = value.parse().ok();
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                }
+
+                                attrs.subtype_attributes.insert(String::new(), subtype_attrs);
+                                found_subtypes = true;
+                            }
+                            continue;
+                        }
+
                         if let Some(section) = map.get(section_name) {
                             let mut subtype_attrs = SubtypeAttributes {
                                 subtype: subtype.clone(),
@@ -403,6 +439,7 @@ mod tests {
     fn test_legacy_entity_type_section_name() {
         assert_eq!(LegacyEntityType::Animal.section_name(), "animals");
         assert_eq!(LegacyEntityType::Building.section_name(), "building");
+        assert_eq!(LegacyEntityType::Guest.section_name(), "guests");
         assert_eq!(LegacyEntityType::Scenery.section_name(), "objects");
     }
 
@@ -658,13 +695,13 @@ mod tests {
         assert!(LegacyEntityType::Staff.has_subtypes());
         assert!(LegacyEntityType::Fence.has_subtypes());
         assert!(LegacyEntityType::Wall.has_subtypes());
-        assert!(LegacyEntityType::Guest.has_subtypes());
     }
 
     #[test]
     fn test_has_subtypes_false() {
         assert!(!LegacyEntityType::Building.has_subtypes());
         assert!(!LegacyEntityType::Food.has_subtypes());
+        assert!(!LegacyEntityType::Guest.has_subtypes());
         assert!(!LegacyEntityType::Item.has_subtypes());
         assert!(!LegacyEntityType::Path.has_subtypes());
         assert!(!LegacyEntityType::Scenery.has_subtypes());
