@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
-use zip::{read::ZipFile, ZipArchive};
+use zip::ZipArchive;
 
 pub struct ZtdArchive {
     archive: ZipArchive<BufReader<File>>,
@@ -61,17 +61,17 @@ impl ZtdArchive {
     }
 }
 
-pub struct ZtdFile<'a> {
-    inner: ZipFile<'a>,
+pub struct ZtdFile<'a, R: Read = BufReader<File>> {
+    inner: zip::read::ZipFile<'a, R>,
 }
 
-impl<'a> ZtdFile<'a> {
-    pub fn new(inner: ZipFile<'a>) -> Self {
+impl<'a, R: Read> ZtdFile<'a, R> {
+    pub fn new(inner: zip::read::ZipFile<'a, R>) -> Self {
         Self { inner }
     }
 }
 
-impl ZtdFile<'_> {
+impl<R: Read> ZtdFile<'_, R> {
     pub fn name(&self) -> &str {
         self.inner.name()
     }
@@ -99,10 +99,10 @@ impl ZtdFile<'_> {
     }
 }
 
-impl TryFrom<ZtdFile<'_>> for String {
+impl<R: Read> TryFrom<ZtdFile<'_, R>> for String {
     type Error = anyhow::Error;
 
-    fn try_from(mut file: ZtdFile) -> Result<String, Self::Error> {
+    fn try_from(mut file: ZtdFile<'_, R>) -> Result<String, Self::Error> {
         let mut buffer = vec![0u8; file.size() as usize].into_boxed_slice();
         file.inner
             .read_exact(&mut buffer)
