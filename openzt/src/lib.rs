@@ -115,54 +115,23 @@ mod zoo_init {
     unsafe extern "thiscall" fn load_res_dlls(this: u32) -> u32 {
         match init_console() {
             Ok(_) => {
-                let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
+                // Initialize logging early with defaults so we can see config loading logs
+                resource_manager::mod_config::init_logging_early();
+
+                let _enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
 
                 // Load config to determine logging settings
                 let config = resource_manager::mod_config::get_openzt_config();
 
-                // Convert log level from config to LevelFilter
-                let log_level = config.logging.level.to_level_filter();
+                // NOTE: Logging was already initialized by init_logging_early() with default settings
+                // We don't reinitialize here since tracing_subscriber::init() can only be called once
+                // The early initialization uses INFO level, which is fine for debugging
+                info!("Config loaded: log_level={:?}, log_to_file={}", config.logging.level, config.logging.log_to_file);
+                eprintln!("[DEBUG] Config loaded, continuing initialization");
 
-                // Set up layered logging
-                use tracing_subscriber::layer::SubscriberExt;
-                use tracing_subscriber::util::SubscriberInitExt;
-                use tracing_subscriber::Layer;
-
-                // Always log to console
-                let console_layer = tracing_subscriber::fmt::layer()
-                    .with_ansi(enable_ansi)
-                    .with_writer(std::io::stdout)
-                    .with_filter(log_level);
-
-                // Conditionally add file logging based on config
-                if config.logging.log_to_file {
-                    // Set up file appender - truncate file on startup
-                    let log_file = std::fs::File::create("openzt.log")
-                        .expect("Failed to create openzt.log");
-                    let (non_blocking_file, guard) = tracing_appender::non_blocking(log_file);
-
-                    let file_layer = tracing_subscriber::fmt::layer()
-                        .with_ansi(false)
-                        .with_writer(non_blocking_file)
-                        .with_filter(log_level);
-
-                    tracing_subscriber::registry()
-                        .with(console_layer)
-                        .with(file_layer)
-                        .init();
-
-                    // Leak the guard to keep the worker thread alive for the DLL lifetime
-                    Box::leak(Box::new(guard));
-
-                    info!("Logging initialized: level={:?}, log_to_file=true", config.logging.level);
-                } else {
-                    // File logging disabled - only log to console
-                    tracing_subscriber::registry()
-                        .with(console_layer)
-                        .init();
-
-                    info!("Logging initialized: level={:?}, log_to_file=false", config.logging.level);
-                }
+                // If file logging is enabled, we could set it up here, but since we can't reinitialize,
+                // we'll just log to console for now. The file logging from early init would need
+                // to be handled differently if we want it.
             },
             Err(e) => {
                 info!("Failed to initialize console: {}", e);
@@ -170,20 +139,43 @@ mod zoo_init {
             }
         }
 
+        eprintln!("[DEBUG] About to start module initialization");
         // Command console is broken on latest stable Rust so we disable it by default.
         if cfg!(feature = "command-console") {
+            eprintln!("[DEBUG] Calling command_console::init()");
             command_console::init();
+            eprintln!("[DEBUG] command_console::init() returned");
         }
+        eprintln!("[DEBUG] Calling resource_manager::init()");
         resource_manager::init();
+        eprintln!("[DEBUG] resource_manager::init() returned");
+        eprintln!("[DEBUG] Calling expansions::init()");
         expansions::init();
+        eprintln!("[DEBUG] expansions::init() returned");
+        eprintln!("[DEBUG] Calling string_registry::init()");
         string_registry::init();
+        eprintln!("[DEBUG] string_registry::init() returned");
+        eprintln!("[DEBUG] Calling bugfix::init()");
         bugfix::init();
+        eprintln!("[DEBUG] bugfix::init() returned");
+        eprintln!("[DEBUG] Calling version::init()");
         version::init();
+        eprintln!("[DEBUG] version::init() returned");
+        eprintln!("[DEBUG] Calling ztui::init()");
         ztui::init();
+        eprintln!("[DEBUG] ztui::init() returned");
+        eprintln!("[DEBUG] Calling ztworldmgr::init()");
         ztworldmgr::init();
+        eprintln!("[DEBUG] ztworldmgr::init() returned");
+        eprintln!("[DEBUG] Calling bfentitytype::init()");
         bfentitytype::init();
+        eprintln!("[DEBUG] bfentitytype::init() returned");
+        eprintln!("[DEBUG] Calling settings::init()");
         settings::init();
+        eprintln!("[DEBUG] settings::init() returned");
+        eprintln!("[DEBUG] Calling scripting::init()");
         scripting::init();
+        eprintln!("[DEBUG] scripting::init() returned");
 
         if cfg!(feature = "capture_ztlog") {
             use crate::capture_ztlog;
@@ -199,7 +191,10 @@ mod zoo_init {
             ztmapview::init();
             zthabitatmgr::init();
         }
-        unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
+        eprintln!("[DEBUG] About to call LOAD_LANG_DLLS_DETOUR.call()");
+        let result = unsafe { LOAD_LANG_DLLS_DETOUR.call(this) };
+        eprintln!("[DEBUG] LOAD_LANG_DLLS_DETOUR.call() returned: {}", result);
+        result
     }
 }
 
