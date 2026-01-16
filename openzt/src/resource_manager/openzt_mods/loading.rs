@@ -10,7 +10,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use openzt_configparser::ini::{Ini, WriteOptions};
 use std::sync::LazyLock;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
     animation::Animation,
@@ -82,7 +82,7 @@ pub fn discover_mods(paths: &[String]) -> HashMap<String, (String, mods::Meta)> 
                         .to_string();
 
                     // Skip if we already found this mod (earlier paths take precedence)
-                    if !discovered.contains_key(&mod_id) {
+                    discovered.entry(mod_id.clone()).or_insert_with(|| {
                         let span = tracing::info_span!(
                             "discover_mod",
                             archive_path = %file_path.display().to_string(),
@@ -92,14 +92,15 @@ pub fn discover_mods(paths: &[String]) -> HashMap<String, (String, mods::Meta)> 
                         let _guard = span.enter();
 
                         info!("Discovered mod: {} ({})", meta.name(), mod_id);
-                        discovered.insert(mod_id, (archive_name, meta));
-                    }
+                        (archive_name, meta)
+                    });
                 }
                 Ok(None) => {
                     // Legacy mod (no meta.toml), skip
                 }
                 Err(e) => {
-                    error!("Failed to read meta from {:?}: {}", file_path, e);
+                    error!("Failed to read meta from {:?}: Failed to parse meta.toml", file_path);
+                    debug!("Detailed parse error for {:?}:\n{:#}", file_path, e);
                 }
             }
         }
@@ -185,13 +186,13 @@ fn classify_def_file(mod_def: &mods::ModDefinition) -> DefFileCategory {
 }
 
 // TODO: We should use '/' as separator instead of '.' to match other resource ids
-pub fn openzt_base_resource_id(mod_id: &String, resource_type: ResourceType, resource_name: &String) -> String {
+pub fn openzt_base_resource_id(mod_id: &str, resource_type: ResourceType, resource_name: &str) -> String {
     let resource_type_name = resource_type.to_string();
     format!("openzt.mods.{}.{}.{}", mod_id, resource_type_name, resource_name)
 }
 
 // TODO: We should use '/' as separator instead of '.' to match other resource ids
-pub fn openzt_full_resource_id_path(base_resource_id: &String, file_type: ZTFileType) -> String {
+pub fn openzt_full_resource_id_path(base_resource_id: &str, file_type: ZTFileType) -> String {
     format!("{}.{}", base_resource_id, file_type)
 }
 
@@ -207,7 +208,7 @@ fn load_open_zt_mod_internal(
 
     let meta_str = String::from_utf8_lossy(meta_file.as_ref());
     let meta = toml::from_str::<mods::Meta>(&meta_str)
-        .with_context(|| "Failed to parse meta.toml")?;
+        .with_context(|| format!("Failed to parse meta.toml in {}", archive_name))?;
 
     if meta.ztd_type() == &mods::ZtdType::Legacy {
         return Ok(mods::ZtdType::Legacy);
@@ -407,30 +408,30 @@ pub fn load_habitats_locations(
     // Habitats
     if let Some(habitats) = mod_def.habitats() {
         for (habitat_name, habitat_def) in habitats.iter() {
-            let base_resource_id = openzt_base_resource_id(&mod_id.to_string(), ResourceType::Habitat, habitat_name);
+            let base_resource_id = openzt_base_resource_id(mod_id, ResourceType::Habitat, habitat_name);
             load_icon_definition(
                 &base_resource_id,
                 habitat_def,
                 file_map,
-                &mod_id.to_string(),
+                mod_id,
                 include_str!("../../../resources/include/infoimg-habitat.ani").to_string(),
             )?;
-            add_location_or_habitat(&mod_id.to_string(), &habitat_name.to_string(), &base_resource_id, true)?;
+            add_location_or_habitat(mod_id, habitat_name, &base_resource_id, true)?;
         }
     }
 
     // Locations
     if let Some(locations) = mod_def.locations() {
         for (location_name, location_def) in locations.iter() {
-            let base_resource_id = openzt_base_resource_id(&mod_id.to_string(), ResourceType::Location, location_name);
+            let base_resource_id = openzt_base_resource_id(mod_id, ResourceType::Location, location_name);
             load_icon_definition(
                 &base_resource_id,
                 location_def,
                 file_map,
-                &mod_id.to_string(),
+                mod_id,
                 include_str!("../../../resources/include/infoimg-location.ani").to_string(),
             )?;
-            add_location_or_habitat(&mod_id.to_string(), &location_name.to_string(), &base_resource_id, false)?;
+            add_location_or_habitat(mod_id, location_name, &base_resource_id, false)?;
         }
     }
 
@@ -438,17 +439,17 @@ pub fn load_habitats_locations(
 }
 
 /// Legacy function that combines parsing and loading - kept for backwards compatibility
-pub fn load_def(mod_id: &String, file_name: &String, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
+pub fn load_def(mod_id: &str, file_name: &str, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
     let defs = parse_def(mod_id, file_name, file_map)?;
     load_habitats_locations(mod_id, &defs, file_map)?;
     Ok(defs)
 }
 
 fn load_icon_definition(
-    base_resource_id: &String,
+    base_resource_id: &str,
     icon_definition: &mods::IconDefinition,
     file_map: &HashMap<String, Box<[u8]>>,
-    mod_id: &String,
+    mod_id: &str,
     base_config: String,
 ) -> anyhow::Result<()> {
     let icon_file = file_map.get(icon_definition.icon_path()).with_context(|| {

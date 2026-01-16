@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-#![cfg_attr(any(feature = "command-console", feature = "integration-tests"), feature(lazy_cell))]
 /// Reimplementation of the BFRegistry, a vanilla system used to store pointers to the ZT*Mgr classes. In theory this
 /// allowed customization via zoo.ini, but in practice it appears unused.
 mod bfregistry;

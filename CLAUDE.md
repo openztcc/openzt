@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It provides mod support, bug fixes, and feature enhancements through function detouring and memory manipulation.
 
-**Target**: 32-bit Windows (`i686-pc-windows-msvc`) using nightly Rust
-**Output**: `openzt.dll` (injected into the running game via the openzt-loader executable)
+**Target**: 32-bit Windows (`i686-pc-windows-msvc`)
+**Output**: `openzt.dll` (copied to Zoo Tycoon directory and loaded automatically)
 
 ## Critical Rules
 
@@ -24,25 +24,16 @@ OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It pr
 # Build only (no game launch)
 ./openzt.bat build                           # Debug with command-console
 ./openzt.bat build --release                 # Release with command-console
-./openzt.bat build --stable                  # Debug with stable Rust (no console)
 ./openzt.bat build --test                    # Debug test build
 ./openzt.bat build --test --release          # Release test build
-./openzt.bat build --loader                  # Debug + loader
 
 # Build and run
 ./openzt.bat run                             # Debug with command-console
 ./openzt.bat run --release                   # Release with command-console
-./openzt.bat run --stable                    # Debug with stable Rust (Currently broken; DO NOT USE)
-
-./openzt.bat run --loader                    # Debug via loader injection
-./openzt.bat run --loader --release          # Release via loader injection
-./openzt.bat run --loader --pause            # Debug, run loader exe (for debugger)
-./openzt.bat run --loader --pause --release  # Release, run loader exe (for debugger)
 
 # Build and run with --wait flag (waits for game to exit before returning)
 ./openzt.bat run --wait                      # Debug, wait for exit
 ./openzt.bat run --release --wait            # Release, wait for exit
-./openzt.bat run --loader --wait             # Loader injection, wait for exit
 
 # Integration tests
 ./openzt.bat integration-tests               # Run all integration tests (builds release, displays results)
@@ -172,7 +163,6 @@ resource_manager::add_handler("bfb", Box::new(BfbHandler));
 ## Workspace Structure
 
 - **`openzt/`**: Main DLL crate with game hooks and features
-- **`openzt-loader/`**: DLL injection executable
 - **`openzt-console/`**: Socket-based runtime console
 - **`openzt-configparser/`**: Custom INI parser for Zoo Tycoon configs
 - **`field_accessor_as_string*/`**: Derive macro crates

@@ -26,7 +26,10 @@
       "Bash(./openzt.bat:*)",
       "Bash(cmd:*)",
       "Bash(type \"C:\\Program Files (x86)\\Microsoft Games\\Zoo Tycoon\\openzt_integration_tests.log\")",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(cargo tree:*)",
+      "Bash(rustc:*)",
+      "Bash(cargo:*)"
     ],
     "deny": [],
     "ask": []
