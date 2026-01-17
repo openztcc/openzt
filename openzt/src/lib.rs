@@ -127,7 +127,6 @@ mod zoo_init {
                 // We don't reinitialize here since tracing_subscriber::init() can only be called once
                 // The early initialization uses INFO level, which is fine for debugging
                 info!("Config loaded: log_level={:?}, log_to_file={}", config.logging.level, config.logging.log_to_file);
-                eprintln!("[DEBUG] Config loaded, continuing initialization");
 
                 // If file logging is enabled, we could set it up here, but since we can't reinitialize,
                 // we'll just log to console for now. The file logging from early init would need
@@ -139,43 +138,20 @@ mod zoo_init {
             }
         }
 
-        eprintln!("[DEBUG] About to start module initialization");
         // Command console is broken on latest stable Rust so we disable it by default.
         if cfg!(feature = "command-console") {
-            eprintln!("[DEBUG] Calling command_console::init()");
             command_console::init();
-            eprintln!("[DEBUG] command_console::init() returned");
         }
-        eprintln!("[DEBUG] Calling resource_manager::init()");
         resource_manager::init();
-        eprintln!("[DEBUG] resource_manager::init() returned");
-        eprintln!("[DEBUG] Calling expansions::init()");
         expansions::init();
-        eprintln!("[DEBUG] expansions::init() returned");
-        eprintln!("[DEBUG] Calling string_registry::init()");
         string_registry::init();
-        eprintln!("[DEBUG] string_registry::init() returned");
-        eprintln!("[DEBUG] Calling bugfix::init()");
         bugfix::init();
-        eprintln!("[DEBUG] bugfix::init() returned");
-        eprintln!("[DEBUG] Calling version::init()");
         version::init();
-        eprintln!("[DEBUG] version::init() returned");
-        eprintln!("[DEBUG] Calling ztui::init()");
         ztui::init();
-        eprintln!("[DEBUG] ztui::init() returned");
-        eprintln!("[DEBUG] Calling ztworldmgr::init()");
         ztworldmgr::init();
-        eprintln!("[DEBUG] ztworldmgr::init() returned");
-        eprintln!("[DEBUG] Calling bfentitytype::init()");
         bfentitytype::init();
-        eprintln!("[DEBUG] bfentitytype::init() returned");
-        eprintln!("[DEBUG] Calling settings::init()");
         settings::init();
-        eprintln!("[DEBUG] settings::init() returned");
-        eprintln!("[DEBUG] Calling scripting::init()");
         scripting::init();
-        eprintln!("[DEBUG] scripting::init() returned");
 
         if cfg!(feature = "capture_ztlog") {
             use crate::capture_ztlog;
@@ -191,9 +167,7 @@ mod zoo_init {
             ztmapview::init();
             zthabitatmgr::init();
         }
-        eprintln!("[DEBUG] About to call LOAD_LANG_DLLS_DETOUR.call()");
         let result = unsafe { LOAD_LANG_DLLS_DETOUR.call(this) };
-        eprintln!("[DEBUG] LOAD_LANG_DLLS_DETOUR.call() returned: {}", result);
         result
     }
 }
