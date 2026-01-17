@@ -357,8 +357,14 @@ pub fn save_openzt_config(config: &OpenZTConfig, skip_cache_update: bool) -> any
         toml_string
     );
 
-    // Only add expansions section with comments if it's not present
-    if !content.contains("[expansions]") {
+    // Add expansions section with comments if no custom expansions are defined yet
+    if config.expansions.custom.is_empty() {
+        // Replace the empty [expansions] section with the commented version
+        if content.contains("[expansions]") {
+            // Remove the empty section (it may be just "[expansions]" or have whitespace)
+            content = content.replace("\n[expansions]\n", "");
+            content = content.replace("[expansions]\n", "");
+        }
         // Append the expansions section with comments
         let expansions_comment = "\n\
 # Custom Expansions\n\
