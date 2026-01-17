@@ -374,8 +374,8 @@ pub fn save_openzt_config(config: &OpenZTConfig, skip_cache_update: bool) -> any
 # - Entity names: Specific entities to include (e.g., \"elephant\", \"lion\")\n\
 #\n\
 # Example:\n\
-# my_animals = [\"elephant\", \"lion\", \"my_mod.ztd\"]\n\
-# more_stuff = [\"zebra\", \"giraffe\"]\n\
+# \"My animals\" = [\"elephant\", \"lion\", \"my_mod.ztd\"]\n\
+# \"More Stuff\" = [\"zebra\", \"giraffe\"]\n\
 [expansions]\n";
         content.push_str(expansions_comment);
     }
