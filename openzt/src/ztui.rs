@@ -365,7 +365,7 @@ fn command_call_ui_callback(args: Vec<&str>) -> Result<String, CommandError> {
     Ok("Success".to_string())
 }
 
-fn click_ui_element(id: UIElementId) {
+fn click_ui_element(_id: UIElementId) {
     // let click_element_fn = unsafe { openzt_detour::ZTUI_CLICK_ELEMENT.original() };
     // unsafe {
     //     click_element_fn(BFUIMGR_PTR, id as u32);

@@ -195,7 +195,7 @@ mod zoo_resource_mgr {
             if needs_update {
                 info!("Load order changed, updating openzt.toml");
                 config.mod_loading.order = resolution_result.order.clone();
-                if let Err(e) = save_openzt_config(&config) {
+                if let Err(e) = save_openzt_config(&config, false) {
                     info!("WARNING: Failed to save openzt.toml: {}", e);
                 }
             }

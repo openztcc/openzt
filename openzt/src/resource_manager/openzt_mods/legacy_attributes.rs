@@ -5,7 +5,6 @@
 
 use std::{collections::HashMap, str::FromStr, sync::Mutex};
 
-use anyhow::Context;
 use openzt_configparser::ini::Ini;
 use std::sync::LazyLock;
 use tracing::info;
@@ -333,7 +332,7 @@ pub fn add_legacy_entity(
     );
 
     map.entry(entity_type)
-        .or_insert_with(HashMap::new)
+        .or_default()
         .insert(entity_name, attributes);
 
     Ok(())

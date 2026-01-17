@@ -1,6 +1,5 @@
 use std::{ffi::{c_char, CString, CStr}, fmt, mem::transmute, path::PathBuf, ptr, marker};
 
-use tracing::debug;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS};
 
@@ -87,8 +86,7 @@ pub fn get_string_from_memory(address: u32) -> String {
         bytes.push(get_from_memory::<u8>(char_address));
         char_address += 1;
     }
-    let decoded = crate::encoding_utils::decode_game_text(&bytes);
-    decoded
+    crate::encoding_utils::decode_game_text(&bytes)
 }
 
 pub fn save_string_to_memory(address: u32, string: &str) {

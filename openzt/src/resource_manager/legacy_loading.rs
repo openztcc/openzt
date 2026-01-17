@@ -8,19 +8,17 @@ use std::{
 use openzt_configparser::ini::Ini;
 use std::sync::LazyLock;
 use regex::Regex;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
 
 use super::ztd::ZtdArchive;
 use crate::{
-    animation::Animation,
     encoding_utils::decode_game_text,
     mods,
     resource_manager::{
         handlers::{get_handlers, RunStage},
         lazyresourcemap::{add_lazy, get_file, get_file_names, get_num_resources},
-        openzt_mods::{get_num_mod_ids, get_mod_ids, legacy_attributes::{add_legacy_entity, LegacyEntityAttributes, LegacyEntityType, SubtypeAttributes}, load_open_zt_mod},
-        ztfile::{ZTFile, ZTFileType},
+        openzt_mods::{get_num_mod_ids, legacy_attributes::{add_legacy_entity, LegacyEntityAttributes, LegacyEntityType, SubtypeAttributes}, load_open_zt_mod},
     },
 };
 
@@ -111,7 +109,10 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String], discovered_mods:
         let file_name = resource.to_str().unwrap_or_default().to_lowercase();
         match handle_ztd(&resource) {
             Ok(count) => resource_count += count,
-            Err(err) => error!("Error loading ztd: {} -> {}", file_name, err),
+            Err(err) => {
+                error!("Error loading ztd: {} -> Failed to parse meta.toml", file_name);
+                debug!("Detailed parse error for {}:\n{:#}", file_name, err);
+            }
         }
     }
 
@@ -122,7 +123,10 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String], discovered_mods:
             let file_name = resource.to_str().unwrap_or_default().to_lowercase();
             match handle_ztd(resource) {
                 Ok(count) => resource_count += count,
-                Err(err) => error!("Error loading ztd: {} -> {}", file_name, err),
+                Err(err) => {
+                    error!("Error loading ztd: {} -> Failed to parse meta.toml", file_name);
+                    debug!("Detailed parse error for {}:\n{:#}", file_name, err);
+                }
             }
         } else {
             warn!("Mod '{}' in load order but not found in resource paths", mod_id);
@@ -301,7 +305,7 @@ fn extract_legacy_entities(cfg: &Ini, entity_type: LegacyEntityType) {
     };
 
     // Get the section from the INI file
-    let Some(section) = map.get(section_name) else {
+    let Some(_section) = map.get(section_name) else {
         return;
     };
 

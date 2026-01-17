@@ -118,14 +118,12 @@ fn lua_value_to_string(value: &mlua::Value) -> String {
             // Simple table representation
             let mut result = String::from("{");
             let mut first = true;
-            for pair in t.pairs::<mlua::Value, mlua::Value>() {
-                if let Ok((k, v)) = pair {
-                    if !first {
-                        result.push_str(", ");
-                    }
-                    first = false;
-                    result.push_str(&format!("{} = {}", lua_value_to_string(&k), lua_value_to_string(&v)));
+            for (k, v) in t.pairs::<mlua::Value, mlua::Value>().flatten() {
+                if !first {
+                    result.push_str(", ");
                 }
+                first = false;
+                result.push_str(&format!("{} = {}", lua_value_to_string(&k), lua_value_to_string(&v)));
             }
             result.push('}');
             result

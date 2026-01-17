@@ -5,7 +5,7 @@ We welcome contributions from everyone! This document provides guidance for deve
 ## Development Environment
 
 ### Prerequisites
-- Rust nightly toolchain (i686-pc-windows-msvc)
+- Rust stable toolchain 1.85 or later (i686-pc-windows-msvc)
 - Zoo Tycoon (2001) installed
 - Windows 32-bit development environment
 

@@ -431,7 +431,7 @@ impl LazyResourceMap {
 
             if is_stale || still_over_target {
                 drop(binding);  // Release lock before calling unload_resource
-                if let Some(_) = Self::unload_resource(&key) {
+                if Self::unload_resource(&key).is_some() {
                     unloaded_size += size;
                     unloaded_count += 1;
                 }

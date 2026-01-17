@@ -55,9 +55,6 @@ GOTO build
 :parse_flags
 SET RELEASE_FLAG=
 SET TEST_FLAG=
-SET STABLE_FLAG=
-SET LOADER_FLAG=
-SET PAUSE_FLAG=
 SET WAIT_FLAG=
 SET CARGO_ARGS=
 SET PARSING_CARGO_ARGS=
@@ -71,21 +68,6 @@ IF "%~1"=="--release" (
 )
 IF "%~1"=="--test" (
     SET TEST_FLAG=1
-    SHIFT
-    GOTO parse_loop
-)
-IF "%~1"=="--stable" (
-    SET STABLE_FLAG=1
-    SHIFT
-    GOTO parse_loop
-)
-IF "%~1"=="--loader" (
-    SET LOADER_FLAG=1
-    SHIFT
-    GOTO parse_loop
-)
-IF "%~1"=="--pause" (
-    SET PAUSE_FLAG=1
     SHIFT
     GOTO parse_loop
 )
@@ -108,14 +90,6 @@ echo Error: Unknown flag "%~1"
 exit /b 1
 
 :validate_and_build
-REM Validate flag combinations
-IF DEFINED PAUSE_FLAG (
-    IF NOT DEFINED LOADER_FLAG (
-        echo Error: --pause requires --loader
-        pause
-        exit /b 1
-    )
-)
 GOTO build
 
 REM ============================================================
@@ -123,14 +97,6 @@ REM Build Function
 REM ============================================================
 
 :build
-REM Set toolchains
-SET TOOLCHAIN=+nightly-2024-05-02-i686-pc-windows-msvc
-SET LOADER_TOOLCHAIN=+nightly-2025-06-23-i686-pc-windows-msvc
-IF DEFINED STABLE_FLAG (
-    SET TOOLCHAIN=+stable
-    SET LOADER_TOOLCHAIN=+stable
-)
-
 REM Set manifest path and DLL name
 IF DEFINED TEST_FLAG (
     SET MANIFEST_PATH=openzt-test-dll/Cargo.toml
@@ -149,12 +115,10 @@ IF DEFINED RELEASE_FLAG (
     SET BUILD_FLAGS=--release
 )
 
-REM Set feature flags - command-console by default for non-test nightly builds
-SET FEATURE_FLAGS=
-IF NOT DEFINED TEST_FLAG (
-    IF NOT DEFINED STABLE_FLAG (
-        SET FEATURE_FLAGS=--features "command-console"
-    )
+REM Set feature flags
+SET FEATURE_FLAGS=--features "command-console"
+IF DEFINED TEST_FLAG (
+    SET FEATURE_FLAGS=
 )
 
 REM Display build info
@@ -164,7 +128,7 @@ IF DEFINED FEATURE_FLAGS (
 )
 
 REM Execute cargo build for DLL
-cargo !TOOLCHAIN! build --manifest-path !MANIFEST_PATH! --lib --target=i686-pc-windows-msvc !BUILD_FLAGS! !FEATURE_FLAGS! !CARGO_ARGS!
+cargo build --manifest-path !MANIFEST_PATH! --lib --target=i686-pc-windows-msvc !BUILD_FLAGS! !FEATURE_FLAGS! !CARGO_ARGS!
 
 IF !errorlevel! NEQ 0 (
     echo.
@@ -175,22 +139,6 @@ IF !errorlevel! NEQ 0 (
 
 echo.
 echo Build successful: target\i686-pc-windows-msvc\!BUILD_TYPE!\!DLL_NAME!
-
-REM Build loader if --loader flag is set
-IF DEFINED LOADER_FLAG (
-    echo.
-    echo Building openzt-loader...
-    cargo !LOADER_TOOLCHAIN! build --manifest-path openzt-loader/Cargo.toml --target=i686-pc-windows-msvc !BUILD_FLAGS!
-
-    IF !errorlevel! NEQ 0 (
-        echo.
-        echo Loader build failed
-        pause
-        exit /b !errorlevel!
-    )
-
-    echo Loader build successful: target\i686-pc-windows-msvc\!BUILD_TYPE!\openzt-loader.exe
-)
 
 REM Write state file on success
 echo BUILD_TYPE=!BUILD_TYPE! > .openzt-build-state
@@ -232,53 +180,7 @@ IF NOT EXIST "!SOURCE_DLL!" (
     exit /b 1
 )
 
-REM Check if using loader injection
-IF DEFINED LOADER_FLAG (
-    echo.
-    echo ============================================================
-    echo WARNING: The --loader injection method is deprecated.
-    echo Consider using the standard DLL copy method instead.
-    echo ============================================================
-    echo.
-
-    REM Delete old DLLs
-    echo Cleaning up old DLLs...
-    del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzt.dll" 2>nul
-    del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openztrpc.dll" 2>nul
-    del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzttest.dll" 2>nul
-
-    REM Run via loader
-    IF DEFINED PAUSE_FLAG (
-        echo.
-        IF DEFINED WAIT_FLAG (
-            echo Running openzt-loader.exe directly ^(for debugger attachment^) and waiting for exit...
-        ) ELSE (
-            echo Running openzt-loader.exe directly ^(for debugger attachment^)...
-        )
-        target\i686-pc-windows-msvc\!BUILD_TYPE!\openzt-loader.exe --dll-path=^"target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!^"
-        IF DEFINED WAIT_FLAG (
-            echo.
-            echo Loader has exited.
-        )
-    ) ELSE (
-        echo.
-        IF DEFINED WAIT_FLAG (
-            echo Running via openzt-loader ^(cargo run^) and waiting for exit...
-        ) ELSE (
-            echo Running via openzt-loader ^(cargo run^)...
-        )
-        cargo !LOADER_TOOLCHAIN! run !BUILD_FLAGS! --manifest-path openzt-loader/Cargo.toml -- --dll-path=^"target/i686-pc-windows-msvc/!BUILD_TYPE!/!DLL_NAME!^" --listen --resume
-        IF DEFINED WAIT_FLAG (
-            echo.
-            echo Loader has exited.
-        )
-    )
-
-    pause
-    GOTO :EOF
-)
-
-REM Standard DLL copy method (no loader)
+REM Standard DLL copy method
 REM Check for already running game before attempting to copy
 CALL :check_zoo_running
 IF !errorlevel! NEQ 0 exit /b !errorlevel!
@@ -344,7 +246,7 @@ REM ============================================================
 
 :docs
 echo Opening documentation...
-cargo +nightly rustdoc --manifest-path openzt/Cargo.toml --lib --target i686-pc-windows-msvc --open -- --document-private-items
+cargo rustdoc --manifest-path openzt/Cargo.toml --lib --target i686-pc-windows-msvc --open -- --document-private-items
 
 IF !errorlevel! NEQ 0 (
     echo.
@@ -392,7 +294,7 @@ REM ============================================================
 
 :check
 echo Running cargo check on openzt...
-cargo +nightly check --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+cargo check --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
 
 IF !errorlevel! NEQ 0 (
     echo.
@@ -411,7 +313,7 @@ REM ============================================================
 
 :clippy
 echo Running cargo clippy on openzt...
-cargo +nightly clippy --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+cargo clippy --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
 
 IF !errorlevel! NEQ 0 (
     echo.
@@ -430,7 +332,7 @@ REM ============================================================
 
 :test
 echo Running cargo test on openzt...
-cargo +nightly test --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+cargo test --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
 
 IF !errorlevel! NEQ 0 (
     echo.
@@ -466,25 +368,17 @@ echo.
 echo Build/Run Flags:
 echo   --release      Build with release optimizations
 echo   --test         Build the test DLL (openzt-test-dll)
-echo   --stable       Build with stable Rust toolchain (disables command-console)
-echo   --loader       Use openzt-loader for DLL injection (instead of copy)
-echo   --pause        (with --loader) Run loader exe directly for debugger
 echo   --wait         Wait for Zoo Tycoon to exit before returning
 echo   -- ^<args^>      Forward additional arguments to cargo
 echo.
-echo Note: command-console feature is enabled by default for non-test builds
-echo       with nightly toolchain. Use --stable or --test to disable it.
+echo Note: command-console feature is enabled by default for non-test builds.
 echo.
 echo Examples:
 echo   openzt.bat build                     Build debug DLL with command-console
 echo   openzt.bat build --release           Build release DLL with command-console
-echo   openzt.bat build --loader            Build DLL + loader
 echo   openzt.bat run                       Build debug, copy DLL, launch game
 echo   openzt.bat run --release             Build release, copy DLL, launch game
-echo   openzt.bat run --loader              Build + run via loader injection
-echo   openzt.bat run --loader --pause      Build + run loader exe (for debugger)
 echo   openzt.bat run --test                Build test DLL and launch game
-echo   openzt.bat build --stable            Build debug without command-console
 echo   openzt.bat check                     Run cargo check on openzt
 echo   openzt.bat clippy                    Run cargo clippy on openzt
 echo   openzt.bat test                      Run cargo test on openzt
@@ -495,6 +389,5 @@ echo   openzt.bat console --oneshot "help()"          Run single Lua command and
 echo   openzt.bat console --oneshot "add_cash(10000)" Add cash via oneshot command
 echo   openzt.bat run --wait                Build debug, launch game, wait for exit
 echo   openzt.bat run --release --wait      Build release, launch game, wait for exit
-echo   openzt.bat run --loader --wait       Build + run via loader, wait for exit
 echo.
 GOTO :EOF

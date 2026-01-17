@@ -1,6 +1,6 @@
 #!/bin/bash
 echo "Run cargo build with specified arguments"
-cargo +nightly-2024-05-02 build --manifest-path openzt-test-dll/Cargo.toml --lib --release --target=i686-pc-windows-gnu
+cargo build --manifest-path openzt-test-dll/Cargo.toml --lib --release --target=i686-pc-windows-gnu
 
 echo "Check if the build succeeded"
 if [ "$retval" -ne 0 ]; then
