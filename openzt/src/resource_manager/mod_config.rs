@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
+use indexmap::IndexMap;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use tracing::{error, info, warn};
@@ -148,7 +148,7 @@ pub struct ExpansionConfig {
     /// Custom expansion definitions (flattened into [expansions] table)
     /// Key: expansion name, Value: array of entity names and/or .ztd archives
     #[serde(default, flatten)]
-    pub custom: HashMap<String, Vec<String>>,
+    pub custom: IndexMap<String, Vec<String>>,
 }
 
 fn default_true() -> bool {
@@ -219,7 +219,7 @@ impl Default for ResourceCacheConfig {
 impl Default for ExpansionConfig {
     fn default() -> Self {
         ExpansionConfig {
-            custom: HashMap::new(),
+            custom: IndexMap::new(),
         }
     }
 }
@@ -372,6 +372,7 @@ pub fn save_openzt_config(config: &OpenZTConfig, skip_cache_update: bool) -> any
 # Format: expansion_name = [\"entity1\", \"entity2\", \"archive.ztd\"]\n\
 # - Archives (files ending in .ztd): All entities from that archive are included\n\
 # - Entity names: Specific entities to include (e.g., \"elephant\", \"lion\")\n\
+# - For uca/ucb/ucs files use the filename without the extension (e.g., \"a2f21026\" for \"a2f21026.uca\")\n\
 #\n\
 # Example:\n\
 # \"My animals\" = [\"elephant\", \"lion\", \"my_mod.ztd\"]\n\

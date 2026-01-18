@@ -137,8 +137,6 @@ const EXPANSION_LIST_START: u32 = 0x00639030;
 const EXPANSION_SIZE: u32 = 0x14;
 const EXPANSION_CURRENT: u32 = 0x00638d4c;
 
-const MAX_EXPANSION_SIZE: usize = 14;
-
 const EXPANSION_ZT_RESOURCE_PREFIX: &str = "ui/sharedui/listbk/";
 const EXPANSION_OPENZT_RESOURCE_PREFIX: &str = "openzt.patches.expansion";
 const EXPANSION_RESOURCE_ANI: &str = "listbk.ani";
@@ -222,9 +220,7 @@ static EXPANSION_ARRAY: LazyLock<Mutex<Vec<Expansion>>> = LazyLock::new(|| Mutex
 /// Adds to the expansion mutex and saves to ZT memory
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<()> {
     let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
-    if data_mutex.len() >= MAX_EXPANSION_SIZE {
-        return Err(anyhow!("Max expansion size reached"));
-    }
+
     data_mutex.push(expansion);
 
     data_mutex.sort_by_key(|k| k.expansion_id);
@@ -405,11 +401,11 @@ fn create_custom_expansions() {
     info!("create_custom_expansions() - getting config");
     let config = get_openzt_config();
     info!("create_custom_expansions() - got config, {} custom expansions to process", config.expansions.custom.len());
-    let mut expansion_id = 0x5000; // Start after official expansion IDs
+    let mut expansion_id = 0x5; // Start after official expansion IDs
 
     for (expansion_name, items) in &config.expansions.custom {
         info!("create_custom_expansions() - processing expansion: '{}'", expansion_name);
-        if expansion_id >= 0x6000 {
+        if expansion_id >= 0x1000 {
             error!("Maximum custom expansions reached");
             break;
         }
@@ -468,7 +464,7 @@ fn initialise_expansions() {
     if let Some(member_hash) = get_members(&get_cc_expansion_name_all()){
         if !member_hash.is_empty() {
             info!("initialise_expansions() - adding 'Custom Content' expansion");
-            add_expansion_with_string_value(0x4000, get_cc_expansion_name_all(), "Custom Content".to_string(), false);
+            add_expansion_with_string_value(0x4, get_cc_expansion_name_all(), "Custom Content".to_string(), false);
         }
     }
 
@@ -497,11 +493,20 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     let number_of_additional_expansions = number_of_expansions as i32 - 4;
     info!("Resizing expansion dropdown to fit {} extra expansions", number_of_additional_expansions);
 
+    // TODO: This bit might need to (number_of_additional_expansions - 1), suspect it already has space for 1 extra expansion
     if let Err(err) = modify_ztfile_as_ini(EXPANSION_RESOURCE_LYT, |cfg| {
-        let old_y = cfg.get_parse::<i32>("list", "dy").unwrap_or(Some(90)).unwrap_or(90);
-        let new_y = old_y + (number_of_additional_expansions * 30);
-        cfg.set("list", "dy", Some(new_y.to_string()));
         cfg.set("background", "animation", Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "." + "listbk"));
+        let additional_spots_needed = number_of_additional_expansions - 1;
+        if additional_spots_needed <= 0 {
+            return Ok(());
+        }
+
+        let old_y = cfg.get_parse::<i32>("list", "dy").unwrap_or(Some(90)).unwrap_or(90);
+        // let new_y = old_y + (number_of_additional_expansions * 12);
+        let new_y = old_y + (additional_spots_needed * 15);
+        cfg.set("list", "dy", Some(new_y.to_string()));
+        cfg.set("LayoutInfo", "dy", Some(new_y.to_string())); // This might need to be slightly bigger than list to make the scrollbar work?
+        // TODO: Add scrollbar here, modify the 'layer' key of background and list so the scrollbar works properly
         Ok(())
     }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
@@ -527,7 +532,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     let animation_result = modify_ztfile_as_animation(&animation_resource_string, |animation| {
         for _ in 0..number_of_additional_expansions {
             animation
-                .duplicate_pixel_rows(0, 10, 31)
+                .duplicate_pixel_rows(0, 10, 25)
                 .map_err(|e| anyhow!("Error duplicating pixel rows when modifying animation: {}", e))?;
         }
         animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
