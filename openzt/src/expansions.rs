@@ -20,6 +20,7 @@ use crate::{
     command_console::CommandError,
     lua_fn,
     resource_manager::{add_handler, modify_ztfile_as_animation, modify_ztfile_as_ini, Handler, RunStage, OPENZT_DIR0},
+    resource_manager::mod_config::get_openzt_config,
     string_registry::add_string_to_registry,
     util::{get_from_memory, get_string_from_memory, get_string_from_memory_bounded, save_to_memory},
     ztui::{get_random_sex, get_selected_sex, BuyTab, Sex},
@@ -136,8 +137,6 @@ const EXPANSION_LIST_START: u32 = 0x00639030;
 const EXPANSION_SIZE: u32 = 0x14;
 const EXPANSION_CURRENT: u32 = 0x00638d4c;
 
-const MAX_EXPANSION_SIZE: usize = 14;
-
 const EXPANSION_ZT_RESOURCE_PREFIX: &str = "ui/sharedui/listbk/";
 const EXPANSION_OPENZT_RESOURCE_PREFIX: &str = "openzt.patches.expansion";
 const EXPANSION_RESOURCE_ANI: &str = "listbk.ani";
@@ -147,6 +146,10 @@ const EXPANSION_RESOURCE_ANIMATION: &str = "listbk.animation";
 
 /// Mutex to store the contents of each `member` set, determined by the `member` section in the `uca`, `ucs`, `ucb`, and `ai` files
 static MEMBER_SETS: LazyLock<Mutex<HashMap<String, HashSet<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Mutex to store entity-to-archive mapping for custom expansion filtering
+/// Key: entity filename (without extension), Value: archive filename (e.g., "my_mod.ztd")
+static ENTITY_TO_ARCHIVE: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn add_member(entity_name: String, member: String) {
     let mut data_mutex = MEMBER_SETS.lock().unwrap();
@@ -168,6 +171,41 @@ pub fn get_members(member: &str) -> Option<HashSet<String>> {
     data_mutex.get(member).cloned()
 }
 
+/// Add entity-to-archive mapping
+fn add_entity_to_archive_mapping(entity_name: String, archive_name: String) {
+    let mut mapping = ENTITY_TO_ARCHIVE.lock().unwrap();
+    mapping.insert(entity_name, archive_name);
+}
+
+/// Get all entities from a specific archive
+/// Returns a HashSet of entity filenames (without extension)
+fn get_entities_from_archive(archive_name: &str) -> Option<HashSet<String>> {
+    let mapping = ENTITY_TO_ARCHIVE.lock().unwrap();
+
+    // Normalize archive name for matching (case-insensitive, strip .ztd if present)
+    let normalized_archive = if archive_name.to_lowercase().ends_with(".ztd") {
+        archive_name.to_lowercase()
+    } else {
+        format!("{}.ztd", archive_name.to_lowercase())
+    };
+
+    // Collect all entities from this archive
+    let entities: HashSet<String> = mapping.iter()
+        .filter(|(_, archive)| {
+            // Strip "zip::" prefix if present for comparison
+            let archive_stripped = archive.strip_prefix("zip::").unwrap_or(archive);
+            archive_stripped.to_lowercase() == normalized_archive
+        })
+        .map(|(entity, _)| entity.clone())
+        .collect();
+
+    if entities.is_empty() {
+        None
+    } else {
+        Some(entities)
+    }
+}
+
 fn get_cc_expansion_name_all() -> String {
     CUSTOM_CONTENT_EXPANSION_STRING_PREFIX.to_string() + CUSTOM_CONTENT_EXPANSION_STRING_ALL
 }
@@ -182,9 +220,7 @@ static EXPANSION_ARRAY: LazyLock<Mutex<Vec<Expansion>>> = LazyLock::new(|| Mutex
 /// Adds to the expansion mutex and saves to ZT memory
 fn add_expansion(expansion: Expansion, save_to_memory: bool) -> anyhow::Result<()> {
     let mut data_mutex = EXPANSION_ARRAY.lock().unwrap();
-    if data_mutex.len() >= MAX_EXPANSION_SIZE {
-        return Err(anyhow!("Max expansion size reached"));
-    }
+
     data_mutex.push(expansion);
 
     data_mutex.sort_by_key(|k| k.expansion_id);
@@ -318,7 +354,7 @@ impl Display for ExpansionList {
 
 #[detour_mod]
 pub mod custom_expansion {
-    use tracing::info;
+    use tracing::debug;
     // use openzt_detour::{ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED, ZTUI_EXPANSIONSELECT_SETUP};
     use openzt_detour::gen::ztui_general::ENTITY_TYPE_IS_DISPLAYED;
     use openzt_detour::gen::ztui_expansionselect::SETUP;
@@ -329,7 +365,7 @@ pub mod custom_expansion {
     #[detour(ENTITY_TYPE_IS_DISPLAYED)]
     pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> bool {
 
-        // TODO: Put this call and subsequent log behind OpenZT debug flag) };
+        // TODO: Put this call and subsequent log behind OpenZT debug flag)
         let result = unsafe { ENTITY_TYPE_IS_DISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
 
         let Some(current_expansion) = read_current_expansion() else {
@@ -344,9 +380,9 @@ pub mod custom_expansion {
 
         let reimplemented_result = super::filter_entity_type(&current_buy_tab, &current_expansion, &entity);
 
-        // TODO: Put this log behind OpenZT debug flag
+        // TODO: Put this log behind OpenZT debug flag (and ignore if a custom expansion is selected)
         if result != reimplemented_result {
-            info!("Filtering mismatch {} {} ({} vs {})", entity, current_buy_tab, result, reimplemented_result);
+            debug!("Filtering mismatch {} {} ({} vs {})", entity, current_buy_tab, result, reimplemented_result);
         }
 
         reimplemented_result
@@ -360,34 +396,131 @@ pub mod custom_expansion {
     }
 }
 
+fn create_custom_expansions() {
+    info!("create_custom_expansions() - starting");
+    info!("create_custom_expansions() - getting config");
+    let config = get_openzt_config();
+    info!("create_custom_expansions() - got config, {} custom expansions to process", config.expansions.custom.len());
+    let mut expansion_id = 0x5; // Start after official expansion IDs
+
+    for (expansion_name, items) in &config.expansions.custom {
+        info!("create_custom_expansions() - processing expansion: '{}'", expansion_name);
+        if expansion_id >= 0x1000 {
+            error!("Maximum custom expansions reached");
+            break;
+        }
+
+        // Create member set name for this expansion
+        let member_set_name = format!("openzt_custom_{}", expansion_id);
+
+        // Process each item in the expansion's list
+        for item in items {
+            if item.to_lowercase().ends_with(".ztd") {
+                // Item is an archive - add all entities from it
+                info!("create_custom_expansions() - getting entities from archive: '{}'", item);
+                if let Some(entities) = get_entities_from_archive(item) {
+                    let entity_count = entities.len();
+                    for entity_name in entities {
+                        add_member(entity_name, member_set_name.clone());
+                    }
+                    info!("Added {} entities from archive '{}' to expansion '{}'",
+                        entity_count, item, expansion_name);
+                } else {
+                    info!("No entities found from archive '{}' for expansion '{}'", item, expansion_name);
+                }
+            } else {
+                // Item is an entity name
+                add_member(item.clone(), member_set_name.clone());
+                info!("Added entity '{}' to expansion '{}'", item, expansion_name);
+            }
+        }
+
+        // Check if we have any members before creating expansion
+        if let Some(members) = get_members(&member_set_name) {
+            if !members.is_empty() {
+                info!("create_custom_expansions() - adding expansion to game: '{}' with {} members", expansion_name, members.len());
+                add_expansion_with_string_value(
+                    expansion_id,
+                    member_set_name.clone(),
+                    expansion_name.clone(),
+                    false, // Don't save yet
+                );
+                info!("Created custom expansion '{}' (ID: {:#x}) with {} members",
+                    expansion_name, expansion_id, members.len());
+                expansion_id += 1;
+            } else {
+                info!("Skipping expansion '{}' - no valid entities found", expansion_name);
+            }
+        }
+    }
+    info!("create_custom_expansions() - finished");
+}
+
 fn initialise_expansions() {
+    info!("initialise_expansions() - starting");
+    info!("initialise_expansions() - adding 'all' expansion");
     add_expansion_with_string_id(0x0, "all".to_string(), 0x5974, false);
+    info!("initialise_expansions() - checking for custom content members");
     if let Some(member_hash) = get_members(&get_cc_expansion_name_all()){
         if !member_hash.is_empty() {
-            add_expansion_with_string_value(0x4000, get_cc_expansion_name_all(), "Custom Content".to_string(), true);
-
-            save_mutex();
+            info!("initialise_expansions() - adding 'Custom Content' expansion");
+            add_expansion_with_string_value(0x4, get_cc_expansion_name_all(), "Custom Content".to_string(), false);
         }
     }
 
+    // Add custom expansions from config
+    info!("initialise_expansions() - about to call create_custom_expansions()");
+    create_custom_expansions();
+    info!("initialise_expansions() - create_custom_expansions() returned");
+
+    // Save all expansions to memory and resize dropdown
+    info!("initialise_expansions() - saving mutex");
+    save_mutex();
     let number_of_expansions = get_expansions().len();
+    info!("initialise_expansions() - total expansions: {}", number_of_expansions);
 
     if number_of_expansions > 4 {
+        info!("initialise_expansions() - resizing dropdown");
         resize_expansion_dropdown(number_of_expansions as u32);
     }
 
+    info!("initialise_expansions() - setting current expansion to 0x0");
     save_current_expansion(0x0);
+    info!("initialise_expansions() - finished");
 }
 
 fn resize_expansion_dropdown(number_of_expansions: u32) {
-    let number_of_additional_expansions = number_of_expansions as i32 - 4;
+    let mut number_of_additional_expansions = number_of_expansions as i32 - 4;
+    if number_of_additional_expansions > 22 {
+        number_of_additional_expansions = 22;
+    }
     info!("Resizing expansion dropdown to fit {} extra expansions", number_of_additional_expansions);
 
     if let Err(err) = modify_ztfile_as_ini(EXPANSION_RESOURCE_LYT, |cfg| {
-        let old_y = cfg.get_parse::<i32>("list", "dy").unwrap_or(Some(90)).unwrap_or(90);
-        let new_y = old_y + (number_of_additional_expansions * 30);
-        cfg.set("list", "dy", Some(new_y.to_string()));
         cfg.set("background", "animation", Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "." + "listbk"));
+        cfg.set("background", "layer", Some("1".to_string()));
+        let additional_spots_needed = number_of_additional_expansions - 2;
+        if additional_spots_needed <= 0 {
+            return Ok(());
+        }
+
+        let old_y = cfg.get_parse::<i32>("list", "dy").unwrap_or(Some(90)).unwrap_or(90);
+        let new_y = old_y + (additional_spots_needed * 15) + 5;
+        cfg.set("list", "dy", Some(new_y.to_string()));
+        cfg.set("list", "scrollbar", Some("22904".to_string()));
+        cfg.set("list", "layer", Some("2".to_string()));
+        cfg.set("list", "x", Some("13".to_string()));
+        cfg.set("list", "dx", Some("101".to_string()));
+        cfg.set("LayoutInfo", "dy", Some(new_y.to_string()));
+
+        cfg.set("scrollbar", "type", Some("UIScrollBar".to_string()));
+        cfg.set("scrollbar", "id", Some("22904".to_string()));
+        cfg.set("scrollbar", "animation", Some("ui/sharedui/scrolbck/scrolbck".to_string()));
+        cfg.set("scrollbar", "upArrow", Some("ui/sharedui/arowup/arowup".to_string()));
+        cfg.set("scrollbar", "thumb", Some("ui/sharedui/thumb/thumb".to_string()));
+        cfg.set("scrollbar", "downArrow", Some("ui/sharedui/arowdn/arowdn".to_string()));
+        cfg.set("scrollbar", "layer", Some("0".to_string()));
+
         Ok(())
     }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
@@ -413,7 +546,7 @@ fn resize_expansion_dropdown(number_of_expansions: u32) {
     let animation_result = modify_ztfile_as_animation(&animation_resource_string, |animation| {
         for _ in 0..number_of_additional_expansions {
             animation
-                .duplicate_pixel_rows(0, 10, 31)
+                .duplicate_pixel_rows(0, 10, 25)
                 .map_err(|e| anyhow!("Error duplicating pixel rows when modifying animation: {}", e))?;
         }
         animation.frames[0].vertical_offset_y += number_of_additional_expansions as u16 * 10;
@@ -580,6 +713,14 @@ fn parse_member_config(path: &str, file_name: &str, file: Ini) -> anyhow::Result
         .to_str()
         .with_context(|| format!("failed to parse member config {}", file_name))?
         .to_string();
+
+    // Extract archive name from path and add entity-to-archive mapping
+    let archive_path = Path::new(path.strip_prefix("zip::").unwrap_or(path));
+    if let Some(archive_file_name) = archive_path.file_name() {
+        if let Some(archive_str) = archive_file_name.to_str() {
+            add_entity_to_archive_mapping(filename.clone(), archive_str.to_string());
+        }
+    }
 
     // TODO: get_keys shouldn't need a mutable ini
     if let Some(keys) = file.clone().get_keys("Member") {

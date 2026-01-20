@@ -10,6 +10,6 @@ repository.workspace = true
 proc-macro = true
 
 [dependencies]
-quote = "1.0.36"
-syn = "2.0.58"
+quote = "1.0.43"
+syn = "2.0.114"
 field_accessor_as_string_trait = { path = "../field_accessor_as_string_trait" }

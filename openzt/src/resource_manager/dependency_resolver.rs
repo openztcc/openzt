@@ -252,6 +252,7 @@ impl DependencyResolver {
     /// 2. For cyclic mods, re-check with only required dependencies
     ///
     /// Returns: (truly_cyclic_mods, formerly_cyclic_mods, stage1_cycles, stage2_cycles)
+    #[allow(clippy::type_complexity)]
     fn detect_cycles_two_stage(
         &self,
         all_deps_graph: &DependencyGraph,
@@ -386,6 +387,7 @@ impl DependencyResolver {
     }
 
     /// Tarjan's algorithm recursive step
+    #[allow(clippy::only_used_in_recursion)]
     fn tarjan_strongconnect(
         &self,
         mod_id: &str,

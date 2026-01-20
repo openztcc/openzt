@@ -8,8 +8,8 @@ repository.workspace = true
 
 [dependencies]
 openzt = { version = "0.1.0-alpha", path = "../openzt" }
-tracing = "0.1.41"
-windows = "0.61.3"
+tracing = "0.1.44"
+windows = { version = "0.62.2", features = ["Win32_System_SystemServices"] }
 
 [lib]
 name = "openzt"

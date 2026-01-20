@@ -144,7 +144,6 @@ openzt/
 │       ├── resource_manager/  # Mod loading and resource handling
 │       ├── settings/       # Game settings integration
 │       └── integration_tests/  # Live game tests
-├── openzt-loader/          # DLL injection executable
 ├── openzt-console/         # TCP-based Lua console
 ├── openzt-configparser/    # INI parser crate
 └── openzt.bat              # Unified build script
@@ -154,7 +153,7 @@ openzt/
 
 - `experimental` - Experimental features (default: enabled)
 - `ini` - INI settings system (default: enabled)
-- `command-console` - Legacy command console (nightly only)
+- `command-console` - Legacy command console (default: enabled)
 - `integration-tests` - Enable integration test framework
 - `capture_ztlog` - Capture and re-log vanilla game logs
 

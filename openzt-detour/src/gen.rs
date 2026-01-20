@@ -1,6 +1,8 @@
 // Auto-generated Rust function definitions for Zoo Tycoon
 // Generated from Ghidra analysis
 
+#![allow(clippy::type_complexity)]
+
 use std::marker::PhantomData;
 
 use crate::FunctionDef;

@@ -1,9 +1,44 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use indexmap::IndexMap;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_subscriber::filter::LevelFilter;
+
+static LOGGING_INITIALIZED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+
+/// Initialize console logging early with default settings
+/// This should be called before any config loading to ensure logs are visible
+pub fn init_logging_early() {
+    let mut initialized = LOGGING_INITIALIZED.lock().unwrap();
+    if *initialized {
+        return; // Already initialized
+    }
+
+    let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
+
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::Layer;
+
+    // Initialize with default INFO level to console only
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(enable_ansi)
+        .with_writer(std::io::stdout)
+        .with_filter(LevelFilter::INFO);
+
+    tracing_subscriber::registry()
+        .with(console_layer)
+        .init();
+
+    *initialized = true;
+}
+
+/// Check if logging has been initialized
+pub fn is_logging_initialized() -> bool {
+    *LOGGING_INITIALIZED.lock().unwrap()
+}
 
 /// OpenZT configuration file structure (openzt.toml)
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -16,6 +51,9 @@ pub struct OpenZTConfig {
 
     #[serde(default)]
     pub resource_cache: ResourceCacheConfig,
+
+    #[serde(default)]
+    pub expansions: ExpansionConfig,
 }
 
 /// Mod loading configuration section
@@ -93,6 +131,26 @@ pub struct ResourceCacheConfig {
     pub stale_timeout_seconds: u64,
 }
 
+/// Custom expansions configuration section
+///
+/// Defines custom expansions for menu filtering in openzt.toml.
+/// Each key is an expansion name, and the value is an array of entity names and/or .ztd archives.
+///
+/// Example:
+/// ```toml
+/// [expansions]
+/// x = ["1", "2", "3", "1.ztd", "2.ztd"]
+/// y = ["2", "3"]
+/// z = ["4", "5"]
+/// ```
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ExpansionConfig {
+    /// Custom expansion definitions (flattened into [expansions] table)
+    /// Key: expansion name, Value: array of entity names and/or .ztd archives
+    #[serde(default, flatten)]
+    pub custom: IndexMap<String, Vec<String>>,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -123,6 +181,7 @@ impl Default for OpenZTConfig {
                 level: LogLevel::Warn,
             },
             resource_cache: ResourceCacheConfig::default(),
+            expansions: ExpansionConfig::default(),
         }
     }
 }
@@ -157,6 +216,14 @@ impl Default for ResourceCacheConfig {
     }
 }
 
+impl Default for ExpansionConfig {
+    fn default() -> Self {
+        ExpansionConfig {
+            custom: IndexMap::new(),
+        }
+    }
+}
+
 // Global cached configuration
 static CACHED_CONFIG: LazyLock<Mutex<OpenZTConfig>> = LazyLock::new(|| {
     Mutex::new(load_openzt_config_from_disk())
@@ -176,8 +243,8 @@ fn load_openzt_config_from_disk() -> OpenZTConfig {
         info!("No openzt.toml found, creating with default configuration");
         let default_config = OpenZTConfig::default();
 
-        // Save default config to file
-        if let Err(e) = save_openzt_config(&default_config) {
+        // Save default config to file (skip cache update - we're initializing it)
+        if let Err(e) = save_openzt_config(&default_config, true) {
             warn!("Failed to create openzt.toml: {}", e);
         }
 
@@ -193,6 +260,7 @@ fn load_openzt_config_from_disk() -> OpenZTConfig {
                     let has_mod_loading = toml_value.get("mod_loading").is_some();
                     let has_logging = toml_value.get("logging").is_some();
                     let has_resource_cache = toml_value.get("resource_cache").is_some();
+                    let has_expansions = toml_value.get("expansions").is_some();
 
                     // Check if all fields exist within sections
                     let mod_loading_complete = if let Some(mod_loading) = toml_value.get("mod_loading") {
@@ -218,8 +286,11 @@ fn load_openzt_config_from_disk() -> OpenZTConfig {
                         false
                     };
 
+                    // expansions section should always be present (even if empty)
+                    // No field-level validation needed for expansions since it's a free-form HashMap
+
                     // Update needed if sections missing or fields incomplete
-                    !has_mod_loading || !has_logging || !has_resource_cache
+                    !has_mod_loading || !has_logging || !has_resource_cache || !has_expansions
                         || !mod_loading_complete || !logging_complete || !resource_cache_complete
                 }
                 Err(_) => false, // If we can't parse as Value, the full parse will fail below
@@ -232,7 +303,7 @@ fn load_openzt_config_from_disk() -> OpenZTConfig {
                     // If sections or fields were missing, save the complete config with defaults
                     if needs_update {
                         info!("Adding missing configuration sections/fields to openzt.toml");
-                        if let Err(e) = save_openzt_config(&config) {
+                        if let Err(e) = save_openzt_config(&config, true) {
                             warn!("Failed to update openzt.toml with missing entries: {}", e);
                         }
                     }
@@ -266,7 +337,11 @@ pub fn get_openzt_config() -> OpenZTConfig {
 /// Save OpenZT configuration to openzt.toml
 ///
 /// Uses atomic write (temp file + rename) to prevent corruption
-pub fn save_openzt_config(config: &OpenZTConfig) -> anyhow::Result<()> {
+///
+/// # Arguments
+/// * `config` - The configuration to save
+/// * `skip_cache_update` - If true, skip updating the in-memory cache (use during initialization)
+pub fn save_openzt_config(config: &OpenZTConfig, skip_cache_update: bool) -> anyhow::Result<()> {
     let config_path = get_config_path();
     let temp_path = get_temp_config_path();
 
@@ -274,13 +349,37 @@ pub fn save_openzt_config(config: &OpenZTConfig) -> anyhow::Result<()> {
     let toml_string = toml::to_string_pretty(config)
         .map_err(|e| anyhow::anyhow!("Failed to serialize config: {}", e))?;
 
-    // Add header comment
-    let content = format!(
+    // Build the content with header comment
+    let mut content = format!(
         "# OpenZT Configuration File\n\
          # This file controls mod loading order, logging, and other behavior\n\
          # Generated automatically - edit with caution\n\n{}",
         toml_string
     );
+
+    // Add expansions section with comments if no custom expansions are defined yet
+    if config.expansions.custom.is_empty() {
+        // Replace the empty [expansions] section with the commented version
+        if content.contains("[expansions]") {
+            // Remove the empty section (it may be just "[expansions]" or have whitespace)
+            content = content.replace("\n[expansions]\n", "");
+            content = content.replace("[expansions]\n", "");
+        }
+        // Append the expansions section with comments
+        let expansions_comment = "\n\
+# Custom Expansions\n\
+# Define custom expansions for menu filtering in the game\n\
+# Format: expansion_name = [\"entity1\", \"entity2\", \"archive.ztd\"]\n\
+# - Archives (files ending in .ztd): All entities from that archive are included\n\
+# - Entity names: Specific entities to include (e.g., \"elephant\", \"lion\")\n\
+# - For uca/ucb/ucs files use the filename without the extension (e.g., \"a2f21026\" for \"a2f21026.uca\")\n\
+#\n\
+# Example:\n\
+# \"My animals\" = [\"elephant\", \"lion\", \"my_mod.ztd\"]\n\
+# \"More Stuff\" = [\"zebra\", \"giraffe\"]\n\
+[expansions]\n";
+        content.push_str(expansions_comment);
+    }
 
     // Write to temp file
     std::fs::write(&temp_path, content)
@@ -292,8 +391,8 @@ pub fn save_openzt_config(config: &OpenZTConfig) -> anyhow::Result<()> {
 
     info!("Updated openzt.toml with new configuration");
 
-    // Update the cached config
-    {
+    // Update the cached config (only if not during initialization)
+    if !skip_cache_update {
         let mut cached = CACHED_CONFIG.lock().unwrap();
         *cached = config.clone();
     }

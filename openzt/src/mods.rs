@@ -6,7 +6,7 @@ use serde::{
     de::{self, Deserializer, Visitor},
     Deserialize,
 };
-use tracing::warn;
+use toml::Value;
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -73,18 +73,23 @@ where
             A: de::SeqAccess<'de>,
         {
             let mut deps = Vec::new();
+            let mut index = 0;
 
-            while let Some(content) = seq.next_element::<serde::__private::de::Content>()? {
-                // Try to deserialize as Dependencies
-                match Dependencies::deserialize(
-                    serde::__private::de::ContentDeserializer::<A::Error>::new(content)
-                ) {
+            while let Some(value) = seq.next_element::<Value>()? {
+                let value_str = format!("{}", value);
+                match value.try_into::<Dependencies>() {
                     Ok(dep) => deps.push(dep),
                     Err(e) => {
-                        // Log warning for invalid dependency and skip it
-                        warn!("Skipping invalid dependency entry: {}", e);
+                        // Skip invalid dependency with a warning (using eprintln as a fallback
+                        // since we don't have access to tracing during deserialization)
+                        eprintln!(
+                            "Warning: Skipping invalid dependency at index {}: {}. \
+                            Dependency will be ignored. Value: {}",
+                            index, e, value_str
+                        );
                     }
                 }
+                index += 1;
             }
 
             Ok(deps)
@@ -140,7 +145,7 @@ where
 {
     struct VersionVisitor;
 
-    impl<'de> Visitor<'de> for VersionVisitor {
+    impl Visitor<'_> for VersionVisitor {
         type Value = Version;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -164,7 +169,7 @@ where
 {
     struct OptionVersionVisitor;
 
-    impl<'de> Visitor<'de> for OptionVersionVisitor {
+    impl Visitor<'_> for OptionVersionVisitor {
         type Value = Option<Version>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

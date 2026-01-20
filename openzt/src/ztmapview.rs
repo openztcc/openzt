@@ -3,8 +3,8 @@ use num_enum::FromPrimitive;
 use tracing::info;
 use openzt_detour_macro::detour_mod;
 
-use crate::bfentitytype::{ZTEntityTypeClass, ZTSceneryType, zt_entity_type_class_is};
-use crate::util::{get_from_memory, checked_get_from_memory};
+use crate::bfentitytype::{ZTEntityTypeClass, zt_entity_type_class_is};
+use crate::util::get_from_memory;
 use crate::zthabitatmgr::read_zt_habitat_mgr_from_memory;
 use crate::ztworldmgr::{BFEntity, IVec3};
 // use crate::{
