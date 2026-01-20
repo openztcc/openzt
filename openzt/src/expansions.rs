@@ -354,7 +354,7 @@ impl Display for ExpansionList {
 
 #[detour_mod]
 pub mod custom_expansion {
-    use tracing::info;
+    use tracing::debug;
     // use openzt_detour::{ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED, ZTUI_EXPANSIONSELECT_SETUP};
     use openzt_detour::gen::ztui_general::ENTITY_TYPE_IS_DISPLAYED;
     use openzt_detour::gen::ztui_expansionselect::SETUP;
@@ -365,7 +365,7 @@ pub mod custom_expansion {
     #[detour(ENTITY_TYPE_IS_DISPLAYED)]
     pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> bool {
 
-        // TODO: Put this call and subsequent log behind OpenZT debug flag) };
+        // TODO: Put this call and subsequent log behind OpenZT debug flag)
         let result = unsafe { ENTITY_TYPE_IS_DISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
 
         let Some(current_expansion) = read_current_expansion() else {
@@ -380,9 +380,9 @@ pub mod custom_expansion {
 
         let reimplemented_result = super::filter_entity_type(&current_buy_tab, &current_expansion, &entity);
 
-        // TODO: Put this log behind OpenZT debug flag
+        // TODO: Put this log behind OpenZT debug flag (and ignore if a custom expansion is selected)
         if result != reimplemented_result {
-            info!("Filtering mismatch {} {} ({} vs {})", entity, current_buy_tab, result, reimplemented_result);
+            debug!("Filtering mismatch {} {} ({} vs {})", entity, current_buy_tab, result, reimplemented_result);
         }
 
         reimplemented_result
@@ -490,23 +490,37 @@ fn initialise_expansions() {
 }
 
 fn resize_expansion_dropdown(number_of_expansions: u32) {
-    let number_of_additional_expansions = number_of_expansions as i32 - 4;
+    let mut number_of_additional_expansions = number_of_expansions as i32 - 4;
+    if number_of_additional_expansions > 22 {
+        number_of_additional_expansions = 22;
+    }
     info!("Resizing expansion dropdown to fit {} extra expansions", number_of_additional_expansions);
 
-    // TODO: This bit might need to (number_of_additional_expansions - 1), suspect it already has space for 1 extra expansion
     if let Err(err) = modify_ztfile_as_ini(EXPANSION_RESOURCE_LYT, |cfg| {
         cfg.set("background", "animation", Some(EXPANSION_OPENZT_RESOURCE_PREFIX.to_string() + "." + "listbk"));
-        let additional_spots_needed = number_of_additional_expansions - 1;
+        cfg.set("background", "layer", Some("1".to_string()));
+        let additional_spots_needed = number_of_additional_expansions - 2;
         if additional_spots_needed <= 0 {
             return Ok(());
         }
 
         let old_y = cfg.get_parse::<i32>("list", "dy").unwrap_or(Some(90)).unwrap_or(90);
-        // let new_y = old_y + (number_of_additional_expansions * 12);
-        let new_y = old_y + (additional_spots_needed * 15);
+        let new_y = old_y + (additional_spots_needed * 15) + 5;
         cfg.set("list", "dy", Some(new_y.to_string()));
-        cfg.set("LayoutInfo", "dy", Some(new_y.to_string())); // This might need to be slightly bigger than list to make the scrollbar work?
-        // TODO: Add scrollbar here, modify the 'layer' key of background and list so the scrollbar works properly
+        cfg.set("list", "scrollbar", Some("22904".to_string()));
+        cfg.set("list", "layer", Some("2".to_string()));
+        cfg.set("list", "x", Some("13".to_string()));
+        cfg.set("list", "dx", Some("101".to_string()));
+        cfg.set("LayoutInfo", "dy", Some(new_y.to_string()));
+
+        cfg.set("scrollbar", "type", Some("UIScrollBar".to_string()));
+        cfg.set("scrollbar", "id", Some("22904".to_string()));
+        cfg.set("scrollbar", "animation", Some("ui/sharedui/scrolbck/scrolbck".to_string()));
+        cfg.set("scrollbar", "upArrow", Some("ui/sharedui/arowup/arowup".to_string()));
+        cfg.set("scrollbar", "thumb", Some("ui/sharedui/thumb/thumb".to_string()));
+        cfg.set("scrollbar", "downArrow", Some("ui/sharedui/arowdn/arowdn".to_string()));
+        cfg.set("scrollbar", "layer", Some("0".to_string()));
+
         Ok(())
     }) {
         info!("Error resizing expansion dropdown 'ani' file: {}", err);
