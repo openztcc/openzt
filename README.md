@@ -2,7 +2,7 @@
 
 An enhancement DLL for **Zoo Tycoon (2001)** written in Rust. OpenZT enables more mods, bug fixes, and feature enhancements through function detouring and memory manipulation, all without modifying any original game assets.
 
-[![Crates.io](https://img.shields.io/crates/v/openzt)](https://crates.io/crates/openzt)
+[![GitHub Release](https://img.shields.io/github/v/release/openzt1/openzt?include_prereleases&sort=semver&display_name=release)](https://github.com/openzt1/openzt/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
