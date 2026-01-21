@@ -63,7 +63,15 @@ pub struct ModLoadingConfig {
     #[serde(default)]
     pub order: Vec<String>,
 
-    /// Disabled mods (present in ./mods but should not load)
+    /// Disabled mods and ZTD files
+    /// - OpenZT mod IDs (e.g., "com.example.mod")
+    /// - ZTD filenames ending in .ztd (e.g., "mymod.ztd")
+    ///
+    /// OpenZT mods in this list are skipped during loading.
+    /// ZTD files in this list:
+    /// - Files already loaded by other mods: skipped (not overwritten)
+    /// - .cfg/.uca/.ucb/.ucs files: empty resources added (prevents vanilla loading)
+    /// - Other file types: errors logged, vanilla will load them (configuration error)
     #[serde(default)]
     pub disabled: Vec<String>,
 

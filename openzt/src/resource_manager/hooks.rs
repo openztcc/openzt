@@ -29,7 +29,7 @@ mod zoo_resource_mgr {
         mods,
         resource_manager::{
             bfresourcemgr::BFResourcePtr,
-            lazyresourcemap::{check_file, get_file_ptr, deref_resource},
+            lazyresourcemap::{check_file, get_file_ptr, deref_resource, is_disabled_ztd_file},
             legacy_loading::{load_resources, OPENZT_DIR0},
             openzt_mods::{get_location_or_habitat_by_id, discover_mods},
             mod_config::{get_openzt_config, save_openzt_config},
@@ -72,6 +72,15 @@ mod zoo_resource_mgr {
             }
         }
         if !check_file(&file_name_string) {
+            // Check if this is a file from a disabled ZTD
+            if is_disabled_ztd_file(&file_name_string) {
+                error!(
+                    "Vanilla game is loading file '{}' from a disabled ZTD! \
+                     The file has an unsupported type (not .cfg/.uca/.ucb/.ucs) \
+                     and could not be disabled. This indicates a configuration mistake.",
+                    file_name_string
+                );
+            }
             return false
         }
 
@@ -100,6 +109,28 @@ mod zoo_resource_mgr {
             }
         }
         Err("Invalid openzt resource string")
+    }
+
+    /// Parse disabled entries into mod IDs and ZTD filenames
+    ///
+    /// # Arguments
+    /// * `disabled` - Array of disabled entries from config
+    ///
+    /// # Returns
+    /// * `(mod_ids, ztd_files)` - Tuple of vectors containing mod IDs and ZTD filenames respectively
+    fn parse_disabled_entries(disabled: &[String]) -> (Vec<String>, Vec<String>) {
+        let mut mod_ids = Vec::new();
+        let mut ztd_files = Vec::new();
+
+        for entry in disabled {
+            if entry.to_lowercase().ends_with(".ztd") {
+                ztd_files.push(entry.clone());
+            } else {
+                mod_ids.push(entry.clone());
+            }
+        }
+
+        (mod_ids, ztd_files)
     }
 
     #[detour(CONSTRUCTOR)]
@@ -146,6 +177,13 @@ mod zoo_resource_mgr {
             let discovered_mods = discover_mods(&paths);
             info!("Discovered {} mod(s)", discovered_mods.len());
 
+            // Parse disabled entries into mod IDs and ZTD filenames
+            let (disabled_mods, disabled_ztds) = parse_disabled_entries(&config.mod_loading.disabled);
+
+            if !disabled_ztds.is_empty() {
+                info!("Disabled ZTD files: {:?}", disabled_ztds);
+            }
+
             // Resolve dependencies and determine load order
             // Extract just the Meta structs for the resolver (convert from tuple)
             let resolver_mods: HashMap<String, mods::Meta> = discovered_mods
@@ -155,7 +193,7 @@ mod zoo_resource_mgr {
             let resolver = DependencyResolver::new(resolver_mods.clone());
             let resolution_result = resolver.resolve_order(
                 &config.mod_loading.order,
-                &config.mod_loading.disabled,
+                &disabled_mods,
             );
 
             // Log any dependency resolution warnings
@@ -202,18 +240,18 @@ mod zoo_resource_mgr {
 
             // Filter out disabled mods for actual loading
             // (they remain in openzt.toml order but are not loaded)
-            let disabled_set: std::collections::HashSet<_> = config.mod_loading.disabled.iter().collect();
+            let disabled_set: std::collections::HashSet<_> = disabled_mods.iter().collect();
             let enabled_order: Vec<String> = resolution_result.order.iter()
                 .filter(|mod_id| !disabled_set.contains(mod_id))
                 .cloned()
                 .collect();
 
-            if !config.mod_loading.disabled.is_empty() {
-                info!("Disabled mods (not loading): {:?}", config.mod_loading.disabled);
+            if !disabled_mods.is_empty() {
+                info!("Disabled OpenZT mods (not loading): {:?}", disabled_mods);
             }
 
-            // Load resources in resolved order (excluding disabled mods)
-            load_resources(paths, &enabled_order, &discovered_mods);
+            // Load resources in resolved order (excluding disabled mods, with disabled ZTD info)
+            load_resources(paths, &enabled_order, &discovered_mods, &disabled_ztds);
             info!("Resources loaded");
         }
         return_value

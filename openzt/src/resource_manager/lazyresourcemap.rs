@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::CString,
     path::Path,
     slice,
@@ -23,6 +23,10 @@ use crate::{
 
 static LAZY_RESOURCE_MAP: LazyLock<Mutex<HashMap<String, LazyResource>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static TOTAL_LOADED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+// Track files that originated from disabled ZTDs
+// Used to log errors only when vanilla actually tries to load them
+static DISABLED_ZTD_FILES: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
 struct LazyResourceMap {}
 
@@ -641,4 +645,70 @@ pub fn deref_resource(file_name: &str) -> bool {
     } else {
         false
     }
+}
+
+/// Create an empty resource (zero-length content)
+/// Used for disabling specific file types from ZTDs
+///
+/// # Arguments
+/// * `filename` - The resource file name
+/// * `file_type` - The type of the file
+pub fn create_empty_resource(filename: String, file_type: ZTFileType) -> anyhow::Result<()> {
+    let lowercase_filename = filename.to_lowercase();
+
+    // Create empty CString for text files
+    let empty_cstring = CString::new("")?;
+    let data_ptr = empty_cstring.into_raw() as u32;
+
+    let bf_zip_name = CString::new("<disabled>".to_string())?;
+    let bf_resource_name = CString::new(lowercase_filename.clone())?;
+
+    let resource_ptr = Box::into_raw(Box::new(BFResourcePtr {
+        num_refs: 100,
+        bf_zip_name: bf_zip_name.into(),
+        bf_resource_name: bf_resource_name.into(),
+        data_ptr,
+        content_size: 0,
+    }));
+
+    // Use LazyResourceMap::insert_custom to add the empty resource
+    LazyResourceMap::insert_custom(lowercase_filename, file_type, resource_ptr as u32);
+    Ok(())
+}
+
+/// Check if a file is already loaded in the resource map
+///
+/// # Arguments
+/// * `file_name` - The file name to check (case-insensitive)
+///
+/// # Returns
+/// * `true` if the file exists in the resource map
+/// * `false` if the file is not in the resource map
+pub fn check_file_loaded(file_name: &str) -> bool {
+    LAZY_RESOURCE_MAP.lock().unwrap().contains_key(&file_name.to_lowercase())
+}
+
+/// Mark a file as originating from a disabled ZTD
+///
+/// This is used to track files from disabled ZTDs so that we can log
+/// appropriate errors only when the vanilla game actually tries to load them.
+///
+/// # Arguments
+/// * `file_name` - The file name to mark (case-insensitive)
+pub fn mark_disabled_ztd_file(file_name: &str) {
+    DISABLED_ZTD_FILES.lock().unwrap().insert(file_name.to_lowercase());
+}
+
+/// Check if a file originated from a disabled ZTD
+///
+/// This is used to detect when vanilla is trying to load a file from a disabled ZTD.
+///
+/// # Arguments
+/// * `file_name` - The file name to check (case-insensitive)
+///
+/// # Returns
+/// * `true` if the file was marked as coming from a disabled ZTD
+/// * `false` otherwise
+pub fn is_disabled_ztd_file(file_name: &str) -> bool {
+    DISABLED_ZTD_FILES.lock().unwrap().contains(&file_name.to_lowercase())
 }
