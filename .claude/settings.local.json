@@ -29,7 +29,10 @@
       "Bash(cat:*)",
       "Bash(cargo tree:*)",
       "Bash(rustc:*)",
-      "Bash(cargo:*)"
+      "Bash(cargo:*)",
+      "Bash(git diff:*)",
+      "Bash(git --no-pager diff:*)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "ask": []

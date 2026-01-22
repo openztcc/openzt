@@ -63,7 +63,15 @@ pub struct ModLoadingConfig {
     #[serde(default)]
     pub order: Vec<String>,
 
-    /// Disabled mods (present in ./mods but should not load)
+    /// Disabled mods and ZTD files
+    /// - OpenZT mod IDs (e.g., "com.example.mod")
+    /// - ZTD filenames ending in .ztd (e.g., "mymod.ztd")
+    ///
+    /// OpenZT mods in this list are skipped during loading.
+    /// ZTD files in this list:
+    /// - Files already loaded by other mods: skipped (not overwritten)
+    /// - .cfg/.uca/.ucb/.ucs files: empty resources added (prevents vanilla loading)
+    /// - Other file types: errors logged, vanilla will load them (configuration error)
     #[serde(default)]
     pub disabled: Vec<String>,
 
@@ -380,6 +388,13 @@ pub fn save_openzt_config(config: &OpenZTConfig, skip_cache_update: bool) -> any
 [expansions]\n";
         content.push_str(expansions_comment);
     }
+
+    // Add inline comment to disabled field to indicate it can disable vanilla ZTDs
+    // Only when empty (similar to expansions section behavior)
+    content = content.replace(
+        "disabled = []",
+        "disabled = [] # Can also be used to disable vanilla ZTD mods (e.g., \"legacy_expansion.ztd\")"
+    );
 
     // Write to temp file
     std::fs::write(&temp_path, content)

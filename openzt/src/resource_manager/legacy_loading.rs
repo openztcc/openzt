@@ -8,7 +8,7 @@ use std::{
 use openzt_configparser::ini::Ini;
 use std::sync::LazyLock;
 use regex::Regex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use walkdir::WalkDir;
 
 use super::ztd::ZtdArchive;
@@ -17,8 +17,9 @@ use crate::{
     mods,
     resource_manager::{
         handlers::{get_handlers, RunStage},
-        lazyresourcemap::{add_lazy, get_file, get_file_names, get_num_resources},
+        lazyresourcemap::{add_lazy, check_file_loaded, create_empty_resource, get_file, get_file_names, get_num_resources, mark_disabled_ztd_file},
         openzt_mods::{get_num_mod_ids, legacy_attributes::{add_legacy_entity, LegacyEntityAttributes, LegacyEntityType, SubtypeAttributes}, load_open_zt_mod},
+        ztfile::ZTFileType,
     },
 };
 
@@ -50,7 +51,13 @@ fn get_ztd_resources(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     resources
 }
 
-pub fn load_resources(paths: Vec<String>, mod_order: &[String], discovered_mods: &HashMap<String, (String, mods::Meta)>) {
+pub fn load_resources(
+    paths: Vec<String>,
+    mod_order: &[String],
+    discovered_mods: &HashMap<String, (String, mods::Meta)>,
+    disabled_mods: &[String],
+    disabled_ztds: &[String],
+) {
     use std::time::Instant;
     use std::collections::HashMap;
 
@@ -76,6 +83,12 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String], discovered_mods:
                 // OpenZT mod - find the mod_id and check ztd_type
                 for (mod_id, (archive_name, meta)) in discovered_mods.iter() {
                     if archive_name == file_name {
+                        // Skip disabled mods entirely
+                        if disabled_mods.contains(mod_id) {
+                            info!("Skipping disabled OpenZT mod archive: {} (mod_id: {})", file_name, mod_id);
+                            break;
+                        }
+
                         let ztd_type = meta.ztd_type();
                         match ztd_type {
                             mods::ZtdType::Combined => {
@@ -105,9 +118,9 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String], discovered_mods:
     // Load legacy mods FIRST (before OpenZT mods)
     // This allows OpenZT mods to patch and modify legacy mod behavior
     for resource in legacy_resources {
-        info!("Loading legacy resource: {}", resource.display());
+        trace!("Loading legacy resource: {}", resource.display());
         let file_name = resource.to_str().unwrap_or_default().to_lowercase();
-        match handle_ztd(&resource) {
+        match handle_ztd(&resource, disabled_ztds) {
             Ok(count) => resource_count += count,
             Err(err) => {
                 error!("Error loading ztd: {} -> Failed to parse meta.toml", file_name);
@@ -121,7 +134,7 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String], discovered_mods:
         if let Some(resource) = mod_to_path.get(mod_id) {
             info!("Loading ordered mod '{}' from: {}", mod_id, resource.display());
             let file_name = resource.to_str().unwrap_or_default().to_lowercase();
-            match handle_ztd(resource) {
+            match handle_ztd(resource, disabled_ztds) {
                 Ok(count) => resource_count += count,
                 Err(err) => {
                     error!("Error loading ztd: {} -> Failed to parse meta.toml", file_name);
@@ -194,10 +207,18 @@ pub fn load_resources(paths: Vec<String>, mod_order: &[String], discovered_mods:
     info!("Extra handling took an extra: {:.2?}", elapsed);
 }
 
-fn handle_ztd(resource: &Path) -> anyhow::Result<i32> {
-    let mut load_count = 0;
+fn handle_ztd(resource: &Path, disabled_ztds: &[String]) -> anyhow::Result<i32> {
     let mut zip = ZtdArchive::new(resource)?;
-    let archive_name = zip.name().to_string();
+    let ztd_filename = resource
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+
+    // Check if this ZTD is disabled
+    let is_disabled = disabled_ztds
+        .iter()
+        .any(|d| d.to_lowercase() == ztd_filename);
 
     let ztd_type = load_open_zt_mod(&mut zip, resource)?;
 
@@ -206,22 +227,101 @@ fn handle_ztd(resource: &Path) -> anyhow::Result<i32> {
     }
 
     // Add span for legacy loading - provides archive context for any errors
-    let span = tracing::info_span!("handle_ztd", archive_name = %archive_name);
+    let span = tracing::info_span!("handle_ztd", archive_name = %ztd_filename, disabled = is_disabled);
     let _guard = span.enter();
 
     let archive = Arc::new(Mutex::new(zip));
 
-    archive.lock().unwrap().file_names().filter(|s| !s.ends_with("/")).for_each(|file_name| {
-        add_lazy(file_name.to_string(), archive.clone());
-        load_count += 1;
-    });
+    if is_disabled {
+        info!("Processing DISABLED ZTD '{}'", ztd_filename);
+        let mut added_count = 0;
+        let mut skipped_count = 0;
 
-    Ok(load_count)
+        archive
+            .lock()
+            .unwrap()
+            .file_names()
+            .filter(|s| !s.ends_with("/"))
+            .for_each(|file_name| {
+                let lowercase_name = file_name.to_lowercase();
+
+                // Check if already loaded
+                if check_file_loaded(&lowercase_name) {
+                    debug!(
+                        "File '{}' already loaded, skipping from disabled ZTD",
+                        lowercase_name
+                    );
+                    skipped_count += 1;
+                    return;
+                }
+
+                // Check file extension
+                let path = Path::new(&file_name);
+                let extension = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_lowercase())
+                    .unwrap_or_default();
+
+                match extension.as_str() {
+                    "cfg" | "uca" | "ucb" | "ucs" => {
+                        // Add empty resource for these types
+                        if let Ok(file_type) = ZTFileType::try_from(path) {
+                            if let Err(e) =
+                                create_empty_resource(file_name.to_string(), file_type)
+                            {
+                                error!(
+                                    "Failed to create empty resource for '{}': {}",
+                                    file_name, e
+                                );
+                            } else {
+                                // Mark as disabled ZTD file for potential error logging later
+                                mark_disabled_ztd_file(&lowercase_name);
+                                debug!(
+                                    "Added empty resource for '{}' from disabled ZTD",
+                                    file_name
+                                );
+                                added_count += 1;
+                            }
+                        }
+                    }
+                    _ => {
+                        // Track unsupported files from disabled ZTDs
+                        // Error will only be logged if vanilla actually tries to load them
+                        mark_disabled_ztd_file(&lowercase_name);
+                        debug!(
+                            "File '{}' from disabled ZTD has unsupported type - will log error if vanilla loads it",
+                            file_name
+                        );
+                        added_count += 1; // Count as "added" for tracking purposes
+                    }
+                }
+            });
+
+        info!(
+            "Disabled ZTD '{}': added {} empty resources, skipped {} already loaded",
+            ztd_filename, added_count, skipped_count
+        );
+        Ok(added_count)
+    } else {
+        // Normal loading for enabled ZTDs
+        let mut load_count = 0;
+        archive
+            .lock()
+            .unwrap()
+            .file_names()
+            .filter(|s| !s.ends_with("/"))
+            .for_each(|file_name| {
+                add_lazy(file_name.to_string(), archive.clone());
+                load_count += 1;
+            });
+        Ok(load_count)
+    }
 }
 
 fn parse_cfg(file_name: &String) -> Vec<String> {
     if let Some(legacy_cfg) = get_legacy_cfg_type(file_name) {
-        info!("Legacy cfg: {} {:?}", file_name, legacy_cfg.cfg_type);
+        trace!("Legacy cfg: {} {:?}", file_name, legacy_cfg.cfg_type);
 
         let Some((_archive_name, file)) = get_file(file_name) else {
             error!("Error getting file: {}", file_name);
@@ -327,7 +427,7 @@ fn extract_legacy_entities(cfg: &Ini, entity_type: LegacyEntityType) {
 
         for (cfg_section_name, _) in map.iter() {
             if let Some(entity_name) = cfg_section_name.strip_suffix("/subtypes") {
-                info!("Found subtype section for entity: {}", entity_name);
+                trace!("Found subtype section for entity: {}", entity_name);
                 if let Some(subtype_section) = map.get(cfg_section_name) {
                     let subtypes = subtype_section.keys().cloned().collect::<Vec<String>>();
                     if !subtypes.is_empty() {

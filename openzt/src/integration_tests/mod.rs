@@ -11,6 +11,7 @@ use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 use crate::detour_mod;
 
 pub mod dependency_resolution;
+pub mod disabled_ztd;
 pub mod legacy_attributes;
 pub mod loading_order;
 pub mod patch_rollback;
@@ -37,6 +38,14 @@ impl TestResult {
             name: name.to_string(),
             passed: false,
             error: Some(error),
+        }
+    }
+
+    pub fn skip(name: &str, reason: &str) -> Self {
+        TestResult {
+            name: format!("{} (skipped: {})", name, reason),
+            passed: true,
+            error: None,
         }
     }
 }
@@ -265,6 +274,22 @@ mod detour_zoo_main {
         let legacy_attributes_results = super::legacy_attributes::run_all_tests();
 
         for result in &legacy_attributes_results {
+            if result.passed {
+                write_log(&format!("  ✓ {}", result.name));
+                total_passed += 1;
+            } else {
+                write_log(&format!("  ✗ {} - {}", result.name, result.error.as_ref().unwrap_or(&"Unknown error".to_string())));
+                total_failed += 1;
+            }
+        }
+
+        write_log("");
+
+        // Run disabled ZTD tests
+        write_log("Running disabled ZTD tests...");
+        let disabled_ztd_results = super::disabled_ztd::run_all_tests();
+
+        for result in &disabled_ztd_results {
             if result.passed {
                 write_log(&format!("  ✓ {}", result.name));
                 total_passed += 1;
