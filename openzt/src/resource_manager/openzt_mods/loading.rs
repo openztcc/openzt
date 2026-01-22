@@ -67,8 +67,9 @@ pub fn discover_mods(paths: &[String]) -> HashMap<String, (String, mods::Meta)> 
         for entry in entries.flatten() {
             let file_path = entry.path();
 
-            // Only process .ztd files
-            if file_path.extension().and_then(|s| s.to_str()) != Some("ztd") {
+            // Only process .ztd files (case-insensitive)
+            if !file_path.extension().is_some_and(|s| s.eq_ignore_ascii_case("ztd")) {
+            // if file_path.extension().and_then(|s| s.to_str()).map_or(true, |s| !s.eq_ignore_ascii_case("ztd")) {
                 continue;
             }
 

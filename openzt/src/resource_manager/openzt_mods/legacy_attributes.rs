@@ -7,7 +7,7 @@ use std::{collections::HashMap, str::FromStr, sync::Mutex};
 
 use openzt_configparser::ini::Ini;
 use std::sync::LazyLock;
-use tracing::info;
+use tracing::trace;
 
 // Import LegacyCfgType from legacy_loading for conversion
 use crate::resource_manager::legacy_loading::LegacyCfgType;
@@ -326,7 +326,7 @@ pub fn add_legacy_entity(
         "(none)".to_string()
     };
 
-    info!(
+    trace!(
         "Registering legacy entity: type={:?}, name={}, name_id={}, subtypes=[{}]",
         entity_type, entity_name, name_id_display, subtype_list
     );

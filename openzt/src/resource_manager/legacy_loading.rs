@@ -8,7 +8,7 @@ use std::{
 use openzt_configparser::ini::Ini;
 use std::sync::LazyLock;
 use regex::Regex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use walkdir::WalkDir;
 
 use super::ztd::ZtdArchive;
@@ -55,6 +55,7 @@ pub fn load_resources(
     paths: Vec<String>,
     mod_order: &[String],
     discovered_mods: &HashMap<String, (String, mods::Meta)>,
+    disabled_mods: &[String],
     disabled_ztds: &[String],
 ) {
     use std::time::Instant;
@@ -82,6 +83,12 @@ pub fn load_resources(
                 // OpenZT mod - find the mod_id and check ztd_type
                 for (mod_id, (archive_name, meta)) in discovered_mods.iter() {
                     if archive_name == file_name {
+                        // Skip disabled mods entirely
+                        if disabled_mods.contains(mod_id) {
+                            info!("Skipping disabled OpenZT mod archive: {} (mod_id: {})", file_name, mod_id);
+                            break;
+                        }
+
                         let ztd_type = meta.ztd_type();
                         match ztd_type {
                             mods::ZtdType::Combined => {
@@ -111,7 +118,7 @@ pub fn load_resources(
     // Load legacy mods FIRST (before OpenZT mods)
     // This allows OpenZT mods to patch and modify legacy mod behavior
     for resource in legacy_resources {
-        info!("Loading legacy resource: {}", resource.display());
+        trace!("Loading legacy resource: {}", resource.display());
         let file_name = resource.to_str().unwrap_or_default().to_lowercase();
         match handle_ztd(&resource, disabled_ztds) {
             Ok(count) => resource_count += count,
@@ -314,7 +321,7 @@ fn handle_ztd(resource: &Path, disabled_ztds: &[String]) -> anyhow::Result<i32> 
 
 fn parse_cfg(file_name: &String) -> Vec<String> {
     if let Some(legacy_cfg) = get_legacy_cfg_type(file_name) {
-        info!("Legacy cfg: {} {:?}", file_name, legacy_cfg.cfg_type);
+        trace!("Legacy cfg: {} {:?}", file_name, legacy_cfg.cfg_type);
 
         let Some((_archive_name, file)) = get_file(file_name) else {
             error!("Error getting file: {}", file_name);
@@ -420,7 +427,7 @@ fn extract_legacy_entities(cfg: &Ini, entity_type: LegacyEntityType) {
 
         for (cfg_section_name, _) in map.iter() {
             if let Some(entity_name) = cfg_section_name.strip_suffix("/subtypes") {
-                info!("Found subtype section for entity: {}", entity_name);
+                trace!("Found subtype section for entity: {}", entity_name);
                 if let Some(subtype_section) = map.get(cfg_section_name) {
                     let subtypes = subtype_section.keys().cloned().collect::<Vec<String>>();
                     if !subtypes.is_empty() {

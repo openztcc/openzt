@@ -389,6 +389,13 @@ pub fn save_openzt_config(config: &OpenZTConfig, skip_cache_update: bool) -> any
         content.push_str(expansions_comment);
     }
 
+    // Add inline comment to disabled field to indicate it can disable vanilla ZTDs
+    // Only when empty (similar to expansions section behavior)
+    content = content.replace(
+        "disabled = []",
+        "disabled = [] # Can also be used to disable vanilla ZTD mods (e.g., \"legacy_expansion.ztd\")"
+    );
+
     // Write to temp file
     std::fs::write(&temp_path, content)
         .map_err(|e| anyhow::anyhow!("Failed to write temp config: {}", e))?;

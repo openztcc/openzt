@@ -251,7 +251,7 @@ mod zoo_resource_mgr {
             }
 
             // Load resources in resolved order (excluding disabled mods, with disabled ZTD info)
-            load_resources(paths, &enabled_order, &discovered_mods, &disabled_ztds);
+            load_resources(paths, &enabled_order, &discovered_mods, &disabled_mods, &disabled_ztds);
             info!("Resources loaded");
         }
         return_value
