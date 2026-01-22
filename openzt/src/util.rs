@@ -221,7 +221,7 @@ impl ZTString for ZTStringPtr {
     }
 
     fn copy_to_string(&self) -> String {
-        unsafe { CStr::from_ptr(self.ptr).to_str().unwrap().to_string() }
+        unsafe { CStr::from_ptr(self.ptr).to_string_lossy().into_owned() }
     }
 }
 

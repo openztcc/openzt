@@ -115,25 +115,20 @@ mod zoo_init {
     unsafe extern "thiscall" fn load_res_dlls(this: u32) -> u32 {
         match init_console() {
             Ok(_) => {
-                // Initialize logging early with defaults so we can see config loading logs
-                resource_manager::mod_config::init_logging_early();
-
                 let _enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
 
                 // Load config to determine logging settings
                 let config = resource_manager::mod_config::get_openzt_config();
 
-                // NOTE: Logging was already initialized by init_logging_early() with default settings
-                // We don't reinitialize here since tracing_subscriber::init() can only be called once
-                // The early initialization uses INFO level, which is fine for debugging
-                info!("Config loaded: log_level={:?}, log_to_file={}", config.logging.level, config.logging.log_to_file);
+                // Initialize logging with config settings
+                if let Err(e) = resource_manager::mod_config::init_logging(&config.logging) {
+                    eprintln!("Failed to initialize logging: {}", e);
+                }
 
-                // If file logging is enabled, we could set it up here, but since we can't reinitialize,
-                // we'll just log to console for now. The file logging from early init would need
-                // to be handled differently if we want it.
+                info!("OpenZT initialization starting");
             },
             Err(e) => {
-                info!("Failed to initialize console: {}", e);
+                eprintln!("Failed to initialize console: {}", e);
                 return 0; // Return 0 to indicate failure
             }
         }
