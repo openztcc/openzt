@@ -3,43 +3,80 @@ use std::path::PathBuf;
 use indexmap::IndexMap;
 use std::sync::LazyLock;
 use std::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::info;
 use tracing_subscriber::filter::LevelFilter;
+use tracing_appender;
 
 static LOGGING_INITIALIZED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
-/// Initialize console logging early with default settings
-/// This should be called before any config loading to ensure logs are visible
-pub fn init_logging_early() {
+/// Initialize logging with settings from openzt.toml
+/// This should be called AFTER config is loaded
+pub fn init_logging(config: &LoggingConfig) -> anyhow::Result<()> {
     let mut initialized = LOGGING_INITIALIZED.lock().unwrap();
     if *initialized {
-        return; // Already initialized
+        return Err(anyhow::anyhow!("Logging already initialized"));
     }
 
     let enable_ansi = enable_ansi_support::enable_ansi_support().is_ok();
+    let level_filter = config.level.to_level_filter();
 
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::Layer;
 
-    // Initialize with default INFO level to console only
+    // Always set up console logging
     let console_layer = tracing_subscriber::fmt::layer()
         .with_ansi(enable_ansi)
         .with_writer(std::io::stdout)
-        .with_filter(LevelFilter::INFO);
+        .with_filter(level_filter);
 
-    tracing_subscriber::registry()
-        .with(console_layer)
-        .init();
+    // Set up file logging if enabled
+    if config.log_to_file {
+        let log_path = crate::util::get_base_path().join("openzt.log");
+        match std::fs::File::create(&log_path) {
+            Ok(log_file) => {
+                // Wrap in non-blocking writer
+                let (non_blocking, _guard) = tracing_appender::non_blocking(log_file);
+
+                let file_layer = tracing_subscriber::fmt::layer()
+                    .with_ansi(false) // No ANSI codes in file
+                    .with_writer(non_blocking)
+                    .with_filter(level_filter);
+
+                // Initialize with both console and file layers
+                tracing_subscriber::registry()
+                    .with(console_layer)
+                    .with(file_layer)
+                    .init();
+
+                // Store guard to prevent it from being dropped
+                // Note: We need to leak this guard to keep file logging active
+                std::mem::forget(_guard);
+
+                eprintln!("Logging initialized: level={:?}, file={}", config.level, log_path.display());
+            }
+            Err(e) => {
+                // Fall back to console-only if file creation fails
+                tracing_subscriber::registry()
+                    .with(console_layer)
+                    .init();
+
+                eprintln!("Failed to create openzt.log: {}", e);
+                eprintln!("Logging initialized: level={:?}, console only", config.level);
+            }
+        }
+    } else {
+        // Console-only logging
+        tracing_subscriber::registry()
+            .with(console_layer)
+            .init();
+
+        eprintln!("Logging initialized: level={:?}, console only", config.level);
+    }
 
     *initialized = true;
+    Ok(())
 }
-
-/// Check if logging has been initialized
-pub fn is_logging_initialized() -> bool {
-    *LOGGING_INITIALIZED.lock().unwrap()
-}
-
 /// OpenZT configuration file structure (openzt.toml)
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct OpenZTConfig {
@@ -248,12 +285,12 @@ fn load_openzt_config_from_disk() -> OpenZTConfig {
     let config_path = get_config_path();
 
     if !config_path.exists() {
-        info!("No openzt.toml found, creating with default configuration");
+        eprintln!("No openzt.toml found, creating with default configuration");
         let default_config = OpenZTConfig::default();
 
         // Save default config to file (skip cache update - we're initializing it)
         if let Err(e) = save_openzt_config(&default_config, true) {
-            warn!("Failed to create openzt.toml: {}", e);
+            eprintln!("Failed to create openzt.toml: {}", e);
         }
 
         return default_config;
@@ -306,28 +343,28 @@ fn load_openzt_config_from_disk() -> OpenZTConfig {
 
             match toml::from_str::<OpenZTConfig>(&content) {
                 Ok(config) => {
-                    info!("Loaded OpenZT configuration from openzt.toml");
+                    eprintln!("Loaded OpenZT configuration from openzt.toml");
 
                     // If sections or fields were missing, save the complete config with defaults
                     if needs_update {
-                        info!("Adding missing configuration sections/fields to openzt.toml");
+                        eprintln!("Adding missing configuration sections/fields to openzt.toml");
                         if let Err(e) = save_openzt_config(&config, true) {
-                            warn!("Failed to update openzt.toml with missing entries: {}", e);
+                            eprintln!("Failed to update openzt.toml with missing entries: {}", e);
                         }
                     }
 
                     config
                 }
                 Err(e) => {
-                    error!("Failed to parse openzt.toml: {}", e);
-                    warn!("Using default configuration instead");
+                    eprintln!("Failed to parse openzt.toml: {}", e);
+                    eprintln!("Using default configuration instead");
                     OpenZTConfig::default()
                 }
             }
         }
         Err(e) => {
-            warn!("Could not read openzt.toml: {}", e);
-            warn!("Using default configuration");
+            eprintln!("Could not read openzt.toml: {}", e);
+            eprintln!("Using default configuration");
             OpenZTConfig::default()
         }
     }
