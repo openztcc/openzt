@@ -301,4 +301,18 @@ pub fn init() {
     if let Err(e) = unsafe { zoo_shortcuts::init_detours() } {
         tracing::error!("Error initializing shortcut detours: {}", e);
     }
+
+    // Example shortcut: Ctrl+R prints a test message
+    shortcut!(
+        "shortcuts",
+        "Example: Print test message",
+        VkKey::R,
+        true,   // Ctrl
+        false,  // Shift
+        false,  // Alt
+        false,  // override
+        || {
+            tracing::info!("Ctrl+R shortcut triggered! This is an example shortcut.");
+        }
+    );
 }
