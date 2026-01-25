@@ -633,8 +633,7 @@ impl TarjanState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mods::{Meta, Dependencies, Version};
-    use std::str::FromStr;
+    use crate::mods::{Meta};
 
     /// Helper to create test metadata from TOML string
     fn create_test_meta(toml_str: &str) -> Meta {

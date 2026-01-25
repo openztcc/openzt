@@ -65,6 +65,9 @@ mod zthabitatmgr;
 
 mod experimental;
 
+/// Keyboard shortcut registration system for game thread callbacks
+mod shortcuts;
+
 /// Patches in the current OpenZT build version into the game's version string.
 mod version;
 
@@ -159,11 +162,11 @@ mod zoo_init {
             ztadvterrainmgr::init();
             ztgamemgr::init();
             experimental::init();
+            shortcuts::init();
             ztmapview::init();
             zthabitatmgr::init();
         }
-        let result = unsafe { LOAD_LANG_DLLS_DETOUR.call(this) };
-        result
+        unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }
 }
 

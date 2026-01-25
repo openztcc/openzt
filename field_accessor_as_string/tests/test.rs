@@ -36,6 +36,7 @@ mod tests {
         i8: i8,
         u8: u8,
         bool: bool,
+        #[allow(dead_code)]
         array: [u8; 2],
     }
 
