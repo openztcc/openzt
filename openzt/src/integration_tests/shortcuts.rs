@@ -1,7 +1,8 @@
 //! Integration tests for the keyboard shortcut registration system.
 
 use super::TestResult;
-use crate::shortcuts::{VkKey, register_shortcut, list_shortcuts};
+use crate::shortcuts::{register_shortcut, list_shortcuts, Ctrl, Alt, Shift};
+use crate::shortcuts::{F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, A, B, NUM1, NUM2, NUM3, NUM4, NUM5, NUM6};
 
 pub fn run_all_tests() -> Vec<TestResult> {
     vec![
@@ -19,12 +20,11 @@ pub fn run_all_tests() -> Vec<TestResult> {
 fn test_simple_shortcut_registration() -> TestResult {
     let test_name = "test_simple_shortcut_registration";
 
-    // Register a simple shortcut
+    // Register a simple shortcut (using Ctrl since no-modifier shortcuts aren't ergonomic in typestate)
     let result = register_shortcut(
         "test_module",
-        "Test F1 shortcut",
-        VkKey::F1,
-        false, false, false,
+        "Test Ctrl+F1 shortcut",
+        F1 + Ctrl,
         false,
         || { /* Test callback */ }
     );
@@ -35,7 +35,7 @@ fn test_simple_shortcut_registration() -> TestResult {
 
     // Verify shortcut is in list
     let list = list_shortcuts();
-    if !list.contains("Test F1 shortcut") {
+    if !list.contains("Test Ctrl+F1 shortcut") {
         return TestResult::fail(test_name, format!("Shortcut not found in list. List: {}", list));
     }
 
@@ -54,8 +54,7 @@ fn test_shortcut_with_modifiers() -> TestResult {
     let ctrl_f2 = register_shortcut(
         "test_module",
         "Ctrl+F2 shortcut",
-        VkKey::F2,
-        true, false, false,
+        F2 + Ctrl,
         false,
         || { /* Ctrl+F2 callback */ }
     );
@@ -67,8 +66,7 @@ fn test_shortcut_with_modifiers() -> TestResult {
     let ctrl_shift_f3 = register_shortcut(
         "test_module",
         "Ctrl+Shift+F3 shortcut",
-        VkKey::F3,
-        true, true, false,
+        F3 + Ctrl + Shift,
         false,
         || { /* Ctrl+Shift+F3 callback */ }
     );
@@ -80,8 +78,7 @@ fn test_shortcut_with_modifiers() -> TestResult {
     let ctrl_shift_alt_f4 = register_shortcut(
         "test_module",
         "Ctrl+Shift+Alt+F4 shortcut",
-        VkKey::F4,
-        true, true, true,
+        F4 + Ctrl + Shift + Alt,
         false,
         || { /* Ctrl+Shift+Alt+F4 callback */ }
     );
@@ -112,9 +109,8 @@ fn test_shortcut_conflict_detection() -> TestResult {
     // Register first shortcut
     let first = register_shortcut(
         "module_a",
-        "First F5 shortcut",
-        VkKey::F5,
-        true, false, false,
+        "First Ctrl+F5 shortcut",
+        F5 + Ctrl,
         false,
         || { /* First callback */ }
     );
@@ -126,9 +122,8 @@ fn test_shortcut_conflict_detection() -> TestResult {
     // Try to register second shortcut with same key+modifiers (should fail)
     let second = register_shortcut(
         "module_b",
-        "Second F5 shortcut",
-        VkKey::F5,
-        true, false, false,
+        "Second Ctrl+F5 shortcut",
+        F5 + Ctrl,
         false,  // override = false
         || { /* Second callback */ }
     );
@@ -145,10 +140,10 @@ fn test_shortcut_conflict_detection() -> TestResult {
 
     // Verify original shortcut is still in list
     let list = list_shortcuts();
-    if !list.contains("First F5 shortcut") {
+    if !list.contains("First Ctrl+F5 shortcut") {
         return TestResult::fail(test_name, "Original shortcut was replaced".to_string());
     }
-    if list.contains("Second F5 shortcut") {
+    if list.contains("Second Ctrl+F5 shortcut") {
         return TestResult::fail(test_name, "Second shortcut should not be in list".to_string());
     }
 
@@ -159,12 +154,11 @@ fn test_shortcut_conflict_detection() -> TestResult {
 fn test_shortcut_override_behavior() -> TestResult {
     let test_name = "test_shortcut_override_behavior";
 
-    // Register first shortcut
+    // Register first shortcut (Shift+Alt since Shift alone isn't allowed)
     let first = register_shortcut(
         "module_a",
-        "Original F6 shortcut",
-        VkKey::F6,
-        false, true, false,
+        "Original Shift+Alt+F6 shortcut",
+        F6 + Shift + Alt,
         false,
         || { /* Original callback */ }
     );
@@ -176,9 +170,8 @@ fn test_shortcut_override_behavior() -> TestResult {
     // Register second shortcut with same key+modifiers but override=true
     let second = register_shortcut(
         "module_b",
-        "Replacement F6 shortcut",
-        VkKey::F6,
-        false, true, false,
+        "Replacement Shift+Alt+F6 shortcut",
+        F6 + Shift + Alt,
         true,  // override = true
         || { /* Replacement callback */ }
     );
@@ -189,10 +182,10 @@ fn test_shortcut_override_behavior() -> TestResult {
 
     // Verify replacement shortcut is in list
     let list = list_shortcuts();
-    if !list.contains("Replacement F6 shortcut") {
+    if !list.contains("Replacement Shift+Alt+F6 shortcut") {
         return TestResult::fail(test_name, "Replacement shortcut not found in list".to_string());
     }
-    if list.contains("Original F6 shortcut") {
+    if list.contains("Original Shift+Alt+F6 shortcut") {
         return TestResult::fail(test_name, "Original shortcut should be replaced".to_string());
     }
     if !list.contains("module_b") {
@@ -206,35 +199,49 @@ fn test_shortcut_override_behavior() -> TestResult {
 fn test_multiple_shortcuts_different_keys() -> TestResult {
     let test_name = "test_multiple_shortcuts_different_keys";
 
-    // Register multiple shortcuts with different keys
-    let keys = [
-        (VkKey::F7, "F7 action", false, false, false),
-        (VkKey::F8, "F8 action", true, false, false),
-        (VkKey::F9, "F9 action", false, true, false),
-        (VkKey::F10, "F10 action", true, true, false),
-        (VkKey::F11, "F11 action", false, false, true),
-        (VkKey::Num1, "Num1 action", true, true, true),
-        (VkKey::A, "A action", false, false, false),
-    ];
+    // Register multiple shortcuts with different keys using typestate pattern
+    // Note: We register each individually to avoid type inference issues
 
-    for (key, desc, ctrl, shift, alt) in &keys {
-        let result = register_shortcut(
-            "multi_test",
-            desc,
-            *key,
-            *ctrl, *shift, *alt,
-            false,
-            || { /* Callback */ }
-        );
+    let result1 = register_shortcut("multi_test", "F7+Ctrl action", F7 + Ctrl, false, || {});
+    if result1.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register F7+Ctrl: {:?}", result1));
+    }
 
-        if result.is_err() {
-            return TestResult::fail(test_name, format!("Failed to register {}: {:?}", desc, result));
-        }
+    let result2 = register_shortcut("multi_test", "F8+Ctrl action", F8 + Ctrl, false, || {});
+    if result2.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register F8+Ctrl: {:?}", result2));
+    }
+
+    let result3 = register_shortcut("multi_test", "F9+Shift+Ctrl action", F9 + Shift + Ctrl, false, || {});
+    if result3.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register F9+Shift+Ctrl: {:?}", result3));
+    }
+
+    let result4 = register_shortcut("multi_test", "F10+Shift+Ctrl action", F10 + Shift + Ctrl, false, || {});
+    if result4.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register F10+Shift+Ctrl: {:?}", result4));
+    }
+
+    let result5 = register_shortcut("multi_test", "F11+Alt action", F11 + Alt, false, || {});
+    if result5.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register F11+Alt: {:?}", result5));
+    }
+
+    let result6 = register_shortcut("multi_test", "Num1+All action", NUM1 + Ctrl + Shift + Alt, false, || {});
+    if result6.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register Num1+All: {:?}", result6));
+    }
+
+    let result7 = register_shortcut("multi_test", "A+Ctrl action", A + Ctrl, false, || {});
+    if result7.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register A+Ctrl: {:?}", result7));
     }
 
     // Verify all shortcuts are in list
     let list = list_shortcuts();
-    for (_, desc, _, _, _) in &keys {
+    let descriptions = ["F7+Ctrl action", "F8+Ctrl action", "F9+Shift+Ctrl action",
+                       "F10+Shift+Ctrl action", "F11+Alt action", "Num1+All action", "A+Ctrl action"];
+    for desc in &descriptions {
         if !list.contains(desc) {
             return TestResult::fail(test_name, format!("Shortcut '{}' not found in list", desc));
         }
@@ -247,27 +254,31 @@ fn test_multiple_shortcuts_different_keys() -> TestResult {
 fn test_list_shortcuts() -> TestResult {
     let test_name = "test_list_shortcuts";
 
-    // Clear registry by checking initial state
-    let initial_list = list_shortcuts();
-
     // Register a few test shortcuts
-    let _ = register_shortcut(
+    // Note: Use override=true since keys might be registered by previous tests
+    let result1 = register_shortcut(
         "list_test_module",
-        "Test list shortcut A",
-        VkKey::A,
-        false, false, false,
-        false,
+        "Test list shortcut A+Ctrl",
+        A + Ctrl,
+        true,  // override in case it was registered before
         || { /* Callback A */ }
     );
 
-    let _ = register_shortcut(
+    if result1.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register A+Ctrl: {:?}", result1));
+    }
+
+    let result2 = register_shortcut(
         "list_test_module",
-        "Test list shortcut B",
-        VkKey::B,
-        true, false, false,
-        false,
+        "Test list shortcut B+Ctrl",
+        B + Ctrl,
+        true,  // override in case it was registered before
         || { /* Callback B */ }
     );
+
+    if result2.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register B+Ctrl: {:?}", result2));
+    }
 
     let list = list_shortcuts();
 
@@ -276,11 +287,11 @@ fn test_list_shortcuts() -> TestResult {
         return TestResult::fail(test_name, format!("List format unexpected: {}", list));
     }
 
-    if !list.contains("Test list shortcut A") {
+    if !list.contains("Test list shortcut A+Ctrl") {
         return TestResult::fail(test_name, format!("Shortcut A not found. List: {}", list));
     }
 
-    if !list.contains("Test list shortcut B") {
+    if !list.contains("Test list shortcut B+Ctrl") {
         return TestResult::fail(test_name, format!("Shortcut B not found. List: {}", list));
     }
 
@@ -291,52 +302,49 @@ fn test_list_shortcuts() -> TestResult {
     TestResult::pass(test_name)
 }
 
-/// Test all possible modifier combinations
+/// Test all possible modifier combinations (that are valid with typestate pattern)
 fn test_all_modifiers_combination() -> TestResult {
     let test_name = "test_all_modifiers_combination";
 
-    // Test all 8 possible modifier combinations
-    let combinations = [
-        (false, false, false, "None"),
-        (true, false, false, "Ctrl"),
-        (false, true, false, "Shift"),
-        (false, false, true, "Alt"),
-        (true, true, false, "Ctrl+Shift"),
-        (true, false, true, "Ctrl+Alt"),
-        (false, true, true, "Shift+Alt"),
-        (true, true, true, "Ctrl+Shift+Alt"),
-    ];
+    // Test all valid modifier combinations using typestate pattern
+    // Note: Shift-only is not allowed, so we skip that case
+    // We register each individually to avoid type inference issues
+    // Use override=true in case keys were registered by previous tests
 
-    for (i, (ctrl, shift, alt, mod_name)) in combinations.iter().enumerate() {
-        let key = match i {
-            0 => VkKey::Num1,
-            1 => VkKey::Num2,
-            2 => VkKey::Num3,
-            3 => VkKey::Num4,
-            4 => VkKey::Num5,
-            5 => VkKey::Num6,
-            6 => VkKey::Num7,
-            _ => VkKey::Num8,
-        };
+    let result1 = register_shortcut("modifier_test", "Test with Ctrl modifiers", NUM1 + Ctrl, true, || {});
+    if result1.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register Ctrl: {:?}", result1));
+    }
 
-        let result = register_shortcut(
-            "modifier_test",
-            &format!("Test with {} modifiers", mod_name),
-            key,
-            *ctrl, *shift, *alt,
-            false,
-            || { /* Callback */ }
-        );
+    let result2 = register_shortcut("modifier_test", "Test with Shift+Ctrl modifiers", NUM2 + Shift + Ctrl, true, || {});
+    if result2.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register Shift+Ctrl: {:?}", result2));
+    }
 
-        if result.is_err() {
-            return TestResult::fail(test_name, format!("Failed to register with {}: {:?}", mod_name, result));
-        }
+    let result3 = register_shortcut("modifier_test", "Test with Alt modifiers", NUM3 + Alt, true, || {});
+    if result3.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register Alt: {:?}", result3));
+    }
+
+    let result4 = register_shortcut("modifier_test", "Test with Ctrl+Alt modifiers", NUM4 + Ctrl + Alt, true, || {});
+    if result4.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register Ctrl+Alt: {:?}", result4));
+    }
+
+    let result5 = register_shortcut("modifier_test", "Test with Shift+Alt modifiers", NUM5 + Shift + Alt, true, || {});
+    if result5.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register Shift+Alt: {:?}", result5));
+    }
+
+    let result6 = register_shortcut("modifier_test", "Test with Ctrl+Shift+Alt modifiers", NUM6 + Ctrl + Shift + Alt, true, || {});
+    if result6.is_err() {
+        return TestResult::fail(test_name, format!("Failed to register Ctrl+Shift+Alt: {:?}", result6));
     }
 
     // Verify all are in list
     let list = list_shortcuts();
-    if !list.contains("Test with None modifiers") {
-        return TestResult::fail(test_name, "No-modifier shortcut not found".to_string());
+    if !list.contains("Test with Ctrl modifiers") {
+        return TestResult::fail(test_name, "Ctrl modifier shortcut not found".to_string());
     }
     if !list.contains("Test with Ctrl+Shift+Alt modifiers") {
         return TestResult::fail(test_name, "All-modifier shortcut not found".to_string());
