@@ -185,29 +185,29 @@ impl<const CTRL: bool, const ALT: bool, const SHIFT: bool, const KEY: i32>
     }
 }
 
-/// A partial shortcut with modifiers but no key.
+/// A partial shortcut with modifiers and optionally a key.
 ///
 /// This type cannot be registered as a shortcut - it must be completed
-/// by adding a Key to produce a full Shortcut.
+/// by adding modifiers (for Shift-only cases) or a key (for modifier-only cases).
 ///
 /// # Example
 ///
 /// ```rust
 /// use openzt::shortcuts::{Ctrl, Shift, R};
 ///
-/// // This creates a PartialShortcut, which cannot be registered
-/// let partial = Ctrl + Shift;  // PartialShortcut<true, false, true>
+/// // Shift-only: produces PartialShortcut (not registerable)
+/// let partial = R + Shift;  // PartialShortcut<false, false, true, R_CODE>
 ///
-/// // Add a key to complete it
-/// let complete = partial + R;  // Shortcut<true, false, true, R_KEY>
+/// // Add Ctrl to make it valid
+/// let complete = partial + Ctrl;  // Shortcut<true, false, true, R_CODE>
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PartialShortcut<const CTRL: bool, const ALT: bool, const SHIFT: bool> {
+pub struct PartialShortcut<const CTRL: bool, const ALT: bool, const SHIFT: bool, const KEY: i32> {
     _private: PhantomData<()>,
 }
 
-impl<const CTRL: bool, const ALT: bool, const SHIFT: bool>
-    PartialShortcut<CTRL, ALT, SHIFT>
+impl<const CTRL: bool, const ALT: bool, const SHIFT: bool, const KEY: i32>
+    PartialShortcut<CTRL, ALT, SHIFT, KEY>
 {
     const fn new() -> Self {
         Self { _private: PhantomData }
@@ -236,10 +236,10 @@ impl<const CODE: i32> Add<Alt> for Key<CODE> {
 }
 
 impl<const CODE: i32> Add<Shift> for Key<CODE> {
-    type Output = Shortcut<false, false, true, CODE>;
+    type Output = PartialShortcut<false, false, true, CODE>;
 
     fn add(self, _: Shift) -> Self::Output {
-        Shortcut::new()
+        PartialShortcut::new()
     }
 }
 
@@ -279,32 +279,32 @@ impl<const CTRL: bool, const ALT: bool, const KEY: i32> Add<Shift>
 // ============================================================================
 
 impl Add<Alt> for Ctrl {
-    type Output = PartialShortcut<true, true, false>;
+    type Output = PartialShortcut<true, true, false, -1>;
     fn add(self, _: Alt) -> Self::Output { PartialShortcut::new() }
 }
 
 impl Add<Shift> for Ctrl {
-    type Output = PartialShortcut<true, false, true>;
+    type Output = PartialShortcut<true, false, true, -1>;
     fn add(self, _: Shift) -> Self::Output { PartialShortcut::new() }
 }
 
 impl Add<Ctrl> for Alt {
-    type Output = PartialShortcut<true, true, false>;
+    type Output = PartialShortcut<true, true, false, -1>;
     fn add(self, _: Ctrl) -> Self::Output { PartialShortcut::new() }
 }
 
 impl Add<Shift> for Alt {
-    type Output = PartialShortcut<false, true, true>;
+    type Output = PartialShortcut<false, true, true, -1>;
     fn add(self, _: Shift) -> Self::Output { PartialShortcut::new() }
 }
 
 impl Add<Ctrl> for Shift {
-    type Output = PartialShortcut<true, false, true>;
+    type Output = PartialShortcut<true, false, true, -1>;
     fn add(self, _: Ctrl) -> Self::Output { PartialShortcut::new() }
 }
 
 impl Add<Alt> for Shift {
-    type Output = PartialShortcut<false, true, true>;
+    type Output = PartialShortcut<false, true, true, -1>;
     fn add(self, _: Alt) -> Self::Output { PartialShortcut::new() }
 }
 
@@ -312,57 +312,58 @@ impl Add<Alt> for Shift {
 // PartialShortcut + Key -> Shortcut
 // ============================================================================
 
-impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, false, false> {
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, false, false, -1> {
     type Output = Shortcut<true, false, false, CODE>;
     fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
 }
 
-impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<false, true, false> {
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<false, true, false, -1> {
     type Output = Shortcut<false, true, false, CODE>;
     fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
 }
 
-impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<false, false, true> {
-    type Output = Shortcut<false, false, true, CODE>;
-    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
-}
+// Note: PartialShortcut<false, false, true, KEY> (Shift-only) should NOT allow adding Key
+// since it already has a key. Adding a modifier is required instead.
 
-impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, true, false> {
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, true, false, -1> {
     type Output = Shortcut<true, true, false, CODE>;
     fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
 }
 
-impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, false, true> {
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, false, true, -1> {
     type Output = Shortcut<true, false, true, CODE>;
     fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
 }
 
-impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<false, true, true> {
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<false, true, true, -1> {
     type Output = Shortcut<false, true, true, CODE>;
     fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
 }
 
-impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, true, true> {
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, true, true, -1> {
     type Output = Shortcut<true, true, true, CODE>;
     fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
 }
 
 // ============================================================================
-// PartialShortcut + Modifier -> PartialShortcut (adding third modifier)
+// PartialShortcut + Modifier -> PartialShortcut (adding third modifier, no key yet)
 // ============================================================================
 
-impl Add<Ctrl> for PartialShortcut<false, true, true> {
-    type Output = PartialShortcut<true, true, true>;
+// These impls add a third modifier to PartialShortcuts with KEY=-1 (no key yet)
+// Note: Using specific impls instead of generic to avoid conflicts with Shift+Key impls
+
+impl Add<Ctrl> for PartialShortcut<false, true, true, -1> {
+    type Output = PartialShortcut<true, true, true, -1>;
     fn add(self, _: Ctrl) -> Self::Output { PartialShortcut::new() }
 }
 
-impl Add<Alt> for PartialShortcut<true, false, true> {
-    type Output = PartialShortcut<true, true, true>;
+impl Add<Alt> for PartialShortcut<true, false, true, -1> {
+    type Output = PartialShortcut<true, true, true, -1>;
     fn add(self, _: Alt) -> Self::Output { PartialShortcut::new() }
 }
 
-impl Add<Shift> for PartialShortcut<true, true, false> {
-    type Output = PartialShortcut<true, true, true>;
+impl Add<Shift> for PartialShortcut<true, true, false, -1> {
+    type Output = PartialShortcut<true, true, true, -1>;
     fn add(self, _: Shift) -> Self::Output { PartialShortcut::new() }
 }
 
@@ -381,8 +382,26 @@ impl<const CODE: i32> Add<Key<CODE>> for Alt {
 }
 
 impl<const CODE: i32> Add<Key<CODE>> for Shift {
-    type Output = Shortcut<false, false, true, CODE>;
-    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+    type Output = PartialShortcut<false, false, true, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { PartialShortcut::new() }
+}
+
+// ============================================================================
+// PartialShortcut + Modifier -> Shortcut (for Shift-only shortcuts)
+// ============================================================================
+
+// PartialShortcut<false, false, true, KEY> + Ctrl → Shortcut<true, false, true, KEY>
+// Note: These impls work for PartialShortcuts with actual key codes (from Shift + Key)
+// They do NOT conflict with the -1 sentinel impls because those are for different modifier combinations
+
+impl<const KEY: i32> Add<Ctrl> for PartialShortcut<false, false, true, KEY> {
+    type Output = Shortcut<true, false, true, KEY>;
+    fn add(self, _: Ctrl) -> Self::Output { Shortcut::new() }
+}
+
+impl<const KEY: i32> Add<Alt> for PartialShortcut<false, false, true, KEY> {
+    type Output = Shortcut<false, true, true, KEY>;
+    fn add(self, _: Alt) -> Self::Output { Shortcut::new() }
 }
 
 // ============================================================================
@@ -697,10 +716,22 @@ mod tests {
     }
 
     #[test]
-    fn test_key_plus_shift() {
+    fn test_key_plus_shift_provides_partial_shortcut() {
         let k = Key::<0x41>::new();
-        let s = k + Shift;
-        assert!(s.matches(false, false, true, 0x41));
+        // Key + Shift now produces PartialShortcut, not Shortcut
+        let p: PartialShortcut<false, false, true, 0x41> = k + Shift;
+        // PartialShortcut cannot be registered, but adding Ctrl makes it valid
+        let s = p + Ctrl;
+        assert!(s.matches(true, false, true, 0x41));
+    }
+
+    #[test]
+    fn test_shift_plus_key_provides_partial_shortcut() {
+        // Shift + Key also produces PartialShortcut
+        let p: PartialShortcut<false, false, true, 0x41> = Shift + Key::<0x41>::new();
+        // Adding Alt makes it valid
+        let s = p + Alt;
+        assert!(s.matches(false, true, true, 0x41));
     }
 
     #[test]
@@ -800,8 +831,8 @@ mod tests {
 
     #[test]
     fn test_all_three_modifiers() {
-        // Test Ctrl + Alt + Shift + R
-        let s = Ctrl + Alt + Shift + R;
+        // Test Ctrl + Shift + Alt + R (modifier-first with all three)
+        let s = Ctrl + Shift + Alt + R;
         assert!(s.matches(true, true, true, VK_R.0 as i32));
         assert!(s.ctrl());
         assert!(s.alt());
@@ -820,9 +851,14 @@ mod tests {
 
     #[test]
     fn test_number_key_shortcuts() {
-        // Test number keys
-        let s = NUM5 + Shift;
-        assert!(s.matches(false, false, true, VK_5.0 as i32));
+        // Test number keys with Ctrl (Shift alone produces PartialShortcut)
+        let s = NUM5 + Ctrl;
+        assert!(s.matches(true, false, false, VK_5.0 as i32));
+
+        // NUM5 + Shift + Alt produces a valid shortcut
+        let p = NUM5 + Shift;
+        let s = p + Alt;
+        assert!(s.matches(false, true, true, VK_5.0 as i32));
     }
 
     #[test]
@@ -844,7 +880,9 @@ mod tests {
         let s = UP + Ctrl;
         assert!(s.matches(true, false, false, VK_UP.0 as i32));
 
-        let s = LEFT + Shift;
-        assert!(s.matches(false, false, true, VK_LEFT.0 as i32));
+        // LEFT + Shift produces PartialShortcut, need to add a modifier
+        let p = LEFT + Shift;
+        let s = p + Ctrl;
+        assert!(s.matches(true, false, true, VK_LEFT.0 as i32));
     }
 }
