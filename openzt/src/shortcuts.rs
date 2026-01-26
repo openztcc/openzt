@@ -5,116 +5,34 @@
 //!
 //! # Typestate Pattern
 //!
-//! Shortcuts use a typestate pattern for type-safe modifier construction:
+//! Shortcuts use a typestate pattern for type-safe modifier construction.
+//! Multiple ergonomic syntaxes are supported:
 //!
 //! ```rust
-//! use openzt::shortcuts::{Key, Ctrl, Shift, Alt, VkKey};
+//! use openzt::shortcuts::{Key, Ctrl, Shift, Alt, VkKey, R};
 //! use windows::Win32::UI::Input::KeyboardAndMouse::*;
 //!
-//! // Method 1: Using VK constants directly
+//! // Method 1: Using const key items (most ergonomic)
+//! let ctrl_r = R + Ctrl;           // Key-first: R key, then Ctrl modifier
+//! let ctrl_r_alt = Ctrl + R;       // Modifier-first: Ctrl, then R key
+//! let ctrl_shift_r = R + Ctrl + Shift;     // Multiple modifiers
+//! let ctrl_shift_r_alt = Ctrl + Shift + R; // Modifier-first with multiple
+//!
+//! // Method 2: Using VK constants directly
 //! let ctrl_a = Key::<{ VK_A.0 as i32 }>::new() + Ctrl;
 //!
-//! // Method 2: Using VkKey::code() in a const
-//! const R_KEY: i32 = VkKey::R.code();
-//! let ctrl_r = Key::<R_KEY>::new() + Ctrl;
-//!
-//! // Key with multiple modifiers
-//! let ctrl_shift_a = Key::<{ VK_A.0 as i32 }>::new() + Ctrl + Shift;
+//! // Method 3: Using VkKey::code() in a const
+//! const X_KEY: i32 = VkKey::X.code();
+//! let ctrl_x = Key::<X_KEY>::new() + Ctrl;
 //!
 //! // Register the shortcut
-//! register_shortcut("module", "description", ctrl_shift_a, false, || {});
+//! register_shortcut("module", "description", ctrl_r, false, || {});
 //! ```
 
 use std::marker::PhantomData;
 use std::ops::Add;
 use std::sync::LazyLock;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-
-/// Common virtual key codes for shortcuts
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VkKey {
-    // Letters
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
-    // Numbers
-    Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
-    // Function keys
-    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
-    // Special keys
-    Space, Enter, Escape, Tab, Backspace,
-    Insert, Delete, Home, End,
-    PageUp, PageDown,
-    Up, Down, Left, Right,
-}
-
-impl VkKey {
-    fn to_i32(self) -> i32 {
-        match self {
-            Self::A => VK_A.0 as i32,
-            Self::B => VK_B.0 as i32,
-            Self::C => VK_C.0 as i32,
-            Self::D => VK_D.0 as i32,
-            Self::E => VK_E.0 as i32,
-            Self::F => VK_F.0 as i32,
-            Self::G => VK_G.0 as i32,
-            Self::H => VK_H.0 as i32,
-            Self::I => VK_I.0 as i32,
-            Self::J => VK_J.0 as i32,
-            Self::K => VK_K.0 as i32,
-            Self::L => VK_L.0 as i32,
-            Self::M => VK_M.0 as i32,
-            Self::N => VK_N.0 as i32,
-            Self::O => VK_O.0 as i32,
-            Self::P => VK_P.0 as i32,
-            Self::Q => VK_Q.0 as i32,
-            Self::R => VK_R.0 as i32,
-            Self::S => VK_S.0 as i32,
-            Self::T => VK_T.0 as i32,
-            Self::U => VK_U.0 as i32,
-            Self::V => VK_V.0 as i32,
-            Self::W => VK_W.0 as i32,
-            Self::X => VK_X.0 as i32,
-            Self::Y => VK_Y.0 as i32,
-            Self::Z => VK_Z.0 as i32,
-            Self::Num0 => VK_0.0 as i32,
-            Self::Num1 => VK_1.0 as i32,
-            Self::Num2 => VK_2.0 as i32,
-            Self::Num3 => VK_3.0 as i32,
-            Self::Num4 => VK_4.0 as i32,
-            Self::Num5 => VK_5.0 as i32,
-            Self::Num6 => VK_6.0 as i32,
-            Self::Num7 => VK_7.0 as i32,
-            Self::Num8 => VK_8.0 as i32,
-            Self::Num9 => VK_9.0 as i32,
-            Self::F1 => VK_F1.0 as i32,
-            Self::F2 => VK_F2.0 as i32,
-            Self::F3 => VK_F3.0 as i32,
-            Self::F4 => VK_F4.0 as i32,
-            Self::F5 => VK_F5.0 as i32,
-            Self::F6 => VK_F6.0 as i32,
-            Self::F7 => VK_F7.0 as i32,
-            Self::F8 => VK_F8.0 as i32,
-            Self::F9 => VK_F9.0 as i32,
-            Self::F10 => VK_F10.0 as i32,
-            Self::F11 => VK_F11.0 as i32,
-            Self::F12 => VK_F12.0 as i32,
-            Self::Space => VK_SPACE.0 as i32,
-            Self::Enter => VK_RETURN.0 as i32,
-            Self::Escape => VK_ESCAPE.0 as i32,
-            Self::Tab => VK_TAB.0 as i32,
-            Self::Backspace => VK_BACK.0 as i32,
-            Self::Insert => VK_INSERT.0 as i32,
-            Self::Delete => VK_DELETE.0 as i32,
-            Self::Home => VK_HOME.0 as i32,
-            Self::End => VK_END.0 as i32,
-            Self::PageUp => VK_PRIOR.0 as i32,
-            Self::PageDown => VK_NEXT.0 as i32,
-            Self::Up => VK_UP.0 as i32,
-            Self::Down => VK_DOWN.0 as i32,
-            Self::Left => VK_LEFT.0 as i32,
-            Self::Right => VK_RIGHT.0 as i32,
-        }
-    }
-}
 
 // ============================================================================
 // Typestate Pattern for Shortcut Construction
@@ -150,87 +68,80 @@ impl<const CODE: i32> Key<CODE> {
     }
 }
 
-impl VkKey {
-    /// Get the virtual key code as a const expression for use with `Key`.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// // Using VK constants directly
-    /// let s1 = Key::<{ VK_A.0 as i32 }>::new() + Ctrl;
-    ///
-    /// // Using the convenience code() method
-    /// const A_KEY: i32 = VkKey::A.code();
-    /// let s2 = Key::<A_KEY>::new() + Ctrl;
-    /// ```
-    pub const fn code(self) -> i32 {
-        match self {
-            Self::A => VK_A.0 as i32,
-            Self::B => VK_B.0 as i32,
-            Self::C => VK_C.0 as i32,
-            Self::D => VK_D.0 as i32,
-            Self::E => VK_E.0 as i32,
-            Self::F => VK_F.0 as i32,
-            Self::G => VK_G.0 as i32,
-            Self::H => VK_H.0 as i32,
-            Self::I => VK_I.0 as i32,
-            Self::J => VK_J.0 as i32,
-            Self::K => VK_K.0 as i32,
-            Self::L => VK_L.0 as i32,
-            Self::M => VK_M.0 as i32,
-            Self::N => VK_N.0 as i32,
-            Self::O => VK_O.0 as i32,
-            Self::P => VK_P.0 as i32,
-            Self::Q => VK_Q.0 as i32,
-            Self::R => VK_R.0 as i32,
-            Self::S => VK_S.0 as i32,
-            Self::T => VK_T.0 as i32,
-            Self::U => VK_U.0 as i32,
-            Self::V => VK_V.0 as i32,
-            Self::W => VK_W.0 as i32,
-            Self::X => VK_X.0 as i32,
-            Self::Y => VK_Y.0 as i32,
-            Self::Z => VK_Z.0 as i32,
-            Self::Num0 => VK_0.0 as i32,
-            Self::Num1 => VK_1.0 as i32,
-            Self::Num2 => VK_2.0 as i32,
-            Self::Num3 => VK_3.0 as i32,
-            Self::Num4 => VK_4.0 as i32,
-            Self::Num5 => VK_5.0 as i32,
-            Self::Num6 => VK_6.0 as i32,
-            Self::Num7 => VK_7.0 as i32,
-            Self::Num8 => VK_8.0 as i32,
-            Self::Num9 => VK_9.0 as i32,
-            Self::F1 => VK_F1.0 as i32,
-            Self::F2 => VK_F2.0 as i32,
-            Self::F3 => VK_F3.0 as i32,
-            Self::F4 => VK_F4.0 as i32,
-            Self::F5 => VK_F5.0 as i32,
-            Self::F6 => VK_F6.0 as i32,
-            Self::F7 => VK_F7.0 as i32,
-            Self::F8 => VK_F8.0 as i32,
-            Self::F9 => VK_F9.0 as i32,
-            Self::F10 => VK_F10.0 as i32,
-            Self::F11 => VK_F11.0 as i32,
-            Self::F12 => VK_F12.0 as i32,
-            Self::Space => VK_SPACE.0 as i32,
-            Self::Enter => VK_RETURN.0 as i32,
-            Self::Escape => VK_ESCAPE.0 as i32,
-            Self::Tab => VK_TAB.0 as i32,
-            Self::Backspace => VK_BACK.0 as i32,
-            Self::Insert => VK_INSERT.0 as i32,
-            Self::Delete => VK_DELETE.0 as i32,
-            Self::Home => VK_HOME.0 as i32,
-            Self::End => VK_END.0 as i32,
-            Self::PageUp => VK_PRIOR.0 as i32,
-            Self::PageDown => VK_NEXT.0 as i32,
-            Self::Up => VK_UP.0 as i32,
-            Self::Down => VK_DOWN.0 as i32,
-            Self::Left => VK_LEFT.0 as i32,
-            Self::Right => VK_RIGHT.0 as i32,
-        }
-    }
-}
+// ============================================================================
+// Const Key Items - for ergonomic shortcut creation
+// ============================================================================
+
+// Letters
+pub const A: Key<{ VK_A.0 as i32 }> = Key::new();
+pub const B: Key<{ VK_B.0 as i32 }> = Key::new();
+pub const C: Key<{ VK_C.0 as i32 }> = Key::new();
+pub const D: Key<{ VK_D.0 as i32 }> = Key::new();
+pub const E: Key<{ VK_E.0 as i32 }> = Key::new();
+pub const F: Key<{ VK_F.0 as i32 }> = Key::new();
+pub const G: Key<{ VK_G.0 as i32 }> = Key::new();
+pub const H: Key<{ VK_H.0 as i32 }> = Key::new();
+pub const I: Key<{ VK_I.0 as i32 }> = Key::new();
+pub const J: Key<{ VK_J.0 as i32 }> = Key::new();
+pub const K: Key<{ VK_K.0 as i32 }> = Key::new();
+pub const L: Key<{ VK_L.0 as i32 }> = Key::new();
+pub const M: Key<{ VK_M.0 as i32 }> = Key::new();
+pub const N: Key<{ VK_N.0 as i32 }> = Key::new();
+pub const O: Key<{ VK_O.0 as i32 }> = Key::new();
+pub const P: Key<{ VK_P.0 as i32 }> = Key::new();
+pub const Q: Key<{ VK_Q.0 as i32 }> = Key::new();
+pub const R: Key<{ VK_R.0 as i32 }> = Key::new();
+pub const S: Key<{ VK_S.0 as i32 }> = Key::new();
+pub const T: Key<{ VK_T.0 as i32 }> = Key::new();
+pub const U: Key<{ VK_U.0 as i32 }> = Key::new();
+pub const V: Key<{ VK_V.0 as i32 }> = Key::new();
+pub const W: Key<{ VK_W.0 as i32 }> = Key::new();
+pub const X: Key<{ VK_X.0 as i32 }> = Key::new();
+pub const Y: Key<{ VK_Y.0 as i32 }> = Key::new();
+pub const Z: Key<{ VK_Z.0 as i32 }> = Key::new();
+
+// Numbers
+pub const NUM0: Key<{ VK_0.0 as i32 }> = Key::new();
+pub const NUM1: Key<{ VK_1.0 as i32 }> = Key::new();
+pub const NUM2: Key<{ VK_2.0 as i32 }> = Key::new();
+pub const NUM3: Key<{ VK_3.0 as i32 }> = Key::new();
+pub const NUM4: Key<{ VK_4.0 as i32 }> = Key::new();
+pub const NUM5: Key<{ VK_5.0 as i32 }> = Key::new();
+pub const NUM6: Key<{ VK_6.0 as i32 }> = Key::new();
+pub const NUM7: Key<{ VK_7.0 as i32 }> = Key::new();
+pub const NUM8: Key<{ VK_8.0 as i32 }> = Key::new();
+pub const NUM9: Key<{ VK_9.0 as i32 }> = Key::new();
+
+// Function keys
+pub const F1: Key<{ VK_F1.0 as i32 }> = Key::new();
+pub const F2: Key<{ VK_F2.0 as i32 }> = Key::new();
+pub const F3: Key<{ VK_F3.0 as i32 }> = Key::new();
+pub const F4: Key<{ VK_F4.0 as i32 }> = Key::new();
+pub const F5: Key<{ VK_F5.0 as i32 }> = Key::new();
+pub const F6: Key<{ VK_F6.0 as i32 }> = Key::new();
+pub const F7: Key<{ VK_F7.0 as i32 }> = Key::new();
+pub const F8: Key<{ VK_F8.0 as i32 }> = Key::new();
+pub const F9: Key<{ VK_F9.0 as i32 }> = Key::new();
+pub const F10: Key<{ VK_F10.0 as i32 }> = Key::new();
+pub const F11: Key<{ VK_F11.0 as i32 }> = Key::new();
+pub const F12: Key<{ VK_F12.0 as i32 }> = Key::new();
+
+// Special keys
+pub const SPACE: Key<{ VK_SPACE.0 as i32 }> = Key::new();
+pub const ENTER: Key<{ VK_RETURN.0 as i32 }> = Key::new();
+pub const ESCAPE: Key<{ VK_ESCAPE.0 as i32 }> = Key::new();
+pub const TAB: Key<{ VK_TAB.0 as i32 }> = Key::new();
+pub const BACKSPACE: Key<{ VK_BACK.0 as i32 }> = Key::new();
+pub const INSERT: Key<{ VK_INSERT.0 as i32 }> = Key::new();
+pub const DELETE: Key<{ VK_DELETE.0 as i32 }> = Key::new();
+pub const HOME: Key<{ VK_HOME.0 as i32 }> = Key::new();
+pub const END: Key<{ VK_END.0 as i32 }> = Key::new();
+pub const PAGE_UP: Key<{ VK_PRIOR.0 as i32 }> = Key::new();
+pub const PAGE_DOWN: Key<{ VK_NEXT.0 as i32 }> = Key::new();
+pub const UP: Key<{ VK_UP.0 as i32 }> = Key::new();
+pub const DOWN: Key<{ VK_DOWN.0 as i32 }> = Key::new();
+pub const LEFT: Key<{ VK_LEFT.0 as i32 }> = Key::new();
+pub const RIGHT: Key<{ VK_RIGHT.0 as i32 }> = Key::new();
 
 /// A complete shortcut with type-level modifier states.
 ///
@@ -271,6 +182,35 @@ impl<const CTRL: bool, const ALT: bool, const SHIFT: bool, const KEY: i32>
     /// Get the Shift modifier state.
     pub const fn shift(&self) -> bool {
         SHIFT
+    }
+}
+
+/// A partial shortcut with modifiers but no key.
+///
+/// This type cannot be registered as a shortcut - it must be completed
+/// by adding a Key to produce a full Shortcut.
+///
+/// # Example
+///
+/// ```rust
+/// use openzt::shortcuts::{Ctrl, Shift, R};
+///
+/// // This creates a PartialShortcut, which cannot be registered
+/// let partial = Ctrl + Shift;  // PartialShortcut<true, false, true>
+///
+/// // Add a key to complete it
+/// let complete = partial + R;  // Shortcut<true, false, true, R_KEY>
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartialShortcut<const CTRL: bool, const ALT: bool, const SHIFT: bool> {
+    _private: PhantomData<()>,
+}
+
+impl<const CTRL: bool, const ALT: bool, const SHIFT: bool>
+    PartialShortcut<CTRL, ALT, SHIFT>
+{
+    const fn new() -> Self {
+        Self { _private: PhantomData }
     }
 }
 
@@ -332,6 +272,117 @@ impl<const CTRL: bool, const ALT: bool, const KEY: i32> Add<Shift>
     fn add(self, _: Shift) -> Self::Output {
         Shortcut::new()
     }
+}
+
+// ============================================================================
+// Modifier + Modifier -> PartialShortcut
+// ============================================================================
+
+impl Add<Alt> for Ctrl {
+    type Output = PartialShortcut<true, true, false>;
+    fn add(self, _: Alt) -> Self::Output { PartialShortcut::new() }
+}
+
+impl Add<Shift> for Ctrl {
+    type Output = PartialShortcut<true, false, true>;
+    fn add(self, _: Shift) -> Self::Output { PartialShortcut::new() }
+}
+
+impl Add<Ctrl> for Alt {
+    type Output = PartialShortcut<true, true, false>;
+    fn add(self, _: Ctrl) -> Self::Output { PartialShortcut::new() }
+}
+
+impl Add<Shift> for Alt {
+    type Output = PartialShortcut<false, true, true>;
+    fn add(self, _: Shift) -> Self::Output { PartialShortcut::new() }
+}
+
+impl Add<Ctrl> for Shift {
+    type Output = PartialShortcut<true, false, true>;
+    fn add(self, _: Ctrl) -> Self::Output { PartialShortcut::new() }
+}
+
+impl Add<Alt> for Shift {
+    type Output = PartialShortcut<false, true, true>;
+    fn add(self, _: Alt) -> Self::Output { PartialShortcut::new() }
+}
+
+// ============================================================================
+// PartialShortcut + Key -> Shortcut
+// ============================================================================
+
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, false, false> {
+    type Output = Shortcut<true, false, false, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+}
+
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<false, true, false> {
+    type Output = Shortcut<false, true, false, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+}
+
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<false, false, true> {
+    type Output = Shortcut<false, false, true, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+}
+
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, true, false> {
+    type Output = Shortcut<true, true, false, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+}
+
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, false, true> {
+    type Output = Shortcut<true, false, true, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+}
+
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<false, true, true> {
+    type Output = Shortcut<false, true, true, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+}
+
+impl<const CODE: i32> Add<Key<CODE>> for PartialShortcut<true, true, true> {
+    type Output = Shortcut<true, true, true, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+}
+
+// ============================================================================
+// PartialShortcut + Modifier -> PartialShortcut (adding third modifier)
+// ============================================================================
+
+impl Add<Ctrl> for PartialShortcut<false, true, true> {
+    type Output = PartialShortcut<true, true, true>;
+    fn add(self, _: Ctrl) -> Self::Output { PartialShortcut::new() }
+}
+
+impl Add<Alt> for PartialShortcut<true, false, true> {
+    type Output = PartialShortcut<true, true, true>;
+    fn add(self, _: Alt) -> Self::Output { PartialShortcut::new() }
+}
+
+impl Add<Shift> for PartialShortcut<true, true, false> {
+    type Output = PartialShortcut<true, true, true>;
+    fn add(self, _: Shift) -> Self::Output { PartialShortcut::new() }
+}
+
+// ============================================================================
+// Modifier + Key -> Shortcut (single modifier shortcut)
+// ============================================================================
+
+impl<const CODE: i32> Add<Key<CODE>> for Ctrl {
+    type Output = Shortcut<true, false, false, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+}
+
+impl<const CODE: i32> Add<Key<CODE>> for Alt {
+    type Output = Shortcut<false, true, false, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
+}
+
+impl<const CODE: i32> Add<Key<CODE>> for Shift {
+    type Output = Shortcut<false, false, true, CODE>;
+    fn add(self, _: Key<CODE>) -> Self::Output { Shortcut::new() }
 }
 
 // ============================================================================
@@ -607,15 +658,14 @@ pub fn init() {
         tracing::error!("Error initializing shortcut detours: {}", e);
     }
 
-    // Example shortcut: Ctrl+R prints a test message
-    const R_KEY: i32 = VkKey::R.code();
+    // Example shortcut: Ctrl+Shift+Alt+R prints a test message
     shortcut!(
         "shortcuts",
         "Example: Print test message",
-        Key::<R_KEY>::new() + Ctrl,
+        Ctrl + Shift + Alt + R,  // Add Modifiers and a key to create a shortcut
         false,  // override
         || {
-            tracing::info!("Ctrl+R shortcut triggered! This is an example shortcut.");
+            tracing::info!("Ctrl+Shift+Alt+R shortcut triggered! This is an example shortcut.");
         }
     );
 }
@@ -679,8 +729,7 @@ mod tests {
 
     #[test]
     fn test_vkkey_code() {
-        const A_KEY: i32 = VkKey::A.code();
-        let s = Key::<A_KEY>::new() + Ctrl;
+        let s = A + Ctrl;
         assert_eq!(s.key_code(), VK_A.0 as i32);
         assert!(s.ctrl());
     }
@@ -692,5 +741,110 @@ mod tests {
         assert!(!s.alt());
         assert!(!s.shift());
         assert_eq!(s.key_code(), 0x41);
+    }
+
+    // ------------------------------------------------------------------------
+    // Tests for new ergonomic syntax with const key items
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_const_key_item_with_modifier() {
+        // Test R + Ctrl (key-first order)
+        let s = R + Ctrl;
+        assert!(s.matches(true, false, false, VK_R.0 as i32));
+        assert!(s.ctrl());
+        assert!(!s.alt());
+        assert!(!s.shift());
+        assert_eq!(s.key_code(), VK_R.0 as i32);
+    }
+
+    #[test]
+    fn test_modifier_first_syntax() {
+        // Test Ctrl + R (modifier-first order)
+        let s = Ctrl + R;
+        assert!(s.matches(true, false, false, VK_R.0 as i32));
+        assert!(s.ctrl());
+        assert!(!s.alt());
+        assert!(!s.shift());
+    }
+
+    #[test]
+    fn test_multiple_modifiers_key_first() {
+        // Test R + Ctrl + Shift (key-first with multiple modifiers)
+        let s = R + Ctrl + Shift;
+        assert!(s.matches(true, false, true, VK_R.0 as i32));
+        assert!(s.ctrl());
+        assert!(!s.alt());
+        assert!(s.shift());
+    }
+
+    #[test]
+    fn test_multiple_modifiers_modifier_first() {
+        // Test Ctrl + Shift + R (modifier-first with multiple modifiers)
+        let s = Ctrl + Shift + R;
+        assert!(s.matches(true, false, true, VK_R.0 as i32));
+        assert!(s.ctrl());
+        assert!(!s.alt());
+        assert!(s.shift());
+    }
+
+    #[test]
+    fn test_shift_ctrl_alternative_order() {
+        // Test Shift + Ctrl + R (different modifier order)
+        let s = Shift + Ctrl + R;
+        assert!(s.matches(true, false, true, VK_R.0 as i32));
+        assert!(s.ctrl());
+        assert!(!s.alt());
+        assert!(s.shift());
+    }
+
+    #[test]
+    fn test_all_three_modifiers() {
+        // Test Ctrl + Alt + Shift + R
+        let s = Ctrl + Alt + Shift + R;
+        assert!(s.matches(true, true, true, VK_R.0 as i32));
+        assert!(s.ctrl());
+        assert!(s.alt());
+        assert!(s.shift());
+    }
+
+    #[test]
+    fn test_function_key_shortcuts() {
+        // Test function keys with modifiers
+        let s1 = F1 + Ctrl;
+        assert!(s1.matches(true, false, false, VK_F1.0 as i32));
+
+        let s2 = Ctrl + F12;
+        assert!(s2.matches(true, false, false, VK_F12.0 as i32));
+    }
+
+    #[test]
+    fn test_number_key_shortcuts() {
+        // Test number keys
+        let s = NUM5 + Shift;
+        assert!(s.matches(false, false, true, VK_5.0 as i32));
+    }
+
+    #[test]
+    fn test_special_key_shortcuts() {
+        // Test special keys
+        let s1 = SPACE + Ctrl;
+        assert!(s1.matches(true, false, false, VK_SPACE.0 as i32));
+
+        let s2 = Ctrl + ENTER;
+        assert!(s2.matches(true, false, false, VK_RETURN.0 as i32));
+
+        let s3 = ESCAPE + Alt;
+        assert!(s3.matches(false, true, false, VK_ESCAPE.0 as i32));
+    }
+
+    #[test]
+    fn test_arrow_key_shortcuts() {
+        // Test arrow keys
+        let s = UP + Ctrl;
+        assert!(s.matches(true, false, false, VK_UP.0 as i32));
+
+        let s = LEFT + Shift;
+        assert!(s.matches(false, false, true, VK_LEFT.0 as i32));
     }
 }
