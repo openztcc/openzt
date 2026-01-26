@@ -295,6 +295,9 @@ fn load_open_zt_mod_internal(
         // Load habitats/locations first (before patches)
         load_habitats_locations(&mod_id, &file_info.mod_def, &file_map)?;
 
+        // Load extensions
+        load_extensions(&mod_id, &file_info.mod_def)?;
+
         // Then apply patches if present
         if let Some(patches) = file_info.mod_def.patches() {
             let patch_meta = file_info.mod_def.patch_meta().as_ref().cloned().unwrap_or_default();
@@ -434,6 +437,30 @@ pub fn load_habitats_locations(
             )?;
             add_location_or_habitat(mod_id, location_name, &base_resource_id, false)?;
         }
+    }
+
+    Ok(())
+}
+
+/// Load extensions from a ModDefinition into the extension storage system
+pub fn load_extensions(
+    mod_id: &str,
+    mod_def: &mods::ModDefinition,
+) -> anyhow::Result<()> {
+    use crate::resource_manager::openzt_mods::extensions;
+
+    if mod_def.extensions().is_empty() {
+        return Ok(());
+    }
+
+    info!("Loading extensions for mod {}", mod_id);
+
+    for (extension_key, entity_extension) in mod_def.extensions().iter() {
+        extensions::add_extension(
+            mod_id.to_string(),
+            extension_key.clone(),
+            entity_extension.clone(),
+        )?;
     }
 
     Ok(())

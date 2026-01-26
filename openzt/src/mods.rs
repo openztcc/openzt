@@ -222,6 +222,10 @@ pub struct ModDefinition {
     habitats: Option<HashMap<String, IconDefinition>>,
     locations: Option<HashMap<String, IconDefinition>>,
 
+    // Extension system - extend vanilla/legacy entities
+    #[serde(default)]
+    extensions: Extensions,
+
     // Patch system - split into metadata and patches
     patch_meta: Option<PatchMeta>,
     patches: Option<IndexMap<String, Patch>>,  // MUST use IndexMap for order preservation
@@ -236,6 +240,8 @@ impl ModDefinition {
         if let Some(locations) = &self.locations {
             len += locations.len();
         }
+        // Count extensions
+        len += self.extensions.extensions.len();
         len
     }
 }
@@ -246,6 +252,56 @@ pub struct IconDefinition {
     name: String,
     icon_path: String,
     icon_palette_path: String,
+}
+
+// ============================================================================
+// Extension System Data Structures
+// ============================================================================
+
+/// Extension data for a single legacy entity
+#[derive(Deserialize, Debug, Clone, Getters)]
+#[get = "pub"]
+pub struct EntityExtension {
+    /// Base entity to extend (e.g., "legacy.animals.elephant")
+    base: String,
+
+    #[serde(default)]
+    tags: Vec<String>,
+
+    #[serde(default)]
+    attributes: HashMap<String, String>,
+}
+
+/// Extension definitions - keyed by entity type and name (e.g., "animals.elephant")
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct Extensions {
+    #[serde(flatten)]
+    extensions: HashMap<String, EntityExtension>,
+}
+
+impl Extensions {
+    pub fn get_extension(&self, key: &str) -> Option<&EntityExtension> {
+        self.extensions.get(key)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.extensions.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &EntityExtension)> {
+        self.extensions.iter()
+    }
+}
+
+impl EntityExtension {
+    #[cfg(feature = "integration-tests")]
+    pub fn new_test(base: String, tags: Vec<String>, attributes: HashMap<String, String>) -> Self {
+        EntityExtension {
+            base,
+            tags,
+            attributes,
+        }
+    }
 }
 
 // ============================================================================
@@ -532,6 +588,7 @@ impl ModDefinition {
         ModDefinition {
             habitats,
             locations,
+            extensions: Extensions::default(),
             patch_meta,
             patches,
         }

@@ -1,4 +1,5 @@
 pub(crate) mod habitats_locations;
+pub(crate) mod extensions;
 pub(crate) mod legacy_attributes;
 pub(crate) mod loading;
 pub mod patches;
