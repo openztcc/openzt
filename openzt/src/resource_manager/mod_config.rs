@@ -5,7 +5,6 @@ use std::sync::LazyLock;
 use std::sync::Mutex;
 use tracing::info;
 use tracing_subscriber::filter::LevelFilter;
-use tracing_appender;
 
 static LOGGING_INITIALIZED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
@@ -500,9 +499,11 @@ mod tests {
     #[test]
     fn test_log_level_serialization() {
         // Test that log levels serialize to lowercase strings within a config
-        let mut config = LoggingConfig::default();
+        let mut config = LoggingConfig {
+            log_to_file: true,
+            level: LogLevel::Trace,
+        };
 
-        config.level = LogLevel::Trace;
         assert!(toml::to_string(&config).unwrap().contains("level = \"trace\""));
 
         config.level = LogLevel::Debug;

@@ -32,7 +32,8 @@
       "Bash(cargo:*)",
       "Bash(git diff:*)",
       "Bash(git --no-pager diff:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(git fetch:*)"
     ],
     "deny": [],
     "ask": []

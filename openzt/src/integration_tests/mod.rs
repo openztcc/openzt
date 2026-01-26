@@ -15,6 +15,7 @@ pub mod disabled_ztd;
 pub mod legacy_attributes;
 pub mod loading_order;
 pub mod patch_rollback;
+pub mod shortcuts;
 
 /// Result of a single test
 #[derive(Debug)]
@@ -290,6 +291,22 @@ mod detour_zoo_main {
         let disabled_ztd_results = super::disabled_ztd::run_all_tests();
 
         for result in &disabled_ztd_results {
+            if result.passed {
+                write_log(&format!("  ✓ {}", result.name));
+                total_passed += 1;
+            } else {
+                write_log(&format!("  ✗ {} - {}", result.name, result.error.as_ref().unwrap_or(&"Unknown error".to_string())));
+                total_failed += 1;
+            }
+        }
+
+        write_log("");
+
+        // Run shortcut tests
+        write_log("Running shortcut tests...");
+        let shortcuts_results = super::shortcuts::run_all_tests();
+
+        for result in &shortcuts_results {
             if result.passed {
                 write_log(&format!("  ✓ {}", result.name));
                 total_passed += 1;
