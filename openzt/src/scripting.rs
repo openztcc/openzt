@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use mlua::Lua;
@@ -477,6 +478,84 @@ pub fn init() {
             } else {
                 exts.join(", ")
             })
+        }
+    );
+
+    // Register the list_registered_tags() function
+    lua_fn!("list_registered_tags",
+        "List all registered tags (optionally filtered by entity type)",
+        "list_registered_tags([entity_type])",
+        |entity_type: Option<String>| {
+            use crate::resource_manager::openzt_mods::extensions::EXTENSION_REGISTRY;
+
+            let registry = EXTENSION_REGISTRY.lock().unwrap();
+            let tags = registry.list_tags();
+
+            let filtered = if let Some(type_str) = entity_type {
+                match LegacyEntityType::from_str(&type_str) {
+                    Ok(et) => tags.iter()
+                        .filter(|def| def.scope.includes(et))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    Err(_) => vec![],
+                }
+            } else {
+                tags.iter().cloned().collect::<Vec<_>>()
+            };
+
+            if filtered.is_empty() {
+                Ok("(no registered tags)".to_string())
+            } else {
+                let result = filtered.iter()
+                    .map(|def| format!("{} ({}) - {}", def.name, def.module, def.description))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Ok(result)
+            }
+        }
+    );
+
+    // Register the list_registered_attributes() function
+    lua_fn!("list_registered_attributes",
+        "List all registered attributes (optionally filtered by entity type)",
+        "list_registered_attributes([entity_type])",
+        |entity_type: Option<String>| {
+            use crate::resource_manager::openzt_mods::extensions::EXTENSION_REGISTRY;
+
+            let registry = EXTENSION_REGISTRY.lock().unwrap();
+            let attrs = registry.list_attributes();
+
+            let filtered = if let Some(type_str) = entity_type {
+                match LegacyEntityType::from_str(&type_str) {
+                    Ok(et) => attrs.iter()
+                        .filter(|def| def.scope.includes(et))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    Err(_) => vec![],
+                }
+            } else {
+                attrs.iter().cloned().collect::<Vec<_>>()
+            };
+
+            if filtered.is_empty() {
+                Ok("(no registered attributes)".to_string())
+            } else {
+                let result = filtered.iter()
+                    .map(|def| format!("{} ({}) - {}", def.name, def.module, def.description))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Ok(result)
+            }
+        }
+    );
+
+    // Register the hide_roofs() function
+    lua_fn!("hide_roofs",
+        "Hide all entities tagged with 'roof'",
+        "hide_roofs()",
+        || {
+            crate::roofs::hide_roofs();
+            Ok(("Roofs hidden".to_string(), None::<String>))
         }
     );
 }

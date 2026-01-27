@@ -65,6 +65,9 @@ mod zthabitatmgr;
 
 mod experimental;
 
+/// Roof tag extension for scenery entities
+mod roofs;
+
 /// Keyboard shortcut registration system for game thread callbacks
 mod shortcuts;
 
@@ -150,6 +153,7 @@ mod zoo_init {
         bfentitytype::init();
         settings::init();
         scripting::init();
+        roofs::init();
 
         if cfg!(feature = "capture_ztlog") {
             use crate::capture_ztlog;

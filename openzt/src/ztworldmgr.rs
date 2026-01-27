@@ -290,6 +290,16 @@ const TILE_SIZE: i32 = 0x40;
 const ELEVATION_SCALE: i32 = 0x10; // 16 units per elevation level
 
 impl ZTWorldMgr {
+    /// Get the start of the entity array in memory
+    pub fn entity_array_start(&self) -> u32 {
+        self.entity_array_start
+    }
+
+    /// Get the end of the entity array in memory
+    pub fn entity_array_end(&self) -> u32 {
+        self.entity_array_end
+    }
+
     pub fn get_neighbour(&self, bftile: &BFTile, direction: Direction) -> Option<BFTile> {
         let x_offset: i32 = match direction {
             Direction::West => 0,
