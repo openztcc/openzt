@@ -295,6 +295,9 @@ fn load_open_zt_mod_internal(
         // Load habitats/locations first (before patches)
         load_habitats_locations(&mod_id, &file_info.mod_def, &file_map)?;
 
+        // Load extensions
+        load_extensions(&mod_id, &file_info.mod_def)?;
+
         // Then apply patches if present
         if let Some(patches) = file_info.mod_def.patches() {
             let patch_meta = file_info.mod_def.patch_meta().as_ref().cloned().unwrap_or_default();
@@ -439,6 +442,31 @@ pub fn load_habitats_locations(
     Ok(())
 }
 
+/// Load extensions from a ModDefinition into the extension storage system
+pub fn load_extensions(
+    mod_id: &str,
+    mod_def: &mods::ModDefinition,
+) -> anyhow::Result<()> {
+    use crate::resource_manager::openzt_mods::extensions;
+
+    let extensions = mod_def.extensions();
+    if extensions.is_empty() {
+        return Ok(());
+    }
+
+    info!("Loading extensions for mod {}", mod_id);
+
+    for (extension_key, entity_extension) in extensions.iter() {
+        extensions::add_extension(
+            mod_id.to_string(),
+            extension_key.clone(),
+            entity_extension.clone(),
+        )?;
+    }
+
+    Ok(())
+}
+
 /// Legacy function that combines parsing and loading - kept for backwards compatibility
 pub fn load_def(mod_id: &str, file_name: &str, file_map: &HashMap<String, Box<[u8]>>) -> anyhow::Result<mods::ModDefinition> {
     let defs = parse_def(mod_id, file_name, file_map)?;
@@ -567,7 +595,7 @@ mod tests {
         let mut habitats = HashMap::new();
         habitats.insert("savanna".to_string(), create_test_icon_def());
 
-        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, None);
+        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, None, None, None);
 
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
     }
@@ -580,7 +608,7 @@ mod tests {
         let mut patches = IndexMap::new();
         patches.insert("patch1".to_string(), create_test_patch());
 
-        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, Some(patches));
+        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, None, None, Some(patches));
 
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::Mixed);
     }
@@ -590,14 +618,14 @@ mod tests {
         let mut patches = IndexMap::new();
         patches.insert("patch1".to_string(), create_test_patch());
 
-        let mod_def = mods::ModDefinition::new_test(None, None, None, Some(patches));
+        let mod_def = mods::ModDefinition::new_test(None, None, None, None, None, Some(patches));
 
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::PatchOnly);
     }
 
     #[test]
     fn test_classify_empty_file() {
-        let mod_def = mods::ModDefinition::new_test(None, None, None, None);
+        let mod_def = mods::ModDefinition::new_test(None, None, None, None, None, None);
 
         // Empty file is treated as NoPatch
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
@@ -607,7 +635,7 @@ mod tests {
     fn test_classify_empty_patches_collection() {
         let patches = IndexMap::new(); // Empty but present
 
-        let mod_def = mods::ModDefinition::new_test(None, None, None, Some(patches));
+        let mod_def = mods::ModDefinition::new_test(None, None, None, None, None, Some(patches));
 
         // Empty patches collection should not count as "has patches"
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);

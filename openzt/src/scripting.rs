@@ -1,9 +1,11 @@
+use std::str::FromStr;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use mlua::Lua;
 use tracing::info;
 
 use crate::resource_manager::openzt_mods::legacy_attributes::{self, LegacyEntityType};
+use crate::resource_manager::openzt_mods::extensions;
 
 /// Macro to simplify registering Lua functions
 ///
@@ -367,4 +369,193 @@ pub fn init() {
 
             Ok(result)
         });
+
+    // Register the get_extension() function
+    lua_fn!("get_extension",
+        "Get extension data by extension key (e.g., 'animals.elephant')",
+        "get_extension(extension_key)",
+        |extension_key: String| {
+            match extensions::get_extension(&extension_key) {
+                Some(record) => {
+                    let tags_str = if record.extension.tags().is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        record.extension.tags().join(", ")
+                    };
+                    let attrs_str = if record.extension.attributes().is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        record.extension.attributes().iter()
+                            .map(|(k, v)| format!("{}: {}", k, v))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    Ok((format!(
+                        "Mod: {}\nBase: {}\nTags: {}\nAttributes: {}",
+                        record.mod_id, record.base, tags_str, attrs_str
+                    ), String::new()))
+                }
+                None => Ok(("(no extension data)".to_string(), String::new())),
+            }
+        }
+    );
+
+    // Register the get_extension_by_base() function
+    lua_fn!("get_extension_by_base",
+        "Get extension data by base entity (e.g., 'legacy.animals.elephant')",
+        "get_extension_by_base(base)",
+        |base: String| {
+            match extensions::get_extension_by_base(&base) {
+                Some(record) => {
+                    let tags_str = if record.extension.tags().is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        record.extension.tags().join(", ")
+                    };
+                    let attrs_str = if record.extension.attributes().is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        record.extension.attributes().iter()
+                            .map(|(k, v)| format!("{}: {}", k, v))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    Ok((format!(
+                        "Mod: {}\nKey: {}\nTags: {}\nAttributes: {}",
+                        record.mod_id, record.extension_key, tags_str, attrs_str
+                    ), String::new()))
+                }
+                None => Ok(("(no extension data)".to_string(), String::new())),
+            }
+        }
+    );
+
+    // Register the get_extension_tags() function
+    lua_fn!("get_extension_tags",
+        "Get tags for an extension by key",
+        "get_extension_tags(extension_key)",
+        |extension_key: String| {
+            match extensions::get_entity_tags(&extension_key) {
+                Ok(tags) => Ok(if tags.is_empty() { "(no tags)".to_string() } else { tags.join(", ") }),
+                Err(e) => Ok(format!("Error: {}", e)),
+            }
+        }
+    );
+
+    // Register the get_extension_attribute() function
+    lua_fn!("get_extension_attribute",
+        "Get a specific attribute for an extension",
+        "get_extension_attribute(extension_key, attribute_key)",
+        |extension_key: String, attribute_key: String| {
+            match extensions::get_entity_attribute(&extension_key, &attribute_key) {
+                Ok(Some(value)) => Ok(value),
+                Ok(None) => Ok("(attribute not found)".to_string()),
+                Err(e) => Ok(format!("Error: {}", e)),
+            }
+        }
+    );
+
+    // Register the extension_has_tag() function
+    lua_fn!("extension_has_tag",
+        "Check if an extension has a specific tag",
+        "extension_has_tag(extension_key, tag)",
+        |extension_key: String, tag: String| {
+            match extensions::entity_has_tag(&extension_key, &tag) {
+                Ok(has_tag) => Ok(if has_tag { "true" } else { "false" }.to_string()),
+                Err(e) => Ok(format!("Error: {}", e)),
+            }
+        }
+    );
+
+    // Register the list_extensions_with_tag() function
+    lua_fn!("list_extensions_with_tag",
+        "List all extensions that have a specific tag",
+        "list_extensions_with_tag(tag)",
+        |tag: String| {
+            let exts = extensions::list_extensions_with_tag(&tag);
+            Ok(if exts.is_empty() {
+                "(no extensions found)".to_string()
+            } else {
+                exts.join(", ")
+            })
+        }
+    );
+
+    // Register the list_registered_tags() function
+    lua_fn!("list_registered_tags",
+        "List all registered tags (optionally filtered by entity type)",
+        "list_registered_tags([entity_type])",
+        |entity_type: Option<String>| {
+            use crate::resource_manager::openzt_mods::extensions::EXTENSION_REGISTRY;
+
+            let registry = EXTENSION_REGISTRY.lock().unwrap();
+            let tags = registry.list_tags();
+
+            let filtered = if let Some(type_str) = entity_type {
+                match LegacyEntityType::from_str(&type_str) {
+                    Ok(et) => tags.iter()
+                        .filter(|def| def.scope.includes(et))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    Err(_) => vec![],
+                }
+            } else {
+                tags.iter().cloned().collect::<Vec<_>>()
+            };
+
+            if filtered.is_empty() {
+                Ok("(no registered tags)".to_string())
+            } else {
+                let result = filtered.iter()
+                    .map(|def| format!("{} ({}) - {}", def.name, def.module, def.description))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Ok(result)
+            }
+        }
+    );
+
+    // Register the list_registered_attributes() function
+    lua_fn!("list_registered_attributes",
+        "List all registered attributes (optionally filtered by entity type)",
+        "list_registered_attributes([entity_type])",
+        |entity_type: Option<String>| {
+            use crate::resource_manager::openzt_mods::extensions::EXTENSION_REGISTRY;
+
+            let registry = EXTENSION_REGISTRY.lock().unwrap();
+            let attrs = registry.list_attributes();
+
+            let filtered = if let Some(type_str) = entity_type {
+                match LegacyEntityType::from_str(&type_str) {
+                    Ok(et) => attrs.iter()
+                        .filter(|def| def.scope.includes(et))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    Err(_) => vec![],
+                }
+            } else {
+                attrs.iter().cloned().collect::<Vec<_>>()
+            };
+
+            if filtered.is_empty() {
+                Ok("(no registered attributes)".to_string())
+            } else {
+                let result = filtered.iter()
+                    .map(|def| format!("{} ({}) - {}", def.name, def.module, def.description))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Ok(result)
+            }
+        }
+    );
+
+    // Register the hide_roofs() function
+    lua_fn!("hide_roofs",
+        "Hide all entities tagged with 'roof'",
+        "hide_roofs()",
+        || {
+            crate::roofs::hide_roofs();
+            Ok(("Roofs hidden".to_string(), None::<String>))
+        }
+    );
 }

@@ -12,6 +12,7 @@ use crate::detour_mod;
 
 pub mod dependency_resolution;
 pub mod disabled_ztd;
+pub mod extensions;
 pub mod legacy_attributes;
 pub mod loading_order;
 pub mod patch_rollback;
@@ -307,6 +308,22 @@ mod detour_zoo_main {
         let shortcuts_results = super::shortcuts::run_all_tests();
 
         for result in &shortcuts_results {
+            if result.passed {
+                write_log(&format!("  ✓ {}", result.name));
+                total_passed += 1;
+            } else {
+                write_log(&format!("  ✗ {} - {}", result.name, result.error.as_ref().unwrap_or(&"Unknown error".to_string())));
+                total_failed += 1;
+            }
+        }
+
+        write_log("");
+
+        // Run extension tests
+        write_log("Running extension tests...");
+        let extensions_results = super::extensions::run_all_tests();
+
+        for result in &extensions_results {
             if result.passed {
                 write_log(&format!("  ✓ {}", result.name));
                 total_passed += 1;
