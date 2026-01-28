@@ -1,4 +1,9 @@
-use std::{collections::HashMap, error::Error, fmt, str::FromStr};
+use std::{
+    collections::HashMap,
+    error::Error,
+    fmt,
+    str::FromStr,
+};
 
 use getset::Getters;
 use indexmap::IndexMap;
@@ -222,9 +227,27 @@ pub struct ModDefinition {
     habitats: Option<HashMap<String, IconDefinition>>,
     locations: Option<HashMap<String, IconDefinition>>,
 
-    // Extension system - extend vanilla/legacy entities
+    // Entity type-specific extension fields
     #[serde(default)]
-    extensions: Extensions,
+    scenery: Option<HashMap<String, EntityExtension>>,
+    #[serde(default)]
+    animals: Option<HashMap<String, EntityExtension>>,
+    #[serde(default)]
+    buildings: Option<HashMap<String, EntityExtension>>,
+    #[serde(default)]
+    fences: Option<HashMap<String, EntityExtension>>,
+    #[serde(default)]
+    walls: Option<HashMap<String, EntityExtension>>,
+    #[serde(default)]
+    paths: Option<HashMap<String, EntityExtension>>,
+    #[serde(default)]
+    food: Option<HashMap<String, EntityExtension>>,
+    #[serde(default)]
+    staff: Option<HashMap<String, EntityExtension>>,
+    #[serde(default)]
+    guests: Option<HashMap<String, EntityExtension>>,
+    #[serde(default)]
+    items: Option<HashMap<String, EntityExtension>>,
 
     // Patch system - split into metadata and patches
     patch_meta: Option<PatchMeta>,
@@ -232,6 +255,79 @@ pub struct ModDefinition {
 }
 
 impl ModDefinition {
+    /// Get all extensions as a single HashMap
+    pub fn extensions(&self) -> HashMap<String, EntityExtension> {
+        let mut all = HashMap::new();
+
+        // Collect from each entity type field
+        if let Some(ref ext) = self.scenery {
+            for (k, v) in ext {
+                all.insert(format!("scenery.{}", k), v.clone());
+            }
+        }
+        if let Some(ref ext) = self.animals {
+            for (k, v) in ext {
+                all.insert(format!("animals.{}", k), v.clone());
+            }
+        }
+        if let Some(ref ext) = self.buildings {
+            for (k, v) in ext {
+                all.insert(format!("buildings.{}", k), v.clone());
+            }
+        }
+        if let Some(ref ext) = self.fences {
+            for (k, v) in ext {
+                all.insert(format!("fences.{}", k), v.clone());
+            }
+        }
+        if let Some(ref ext) = self.walls {
+            for (k, v) in ext {
+                all.insert(format!("walls.{}", k), v.clone());
+            }
+        }
+        if let Some(ref ext) = self.paths {
+            for (k, v) in ext {
+                all.insert(format!("paths.{}", k), v.clone());
+            }
+        }
+        if let Some(ref ext) = self.food {
+            for (k, v) in ext {
+                all.insert(format!("food.{}", k), v.clone());
+            }
+        }
+        if let Some(ref ext) = self.staff {
+            for (k, v) in ext {
+                all.insert(format!("staff.{}", k), v.clone());
+            }
+        }
+        if let Some(ref ext) = self.guests {
+            for (k, v) in ext {
+                all.insert(format!("guests.{}", k), v.clone());
+            }
+        }
+        if let Some(ref ext) = self.items {
+            for (k, v) in ext {
+                all.insert(format!("items.{}", k), v.clone());
+            }
+        }
+
+        all
+    }
+
+    /// Check if any extensions exist
+    pub fn has_extensions(&self) -> bool {
+        self.scenery.is_some()
+            || self.animals.is_some()
+            || self.buildings.is_some()
+            || self.fences.is_some()
+            || self.walls.is_some()
+            || self.paths.is_some()
+            || self.food.is_some()
+            || self.staff.is_some()
+            || self.guests.is_some()
+            || self.items.is_some()
+    }
+
     pub fn len(&self) -> usize {
         let mut len = 0;
         if let Some(habitats) = &self.habitats {
@@ -240,8 +336,17 @@ impl ModDefinition {
         if let Some(locations) = &self.locations {
             len += locations.len();
         }
-        // Count extensions
-        len += self.extensions.extensions.len();
+        // Count all entity type extensions
+        if let Some(ref ext) = self.scenery { len += ext.len(); }
+        if let Some(ref ext) = self.animals { len += ext.len(); }
+        if let Some(ref ext) = self.buildings { len += ext.len(); }
+        if let Some(ref ext) = self.fences { len += ext.len(); }
+        if let Some(ref ext) = self.walls { len += ext.len(); }
+        if let Some(ref ext) = self.paths { len += ext.len(); }
+        if let Some(ref ext) = self.food { len += ext.len(); }
+        if let Some(ref ext) = self.staff { len += ext.len(); }
+        if let Some(ref ext) = self.guests { len += ext.len(); }
+        if let Some(ref ext) = self.items { len += ext.len(); }
         len
     }
 }
@@ -270,27 +375,6 @@ pub struct EntityExtension {
 
     #[serde(default)]
     attributes: HashMap<String, String>,
-}
-
-/// Extension definitions - keyed by entity type and name (e.g., "animals.elephant")
-#[derive(Deserialize, Debug, Clone, Default)]
-pub struct Extensions {
-    #[serde(flatten)]
-    extensions: HashMap<String, EntityExtension>,
-}
-
-impl Extensions {
-    pub fn get_extension(&self, key: &str) -> Option<&EntityExtension> {
-        self.extensions.get(key)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.extensions.is_empty()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &EntityExtension)> {
-        self.extensions.iter()
-    }
 }
 
 impl EntityExtension {
@@ -582,13 +666,24 @@ impl ModDefinition {
     pub fn new_test(
         habitats: Option<std::collections::HashMap<String, IconDefinition>>,
         locations: Option<std::collections::HashMap<String, IconDefinition>>,
+        scenery: Option<std::collections::HashMap<String, EntityExtension>>,
+        animals: Option<std::collections::HashMap<String, EntityExtension>>,
         patch_meta: Option<PatchMeta>,
         patches: Option<indexmap::IndexMap<String, Patch>>,
     ) -> Self {
         ModDefinition {
             habitats,
             locations,
-            extensions: Extensions::default(),
+            scenery,
+            animals,
+            buildings: None,
+            fences: None,
+            walls: None,
+            paths: None,
+            food: None,
+            staff: None,
+            guests: None,
+            items: None,
             patch_meta,
             patches,
         }
@@ -858,6 +953,61 @@ dependencies = [
         assert_eq!(patch_names[7], "add_section_with_on_exists");
         assert_eq!(patch_names[8], "set_elephant_palette");
         assert_eq!(patch_names[9], "conditional_palette_swap");
+    }
+
+    #[test]
+    fn test_parse_extensions_nested_tables() {
+        let mod_def: super::ModDefinition = toml::from_str(include_str!("../resources/test/extensions.toml")).unwrap();
+
+        // Check scenery extensions
+        let scenery = mod_def.scenery.as_ref().expect("scenery should be present");
+        assert_eq!(scenery.len(), 2);
+
+        let roof = scenery.get("vondel_greenhouse_roof").expect("vondel_greenhouse_roof not found");
+        assert_eq!(roof.base(), "legacy.scenery.vogrhrf1");
+        assert_eq!(roof.tags(), &vec!["roof".to_string()]);
+
+        let statue = scenery.get("statue").expect("statue not found");
+        assert_eq!(statue.base(), "legacy.scenery.statue");
+        assert_eq!(statue.tags(), &vec!["roof".to_string(), "decoration".to_string()]);
+
+        // Check animals extensions
+        let animals = mod_def.animals.as_ref().expect("animals should be present");
+        assert_eq!(animals.len(), 2);
+
+        let elephant = animals.get("elephant").expect("elephant not found");
+        assert_eq!(elephant.base(), "legacy.animals.elephant");
+        assert_eq!(elephant.tags(), &vec!["big".to_string()]);
+
+        let lion = animals.get("lion").expect("lion not found");
+        assert_eq!(lion.base(), "legacy.animals.lion");
+        assert_eq!(lion.tags(), &vec!["big".to_string(), "predator".to_string()]);
+
+        // Check fences extensions
+        let fences = mod_def.fences.as_ref().expect("fences should be present");
+        assert_eq!(fences.len(), 1);
+
+        let wood = fences.get("wood").expect("wood not found");
+        assert_eq!(wood.base(), "legacy.fences.wood");
+        assert_eq!(wood.tags(), &vec!["natural".to_string()]);
+
+        // Check buildings extensions
+        let buildings = mod_def.buildings.as_ref().expect("buildings should be present");
+        assert_eq!(buildings.len(), 1);
+
+        let restaurant = buildings.get("restaurant").expect("restaurant not found");
+        assert_eq!(restaurant.base(), "legacy.buildings.restaurant");
+        assert_eq!(restaurant.tags(), &vec!["food".to_string()]);
+
+        // Verify extensions() method collects all correctly
+        let all_extensions = mod_def.extensions();
+        assert_eq!(all_extensions.len(), 6);
+        assert!(all_extensions.contains_key("scenery.vondel_greenhouse_roof"));
+        assert!(all_extensions.contains_key("scenery.statue"));
+        assert!(all_extensions.contains_key("animals.elephant"));
+        assert!(all_extensions.contains_key("animals.lion"));
+        assert!(all_extensions.contains_key("fences.wood"));
+        assert!(all_extensions.contains_key("buildings.restaurant"));
     }
 }
 

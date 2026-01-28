@@ -1,0 +1,26 @@
+# Test file for entity type-specific extension syntax
+# This tests that [scenery.xxx], [animals.xxx], etc. work correctly
+
+[scenery.vondel_greenhouse_roof]
+base = "legacy.scenery.vogrhrf1"
+tags = ["roof"]
+
+[scenery.statue]
+base = "legacy.scenery.statue"
+tags = ["roof", "decoration"]
+
+[animals.elephant]
+base = "legacy.animals.elephant"
+tags = ["big"]
+
+[animals.lion]
+base = "legacy.animals.lion"
+tags = ["big", "predator"]
+
+[fences.wood]
+base = "legacy.fences.wood"
+tags = ["natural"]
+
+[buildings.restaurant]
+base = "legacy.buildings.restaurant"
+tags = ["food"]

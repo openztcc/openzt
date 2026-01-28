@@ -369,9 +369,11 @@ pub fn get_entity_base(entity_ptr: u32) -> Option<String> {
     let vtable = get_from_memory::<u32>(entity_type_ptr);
     let entity_type = guess_entity_type_from_vtable(vtable)?;
 
-    // For non-subtype entities, use zt_type directly
-    // For subtype entities (animals, staff), use zt_sub_type if available
-    let type_str = if entity_type.has_subtypes() && !zt_sub_type.is_empty() {
+    // For subtype entities (animals, staff, fences, walls), the entity name is in zt_type
+    // For non-subtype entities (scenery, buildings, etc.), the entity name is in zt_sub_type
+    let type_str = if entity_type.has_subtypes() {
+        &zt_type
+    } else if !zt_sub_type.is_empty() {
         &zt_sub_type
     } else {
         &zt_type

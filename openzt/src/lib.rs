@@ -68,6 +68,9 @@ mod experimental;
 /// Roof tag extension for scenery entities
 mod roofs;
 
+/// Global runtime state store for cross-module state sharing
+mod runtime_state;
+
 /// Keyboard shortcut registration system for game thread callbacks
 mod shortcuts;
 

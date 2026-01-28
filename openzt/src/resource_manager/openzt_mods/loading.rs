@@ -449,13 +449,14 @@ pub fn load_extensions(
 ) -> anyhow::Result<()> {
     use crate::resource_manager::openzt_mods::extensions;
 
-    if mod_def.extensions().is_empty() {
+    let extensions = mod_def.extensions();
+    if extensions.is_empty() {
         return Ok(());
     }
 
     info!("Loading extensions for mod {}", mod_id);
 
-    for (extension_key, entity_extension) in mod_def.extensions().iter() {
+    for (extension_key, entity_extension) in extensions.iter() {
         extensions::add_extension(
             mod_id.to_string(),
             extension_key.clone(),
@@ -594,7 +595,7 @@ mod tests {
         let mut habitats = HashMap::new();
         habitats.insert("savanna".to_string(), create_test_icon_def());
 
-        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, None);
+        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, None, None, None);
 
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
     }
@@ -607,7 +608,7 @@ mod tests {
         let mut patches = IndexMap::new();
         patches.insert("patch1".to_string(), create_test_patch());
 
-        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, Some(patches));
+        let mod_def = mods::ModDefinition::new_test(Some(habitats), None, None, None, None, Some(patches));
 
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::Mixed);
     }
@@ -617,14 +618,14 @@ mod tests {
         let mut patches = IndexMap::new();
         patches.insert("patch1".to_string(), create_test_patch());
 
-        let mod_def = mods::ModDefinition::new_test(None, None, None, Some(patches));
+        let mod_def = mods::ModDefinition::new_test(None, None, None, None, None, Some(patches));
 
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::PatchOnly);
     }
 
     #[test]
     fn test_classify_empty_file() {
-        let mod_def = mods::ModDefinition::new_test(None, None, None, None);
+        let mod_def = mods::ModDefinition::new_test(None, None, None, None, None, None);
 
         // Empty file is treated as NoPatch
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
@@ -634,7 +635,7 @@ mod tests {
     fn test_classify_empty_patches_collection() {
         let patches = IndexMap::new(); // Empty but present
 
-        let mod_def = mods::ModDefinition::new_test(None, None, None, Some(patches));
+        let mod_def = mods::ModDefinition::new_test(None, None, None, None, None, Some(patches));
 
         // Empty patches collection should not count as "has patches"
         assert_eq!(classify_def_file(&mod_def), DefFileCategory::NoPatch);
