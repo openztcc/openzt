@@ -4,11 +4,64 @@ use std::collections::HashSet;
 use tracing::info;
 
 use crate::resource_manager::openzt_mods::extensions::{register_tag, EntityScope, list_extensions_with_tag, get_extension};
-use crate::runtime_state;
 use crate::resource_manager::openzt_mods::legacy_attributes::LegacyEntityType;
+use crate::runtime_state;
 use crate::shortcuts::{Ctrl, R};
 use crate::util::get_from_memory;
 use crate::ztworldmgr::read_zt_world_mgr_from_global;
+
+#[cfg(target_os = "windows")]
+use openzt_detour_macro::detour_mod;
+
+/// Detour module for PLACE_ENTITY_ON_MAP_1
+///
+/// This detour ensures that newly placed roof entities are hidden
+/// if the roofs_hidden state is true.
+#[cfg(target_os = "windows")]
+#[detour_mod]
+pub mod hooks_place_entity {
+    use super::*;
+    use openzt_detour::gen::ztmapview::PLACE_ENTITY_ON_MAP_1;
+
+    /// Detour for PLACE_ENTITY_ON_MAP_1
+    ///
+    /// After placing an entity, checks if it's a roof and hides it if needed.
+    /// The second parameter (entity_ptr) is the BFEntity that was just placed.
+    #[detour(PLACE_ENTITY_ON_MAP_1)]
+    unsafe extern "thiscall" fn place_entity_on_map_detour(
+        _this: u32,
+        entity_ptr: u32,
+        _pos: f32,
+        _rotation: i32,
+    ) -> u32 {
+        // Call the original function first to place the entity
+        let result = PLACE_ENTITY_ON_MAP_1_DETOUR.call(_this, entity_ptr, _pos, _rotation);
+
+        // Only proceed if placement succeeded and we have a valid entity pointer
+        if result != 0 && entity_ptr != 0 {
+            // Check if roofs are currently hidden
+            if runtime_state::get_bool("roofs_hidden") {
+                // Check if this entity has the "roof" tag
+                if let Some(base) = crate::resource_manager::openzt_mods::extensions::get_entity_base(entity_ptr) {
+                    let roof_extensions = list_extensions_with_tag("roof");
+                    for ext_key in &roof_extensions {
+                        if let Some(record) = get_extension(ext_key) {
+                            if record.base == base {
+                                // This is a roof entity, hide it
+                                let visible_ptr = (entity_ptr + 0x13f) as *mut u8;
+                                *visible_ptr = 0;
+                                info!("Auto-hid newly placed roof entity: {} (ptr: 0x{:x})", base, entity_ptr);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        result
+    }
+}
 
 /// Hide all entities tagged with "roof"
 ///
@@ -177,6 +230,14 @@ pub fn init() {
     ) {
         Ok(_) => info!("Registered 'roof' tag for scenery entities"),
         Err(e) => tracing::error!("Failed to register roof tag: {}", e),
+    }
+
+    // Initialize the placement detour (Windows only)
+    #[cfg(target_os = "windows")]
+    if let Err(e) = unsafe { hooks_place_entity::init_detours() } {
+        tracing::error!("Failed to initialize roofs placement detour: {}", e);
+    } else {
+        info!("Initialized roofs placement detour");
     }
 
     // Register Ctrl+R shortcut to toggle roof visibility
