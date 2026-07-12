@@ -150,17 +150,17 @@ static MEMBER_SETS: LazyLock<Mutex<HashMap<String, HashSet<String>>>> = LazyLock
 /// Key: entity filename (without extension), Value: archive filename (e.g., "my_mod.ztd")
 static ENTITY_TO_ARCHIVE: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn add_member(entity_name: String, member: String) {
+pub fn add_member(entity_name: String, member: String) {
     let mut data_mutex = MEMBER_SETS.lock().unwrap();
 
     let set = data_mutex.entry(member).or_default();
-    set.insert(entity_name);
+    set.insert(entity_name.to_ascii_lowercase());
 }
 
 pub fn is_member(entity_name: &str, member: &str) -> bool {
     let data_mutex = MEMBER_SETS.lock().unwrap();
     match data_mutex.get(member) {
-        Some(set) => set.contains(entity_name),
+        Some(set) => set.contains(&entity_name.to_ascii_lowercase()),
         None => false,
     }
 }
@@ -372,7 +372,7 @@ impl Display for ExpansionList {
 
 #[detour_mod]
 pub mod custom_expansion {
-    use tracing::debug;
+    use tracing::error;
     // use openzt_detour::{ZTUI_GENERAL_ENTITY_TYPE_IS_DISPLAYED, ZTUI_EXPANSIONSELECT_SETUP};
     use openzt_detour::generated::ztui_expansionselect::SETUP;
     use openzt_detour::generated::ztui_general::ENTITY_TYPE_IS_DISPLAYED;
@@ -399,7 +399,7 @@ pub mod custom_expansion {
 
         // TODO: Put this log behind OpenZT debug flag (and ignore if a custom expansion is selected)
         if result != reimplemented_result {
-            debug!("Filtering mismatch {} {} ({} vs {})", entity, current_buy_tab, result, reimplemented_result);
+            error!("Filtering mismatch {} {} ({} vs {})", entity, current_buy_tab, result, reimplemented_result);
         }
 
         reimplemented_result

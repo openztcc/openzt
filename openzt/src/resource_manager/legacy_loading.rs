@@ -611,6 +611,15 @@ fn extract_legacy_entities(cfg: &Ini, entity_type: LegacyEntityType) {
                     let ai_content = decode_game_text(&ai_file);
 
                     if ai_ini.read(ai_content).is_ok() {
+                        // Register [Member] keys under the .cfg registry's entity name (the
+                        // game's actual zt_type, e.g. "tankwal1"), which can differ from the
+                        // underlying .ai filename (e.g. "fences/tankwall.ai").
+                        if let Some(member_keys) = ai_ini.get_keys("Member") {
+                            for member_key in member_keys {
+                                crate::expansions::add_member(entity_name.clone(), member_key);
+                            }
+                        }
+
                         match LegacyEntityAttributes::parse_from_ini(entity_name.clone(), &ai_ini, entity_type) {
                             Ok(mut attrs) => {
                                 // If we have subtype information from the .cfg, validate/merge it

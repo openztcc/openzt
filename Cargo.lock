@@ -1754,7 +1754,7 @@ dependencies = [
 
 [[package]]
 name = "openzt"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -1820,7 +1820,7 @@ dependencies = [
 
 [[package]]
 name = "openzt-dll"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "openzt",
  "tracing",
