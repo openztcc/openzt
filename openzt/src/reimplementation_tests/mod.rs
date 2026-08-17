@@ -101,11 +101,13 @@ mod detour_zoo_main {
                 let result = GET_LOCAL_ELEVATION.original()(&raw const tile as *const u32, &raw const pos as *const u32);
                 assert_eq!(
                     result,
-                    reimplemented_result + 1,
-                    "Failed for pos: {:?}, tile: {:?}, unknown_byte_2: {}",
+                    reimplemented_result,
+                    "Failed for pos: {:?}, tile: {:?}, unknown_byte_2: {}, real: {}, reimplemented: {}",
                     pos,
                     tile,
-                    unknown_byte_2
+                    unknown_byte_2,
+                    result,
+                    reimplemented_result
                 );
                 Ok(())
             }) {
@@ -115,7 +117,11 @@ mod detour_zoo_main {
                 Err(e) => {
                     error!("Proptest failed: {:?}", e);
                     if let proptest::test_runner::TestError::Fail(r, (x, y)) = e {
-                        let failure_line = format!("unknown_byte_2: {}, x: {}, y: {}\n", unknown_byte_2, x, y);
+                        let pos = IVec3::new(x, y, 0);
+                        let tile = BFTile::new(pos, unknown_byte_2);
+                        let reimplemented_result = tile.get_local_elevation(pos);
+                        let result = GET_LOCAL_ELEVATION.original()(&raw const tile as *const u32, &raw const pos as *const u32);
+                        let failure_line = format!("unknown_byte_2: {}, x: {}, y: {}, real: {}, reimplemented: {}\n", unknown_byte_2, x, y, result, reimplemented_result);
 
                         if let Some(ref mut log_file) = failure_log {
                             if let Err(write_err) = log_file.write_all(failure_line.as_bytes()) {
