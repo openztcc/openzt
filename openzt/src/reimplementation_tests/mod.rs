@@ -98,7 +98,7 @@ mod detour_zoo_main {
                 let tile = BFTile::new(pos, unknown_byte_2);
                 let reimplemented_result = tile.get_local_elevation(pos);
 
-                let result = GET_LOCAL_ELEVATION.original()(&raw const tile as u32, &raw const pos as u32);
+                let result = GET_LOCAL_ELEVATION.original()(&raw const tile as *const u32, &raw const pos as *const u32);
                 assert_eq!(
                     result,
                     reimplemented_result + 1,
