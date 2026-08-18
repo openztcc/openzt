@@ -276,7 +276,7 @@ fn inner_save_mutex(mut mutex_guard: MutexGuard<Vec<Expansion>>) {
     });
 }
 
-fn get_expansions() -> Vec<Expansion> {
+pub fn get_expansions() -> Vec<Expansion> {
     EXPANSION_ARRAY.lock().unwrap().clone()
 }
 
@@ -301,6 +301,23 @@ pub struct Expansion {
 impl Expansion {
     fn name_string(&self) -> String {
         get_string_from_memory_bounded(self.name_string_start_ptr, self.name_string_end_ptr, self.name_string_buffer_end_ptr)
+    }
+
+    /// The registry-side id (raw `.cfg` `expansion`/`id` value `+1` for official expansions - see
+    /// `parse_expansion_config` - or an OpenZT-assigned id `>= 4` for custom ones). This is what
+    /// `ZTUI::expansionselect::isExpansionDisabled` and `filter_entity_type` compare against, and is
+    /// `ZTResearchCategory::expansion_id() + 1` for the matching expansion (see that field's doc
+    /// comment in `ztresearch.rs`).
+    pub fn expansion_id(&self) -> u32 {
+        self.expansion_id
+    }
+
+    /// The string-table/registry id naming this expansion for display. Always resolvable via
+    /// `string_registry::load_string_by_id` regardless of whether this is a vanilla expansion (a
+    /// plain string-table id, e.g. from `xpac0N.cfg`'s `listid=`) or an OpenZT-registered custom one
+    /// (`>= 100_000`) - `load_string_by_id` already checks the OpenZT registry first.
+    pub fn name_id(&self) -> u32 {
+        self.name_id
     }
 }
 
@@ -381,7 +398,7 @@ pub mod custom_expansion {
     use crate::{bfentitytype::read_zt_entity_type_from_memory, ztui::get_current_buy_tab};
 
     #[detour(ENTITY_TYPE_IS_DISPLAYED)]
-    pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: u32, param_1: u32, param_2: u32) -> bool {
+    pub unsafe extern "cdecl" fn ztui_general_entity_type_is_displayed(bf_entity: *const i32, param_1: *const i8, param_2: *const i8) -> bool {
         // TODO: Put this call and subsequent log behind OpenZT debug flag)
         let result = unsafe { ENTITY_TYPE_IS_DISPLAYED_DETOUR.call(bf_entity, param_1, param_2) };
 
@@ -389,7 +406,7 @@ pub mod custom_expansion {
             return false;
         };
 
-        let entity = read_zt_entity_type_from_memory(bf_entity);
+        let entity = read_zt_entity_type_from_memory(bf_entity as u32);
 
         let Some(current_buy_tab) = get_current_buy_tab() else {
             return false;

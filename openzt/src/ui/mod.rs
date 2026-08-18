@@ -1,10 +1,18 @@
 mod cursor;
 mod blit;
+mod date_display;
 mod input_block;
 mod live_game;
+mod money_display;
+mod pause;
 mod render_hook;
+mod status_display;
+mod tga;
+mod tooltip;
 mod vanilla_main;
 mod wndproc;
+mod zt_image;
+mod zoom_block;
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,8 +58,14 @@ pub fn init() {
     }
 
     cursor::init();
+    date_display::init();
     input_block::init();
     live_game::init();
+    money_display::init();
+    pause::init();
+    status_display::init();
+    tooltip::init();
+    zoom_block::init();
     register_shortcuts();
     wndproc::init();
     render_hook::init();
@@ -113,6 +127,7 @@ pub fn render_and_blit(hwnd: HWND) {
             if SHOW_VANILLA_UI.load(Ordering::Acquire) {
                 vanilla_main::show(ctx, egui::vec2(width as f32, height as f32));
             }
+            tooltip::show(ctx, egui::vec2(width as f32, height as f32));
 
             if SHOW_DEBUG_WINDOW.load(Ordering::Acquire) {
                 show_debug_panel(ctx);
@@ -273,6 +288,7 @@ pub fn set_live_game_active(active: bool) {
 
     if active {
         info!("egui overlay: live game started");
+        pause::set_paused(false);
     } else {
         info!("egui overlay: live game stopped");
         drain_input_events();
