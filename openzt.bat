@@ -330,8 +330,17 @@ REM Test Function
 REM ============================================================
 
 :test
+SHIFT
+SET TEST_ARGS=
+:test_args_loop
+IF "%~1"=="" GOTO run_test
+SET TEST_ARGS=!TEST_ARGS! %1
+SHIFT
+GOTO test_args_loop
+
+:run_test
 echo Running cargo test on openzt...
-cargo test --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+cargo test --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc !TEST_ARGS!
 
 IF !errorlevel! NEQ 0 (
     echo.
@@ -381,6 +390,7 @@ echo   openzt.bat run --test                Build test DLL and launch game
 echo   openzt.bat check                     Run cargo check on openzt
 echo   openzt.bat clippy                    Run cargo clippy on openzt
 echo   openzt.bat test                      Run cargo test on openzt
+echo   openzt.bat test -- --nocapture        Run cargo test, forwarding extra args to cargo
 echo   openzt.bat integration-tests         Run integration tests (builds release, displays results)
 echo   openzt.bat docs                      Generate and open docs
 echo   openzt.bat console                   Open interactive Lua console
