@@ -80,7 +80,7 @@ pub mod zoo_experimental {
 }
 
 pub fn init() {
-    // if let Err(e) = unsafe { zoo_experimental::init_detours() } {
-    //     info!("Error initialising experimental detours: {}", e);
-    // };
+    if let Err(e) = unsafe { zoo_experimental::init_detours() } {
+        info!("Error initialising experimental detours: {}", e);
+    };
 }
