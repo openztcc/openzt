@@ -95,8 +95,14 @@ macro_rules! integration_tests {
 pub fn init() {
     #[cfg(target_os = "windows")]
     {
+        #[cfg(feature = "tui")]
+        let tui_config: Option<&crate::tui_console::TuiConfig> = None;
+        #[cfg(not(feature = "tui"))]
+        let tui_config = None;
+
         if let Err(e) = crate::logging::init_with_console(
-            &crate::logging::LoggingConfig::default()
+            &crate::logging::LoggingConfig::default(),
+            tui_config,
         ) {
             eprintln!("Failed to initialize logging: {}", e);
         }

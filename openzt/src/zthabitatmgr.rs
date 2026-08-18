@@ -132,6 +132,8 @@ pub struct ZTHabitat {
     is_filled: bool,             // 0x198 // Set true by ZTTankExhibit::fill(), false by ZTTankExhibit::drain().
 }
 
+const _: () = assert!(std::mem::size_of::<ZTHabitat>() == 0x198);
+
 impl ZTHabitat {
     const TANK_VTABLE_PTR: u32 = 0x006312bc;
     pub fn get_gate_tile_in(&self) -> Option<BFTile> {
