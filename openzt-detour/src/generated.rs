@@ -66,7 +66,7 @@ pub mod bfanimcache {
 pub mod bfapp {
     use super::*;
 
-    pub const LOAD_STRING: FunctionDef<unsafe extern "thiscall" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x00404e0a, function_type: PhantomData};
+    pub const LOAD_STRING: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32, *const u8) -> u32> = FunctionDef{address: 0x00404e0a, function_type: PhantomData};
     pub const HANDLE_MESSAGES: FunctionDef<unsafe extern "stdcall" fn(u32, u32, u32, i32) -> i32> = FunctionDef{address: 0x00418f4f, function_type: PhantomData};
     pub const WIN_MAIN: FunctionDef<unsafe extern "stdcall" fn(u32, u32, u32, i32) -> i32> = FunctionDef{address: 0x0041a8bc, function_type: PhantomData};
     pub const BUILD_STRING: FunctionDef<unsafe extern "cdecl" fn(u32, u32, u32) -> u32> = FunctionDef{address: 0x0041ca7f, function_type: PhantomData};
