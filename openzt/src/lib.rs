@@ -64,6 +64,10 @@ mod animation;
 /// Structs that mirror ZT Entity types and their properties. Currently there are many missing fields.
 mod bfentitytype;
 
+/// BFConfigFile is the vanilla base class for anything that loads itself from a .cfg-style INI
+/// block (e.g. the ZTResearch* classes); this module models its raw memory layout.
+mod bfconfigfile;
+
 /// ztgamemgr module has commands to interact with the live zoo stats such as cash, num animals, species, guests, etc. via the vanilla ZTGameMgr class.
 mod ztgamemgr;
 
@@ -72,6 +76,10 @@ pub mod ztmapview;
 
 /// zthabitatmgr module has commands to interact with habitats/exhibits/tanks via the vanilla ZTHabitatMgr class.
 mod zthabitatmgr;
+
+/// ztresearch module has structs and methods for the vanilla ZTResearchMgr/ZTResearchBranch/ZTResearchCategory/ZTResearchProgram
+/// classes, which drive the zoo's research tree, funding levels and program completion effects.
+mod ztresearch;
 
 mod experimental;
 
@@ -183,6 +191,7 @@ mod zoo_init {
             experimental::init();
             ztmapview::init();
             zthabitatmgr::init();
+            ztresearch::init();
         }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }
