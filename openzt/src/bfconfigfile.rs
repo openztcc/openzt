@@ -1,7 +1,7 @@
 //! `BFConfigFile` is the vanilla base class for anything that loads itself from a `.cfg`-style INI
 //! block via `getInt`/`getFloat`/`getString`/`getStringList` (e.g. `ZTResearchProgram`,
-//! `ZTResearchCategory`, `ZTResearchBranch` - see `private/resources/decompiles/BFConfigFile_*` and
-//! `private/resources/decompiles/ZTResearch*_load*`). Those classes inherit it directly (`this` gets cast
+//! `ZTResearchCategory`, `ZTResearchBranch` - see `resources/decompiles/BFConfigFile_*` and
+//! `resources/decompiles/ZTResearch*_load*`). Those classes inherit it directly (`this` gets cast
 //! straight to `BFConfigFile*` when calling its methods), so it occupies their first `0xc` bytes.
 //!
 //! Only the raw layout is modeled here, not `parse`/`getInt`/etc. themselves - callers that already
@@ -9,7 +9,7 @@
 
 use std::fmt;
 
-/// Confirmed via `private/resources/decompiles/BFConfigFile_BFConfigFile.c`/`_attempt.c`/`_parse.c` and
+/// Confirmed via `resources/decompiles/BFConfigFile_BFConfigFile.c`/`_attempt.c`/`_parse.c` and
 /// cross-checked against every `ZTResearch*::load*` function that inherits it.
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]

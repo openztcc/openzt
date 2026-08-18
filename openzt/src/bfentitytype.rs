@@ -80,9 +80,8 @@ pub struct BFEntityType {
     pub bf_config_file_ptr: u32,      // 0x080
     pad9: [u8; 0x098 - 0x084],        // ----------------------- padding: 20 bytes
     pub zt_type: ZTBoundedString,     // 0x098
-    pub zt_sub_type: ZTBoundedString, // 0x0A4
-    pad10: [u8; 0x0B4 - 0x0A8],       // ----------------------- padding: 4 bytes
-    // pad10: [u8; 0x0B4 - 0x0B0],       // ----------------------- padding: 4 bytes
+    pub zt_sub_type: ZTBoundedString, // 0x0A0
+    pad10: [u8; 0x0B4 - 0x0A8],       // ----------------------- padding: 12 bytes
     pub footprintx: i32,              // 0x0B4
     pub footprinty: i32,              // 0x0B8
     pub footprintz: i32,              // 0x0BC
@@ -92,6 +91,8 @@ pub struct BFEntityType {
     pub available_at_startup: bool,   // 0x0CC
     pad11: [u8; 0x100 - 0x0CD],       // ----------------------- padding: 51 bytes
 }
+
+const _: () = assert!(std::mem::size_of::<BFEntityType>() == 0x100);
 
 impl BFEntityType {
     // returns the codename of the entity type
@@ -766,6 +767,8 @@ pub struct BFUnitType {
     pad2: [u8; 0x144 - 0x138],        // ----------------------- padding: 16 bytes
 }
 
+const _: () = assert!(std::mem::size_of::<BFUnitType>() == 0x144);
+
 impl EntityType for BFUnitType {
     fn print_config_integers(&self) -> String {
         format!(
@@ -827,7 +830,29 @@ pub struct ZTUnitType {
     pub skip_trick_chance: i32,    // 0x184
 }
 
+const _: () = assert!(std::mem::size_of::<ZTUnitType>() == 0x188);
+
 impl ZTUnitType {
+    /// Confirmed real vtable VA for `ZTUnitType` in zoo.exe (see `private/docs/vtables/ZTUnitType.md`).
+    /// `ZTUnitType` overrides `BFEntityType`'s `+0x1c` slot with a different function (confirmed by
+    /// the vtable diff docs), so fixtures must use this class's own vtable, not `BFEntityType`'s
+    /// - see `ztunit-ztanimal-footprint-crash-investigation.md`.
+    const VTABLE_PTR: u32 = 0x0062e404;
+
+    /// Test-only fixture: a zero-filled `ZTUnitType` with a real vtable pointer, needed because
+    /// `ZTUnit::getFootprint` virtually dispatches through `entity_type`'s vtable (not its own) in
+    /// its `use_map_footprint=true` branch. `mem::zeroed()` is otherwise safe: every other field is
+    /// an integer/bool/byte-array.
+    pub fn new_for_test(footprint: IVec3, map_footprint: i32) -> Self {
+        let mut entity_type: ZTUnitType = unsafe { std::mem::zeroed() };
+        entity_type.bfunit_type.bfentitytype.vtable = Self::VTABLE_PTR;
+        entity_type.bfunit_type.bfentitytype.footprintx = footprint.x;
+        entity_type.bfunit_type.bfentitytype.footprinty = footprint.y;
+        entity_type.bfunit_type.bfentitytype.footprintz = footprint.z;
+        entity_type.map_footprint = map_footprint;
+        entity_type
+    }
+
     pub fn get_list_name(&self) -> String {
         let obj_ptr = self as *const ZTUnitType as u32;
         get_string_from_memory(get_from_memory::<u32>(obj_ptr + 0x168))
@@ -1141,6 +1166,8 @@ pub struct ZTAnimalType {
     pub egg_footprint: IVec3,         // 0x410
 }
 
+const _: () = assert!(std::mem::size_of::<ZTAnimalType>() == 0x41c);
+
 impl EntityType for ZTAnimalType {
     fn print_config_integers(&self) -> String {
         format!("{}\ncBoxFootprintX: {}\ncBoxFootprintY: {}\ncBoxFootprintZ: {}\ncFamily: {}\ncGenus: {}\ncHabitat: {}\ncLocation: {}\ncEra: {}\ncBreathThreshold: {}\ncBreathIncrement: {}\ncHungerThreshold: {}\ncHungryHealthChange: {}\ncHungerIncrement: {}\ncFoodUnitValue: {}\ncKeeperFoodUnitsEaten: {}\ncNeededFood: {}\ncNoFoodChange: {}\ncInitialHappiness: {}\ncMaxHits: {}\ncPctHits: {}\ncMaxEnergy: {}\ncMaxDirty: {}\ncMinDirty: {}\ncSickChange: {}\ncOtherAnimalSickChange: {}\ncSickChance: {}\ncSickRandomChance: {}\ncCrowd: {}\ncCrowdHappinessChange: {}\ncZapHappinessChange: {}\ncCaptivity: {}\ncReproductionChance: {}\ncReproductionInterval: {}\ncMatingType: {}\ncOffspring: {}\ncKeeperFrequency: {}\ncNotEnoughKeepersChange: {}\ncSocial: {}\ncHabitatSize: {}\ncNumberAnimalsMin: {}\ncNumberAnimalsMax: {}\ncNumberMinChange: {}\ncNumberMaxChange: {}\ncHabitatPreference: {}\ncBabyBornChange: {}\ncEnergyIncrement: {}\ncEnergyThreshold: {}\ncDirtyIncrement: {}\ncDirtyThreshold: {}\ncSickTime: {}\ncBabyToAdult: {}\ncOtherFood: {}\ncTreePref: {}\ncRockPref: {}\ncSpacePref: {}\ncElevationPref: {}\ncDepthMin: {}\ncDepthMax: {}\ncDepthChange: {}\ncSalinityChange: {}\ncSalinityHealthChange: {}\ncHappyReproduceThreshold: {}\ncBuildingUseChance: {}\ncNoMateChange: {}\ncTimeDeath: {}\ncDeathChance: {}\ncDirtChance: {}\ncWaterNeeded: {}\ncUnderwaterNeeded: {}\ncLandNeeded: {}\ncEnterWaterChance: {}\ncEnterTankChance: {}\ncEnterLandChance: {}\ncDrinkWaterChance: {}\ncChaseAnimalChance: {}\ncClimbsCliffs: {}\ncBashStrength: {}\ncAttractiveness: {}\ncKeeperFoodType: {}\ncIsClimber: {}\ncIsJumper: {}\ncSmallZoodoo: {}\ncDinoZoodoo: {}\ncGiantZoodoo: {}\ncIsSpecialAnimal: {}\ncNeedShelter: {}\ncNeedToys: {}\ncBabiesAttack: {}\n EggFootprintX: {}\ncEggFootprintY: {}\ncEggFootprintZ: {}\n",
@@ -1249,6 +1276,25 @@ impl EntityType for ZTAnimalType {
 
     fn print_config_details(&self) -> String {
         self.ztunit_type.print_config_details()
+    }
+}
+
+impl ZTAnimalType {
+    /// Confirmed real vtable VA for `ZTAnimalType` in zoo.exe (see `private/docs/vtables/ZTAnimalType.md`).
+    /// See `ZTUnitType::VTABLE_PTR` for why the type's own vtable is required, not `BFEntityType`'s.
+    const VTABLE_PTR: u32 = 0x00630268;
+
+    /// Test-only fixture, see `ZTUnitType::new_for_test`.
+    pub fn new_for_test(footprint: IVec3, map_footprint: i32, box_footprint: IVec3, egg_footprint: IVec3) -> Self {
+        let mut entity_type: ZTAnimalType = unsafe { std::mem::zeroed() };
+        entity_type.ztunit_type.bfunit_type.bfentitytype.vtable = Self::VTABLE_PTR;
+        entity_type.ztunit_type.bfunit_type.bfentitytype.footprintx = footprint.x;
+        entity_type.ztunit_type.bfunit_type.bfentitytype.footprinty = footprint.y;
+        entity_type.ztunit_type.bfunit_type.bfentitytype.footprintz = footprint.z;
+        entity_type.ztunit_type.map_footprint = map_footprint;
+        entity_type.box_footprint = box_footprint;
+        entity_type.egg_footprint = egg_footprint;
+        entity_type
     }
 }
 
@@ -2021,5 +2067,54 @@ pub fn command_make_sel(args: Vec<&str>) -> Result<String, CommandError> {
         }
         entity_type.selectable = true;
         Ok(format!("Entity type {} is now selectable", entity_type.bfentitytype.get_type_name()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Explicit list (not derived from the enum) so it visibly needs updating when a
+    // variant is added and the match arm in `FromStr` is forgotten.
+    const ZT_ENTITY_TYPE_CLASS_CASES: &[(ZTEntityTypeClass, &str)] = &[
+        (ZTEntityTypeClass::Animal, "animal"),
+        (ZTEntityTypeClass::Ambient, "ambient"),
+        (ZTEntityTypeClass::Guest, "guest"),
+        (ZTEntityTypeClass::Fence, "fence"),
+        (ZTEntityTypeClass::TourGuide, "tourguide"),
+        (ZTEntityTypeClass::Building, "building"),
+        (ZTEntityTypeClass::Scenery, "scenery"),
+        (ZTEntityTypeClass::Food, "food"),
+        (ZTEntityTypeClass::TankFilter, "tankfilter"),
+        (ZTEntityTypeClass::Path, "path"),
+        (ZTEntityTypeClass::Rubble, "rubble"),
+        (ZTEntityTypeClass::TankWall, "tankwall"),
+        (ZTEntityTypeClass::Keeper, "keeper"),
+        (ZTEntityTypeClass::MaintenanceWorker, "maintenanceworker"),
+        (ZTEntityTypeClass::Drt, "drt"),
+        (ZTEntityTypeClass::BFOverlay, "bfoverlay"),
+        (ZTEntityTypeClass::BFUnit, "bfunit"),
+        (ZTEntityTypeClass::ZTUnit, "ztunit"),
+        (ZTEntityTypeClass::Staff, "staff"),
+        (ZTEntityTypeClass::BFEntity, "bfentity"),
+    ];
+
+    #[test]
+    fn test_zt_entity_type_class_from_str_round_trip() {
+        for (variant, s) in ZT_ENTITY_TYPE_CLASS_CASES {
+            assert_eq!(s.parse::<ZTEntityTypeClass>().unwrap(), *variant, "failed to parse '{}'", s);
+        }
+    }
+
+    #[test]
+    fn test_zt_entity_type_class_from_str_case_insensitive() {
+        assert_eq!("Animal".parse::<ZTEntityTypeClass>().unwrap(), ZTEntityTypeClass::Animal);
+        assert_eq!("ANIMAL".parse::<ZTEntityTypeClass>().unwrap(), ZTEntityTypeClass::Animal);
+        assert_eq!("aNiMaL".parse::<ZTEntityTypeClass>().unwrap(), ZTEntityTypeClass::Animal);
+    }
+
+    #[test]
+    fn test_zt_entity_type_class_from_str_unknown_is_err() {
+        assert!("not_a_real_entity_type_class".parse::<ZTEntityTypeClass>().is_err());
     }
 }

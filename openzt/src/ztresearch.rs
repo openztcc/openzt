@@ -3,8 +3,8 @@
 //! (e.g. "Animal Care") is currently working towards, tracking funding and progress, and applying a
 //! program's effect once it completes.
 //!
-//! Field layouts below are derived from the decompiles in `private/resources/decompiles/ZTResearch*` and
-//! `private/resources/decompiles/_forceResearch.c` / `_clickResearch.c`. Byte ranges with no decompiled
+//! Field layouts below are derived from the decompiles in `resources/decompiles/ZTResearch*` and
+//! `resources/decompiles/_forceResearch.c` / `_clickResearch.c`. Byte ranges with no decompiled
 //! evidence are left as `padN` placeholders. `ZTResearchMgr`'s layout is additionally confirmed by
 //! `openzt-detour/src/structs.rs` (size `0x18`).
 //!
@@ -581,7 +581,7 @@ impl ZTResearchBranch {
     }
 
     /// The vanilla "$400 (Min)"-style formatted text for the *currently selected* funding level (per
-    /// `private/resources/decompiles/ZTResearchBranch_getFundingText.c`, this always uses
+    /// `resources/decompiles/ZTResearchBranch_getFundingText.c`, this always uses
     /// `current_funding_level` - there's no way to ask for an arbitrary level's text). Calls into the
     /// original implementation (money formatting + a `%s`-templated name) rather than reimplementing
     /// it, since it depends on an unconfirmed scale constant (`DAT_00635040`) that only matters if
@@ -693,7 +693,7 @@ impl ZTResearchMgr {
     }
 
     /// Calls the vanilla `ZTResearchMgr::load` - the save-file counterpart to `save()`. Per
-    /// `private/resources/decompiles/ZTResearchMgr_load.c`/`.asm`, `load` always starts by resetting every
+    /// `resources/decompiles/ZTResearchMgr_load.c`/`.asm`, `load` always starts by resetting every
     /// branch's `current_funding_level` to `0`, every category's `enabled` to `1`, and calling
     /// `ZTResearchProgram::reset()` on every program (which itself zeroes `current_progress` and, for
     /// `UnlockEntity`/`BuildingUpgrade` effects, calls back into the building/entity managers) -
@@ -739,7 +739,7 @@ impl fmt::Display for ZTResearchMgr {
 }
 
 /// Calls the vanilla standalone `forceResearch` cheat-console function - the one the in-game
-/// "force research" cheat actually triggers, per `private/resources/decompiles/_forceResearch.c`. It calls
+/// "force research" cheat actually triggers, per `resources/decompiles/_forceResearch.c`. It calls
 /// `ZTResearchMgr::forceResearch(GLOBAL_ZTResearchMgr, false)` (the `continue_program` flag is
 /// hardcoded `false` here - use `ZTResearchMgr::force_research` directly if you need `true`) and
 /// then notifies every `ZTWorldMgr` entity of the change, so the world/UI actually refreshes; plain
@@ -2030,7 +2030,7 @@ mod research_config_reimplementation {
 /// Native reimplementation of `ZTResearchMgr::save`/`load`'s save-file persistence format - a small,
 /// self-describing stream of `(kind, id, value)` tuples capturing each branch's `current_funding_level`,
 /// each category's `enabled` flag, and each program's `current_progress`. Confirmed byte-for-byte from
-/// `private/resources/decompiles/ZTResearchMgr_save.c` and cross-checked against `ZTResearchMgr_load.c`/`.asm`.
+/// `resources/decompiles/ZTResearchMgr_save.c` and cross-checked against `ZTResearchMgr_load.c`/`.asm`.
 ///
 /// This is **shadow-mode only**: nothing here ever runs during real save/load (`ZTResearchMgr::save`/
 /// `load` are not detoured), it exists purely to be exercised by the live proptest-vs-`.original()`
