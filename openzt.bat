@@ -19,6 +19,7 @@ IF "%~1"=="console" GOTO console
 IF "%~1"=="check" GOTO check
 IF "%~1"=="clippy" GOTO clippy
 IF "%~1"=="test" GOTO test
+IF "%~1"=="test-egui-tiny-skia" GOTO test_egui_tiny_skia
 IF "%~1"=="integration-tests" GOTO integration_tests
 
 echo Error: Unknown subcommand "%~1"
@@ -354,6 +355,25 @@ echo Tests passed
 GOTO :EOF
 
 REM ============================================================
+REM egui-tiny-skia Test Function
+REM ============================================================
+
+:test_egui_tiny_skia
+echo Running cargo test on egui-tiny-skia...
+cargo test --manifest-path egui-tiny-skia/Cargo.toml
+
+IF !errorlevel! NEQ 0 (
+    echo.
+    echo egui-tiny-skia tests failed
+    pause
+    exit /b !errorlevel!
+)
+
+echo.
+echo egui-tiny-skia tests passed
+GOTO :EOF
+
+REM ============================================================
 REM Help Function
 REM ============================================================
 
@@ -368,6 +388,7 @@ echo   run                Build the DLL and launch the game
 echo   check              Run cargo check on openzt crate
 echo   clippy             Run cargo clippy on openzt crate
 echo   test               Run cargo test on openzt crate
+echo   test-egui-tiny-skia Run cargo test on egui-tiny-skia crate
 echo   integration-tests  Run integration tests (builds release, launches game, displays results)
 echo   docs               Generate and open documentation
 echo   console            Open interactive Lua console or run oneshot command
@@ -391,6 +412,7 @@ echo   openzt.bat check                     Run cargo check on openzt
 echo   openzt.bat clippy                    Run cargo clippy on openzt
 echo   openzt.bat test                      Run cargo test on openzt
 echo   openzt.bat test -- --nocapture        Run cargo test, forwarding extra args to cargo
+echo   openzt.bat test-egui-tiny-skia        Run cargo test on egui-tiny-skia
 echo   openzt.bat integration-tests         Run integration tests (builds release, displays results)
 echo   openzt.bat docs                      Generate and open docs
 echo   openzt.bat console                   Open interactive Lua console
