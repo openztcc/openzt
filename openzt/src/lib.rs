@@ -81,6 +81,9 @@ mod zthabitatmgr;
 /// classes, which drive the zoo's research tree, funding levels and program completion effects.
 mod ztresearch;
 
+/// Save/load logging detours for understanding savefile format
+mod save_logging;
+
 mod experimental;
 
 /// Roof tag extension for scenery entities
@@ -192,6 +195,7 @@ mod zoo_init {
             ztmapview::init();
             zthabitatmgr::init();
             ztresearch::init();
+            save_logging::init();
         }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }
