@@ -5,9 +5,34 @@ REM OpenZT Unified Build Script
 REM Combines build, run, and docs functionality
 
 REM ============================================================
+REM Global --no-pause flag: can appear anywhere in the argument
+REM list. Strips itself out before dispatch and skips every
+REM `pause` this script would otherwise do on failure, so agents
+REM and CI can run it non-interactively without hanging waiting
+REM for a keypress.
+REM ============================================================
+SET NO_PAUSE=
+SET FILTERED_ARGS=
+:filter_args_loop
+IF "%~1"=="" GOTO filter_args_done
+IF "%~1"=="--no-pause" (
+    SET NO_PAUSE=1
+    SHIFT
+    GOTO filter_args_loop
+)
+SET FILTERED_ARGS=!FILTERED_ARGS! "%~1"
+SHIFT
+GOTO filter_args_loop
+
+:filter_args_done
+CALL :main %FILTERED_ARGS%
+EXIT /B !ERRORLEVEL!
+
+REM ============================================================
 REM Main Dispatcher
 REM ============================================================
 
+:main
 IF "%~1"=="" GOTO show_help
 IF "%~1"=="help" GOTO show_help
 IF "%~1"=="--help" GOTO show_help
@@ -20,6 +45,7 @@ IF "%~1"=="check" GOTO check
 IF "%~1"=="clippy" GOTO clippy
 IF "%~1"=="test" GOTO test
 IF "%~1"=="integration-tests" GOTO integration_tests
+IF "%~1"=="validate-detours" GOTO validate_detours
 
 echo Error: Unknown subcommand "%~1"
 echo.
@@ -50,6 +76,34 @@ SET WAIT_FLAG=1
 SET CARGO_ARGS=--features integration-tests
 SET INTEGRATION_TESTS_MODE=1
 SHIFT
+GOTO build
+
+REM ============================================================
+REM Validate Detours Command
+REM ============================================================
+
+:validate_detours
+SHIFT
+SET VALIDATE_DETOUR_NAMES=
+:validate_collect_args
+IF "%~1"=="" GOTO validate_build
+IF DEFINED VALIDATE_DETOUR_NAMES (
+    SET VALIDATE_DETOUR_NAMES=!VALIDATE_DETOUR_NAMES!,%~1
+) ELSE (
+    SET VALIDATE_DETOUR_NAMES=%~1
+)
+SHIFT
+GOTO validate_collect_args
+
+:validate_build
+IF "!VALIDATE_DETOUR_NAMES!"=="" SET VALIDATE_DETOUR_NAMES=all
+SET OPENZT_VALIDATE_DETOURS=!VALIDATE_DETOUR_NAMES!
+SET VALIDATE_DETOURS_MODE=1
+SET RUN_AFTER_BUILD=1
+SET RELEASE_FLAG=1
+SET WAIT_FLAG=1
+SET CARGO_ARGS=--features "detour-validation,command-console"
+echo Validate-detours: [!VALIDATE_DETOUR_NAMES!]
 GOTO build
 
 :parse_flags
@@ -126,6 +180,9 @@ echo Building !DLL_NAME! (!BUILD_TYPE!)...
 IF DEFINED FEATURE_FLAGS (
     echo Features: !FEATURE_FLAGS!
 )
+IF DEFINED CARGO_ARGS (
+    echo Cargo args: !CARGO_ARGS!
+)
 
 REM Execute cargo build for DLL
 cargo build --manifest-path !MANIFEST_PATH! --lib --target=i686-pc-windows-msvc !BUILD_FLAGS! !FEATURE_FLAGS! !CARGO_ARGS!
@@ -133,7 +190,7 @@ cargo build --manifest-path !MANIFEST_PATH! --lib --target=i686-pc-windows-msvc 
 IF !errorlevel! NEQ 0 (
     echo.
     echo Build failed
-    pause
+    IF NOT DEFINED NO_PAUSE pause
     exit /b !errorlevel!
 )
 
@@ -176,7 +233,7 @@ SET SOURCE_DLL=target\i686-pc-windows-msvc\!BUILD_TYPE!\!DLL_NAME!
 REM Check source exists
 IF NOT EXIST "!SOURCE_DLL!" (
     echo Error: Built DLL not found at !SOURCE_DLL!
-    pause
+    IF NOT DEFINED NO_PAUSE pause
     exit /b 1
 )
 
@@ -206,7 +263,7 @@ copy "!SOURCE_DLL!" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\!DEST_NAM
 IF !errorlevel! NEQ 0 (
     echo.
     echo Copy failed
-    pause
+    IF NOT DEFINED NO_PAUSE pause
     exit /b !errorlevel!
 )
 
@@ -232,6 +289,22 @@ IF DEFINED WAIT_FLAG (
         echo ============================================================
         echo.
     )
+
+    REM Display detour validation results if in validate-detours mode
+    IF DEFINED VALIDATE_DETOURS_MODE (
+        echo.
+        echo ============================================================
+        echo Detour Validation Results  [!OPENZT_VALIDATE_DETOURS!]
+        echo ============================================================
+        powershell -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Select-String -Path 'C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt.log' -Pattern 'DETOUR_CALLED|[Vv]alidation detour' | Select-Object -ExpandProperty Line | Out-Host"
+        echo.
+        powershell -Command "if (Select-String -Path 'C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt.log' -Pattern 'OPENZT_CLEAN_SHUTDOWN' -Quiet) { Write-Host 'Exit status: clean' } else { Write-Host 'Exit status: CRASHED (no clean shutdown marker in log)' }"
+        echo.
+        echo Full logs:
+        echo   "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\openzt.log"
+        echo ============================================================
+        echo.
+    )
 ) ELSE (
     echo Launching Zoo Tycoon...
     start "Zoo Tycoon" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe"
@@ -250,7 +323,7 @@ cargo rustdoc --manifest-path openzt/Cargo.toml --lib --target i686-pc-windows-m
 IF !errorlevel! NEQ 0 (
     echo.
     echo Documentation generation failed
-    pause
+    IF NOT DEFINED NO_PAUSE pause
     exit /b !errorlevel!
 )
 
@@ -281,7 +354,7 @@ IF "!CONSOLE_ARGS!"=="" (
 IF !errorlevel! NEQ 0 (
     echo.
     echo Console failed
-    pause
+    IF NOT DEFINED NO_PAUSE pause
     exit /b !errorlevel!
 )
 
@@ -293,12 +366,36 @@ REM ============================================================
 
 :check
 echo Running cargo check on openzt...
-cargo check --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+echo openzt.bat arguments: %*
+SHIFT
+SET CHECK_CARGO_ARGS=
+SET CHECK_PARSING_CARGO_ARGS=
+
+:check_parse_loop
+IF "%~1"=="" GOTO check_run
+IF "%~1"=="--" (
+    SET CHECK_PARSING_CARGO_ARGS=1
+    SHIFT
+    GOTO check_parse_loop
+)
+IF DEFINED CHECK_PARSING_CARGO_ARGS (
+    SET CHECK_CARGO_ARGS=!CHECK_CARGO_ARGS! %~1
+    SHIFT
+    GOTO check_parse_loop
+)
+echo Error: Unknown check flag "%~1"
+exit /b 1
+
+:check_run
+IF DEFINED CHECK_CARGO_ARGS (
+    echo Cargo args: !CHECK_CARGO_ARGS!
+)
+cargo check --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc !CHECK_CARGO_ARGS!
 
 IF !errorlevel! NEQ 0 (
     echo.
     echo Cargo check failed
-    pause
+    IF NOT DEFINED NO_PAUSE pause
     exit /b !errorlevel!
 )
 
@@ -312,12 +409,13 @@ REM ============================================================
 
 :clippy
 echo Running cargo clippy on openzt...
+echo openzt.bat arguments: %*
 cargo clippy --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
 
 IF !errorlevel! NEQ 0 (
     echo.
     echo Clippy found issues
-    pause
+    IF NOT DEFINED NO_PAUSE pause
     exit /b !errorlevel!
 )
 
@@ -330,22 +428,37 @@ REM Test Function
 REM ============================================================
 
 :test
-SHIFT
-SET TEST_ARGS=
-:test_args_loop
-IF "%~1"=="" GOTO run_test
-SET TEST_ARGS=!TEST_ARGS! %1
-SHIFT
-GOTO test_args_loop
-
-:run_test
 echo Running cargo test on openzt...
-cargo test --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc !TEST_ARGS!
+echo openzt.bat arguments: %*
+SHIFT
+SET TEST_CARGO_ARGS=
+SET TEST_PARSING_CARGO_ARGS=
+
+:test_parse_loop
+IF "%~1"=="" GOTO test_run
+IF "%~1"=="--" (
+    SET TEST_PARSING_CARGO_ARGS=1
+    SHIFT
+    GOTO test_parse_loop
+)
+IF DEFINED TEST_PARSING_CARGO_ARGS (
+    SET TEST_CARGO_ARGS=!TEST_CARGO_ARGS! %~1
+    SHIFT
+    GOTO test_parse_loop
+)
+echo Error: Unknown test flag "%~1"
+exit /b 1
+
+:test_run
+IF DEFINED TEST_CARGO_ARGS (
+    echo Cargo args: !TEST_CARGO_ARGS!
+)
+cargo test --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc !TEST_CARGO_ARGS!
 
 IF !errorlevel! NEQ 0 (
     echo.
     echo Tests failed
-    pause
+    IF NOT DEFINED NO_PAUSE pause
     exit /b !errorlevel!
 )
 
@@ -369,6 +482,7 @@ echo   check              Run cargo check on openzt crate
 echo   clippy             Run cargo clippy on openzt crate
 echo   test               Run cargo test on openzt crate
 echo   integration-tests  Run integration tests (builds release, launches game, displays results)
+echo   validate-detours   Validate detour addresses (builds release, launches game, shows calls)
 echo   docs               Generate and open documentation
 echo   console            Open interactive Lua console or run oneshot command
 echo   help               Show this help message
@@ -378,6 +492,9 @@ echo   --release      Build with release optimizations
 echo   --test         Build the test DLL (openzt-test-dll)
 echo   --wait         Wait for Zoo Tycoon to exit before returning
 echo   -- ^<args^>      Forward additional arguments to cargo
+echo.
+echo Global Flags (any subcommand, any position):
+echo   --no-pause     Skip the `pause` on failure - for agents/CI running non-interactively
 echo.
 echo Note: command-console feature is enabled by default for non-test builds.
 echo.
@@ -390,8 +507,9 @@ echo   openzt.bat run --test                Build test DLL and launch game
 echo   openzt.bat check                     Run cargo check on openzt
 echo   openzt.bat clippy                    Run cargo clippy on openzt
 echo   openzt.bat test                      Run cargo test on openzt
-echo   openzt.bat test -- --nocapture        Run cargo test, forwarding extra args to cargo
 echo   openzt.bat integration-tests         Run integration tests (builds release, displays results)
+echo   openzt.bat validate-detours          Validate all annotated detours
+echo   openzt.bat validate-detours bfanimcache/update    Validate specific detour
 echo   openzt.bat docs                      Generate and open docs
 echo   openzt.bat console                   Open interactive Lua console
 echo   openzt.bat console --oneshot "help()"          Run single Lua command and exit
