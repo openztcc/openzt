@@ -254,7 +254,7 @@ impl BFEntity {
     }
 
     pub fn check_avoid_edges(&self, tile: &BFTile) -> bool {
-        let radius = self.entity_type().avoid_edges - 1;
+        let radius = self.entity_type().avoid_edges as i32 - 1;
 
         if radius < 0 {
             return false;
