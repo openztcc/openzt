@@ -4,3 +4,8 @@
 /libs/*/target
 .idea
 .openzt-build-state
+
+# Reverse-engineering research: decompiles, vtable docs, RE scripts.
+# Backed up privately, see private/README.md - never commit to this repo.
+/private/
+__pycache__/

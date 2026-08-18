@@ -236,7 +236,9 @@ fn load_openzt_config_from_disk() -> OpenZTConfig {
                     };
 
                     let logging_complete = if let Some(logging) = toml_value.get("logging") {
-                        logging.get("log_to_file").is_some() && logging.get("level").is_some()
+                        logging.get("log_to_file").is_some()
+                            && logging.get("level").is_some()
+                            && logging.get("log_command_output").is_some()
                     } else {
                         false
                     };
@@ -449,6 +451,7 @@ mod tests {
         let mut config = LoggingConfig {
             log_to_file: true,
             level: LogLevel::Trace,
+            log_command_output: false,
         };
 
         assert!(toml::to_string(&config).unwrap().contains("level = \"trace\""));

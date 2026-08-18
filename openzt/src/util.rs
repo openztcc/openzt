@@ -126,8 +126,8 @@ pub fn get_string_from_memory_bounded(start: u32, end: u32, buffer_end: u32) -> 
 }
 
 pub fn get_string_from_memory(address: impl MemAddr) -> String {
-    let mut bytes = Vec::new();
     let mut char_address = address.as_u32();
+    let mut bytes = Vec::new();
     while {
         let byte = get_from_memory::<u8>(char_address);
         byte != 0
