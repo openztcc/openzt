@@ -167,6 +167,21 @@ pub struct ZTBufferString {
     buffer_end_ptr: u32,
 }
 
+impl ZTBufferString {
+    /// Builds a `ZTBufferString` from raw pointers - the write-side counterpart to `raw_parts`, for
+    /// callers constructing/repointing the buffer themselves (e.g. allocating via Rust's own
+    /// allocator instead of vanilla's game heap).
+    pub fn from_raw_parts(start_ptr: u32, end_ptr: u32, buffer_end_ptr: u32) -> Self {
+        Self { start_ptr, end_ptr, buffer_end_ptr }
+    }
+
+    /// The raw `(start_ptr, end_ptr, buffer_end_ptr)` triple, for callers that need to
+    /// reconstruct/free the underlying buffer themselves.
+    pub fn raw_parts(&self) -> (u32, u32, u32) {
+        (self.start_ptr, self.end_ptr, self.buffer_end_ptr)
+    }
+}
+
 impl fmt::Display for ZTBufferString {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.copy_to_string())
@@ -312,6 +327,19 @@ impl<T> fmt::Display for ZTArray<T> {
 }
 
 impl<T> ZTArray<T> {
+    /// Builds a `ZTArray<T>` from raw pointers - the write-side counterpart to `raw_parts`, for
+    /// callers constructing/repointing the array themselves (e.g. allocating via Rust's own
+    /// allocator instead of vanilla's game heap).
+    pub fn from_raw_parts(start_ptr: u32, end_ptr: u32, buffer_end_ptr: u32) -> Self {
+        Self { start_ptr, end_ptr, buffer_end_ptr, _marker: marker::PhantomData }
+    }
+
+    /// The raw `(start_ptr, end_ptr, buffer_end_ptr)` triple, for callers that need to
+    /// reconstruct/free the underlying buffer themselves.
+    pub fn raw_parts(&self) -> (u32, u32, u32) {
+        (self.start_ptr, self.end_ptr, self.buffer_end_ptr)
+    }
+
     pub fn len(&self) -> usize {
         ((self.end_ptr - self.start_ptr) / 4) as usize
     }
