@@ -125,14 +125,9 @@ pub struct ZTHabitat {
     unknown_nt_time: FileTime,   // 0x128
     pad5: [u8; 0x24],            // ----------------------- padding: 36 bytes
     exhibit_name: ZTBoundedString, // 0x154
-    pad6: [u8; 0x24],            // ----------------------- padding: 36 bytes
-    tank_height: u32,            // 0x184 // Actual structural tank height (ZTTankExhibit::getTankHeight/setTankHeight); not the field checkTankPlacement compares against, see water_level.
-    water_level: u32,            // 0x188 // Current water level (ZTTankExhibit::getWaterLevel); this is what checkTankPlacement's height comparisons actually use.
-    pad7: [u8; 0xc],             // ----------------------- padding: 12 bytes
-    is_filled: bool,             // 0x198 // Set true by ZTTankExhibit::fill(), false by ZTTankExhibit::drain().
+    pad6: [u8; 0x28],            // ----------------------- padding: 40 bytes
+    tank_height: u32,            // 0x188
 }
-
-const _: () = assert!(std::mem::size_of::<ZTHabitat>() == 0x198);
 
 impl ZTHabitat {
     const TANK_VTABLE_PTR: u32 = 0x006312bc;
