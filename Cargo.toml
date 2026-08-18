@@ -15,7 +15,6 @@ members = [
     "openzt-detour",
     "openzt-dll",
     "openzt-instance-manager",
-    "egui-tiny-skia",
 
     # vendor
     "vendor/retour-rs",
