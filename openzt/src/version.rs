@@ -13,7 +13,7 @@ mod bf_version_info {
     use openzt_detour::generated::bfversioninfo::GET_VERSION_STRING;
 
     #[detour(GET_VERSION_STRING)]
-    unsafe extern "cdecl" fn bf_version_info_get_version_string_hook(param_1: u32, param_2: u32, param_3: u32) -> u32 {
+    unsafe extern "cdecl" fn bf_version_info_get_version_string_hook(param_1: *const i8, param_2: *const std::ffi::c_void, param_3: *const u32) -> u32 {
         let return_value = unsafe { GET_VERSION_STRING_DETOUR.call(param_1, param_2, param_3) };
         let version_string = get_string_from_memory(get_from_memory::<u32>(param_2));
         let version_length = version_string.len();

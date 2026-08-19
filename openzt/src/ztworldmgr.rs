@@ -684,7 +684,8 @@ pub mod hooks_ztanimal {
 #[detour_mod]
 pub mod hooks_ztworldmgr {
     use crate::util::save_to_memory;
-    use openzt_detour::generated::bfentity::{GET_BLOCKING_RECT, GET_BLOCKING_RECT_VIRT_ZTPATH, GET_FOOTPRINT, IS_ON_TILE};
+    use openzt_detour::generated::bfentity::{GET_BLOCKING_RECT, GET_FOOTPRINT, IS_ON_TILE};
+    use openzt_detour::generated::ztpath::GET_BLOCKING_RECT as GET_BLOCKING_RECT_VIRT_ZTPATH;
     use openzt_detour::generated::bfmap::{GET_NEIGHBOR_1, TILE_TO_WORLD};
 
     use super::*;
@@ -714,7 +715,7 @@ pub mod hooks_ztworldmgr {
 
     // 0x0042721a u32 __thiscall OOAnalyzer::BFEntity::getBlockingRect(BFEntity *this,u32 param_1)
     #[detour(GET_BLOCKING_RECT)]
-    unsafe extern "thiscall" fn bfentity_get_blocking_rect(_this: *const u32, param_1: *const i32) -> *const u32 {
+    unsafe extern "thiscall" fn bfentity_get_blocking_rect(_this: *const u32, param_1: *const std::ffi::c_void) -> *const u32 {
         let entity = unsafe { ref_from_memory::<BFEntity>(_this) };
         save_to_memory(param_1, entity.get_blocking_rect());
         param_1 as *const u32

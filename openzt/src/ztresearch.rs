@@ -683,13 +683,13 @@ impl ZTResearchMgr {
     /// Calls the vanilla `ZTResearchMgr::update`. `delta_ticks` is added to an internal accumulator;
     /// once enough time has accrued every branch is advanced (see `pad0`/`elapsed_ticks` above).
     pub fn update(&mut self, delta_ticks: i32) -> i32 {
-        unsafe { ztresearchmgr::UPDATE.original()((self as *mut Self) as *const u32, delta_ticks) }
+        unsafe { ztresearchmgr::UPDATE.original()((self as *mut Self) as *const u32, delta_ticks as u32) }
     }
 
     /// Calls the vanilla `ZTResearchMgr::save`. `file` is whatever file-handle pointer the original
     /// `WriteBytesToFile` calls expect.
     pub fn save(&self, file: *const u32) -> bool {
-        unsafe { ztresearchmgr::SAVE.original()((self as *const Self) as *const u32, file) }
+        unsafe { ztresearchmgr::SAVE.original()((self as *const Self) as *const u32, file) != 0 }
     }
 
     /// Calls the vanilla `ZTResearchMgr::load` - the save-file counterpart to `save()`. Per
