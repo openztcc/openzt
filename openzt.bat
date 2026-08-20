@@ -20,6 +20,8 @@ IF "%~1"=="check" GOTO check
 IF "%~1"=="clippy" GOTO clippy
 IF "%~1"=="test" GOTO test
 IF "%~1"=="integration-tests" GOTO integration_tests
+IF "%~1"=="update" GOTO update
+IF "%~1"=="tree" GOTO tree
 
 echo Error: Unknown subcommand "%~1"
 echo.
@@ -354,6 +356,59 @@ echo Tests passed
 GOTO :EOF
 
 REM ============================================================
+REM Update Function
+REM ============================================================
+
+:update
+SHIFT
+SET UPDATE_ARGS=
+:update_args_loop
+IF "%~1"=="" GOTO run_update
+SET UPDATE_ARGS=!UPDATE_ARGS! %1
+SHIFT
+GOTO update_args_loop
+
+:run_update
+echo Running cargo update on workspace...
+cargo update --workspace !UPDATE_ARGS!
+
+IF !errorlevel! NEQ 0 (
+    echo.
+    echo Cargo update failed
+    pause
+    exit /b !errorlevel!
+)
+
+echo.
+echo Cargo update complete
+GOTO :EOF
+
+REM ============================================================
+REM Tree Function
+REM ============================================================
+
+:tree
+SHIFT
+SET TREE_ARGS=
+:tree_args_loop
+IF "%~1"=="" GOTO run_tree
+SET TREE_ARGS=!TREE_ARGS! %1
+SHIFT
+GOTO tree_args_loop
+
+:run_tree
+cargo tree --workspace !TREE_ARGS!
+
+IF !errorlevel! NEQ 0 (
+    echo.
+    echo Cargo tree failed
+    pause
+    exit /b !errorlevel!
+)
+
+GOTO :EOF
+
+REM ============================================================
 REM Help Function
 REM ============================================================
 
@@ -369,6 +424,8 @@ echo   check              Run cargo check on openzt crate
 echo   clippy             Run cargo clippy on openzt crate
 echo   test               Run cargo test on openzt crate
 echo   integration-tests  Run integration tests (builds release, launches game, displays results)
+echo   update             Run cargo update on the workspace (forwards extra args, e.g. -p ^<pkg^>)
+echo   tree               Run cargo tree on the workspace (forwards extra args, e.g. -i ^<pkg^>)
 echo   docs               Generate and open documentation
 echo   console            Open interactive Lua console or run oneshot command
 echo   help               Show this help message
