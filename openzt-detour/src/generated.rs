@@ -8415,6 +8415,8 @@ pub mod ztui_zoostatus {
     pub const ADD_CALLBACKS: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x00517320, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztui_zoostatus/add_completed_research"))]
     pub const ADD_COMPLETED_RESEARCH: FunctionDef<unsafe extern "cdecl" fn(i32)> = FunctionDef{address: 0x0058fc10, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztui_zoostatus/remove_completed_research"))]
+    pub const REMOVE_COMPLETED_RESEARCH: FunctionDef<unsafe extern "cdecl" fn(*const i32)> = FunctionDef{address: 0x0059002c, function_type: PhantomData};
 }
 
 // ZTUndoBuffer class functions
@@ -8749,6 +8751,8 @@ pub mod zoostatus {
 
     #[cfg_attr(feature = "detour-validation", validate_detour("zoostatus/spend_marketing"))]
     pub const SPEND_MARKETING: FunctionDef<unsafe extern "thiscall" fn(*const u32, f32)> = FunctionDef{address: 0x0041f368, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("zoostatus/spend_research"))]
+    pub const SPEND_RESEARCH: FunctionDef<unsafe extern "thiscall" fn(*const u32, f32)> = FunctionDef{address: 0x0041f3f3, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zoostatus/calculate_sums"))]
     pub const CALCULATE_SUMS: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x0041f881, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zoostatus/rating_checks"))]
@@ -9468,11 +9472,11 @@ pub mod standalone {
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/click_habitat_list"))]
     pub const CLICK_HABITAT_LIST: FunctionDef<unsafe extern "cdecl" fn(i32)> = FunctionDef{address: 0x00599ae7, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/set_family_characteristic"))]
-    pub const SET_FAMILY_CHARACTERISTIC: FunctionDef<unsafe extern "stdcall" fn(i32, i32, i32, u8) -> u32> = FunctionDef{address: 0x0059abd5, function_type: PhantomData};
+    pub const SET_FAMILY_CHARACTERISTIC: FunctionDef<unsafe extern "cdecl" fn(i32, i32, i32, i8) -> bool> = FunctionDef{address: 0x0059abd5, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/set_food_characteristic"))]
-    pub const SET_FOOD_CHARACTERISTIC: FunctionDef<unsafe extern "cdecl" fn(i32, i32, i32, u32) -> u32> = FunctionDef{address: 0x0059addb, function_type: PhantomData};
+    pub const SET_FOOD_CHARACTERISTIC: FunctionDef<unsafe extern "cdecl" fn(i32, i32, i32, u32) -> bool> = FunctionDef{address: 0x0059addb, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/set_entity_characteristic"))]
-    pub const SET_ENTITY_CHARACTERISTIC: FunctionDef<unsafe extern "cdecl" fn(i32, i32, i32, u8) -> u8> = FunctionDef{address: 0x0059af88, function_type: PhantomData};
+    pub const SET_ENTITY_CHARACTERISTIC: FunctionDef<unsafe extern "cdecl" fn(i32, i32, i32, u8) -> bool> = FunctionDef{address: 0x0059af88, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/set_trick_available"))]
     pub const SET_TRICK_AVAILABLE: FunctionDef<unsafe extern "cdecl" fn(i32, u32) -> u32> = FunctionDef{address: 0x0059b60a, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/set_effect_discount"))]
@@ -9570,7 +9574,7 @@ pub mod standalone {
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/unclick_info_plaque"))]
     pub const UNCLICK_INFO_PLAQUE: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x00618d57, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/set_genus_characteristic"))]
-    pub const SET_GENUS_CHARACTERISTIC: FunctionDef<unsafe extern "stdcall" fn(i32, i32, i32, u8) -> u32> = FunctionDef{address: 0x00618d7c, function_type: PhantomData};
+    pub const SET_GENUS_CHARACTERISTIC: FunctionDef<unsafe extern "cdecl" fn(i32, i32, i32, i8) -> bool> = FunctionDef{address: 0x00618d7c, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/thread_download"))]
     pub const THREAD_DOWNLOAD: FunctionDef<unsafe extern "cdecl" fn(*const u32) -> bool> = FunctionDef{address: 0x0062671e, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/configure_keyboard_settings"))]
