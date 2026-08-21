@@ -294,8 +294,17 @@ REM Check Function
 REM ============================================================
 
 :check
+SHIFT
+SET CHECK_ARGS=
+:check_args_loop
+IF "%~1"=="" GOTO run_check
+SET CHECK_ARGS=!CHECK_ARGS! %1
+SHIFT
+GOTO check_args_loop
+
+:run_check
 echo Running cargo check on openzt...
-cargo check --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+cargo check --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc !CHECK_ARGS!
 
 IF !errorlevel! NEQ 0 (
     echo.
@@ -313,8 +322,17 @@ REM Clippy Function
 REM ============================================================
 
 :clippy
+SHIFT
+SET CLIPPY_ARGS=
+:clippy_args_loop
+IF "%~1"=="" GOTO run_clippy
+SET CLIPPY_ARGS=!CLIPPY_ARGS! %1
+SHIFT
+GOTO clippy_args_loop
+
+:run_clippy
 echo Running cargo clippy on openzt...
-cargo clippy --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc
+cargo clippy --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc !CLIPPY_ARGS!
 
 IF !errorlevel! NEQ 0 (
     echo.

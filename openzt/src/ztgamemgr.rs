@@ -1,3 +1,4 @@
+use openzt_detour::generated::{zoostatus::SPEND_RESEARCH, ztgamemgr::SUBTRACT_CASH};
 use tracing::info;
 
 use crate::{command_console::CommandError, globals::globals, lua_fn};
@@ -61,6 +62,40 @@ impl ZTGameMgr {
         unsafe {
             *(enable_dev_mode_address as *mut bool) = enable;
         }
+    }
+
+    /// The current budget, in dollars.
+    pub fn cash(&self) -> f32 {
+        self.cash
+    }
+
+    /// Exposed for the live `reimplementation_tests` comparison harness, to pin the real, live
+    /// `ZTGameMgr` singleton's budget to a known value around a `ZTResearchBranch::update` comparison
+    /// call - see `ztresearch::reimplementation_tests` support for why this writes the real singleton
+    /// rather than a synthetic instance.
+    #[cfg(feature = "reimplementation-tests")]
+    pub(crate) fn set_cash(&mut self, value: f32) {
+        self.cash = value;
+    }
+
+    /// Calls the vanilla `ZTGameMgr::subtractCash`: subtracts `amount` from the budget, then refreshes
+    /// the on-screen money display (`ZTUI::main::setMoneyText`). Used by `ztresearch::ZTResearchBranch::update`'s
+    /// native reimplementation of the branch funding cost, among other callers.
+    pub fn subtract_cash(&mut self, amount: f32) {
+        unsafe { SUBTRACT_CASH.original()((self as *mut Self) as *const u32, amount) }
+    }
+
+    /// Calls the vanilla `ZooStatus::spendResearch` on the embedded `ZooStatus` finance-tracker at
+    /// `self + 0x10` (per `resources/decompiles/ZTResearchBranch_update.c`, which calls it right
+    /// before `subtractCash`; the sibling `ZTMarketing::update` confirms the same `&GameMgr->field_0x10`
+    /// `ZooStatus` sub-object at the exact same call shape with its own `spendMarketing`). Per
+    /// `resources/decompiles/ZooStatus_spendResearch.c`, this only ever writes running-total fields on
+    /// `this` itself - no further calls, no other side effects. Used by
+    /// `ztresearch::ZTResearchBranch::update`'s native reimplementation, called before `subtract_cash`
+    /// to match vanilla's own call order.
+    pub fn spend_research(&mut self, amount: f32) {
+        let zoostatus_ptr = (self as *mut Self as u32 + 0x10) as *const u32;
+        unsafe { SPEND_RESEARCH.original()(zoostatus_ptr, amount) }
     }
 }
 

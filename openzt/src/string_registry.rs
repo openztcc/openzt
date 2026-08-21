@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Mutex};
 
+use openzt_detour::generated::bfapp::LOAD_STRING;
 use openzt_detour_macro::detour_mod;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
@@ -347,9 +348,8 @@ fn is_user_type_id(param_1: u32) -> bool {
 }
 
 fn load_string_from_game(string_id: u32) -> Option<String> {
-    let bfapp_load_string: extern "thiscall" fn(u32, u32, u32) -> u32 = unsafe { std::mem::transmute(0x00404e0a) };
     let mut buffer = [0u8; LOAD_STRING_BUFFER_SIZE];
-    let length = bfapp_load_string(GLOBAL_BFAPP, string_id, buffer.as_mut_ptr() as u32);
+    let length = unsafe { LOAD_STRING.original()(GLOBAL_BFAPP as *const u32, string_id as *const u32, buffer.as_mut_ptr() as *const u8) };
     if length == 0 {
         return None;
     }

@@ -17,14 +17,20 @@
 //! `openzt-detour/src/generated.rs` rather than risk a subtly wrong reimplementation.
 
 use std::{
-    ffi::{c_char, CStr},
+    ffi::{c_char, CStr, CString},
     fmt,
     mem::size_of,
 };
 
 use num_enum::TryFromPrimitive;
-use openzt_detour::generated::{standalone, ztresearchbranch, ztresearchcategory, ztresearchmgr, ztresearchprogram};
+use openzt_detour::generated::{
+    bfuimgr, standalone, uicontrol, ztresearchbranch, ztresearchcategory, ztresearchmgr, ztresearchprogram, ztui_expansionselect, ztui_zoostatus,
+};
 use tracing::{error, info, warn};
+use windows::{
+    core::{PCSTR, PSTR},
+    Win32::Globalization::{GetCurrencyFormatA, CURRENCYFMTA},
+};
 
 use crate::{
     bfconfigfile::BFConfigFile,
@@ -117,6 +123,190 @@ pub struct ZTResearchProgram {
     effect_param_1: i32,         // 0x4c - confirmed: the `.cfg` `effectval2` field
     effect_param_2: i32,         // 0x50 - confirmed: the `.cfg` `effectval3` field
     help_id: i32,                // 0x54 - confirmed: the `.cfg` `helpid` field (only set if present; 0 by default from the constructor)
+}
+
+/// The underlying manager calls `ZTResearchProgram::on_completion`/`reset` dispatch into (still
+/// opaque calls into the original game code, same as everywhere else those aren't independently
+/// reimplemented in OpenZT), abstracted so `dispatch_on_completion`/`dispatch_reset`'s own
+/// branching/bookkeeping logic - which case fires, and whether the zoostatus completed-research list
+/// gets touched - can be pure-tested against a mock, without touching real game memory. Every method
+/// but the two `add`/`remove_completed_research` notifications takes `&ZTResearchProgram` rather than
+/// individual fields, matching how vanilla reads straight out of `this`. `LiveResearchEffects` below
+/// is the only real implementation.
+trait ResearchEffects {
+    fn set_avail(&mut self, target_id: i32, avail: bool);
+    fn set_building_upgrade(&mut self, program: &ZTResearchProgram, install: bool) -> bool;
+    fn set_entity_characteristic(&mut self, program: &ZTResearchProgram) -> bool;
+    fn set_genus_characteristic(&mut self, program: &ZTResearchProgram) -> bool;
+    fn set_family_characteristic(&mut self, program: &ZTResearchProgram) -> bool;
+    fn set_food_characteristic(&mut self, program: &ZTResearchProgram) -> bool;
+    fn set_trick_available(&mut self, program: &ZTResearchProgram) -> bool;
+    fn set_effect_discount(&mut self, program: &ZTResearchProgram) -> bool;
+    fn add_completed_research(&mut self, program_ptr: *mut ZTResearchProgram);
+    fn remove_completed_research(&mut self, program_ptr: *mut ZTResearchProgram);
+}
+
+/// Pure dispatch decision for `ZTResearchProgram::onCompletion`, per
+/// `resources/decompiles/ZTResearchProgram_onCompletion.c`: every valid `effect_kind` calls exactly
+/// one underlying effect function, then notifies `ZTUI::zoostatus` iff that call reports success. An
+/// invalid `effect_kind_raw` (anything `ZTResearchEffectKind::try_from` rejects) is a no-op.
+fn dispatch_on_completion(effects: &mut impl ResearchEffects, program: &mut ZTResearchProgram) -> bool {
+    let success = match program.effect_kind() {
+        Some(ZTResearchEffectKind::UnlockEntity) => {
+            effects.set_avail(program.target_id, true);
+            true
+        }
+        Some(ZTResearchEffectKind::BuildingUpgrade) => effects.set_building_upgrade(program, true),
+        Some(ZTResearchEffectKind::EntityCharacteristic) => effects.set_entity_characteristic(program),
+        Some(ZTResearchEffectKind::GenusCharacteristic) => effects.set_genus_characteristic(program),
+        Some(ZTResearchEffectKind::FamilyCharacteristic) => effects.set_family_characteristic(program),
+        Some(ZTResearchEffectKind::FoodCharacteristic) => effects.set_food_characteristic(program),
+        Some(ZTResearchEffectKind::TrickAvailable) => effects.set_trick_available(program),
+        Some(ZTResearchEffectKind::EffectDiscount) => effects.set_effect_discount(program),
+        None => return false,
+    };
+    if success {
+        effects.add_completed_research(program as *mut ZTResearchProgram);
+    }
+    success
+}
+
+/// Pure dispatch decision for `ZTResearchProgram::reset`, per
+/// `resources/decompiles/ZTResearchProgram_reset.c`/`.asm`. Always zeroes `current_progress` first,
+/// unconditionally - confirmed via `.asm`: `this->current_progress = 0` runs before the switch even
+/// dispatches, for every `effect_kind_raw` including invalid ones. Beyond that, notably asymmetric
+/// with `dispatch_on_completion` above:
+/// - `UnlockEntity` (0): calls `setAvail(target_id, false)`, then unconditionally removes the program
+///   from the completed-research list.
+/// - `BuildingUpgrade` (1): calls `setBuildingUpgrade(..., install=false)`; only removes from the
+///   completed-research list if that call reports success.
+/// - Unset (`-1`) and `EntityCharacteristic`..`EffectDiscount` (2..=7): no underlying call at all -
+///   just unconditionally removes the program from the completed-research list. The C decompile only
+///   shows explicit case labels for `-1,2,3,4,5,6`, leaving `7` looking like it falls into the
+///   "invalid" default - but that's the decompiler under-reporting the jump table: confirmed **live**
+///   (`ZTRESEARCHPROGRAM_ON_COMPLETION_RESET`'s comparison against real vanilla `reset()`) that
+///   `EffectDiscount` (`7`) returns success here too, meaning the compiled jump table's 9th slot
+///   aliases to the very same block `-1`/`2..=6` use, just like every one of them skipping the
+///   effect-specific call entirely (unlike `on_completion`, which does call the matching
+///   `set*Characteristic`/`setTrickAvailable`/`setEffectDiscount` for every one of these).
+/// - Anything outside `-1..=7`: a genuine no-op (beyond the unconditional `current_progress` reset
+///   above) - this is the real out-of-range default, confirmed by the `.asm`'s `JA` guard.
+fn dispatch_reset(effects: &mut impl ResearchEffects, program: &mut ZTResearchProgram) -> bool {
+    program.current_progress = 0.0;
+    match program.effect_kind_raw {
+        0 => {
+            effects.set_avail(program.target_id, false);
+            effects.remove_completed_research(program as *mut ZTResearchProgram);
+            true
+        }
+        1 => {
+            let success = effects.set_building_upgrade(program, false);
+            if success {
+                effects.remove_completed_research(program as *mut ZTResearchProgram);
+            }
+            success
+        }
+        -1 | 2..=7 => {
+            effects.remove_completed_research(program as *mut ZTResearchProgram);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The real `ResearchEffects`: calls straight into the addresses `on_completion`/`reset` dispatch to
+/// in vanilla, via `openzt-detour/src/generated.rs`. `set_building_upgrade`/`set_trick_available`/
+/// `set_effect_discount` used to mask their raw return value to its low byte before checking success:
+/// per their own decompiles, they return `CONCAT31(garbage, success_flag)` - the upper 3 bytes are
+/// whatever was left over in EAX from an unrelated prior call, not part of the real result. Confirmed
+/// live: without the mask, `ZTRESEARCHPROGRAM_ON_COMPLETION_RESET`'s live comparison test
+/// intermittently reported a spurious success for e.g. `TrickAvailable` even when the real call's
+/// actual (low-byte) result was failure. A Ghidra regen has since retyped all six of these (this trio
+/// included) to return `bool` rather than `u32`/`i8`/etc - matching the real, single-byte C++ `bool`
+/// these functions actually return - so the manual mask is gone: `bool`'s `extern "cdecl"` ABI already
+/// reads only the low byte (`AL`) the same way vanilla's own callers do, which is exactly what the
+/// mask was manually working around. Re-confirmed live post-regen against the same
+/// `ZTRESEARCHPROGRAM_ON_COMPLETION_RESET` test that originally caught the garbage-upper-bytes bug.
+struct LiveResearchEffects;
+
+impl ResearchEffects for LiveResearchEffects {
+    fn set_avail(&mut self, target_id: i32, avail: bool) {
+        unsafe { standalone::SET_AVAIL.original()(target_id, avail as u32) }
+    }
+
+    fn set_building_upgrade(&mut self, program: &ZTResearchProgram, install: bool) -> bool {
+        unsafe {
+            standalone::SET_BUILDING_UPGRADE.original()(
+                program.target_id,
+                program.id,
+                program.entity_icon_ptr as *const i8,
+                program.effect_param_0,
+                program.effect_param_1,
+                program.effect_param_2,
+                install as i8,
+            )
+        }
+    }
+
+    fn set_entity_characteristic(&mut self, program: &ZTResearchProgram) -> bool {
+        unsafe {
+            standalone::SET_ENTITY_CHARACTERISTIC.original()(
+                program.target_id,
+                program.effect_param_0,
+                program.effect_param_1,
+                program.effect_param_2 as u8,
+            )
+        }
+    }
+
+    fn set_genus_characteristic(&mut self, program: &ZTResearchProgram) -> bool {
+        unsafe {
+            standalone::SET_GENUS_CHARACTERISTIC.original()(
+                program.target_id,
+                program.effect_param_0,
+                program.effect_param_1,
+                program.effect_param_2 as i8,
+            )
+        }
+    }
+
+    fn set_family_characteristic(&mut self, program: &ZTResearchProgram) -> bool {
+        unsafe {
+            standalone::SET_FAMILY_CHARACTERISTIC.original()(
+                program.target_id,
+                program.effect_param_0,
+                program.effect_param_1,
+                program.effect_param_2 as i8,
+            )
+        }
+    }
+
+    fn set_food_characteristic(&mut self, program: &ZTResearchProgram) -> bool {
+        unsafe {
+            standalone::SET_FOOD_CHARACTERISTIC.original()(
+                program.target_id,
+                program.effect_param_0,
+                program.effect_param_1,
+                program.effect_param_2 as u32,
+            )
+        }
+    }
+
+    fn set_trick_available(&mut self, program: &ZTResearchProgram) -> bool {
+        unsafe { standalone::SET_TRICK_AVAILABLE.original()(program.target_id, program.effect_param_0 as u32) }
+    }
+
+    fn set_effect_discount(&mut self, program: &ZTResearchProgram) -> bool {
+        unsafe { standalone::SET_EFFECT_DISCOUNT.original()(program.target_id, program.effect_param_0, program.effect_param_1, program.effect_param_2) }
+    }
+
+    fn add_completed_research(&mut self, program_ptr: *mut ZTResearchProgram) {
+        unsafe { ztui_zoostatus::ADD_COMPLETED_RESEARCH.original()(program_ptr as i32) }
+    }
+
+    fn remove_completed_research(&mut self, program_ptr: *mut ZTResearchProgram) {
+        unsafe { ztui_zoostatus::REMOVE_COMPLETED_RESEARCH.original()(program_ptr as *const i32) }
+    }
 }
 
 impl ZTResearchProgram {
@@ -228,20 +418,249 @@ impl ZTResearchProgram {
         load_string_by_id(self.help_id as u32)
     }
 
-    /// Calls the vanilla `ZTResearchProgram::onCompletion`, which dispatches on `effect_kind` into
-    /// one of several other managers (building/entity/genus/family/food/trick/discount) and reports
-    /// the completion to `ZTUI::zoostatus`. Left as a call into the original implementation since
-    /// several of those downstream functions aren't otherwise reimplemented in OpenZT.
+    /// Reimplementation of `ZTResearchProgram::onCompletion`: dispatches on `effect_kind` into one of
+    /// several other managers (building/entity/genus/family/food/trick/discount - still opaque calls
+    /// into the original game code, same as everywhere else in OpenZT those aren't independently
+    /// reimplemented) and reports the completion to `ZTUI::zoostatus` if the underlying call reports
+    /// success. See `dispatch_on_completion` for the dispatch logic itself and
+    /// `ZTResearchProgram_onCompletion.c` for the source this was reimplemented from. Returns `1` on
+    /// success, `0` otherwise (vanilla's raw return value has undefined garbage in its upper 3 bytes -
+    /// only the low byte, i.e. this success flag, is ever meaningful).
     pub fn on_completion(&mut self) -> u32 {
-        unsafe { ztresearchprogram::ON_COMPLETION.original()((self as *mut Self) as *const u32) }
+        dispatch_on_completion(&mut LiveResearchEffects, self) as u32
     }
 
+    /// Reimplementation of `ZTResearchProgram::reset`. Always zeroes `current_progress`, regardless
+    /// of `effect_kind`. See `dispatch_reset` for the rest of the dispatch logic and
+    /// `ZTResearchProgram_reset.c` for the source this was reimplemented from - notably, unlike
+    /// `on_completion`, only `UnlockEntity`/`BuildingUpgrade` effects call back into their underlying
+    /// manager; every other valid effect kind (`EntityCharacteristic` through `EffectDiscount`) just
+    /// unconditionally removes the program from the completed-research list with no attempt to undo
+    /// the effect. Returns `1` on success, `0` otherwise (see `on_completion`'s doc comment on why the
+    /// raw vanilla return value isn't reproduced exactly).
     pub fn reset(&mut self) -> u32 {
-        unsafe { ztresearchprogram::RESET.original()((self as *mut Self) as *const u32) }
+        dispatch_reset(&mut LiveResearchEffects, self) as u32
     }
 
     pub fn load_program(&mut self, reader: *const u32) -> u32 {
         unsafe { ztresearchprogram::LOAD_PROGRAM.original()((self as *mut Self) as *const u32, reader) }
+    }
+}
+
+#[cfg(test)]
+mod effect_dispatch_tests {
+    use super::*;
+
+    /// Records every `ResearchEffects` call made against it, in order, and returns caller-configured
+    /// canned results for the calls that report success/failure.
+    #[derive(Debug, Default)]
+    struct MockEffects {
+        calls: Vec<String>,
+        set_building_upgrade_result: bool,
+        set_entity_characteristic_result: bool,
+        set_genus_characteristic_result: bool,
+        set_family_characteristic_result: bool,
+        set_food_characteristic_result: bool,
+        set_trick_available_result: bool,
+        set_effect_discount_result: bool,
+    }
+
+    impl ResearchEffects for MockEffects {
+        fn set_avail(&mut self, target_id: i32, avail: bool) {
+            self.calls.push(format!("set_avail({target_id}, {avail})"));
+        }
+
+        fn set_building_upgrade(&mut self, _program: &ZTResearchProgram, install: bool) -> bool {
+            self.calls.push(format!("set_building_upgrade(install={install})"));
+            self.set_building_upgrade_result
+        }
+
+        fn set_entity_characteristic(&mut self, _program: &ZTResearchProgram) -> bool {
+            self.calls.push("set_entity_characteristic".to_string());
+            self.set_entity_characteristic_result
+        }
+
+        fn set_genus_characteristic(&mut self, _program: &ZTResearchProgram) -> bool {
+            self.calls.push("set_genus_characteristic".to_string());
+            self.set_genus_characteristic_result
+        }
+
+        fn set_family_characteristic(&mut self, _program: &ZTResearchProgram) -> bool {
+            self.calls.push("set_family_characteristic".to_string());
+            self.set_family_characteristic_result
+        }
+
+        fn set_food_characteristic(&mut self, _program: &ZTResearchProgram) -> bool {
+            self.calls.push("set_food_characteristic".to_string());
+            self.set_food_characteristic_result
+        }
+
+        fn set_trick_available(&mut self, _program: &ZTResearchProgram) -> bool {
+            self.calls.push("set_trick_available".to_string());
+            self.set_trick_available_result
+        }
+
+        fn set_effect_discount(&mut self, _program: &ZTResearchProgram) -> bool {
+            self.calls.push("set_effect_discount".to_string());
+            self.set_effect_discount_result
+        }
+
+        fn add_completed_research(&mut self, _program_ptr: *mut ZTResearchProgram) {
+            self.calls.push("add_completed_research".to_string());
+        }
+
+        fn remove_completed_research(&mut self, _program_ptr: *mut ZTResearchProgram) {
+            self.calls.push("remove_completed_research".to_string());
+        }
+    }
+
+    fn program_with(effect_kind_raw: i32) -> ZTResearchProgram {
+        ZTResearchProgram {
+            config_file: BFConfigFile::default(),
+            cached_name: ZTBufferString::from_raw_parts(0, 0, 0),
+            cached_desc: ZTBufferString::from_raw_parts(0, 0, 0),
+            desc_id: 0,
+            icon_ptr: 0,
+            entity_icon_ptr: 0,
+            id: 0,
+            target_cost: 0.0,
+            current_progress: 0.0,
+            priority: 0,
+            target_id: 42,
+            effect_kind_raw,
+            effect_param_0: 1,
+            effect_param_1: 2,
+            effect_param_2: 3,
+            help_id: 0,
+        }
+    }
+
+    #[test]
+    fn on_completion_unlock_entity_always_succeeds_and_notifies() {
+        let mut program = program_with(ZTResearchEffectKind::UnlockEntity as i32);
+        let mut mock = MockEffects::default();
+        assert!(dispatch_on_completion(&mut mock, &mut program));
+        assert_eq!(mock.calls, vec!["set_avail(42, true)", "add_completed_research"]);
+    }
+
+    #[test]
+    fn on_completion_building_upgrade_notifies_only_on_success() {
+        for success in [true, false] {
+            let mut program = program_with(ZTResearchEffectKind::BuildingUpgrade as i32);
+            let mut mock = MockEffects { set_building_upgrade_result: success, ..Default::default() };
+            assert_eq!(dispatch_on_completion(&mut mock, &mut program), success);
+            let mut expected = vec!["set_building_upgrade(install=true)".to_string()];
+            if success {
+                expected.push("add_completed_research".to_string());
+            }
+            assert_eq!(mock.calls, expected);
+        }
+    }
+
+    #[test]
+    fn on_completion_dispatches_each_remaining_valid_effect_kind() {
+        let cases = [
+            (ZTResearchEffectKind::EntityCharacteristic, "set_entity_characteristic"),
+            (ZTResearchEffectKind::GenusCharacteristic, "set_genus_characteristic"),
+            (ZTResearchEffectKind::FamilyCharacteristic, "set_family_characteristic"),
+            (ZTResearchEffectKind::FoodCharacteristic, "set_food_characteristic"),
+            (ZTResearchEffectKind::TrickAvailable, "set_trick_available"),
+            (ZTResearchEffectKind::EffectDiscount, "set_effect_discount"),
+        ];
+        for (kind, expected_call) in cases {
+            for success in [true, false] {
+                let mut program = program_with(kind as i32);
+                let mut mock = MockEffects::default();
+                match kind {
+                    ZTResearchEffectKind::EntityCharacteristic => mock.set_entity_characteristic_result = success,
+                    ZTResearchEffectKind::GenusCharacteristic => mock.set_genus_characteristic_result = success,
+                    ZTResearchEffectKind::FamilyCharacteristic => mock.set_family_characteristic_result = success,
+                    ZTResearchEffectKind::FoodCharacteristic => mock.set_food_characteristic_result = success,
+                    ZTResearchEffectKind::TrickAvailable => mock.set_trick_available_result = success,
+                    ZTResearchEffectKind::EffectDiscount => mock.set_effect_discount_result = success,
+                    _ => unreachable!(),
+                }
+                assert_eq!(dispatch_on_completion(&mut mock, &mut program), success);
+                let mut expected = vec![expected_call.to_string()];
+                if success {
+                    expected.push("add_completed_research".to_string());
+                }
+                assert_eq!(mock.calls, expected, "kind={kind:?}, success={success}");
+            }
+        }
+    }
+
+    #[test]
+    fn on_completion_invalid_effect_kind_is_a_no_op() {
+        for kind in [-1, 8, i32::MIN, i32::MAX] {
+            let mut program = program_with(kind);
+            let mut mock = MockEffects::default();
+            assert!(!dispatch_on_completion(&mut mock, &mut program));
+            assert!(mock.calls.is_empty());
+        }
+    }
+
+    #[test]
+    fn reset_always_zeroes_current_progress_regardless_of_effect_kind() {
+        for kind in [-1, 0, 1, 2, 6, 7, 8, i32::MIN, i32::MAX] {
+            let mut program = program_with(kind);
+            program.current_progress = 123.0;
+            let mut mock = MockEffects::default();
+            dispatch_reset(&mut mock, &mut program);
+            assert_eq!(program.current_progress, 0.0, "kind={kind}");
+        }
+    }
+
+    #[test]
+    fn reset_unlock_entity_always_succeeds_and_notifies() {
+        let mut program = program_with(ZTResearchEffectKind::UnlockEntity as i32);
+        let mut mock = MockEffects::default();
+        assert!(dispatch_reset(&mut mock, &mut program));
+        assert_eq!(mock.calls, vec!["set_avail(42, false)", "remove_completed_research"]);
+    }
+
+    #[test]
+    fn reset_building_upgrade_notifies_only_on_success() {
+        for success in [true, false] {
+            let mut program = program_with(ZTResearchEffectKind::BuildingUpgrade as i32);
+            let mut mock = MockEffects { set_building_upgrade_result: success, ..Default::default() };
+            assert_eq!(dispatch_reset(&mut mock, &mut program), success);
+            let mut expected = vec!["set_building_upgrade(install=false)".to_string()];
+            if success {
+                expected.push("remove_completed_research".to_string());
+            }
+            assert_eq!(mock.calls, expected);
+        }
+    }
+
+    /// Confirmed via `ZTResearchProgram_reset.c`/`.asm`: unlike `on_completion`, `reset` does NOT call
+    /// `setEntityCharacteristic`/`setGenusCharacteristic`/`setFamilyCharacteristic`/
+    /// `setFoodCharacteristic`/`setTrickAvailable` at all for these kinds - it just unconditionally
+    /// removes the program from the completed-research list, same as the unset (`-1`) case.
+    #[test]
+    fn reset_unset_and_non_reversible_kinds_notify_without_calling_the_underlying_effect() {
+        for kind in [-1, 2, 3, 4, 5, 6, ZTResearchEffectKind::EffectDiscount as i32] {
+            let mut program = program_with(kind);
+            let mut mock = MockEffects::default();
+            assert!(dispatch_reset(&mut mock, &mut program), "kind={kind}");
+            assert_eq!(mock.calls, vec!["remove_completed_research"], "kind={kind}");
+        }
+    }
+
+    /// Confirmed live (`ZTRESEARCHPROGRAM_ON_COMPLETION_RESET`'s comparison against real vanilla
+    /// `reset()`): the C decompile only shows explicit case labels through `6`, making `7`
+    /// (`EffectDiscount`) look like it falls into the "invalid" default - but the compiled jump
+    /// table's 9th slot actually aliases to the same block `-1`/`2..=6` use (see
+    /// `reset_unset_and_non_reversible_kinds_notify_without_calling_the_underlying_effect` above).
+    /// Only genuinely out-of-range values are a no-op.
+    #[test]
+    fn reset_out_of_range_is_a_no_op() {
+        for kind in [8, i32::MIN, i32::MAX] {
+            let mut program = program_with(kind);
+            let mut mock = MockEffects::default();
+            assert!(!dispatch_reset(&mut mock, &mut program), "kind={kind}");
+            assert!(mock.calls.is_empty(), "kind={kind}");
+        }
     }
 }
 
@@ -482,6 +901,12 @@ impl ZTResearchBranch {
         (self.current_program_ptr != 0).then(|| unsafe { ref_from_memory(self.current_program_ptr) })
     }
 
+    /// Mutable counterpart to `current_program`, used by `update` to accumulate progress on the
+    /// selected program.
+    fn current_program_mut(&self) -> Option<&'static mut ZTResearchProgram> {
+        (self.current_program_ptr != 0).then(|| unsafe { mut_from_memory(self.current_program_ptr) })
+    }
+
     pub fn current_funding_level(&self) -> i32 {
         self.current_funding_level
     }
@@ -505,13 +930,20 @@ impl ZTResearchBranch {
         (index < self.funding_level_count()).then(|| self.funding_level(index).rate())
     }
 
-    /// Reimplementation of `OOAnalyzer::ZTResearchBranch::increaseFunding`.
+    /// Reimplementation of `OOAnalyzer::ZTResearchBranch::increaseFunding`. Confirmed against
+    /// `ZTResearchBranch_increaseFunding.asm`: the `current_funding_level + 1 < count` guard is an
+    /// **unsigned** comparison (`CMP`/`JNC`, not a signed `JGE`), so a negative `current_funding_level`
+    /// whose `+1` is still negative (i.e. `<= -2`) wraps to a huge `u32` and fails the guard, falling
+    /// through to the `count - 1` clamp below - the same clamp an already-at-the-top level hits.
+    /// `current_funding_level == -1` doesn't diverge (`-1 + 1 == 0`, non-negative either way). Found
+    /// live via `ZTRESEARCHBRANCH_FUNDING`: a naive signed `<` here (this function's original form)
+    /// disagreed with real vanilla for `current_funding_level <= -2`.
     pub fn increase_funding(&mut self) {
         let count = self.funding_level_count() as i32;
         if count == 0 {
             self.current_funding_level = 0;
-        } else if self.current_funding_level + 1 < count {
-            self.current_funding_level += 1;
+        } else if (self.current_funding_level.wrapping_add(1) as u32) < count as u32 {
+            self.current_funding_level = self.current_funding_level.wrapping_add(1);
         } else {
             self.current_funding_level = count - 1;
         }
@@ -529,13 +961,37 @@ impl ZTResearchBranch {
     /// Reimplementation of `OOAnalyzer::ZTResearchBranch::pctRemainingOnProgram`. Returns `None`
     /// when there is no selected program or the active funding level isn't contributing (rate <= 0),
     /// mirroring the vanilla function's `-1` sentinel return.
+    ///
+    /// The float-to-int conversion deliberately does *not* round to nearest, despite Ghidra's
+    /// decompile naming its helper `ROUND()`, and does *not* use Rust's plain `as i32` saturating
+    /// cast either - both confirmed live (`ZTRESEARCHBRANCH_PCT_DAYS_REMAINING` in
+    /// `reimplementation_tests`):
+    ///
+    /// - It **truncates toward zero**, not round-to-nearest: confirmed live for
+    ///   `target_cost=-8576.077, current_progress=-4133.11` (true value ≈`51.807`), where vanilla
+    ///   returned `51`, not the `52` `.round()` (or any nearest-rounding) would give. This matches
+    ///   `private/resources/decompiles/ZTResearchBranch_pctRemainingOnProgram.asm` exactly: right
+    ///   before `FISTP`, it does `FSTCW`/`OR AH,0xc`/`FLDCW` to force the x87 rounding-control field
+    ///   to `11` (round-toward-zero) for just that one instruction, then restores the original
+    ///   control word - the classic MSVC codegen for a plain C `(int)x` cast (whose standard-mandated
+    ///   semantics *are* truncation toward zero), not an actual `round()` call. `f32::trunc()` below
+    ///   reproduces this directly.
+    /// - For a value that doesn't fit a 64-bit integer (NaN, ±Infinity, or a magnitude beyond
+    ///   `i64`'s range), x87's masked-invalid-operation behavior makes `FISTP` store the "integer
+    ///   indefinite" pattern `0x8000_0000_0000_0000` into its 64-bit destination (`FISTP` only has a
+    ///   64-bit integer store form - x87 has no 32-bit one - so the real return value is the low
+    ///   dword of that 64-bit store, the rest discarded). That pattern's low dword is `0`, confirmed
+    ///   live for `target_cost=0.0` - *not*
+    ///   `i32::MIN`/`i32::MAX`, which is what `f32 as i32`'s saturating cast would (wrongly) produce
+    ///   for -Infinity/+Infinity.
     pub fn pct_remaining_on_program(&self) -> Option<i32> {
         let program = self.current_program()?;
         let rate = self.current_funding_rate()?;
         if rate <= 0.0 {
             return None;
         }
-        Some((((program.target_cost - program.current_progress) * 100.0) / program.target_cost).round() as i32)
+        let raw = (((program.target_cost - program.current_progress) * 100.0) / program.target_cost).trunc();
+        Some(if raw.is_finite() { raw as i64 as i32 } else { 0 })
     }
 
     /// Reimplementation of `OOAnalyzer::ZTResearchBranch::daysRemainingOnProgram`. Same guards as
@@ -550,10 +1006,79 @@ impl ZTResearchBranch {
         Some((program.target_cost - program.current_progress) * 30.0 / rate)
     }
 
-    /// Calls the vanilla `ZTResearchBranch::update`; applies `days` in-game days of progress to the
-    /// currently selected program. No decompile of this function's body is available.
+    /// Native reimplementation of `ZTResearchBranch::update`'s eligibility/progress/cash
+    /// state-transition core, per `resources/decompiles/ZTResearchBranch_update.c`/`.asm` (the `.asm`
+    /// was needed to get the real byte offsets right - see `ZTResearchMgr::always_check_expansion`'s
+    /// doc comment for one place the `.c` decompile's own pointer-arithmetic scaling was actively
+    /// misleading). Applies `days` in-game days of progress/cost to the currently selected program (see
+    /// `predict_branch_progress`), spending cash via `ZTGameMgr::spend_research`/`subtract_cash` (in
+    /// that order, matching vanilla) when affordable, then, on completion, dispatches `on_completion()`
+    /// (native, from Phase A) and picks the next program via `pick_random_program()` (still a call into
+    /// the original implementation - see its own doc comment on why).
+    ///
+    /// The eligibility gate mirrors vanilla exactly: with `ZTResearchMgr::always_check_expansion()` or
+    /// `getAnyExpansionsDisabled()` true, a null `current_category` short-circuits straight to
+    /// `pick_random_program()` (matching vanilla's `iVar1 == 0` guard before it would otherwise
+    /// dereference the category to call `isExpansionDisabled`); with neither true, `isExpansionDisabled`
+    /// is never called at all (vanilla skips straight past it), matching this method's `eligible = true`
+    /// fallback below.
+    ///
+    /// UI feedback (icon animation, the "research complete"/"no more research" confirm dialog) is
+    /// called via address like every other UI surface in this file that isn't independently
+    /// reimplemented - **except** the confirm dialog's own caption text, which vanilla sets via an
+    /// indirect vtable call (`BFApp::buildString` into a stack buffer, then a virtual dispatch through
+    /// the label element's own vtable at offset `0xc4` - past `UIElement`'s own confirmed 49-entry
+    /// vtable entirely, i.e. some derived class's real override that isn't independently reverse
+    /// engineered here) this deliberately does not replicate: the dialog still appears (gated on the
+    /// label element existing, matching vanilla's own null check), just without vanilla's
+    /// dynamically-substituted caption text. This is a cosmetic gap only - every gameplay-affecting
+    /// side effect (cash, progress, completion effects, program selection) still happens exactly as
+    /// vanilla does.
     pub fn update(&mut self, days: u32) {
-        unsafe { ztresearchbranch::UPDATE.original()((self as *mut Self) as *const u32, days) }
+        let should_check_expansion =
+            global_always_check_expansion() || unsafe { ztui_expansionselect::GET_ANY_EXPANSIONS_DISABLED.original()() != 0 };
+
+        let category = self.current_category();
+        if should_check_expansion && category.is_none() {
+            self.pick_random_program();
+            return;
+        }
+        let eligible = if should_check_expansion {
+            unsafe { ztui_expansionselect::IS_EXPANSION_DISABLED.original()(category.expect("checked above").expansion_id + 1) == 0 }
+        } else {
+            true
+        };
+
+        let category_enabled = category.map(ZTResearchCategory::is_enabled).unwrap_or(false);
+        if category.is_none() || self.current_program().is_none() || !eligible || !category_enabled {
+            self.pick_random_program();
+            return;
+        }
+
+        let level = self.funding_level(self.current_funding_level as usize);
+        let cash = unsafe { &*global_ztgamemgr_ptr() }.cash();
+        let (cash_delta, progress_delta) = predict_branch_progress(days, level.cost(), level.rate(), cash);
+        if cash_delta != 0.0 || progress_delta != 0.0 {
+            unsafe { &mut *global_ztgamemgr_ptr() }.spend_research(cash_delta);
+            unsafe { &mut *global_ztgamemgr_ptr() }.subtract_cash(cash_delta);
+            self.current_program_mut().expect("checked above").current_progress += progress_delta;
+        }
+
+        let program = self.current_program().expect("checked above");
+        if program.current_progress < program.target_cost {
+            return;
+        }
+        self.current_program_mut().expect("checked above").on_completion();
+
+        let icon = get_research_dialog_element(RESEARCH_DIALOG_ICON_ELEMENT_ID);
+        let label_present = get_research_dialog_element(RESEARCH_DIALOG_LABEL_ELEMENT_ID).is_some();
+        show_research_dialog(icon, label_present);
+
+        self.pick_random_program();
+        if self.current_program_ptr != 0 {
+            return;
+        }
+        show_research_dialog(icon, label_present);
     }
 
     /// Calls the vanilla `ZTResearchBranch::pickRandomProgram`, which selects the branch's next
@@ -582,26 +1107,425 @@ impl ZTResearchBranch {
 
     /// The vanilla "$400 (Min)"-style formatted text for the *currently selected* funding level (per
     /// `resources/decompiles/ZTResearchBranch_getFundingText.c`, this always uses
-    /// `current_funding_level` - there's no way to ask for an arbitrary level's text). Calls into the
-    /// original implementation (money formatting + a `%s`-templated name) rather than reimplementing
-    /// it, since it depends on an unconfirmed scale constant (`DAT_00635040`) that only matters if
-    /// you're reimplementing the formatting yourself.
-    ///
-    /// Note: the vanilla function may heap-allocate the returned string and frees it internally via
-    /// an unnamed helper (`FUN_00401a2f`) we don't have a `FunctionDef` for, so we can't replicate
-    /// that free here. In practice these strings are short enough to stay within the small-string-
-    /// optimization inline buffer (no heap allocation at all), so this shouldn't leak in normal use -
-    /// flagging it in case that ever changes.
+    /// `current_funding_level` - there's no way to ask for an arbitrary level's text). Out of range
+    /// (checked as `uint`, so a negative `current_funding_level` also lands here - same idiom as
+    /// `current_funding_rate`) returns an empty string, matching vanilla's empty heap-allocated
+    /// `std::string` in that branch.
     pub fn funding_text(&self) -> String {
-        let mut buffer = [0u32; 3];
-        unsafe {
-            ztresearchbranch::GET_FUNDING_TEXT.original()(
-                (self as *const Self) as *const u32,
-                buffer.as_mut_ptr() as *const u32,
-            );
+        let index = self.current_funding_level as usize;
+        if index >= self.funding_level_count() {
+            return String::new();
         }
-        get_from_memory::<ZTBufferString>(buffer.as_ptr() as u32).copy_to_string()
+        let level = self.funding_level(index);
+        // Confirmed live: despite Ghidra's `ROUND()` label, the underlying FISTP-with-overridden-
+        // control-word idiom truncates toward zero here (e.g. `-29506.857 * (1/30) = -983.56..` prints
+        // as `-$983`, not `-$984`) - a plain `as i32` cast already truncates toward zero in Rust, so no
+        // `.round()` is needed (or correct) here.
+        let money_value = (level.cost() * MONTHLY_TO_DAILY_COST_SCALE) as i32;
+        let money_text = get_money_text(money_value);
+        match level.name() {
+            Some(template) => template.replacen("%s", &money_text, 1),
+            None => money_text,
+        }
     }
+}
+
+/// Pure, no-live-game-dependency tests for `ZTResearchBranch::pct_remaining_on_program`/
+/// `days_remaining_on_program` - both `&self`-only, reading nothing but `this`'s own
+/// `current_program_ptr`/`current_funding_level`/funding table, so real `ZTResearchProgram`/
+/// `ZTResearchBranch` instances can be built directly on Rust's own allocator without any of
+/// `reimplementation_tests::live_support`'s machinery (which is feature-gated behind
+/// `reimplementation-tests`/`proptest`, unavailable to a plain `cargo test` run). Also covered live
+/// in `reimplementation_tests` (`ZTRESEARCHBRANCH_PCT_DAYS_REMAINING`) against the real
+/// `ztresearchbranch::PCT_REMAINING_ON_PROGRAM`/`DAYS_REMAINING_ON_PROGRAM` - originally these
+/// `FunctionDef`s' auto-detected signatures were wrong (`-> i64` and no return type at all), which
+/// is why that live test didn't exist at first; a Ghidra regen has since fixed both to their
+/// confirmed-correct `-> i32`/`-> f32`.
+#[cfg(test)]
+mod pct_days_remaining_tests {
+    use super::*;
+
+    fn build_test_program(target_cost: f32, current_progress: f32) -> *mut ZTResearchProgram {
+        Box::into_raw(Box::new(ZTResearchProgram {
+            config_file: BFConfigFile::default(),
+            cached_name: ZTBufferString::from_raw_parts(0, 0, 0),
+            cached_desc: ZTBufferString::from_raw_parts(0, 0, 0),
+            desc_id: 0,
+            icon_ptr: 0,
+            entity_icon_ptr: 0,
+            id: 0,
+            target_cost,
+            current_progress,
+            priority: 0,
+            target_id: -1,
+            effect_kind_raw: -1,
+            effect_param_0: 0,
+            effect_param_1: -1,
+            effect_param_2: 0,
+            help_id: 0,
+        }))
+    }
+
+    fn destroy_test_program(ptr: *mut ZTResearchProgram) {
+        drop(unsafe { Box::from_raw(ptr) });
+    }
+
+    /// Leaks `rates` into a fresh funding-table buffer (`name_id`/`cost` fixed to `0` - neither method
+    /// under test reads them, only `rate`), returning its `(start, end, capacity_end)` raw parts.
+    fn funding_table_from_rates(rates: &[f32]) -> (u32, u32, u32) {
+        if rates.is_empty() {
+            return (0, 0, 0);
+        }
+        let mut table: Vec<ZTResearchFundingLevel> = rates.iter().map(|&rate| ZTResearchFundingLevel { name_id: 0, rate, cost: 0.0 }).collect();
+        let stride = size_of::<ZTResearchFundingLevel>() as u32;
+        let ptr = table.as_mut_ptr() as u32;
+        let len = table.len() as u32;
+        std::mem::forget(table);
+        (ptr, ptr + len * stride, ptr + len * stride)
+    }
+
+    fn free_funding_table(start: u32, end: u32) {
+        if start == 0 {
+            return;
+        }
+        let stride = size_of::<ZTResearchFundingLevel>() as u32;
+        let len = ((end - start) / stride) as usize;
+        drop(unsafe { Vec::<ZTResearchFundingLevel>::from_raw_parts(start as *mut ZTResearchFundingLevel, len, len) });
+    }
+
+    fn build_test_branch(current_program_ptr: u32, current_funding_level: i32, rates: &[f32]) -> ZTResearchBranch {
+        let (funding_table_start, funding_table_end, funding_table_capacity) = funding_table_from_rates(rates);
+        ZTResearchBranch {
+            config_file: BFConfigFile::default(),
+            id: 0,
+            cached_name: ZTBufferString::from_raw_parts(0, 0, 0),
+            cached_desc: ZTBufferString::from_raw_parts(0, 0, 0),
+            icon_ptr: 0,
+            noprogicon_ptr: 0,
+            current_category_ptr: 0,
+            current_program_ptr,
+            category_array: ZTArray::from_raw_parts(0, 0, 0),
+            current_funding_level,
+            funding_table_start,
+            funding_table_end,
+            funding_table_capacity,
+        }
+    }
+
+    fn destroy_test_branch(branch: &ZTResearchBranch) {
+        free_funding_table(branch.funding_table_start, branch.funding_table_end);
+    }
+
+    #[test]
+    fn no_current_program_returns_none() {
+        let branch = build_test_branch(0, 0, &[30.0]);
+        assert_eq!(branch.pct_remaining_on_program(), None);
+        assert_eq!(branch.days_remaining_on_program(), None);
+        destroy_test_branch(&branch);
+    }
+
+    #[test]
+    fn out_of_range_funding_level_returns_none() {
+        let program = build_test_program(100.0, 50.0);
+        // One level in the table, but `current_funding_level` points past the end.
+        let branch = build_test_branch(program as u32, 1, &[30.0]);
+        assert_eq!(branch.pct_remaining_on_program(), None);
+        assert_eq!(branch.days_remaining_on_program(), None);
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn negative_funding_level_returns_none() {
+        let program = build_test_program(100.0, 50.0);
+        let branch = build_test_branch(program as u32, -1, &[30.0]);
+        assert_eq!(branch.pct_remaining_on_program(), None);
+        assert_eq!(branch.days_remaining_on_program(), None);
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn zero_rate_returns_none() {
+        let program = build_test_program(100.0, 50.0);
+        let branch = build_test_branch(program as u32, 0, &[0.0]);
+        assert_eq!(branch.pct_remaining_on_program(), None);
+        assert_eq!(branch.days_remaining_on_program(), None);
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn negative_rate_returns_none() {
+        let program = build_test_program(100.0, 50.0);
+        let branch = build_test_branch(program as u32, 0, &[-5.0]);
+        assert_eq!(branch.pct_remaining_on_program(), None);
+        assert_eq!(branch.days_remaining_on_program(), None);
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn zero_target_cost_with_zero_progress_is_a_zero_over_zero_nan_that_becomes_zero() {
+        let program = build_test_program(0.0, 0.0);
+        let branch = build_test_branch(program as u32, 0, &[30.0]);
+        // (0.0 - 0.0) * 100.0 / 0.0 == NaN; NaN.round() is still NaN, not `is_finite()`, so
+        // `pct_remaining_on_program` returns 0 - matching vanilla's x87 `FISTP` "integer
+        // indefinite" behavior for a value that can't convert to an integer (confirmed live via
+        // `ZTRESEARCHBRANCH_PCT_DAYS_REMAINING`; see that method's own doc comment).
+        assert_eq!(branch.pct_remaining_on_program(), Some(0));
+        // (0.0 - 0.0) * 30.0 / rate == 0.0 exactly (the numerator is a real zero, not a NaN), so
+        // this case doesn't exercise that conversion for `days_remaining_on_program` at all (it
+        // returns `f32`, not `i32`, so there's no int conversion to begin with).
+        assert_eq!(branch.days_remaining_on_program(), Some(0.0));
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn zero_target_cost_with_positive_progress_is_negative_infinity_that_becomes_zero() {
+        let program = build_test_program(0.0, 5.0);
+        let branch = build_test_branch(program as u32, 0, &[30.0]);
+        // (0.0 - 5.0) * 100.0 / 0.0 == -inf, not `is_finite()`, so `pct_remaining_on_program`
+        // returns 0. Confirmed live (`ZTRESEARCHBRANCH_PCT_DAYS_REMAINING`) against real vanilla,
+        // which disagreed with this crate's older `f32 as i32` saturating-cast implementation here
+        // (that cast saturates -inf to `i32::MIN`, but vanilla's x87 `FISTP` "integer indefinite"
+        // value's low dword - the only part any real caller reads - is 0, not `i32::MIN`).
+        assert_eq!(branch.pct_remaining_on_program(), Some(0));
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn zero_target_cost_with_negative_progress_is_positive_infinity_that_becomes_zero() {
+        let program = build_test_program(0.0, -5.0);
+        let branch = build_test_branch(program as u32, 0, &[30.0]);
+        // (0.0 - (-5.0)) * 100.0 / 0.0 == +inf, not `is_finite()`, so `pct_remaining_on_program`
+        // returns 0 - the same x87 `FISTP` "integer indefinite" behavior as the positive-progress
+        // case above, confirmed live the same way (vanilla does not saturate to `i32::MAX` here).
+        assert_eq!(branch.pct_remaining_on_program(), Some(0));
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn current_progress_greater_than_target_cost_returns_negative_values() {
+        let program = build_test_program(100.0, 150.0);
+        let branch = build_test_branch(program as u32, 0, &[30.0]);
+        assert_eq!(branch.pct_remaining_on_program(), Some(-50));
+        assert_eq!(branch.days_remaining_on_program(), Some(-50.0));
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn pct_truncates_toward_zero_at_the_boundary() {
+        // (200.0 - 1.0) * 100.0 / 200.0 == 99.5, which `f32::trunc` truncates toward zero to 99.0 -
+        // vanilla does *not* round to nearest here, confirmed live (see `pct_remaining_on_program`'s
+        // own doc comment for the live case that caught this).
+        let program = build_test_program(200.0, 1.0);
+        let branch = build_test_branch(program as u32, 0, &[30.0]);
+        assert_eq!(branch.pct_remaining_on_program(), Some(99));
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn pct_truncates_toward_zero_for_negative_values() {
+        // (-8576.077 - -4133.11) * 100.0 / -8576.077 == 51.8067..., which `f32::trunc` truncates
+        // toward zero to 51.0. The live case that first caught the round-vs-truncate mismatch.
+        let program = build_test_program(-8576.077, -4133.11);
+        let branch = build_test_branch(program as u32, 0, &[3.9904687]);
+        assert_eq!(branch.pct_remaining_on_program(), Some(51));
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn normal_in_progress_case_matches_hand_computed_values() {
+        let program = build_test_program(1000.0, 250.0);
+        let branch = build_test_branch(program as u32, 0, &[30.0]);
+        // (1000.0 - 250.0) * 100.0 / 1000.0 == 75.0
+        assert_eq!(branch.pct_remaining_on_program(), Some(75));
+        // (1000.0 - 250.0) * 30.0 / 30.0 == 750.0
+        assert_eq!(branch.days_remaining_on_program(), Some(750.0));
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+}
+
+/// `DAT_00630d78`, confirmed by reading the installed `zoo.exe`'s `.data` section directly (float
+/// bytes `45 2e c2 37`, value `2.3148148e-5`) - **not** the same constant as `funding_text`'s
+/// `MONTHLY_TO_DAILY_COST_SCALE` (`1.0/30.0`) despite both scaling a `cost`-shaped field by an elapsed
+/// time unit; empirically `1.0 / 43200.0` to `f32` precision. Confirmed shared verbatim by
+/// `ZTMarketing::update` too (`resources/decompiles/ZTMarketing_update.c` references the exact same
+/// `_DAT_00630d78`, in the exact same `days * cost * scale` shape, right down to reusing
+/// `ZTGameMgr::subtractCash`/an embedded `ZooStatus` "spend" call) - a shared days-to-funding-delta
+/// scale used by more than just research.
+const DAYS_TO_FUNDING_SCALE: f32 = 1.0 / 43200.0;
+
+/// Pure prediction for one `ZTResearchBranch::update(days)` call's progress/cash effect on the
+/// currently-selected program, restricted to the "doesn't complete this call" case - `update` itself
+/// handles completion (`on_completion`/`pick_random_program`/UI) using this function's result. Per
+/// `resources/decompiles/ZTResearchBranch_update.c`/`.asm`: `cash_delta`/`progress_delta` are always
+/// computed from `days`/the current funding level's `cost`/`rate`, but only actually applied - cash
+/// subtracted, progress accumulated - when `cash_delta <= available_cash`; insufficient cash leaves
+/// both unchanged for this call (silently - no partial progress, no debt), signalled here by returning
+/// `(0.0, 0.0)`.
+fn predict_branch_progress(days: u32, funding_cost: f32, funding_rate: f32, available_cash: f32) -> (f32, f32) {
+    let cash_delta = days as f32 * funding_cost * DAYS_TO_FUNDING_SCALE;
+    if cash_delta <= available_cash {
+        let progress_delta = days as f32 * funding_rate * DAYS_TO_FUNDING_SCALE;
+        (cash_delta, progress_delta)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
+#[cfg(test)]
+mod predict_branch_progress_tests {
+    use super::*;
+
+    #[test]
+    fn affordable_case_scales_both_deltas() {
+        let (cash_delta, progress_delta) = predict_branch_progress(10, 1000.0, 30.0, f32::MAX);
+        assert!((cash_delta - 10.0 * 1000.0 * DAYS_TO_FUNDING_SCALE).abs() < f32::EPSILON);
+        assert!((progress_delta - 10.0 * 30.0 * DAYS_TO_FUNDING_SCALE).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn insufficient_cash_leaves_both_deltas_zero() {
+        // cash_delta for this input is well above the tiny available_cash below.
+        assert_eq!(predict_branch_progress(1000, 1_000_000.0, 30.0, 1.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn exactly_affordable_boundary_still_applies() {
+        let cash_delta = 5.0 * 100.0 * DAYS_TO_FUNDING_SCALE;
+        let (applied_cash, applied_progress) = predict_branch_progress(5, 100.0, 30.0, cash_delta);
+        assert_eq!(applied_cash, cash_delta);
+        assert!(applied_progress > 0.0);
+    }
+
+    #[test]
+    fn zero_days_is_a_harmless_no_progress_no_op() {
+        assert_eq!(predict_branch_progress(0, 1000.0, 30.0, 0.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn negative_funding_cost_still_gates_on_the_same_comparison() {
+        // A negative `cost` (not expected from real `.cfg` data, but the comparison itself has no
+        // sign guard in vanilla) produces a negative `cash_delta`, which is always `<= available_cash`
+        // for any non-negative budget - so it applies, "refunding" cash.
+        let (cash_delta, progress_delta) = predict_branch_progress(10, -100.0, 30.0, 0.0);
+        assert!(cash_delta < 0.0);
+        assert!(progress_delta > 0.0);
+    }
+}
+
+/// `GLOBAL_BFUIMgr`'s own fixed address (`0x00635c54`, confirmed via `private/docs/vtables/BFUIMgr.md`:
+/// "address confirmed via its own constructor overwriting `BFMgr`'s vtable") - a plain static object,
+/// not a pointer slot (every call site takes its address directly, e.g.
+/// `BFUIMgr::getElement((BFUIMgr*)&GLOBAL_BFUIMgr, ...)`), unlike `GLOBAL_ZTResearchMgr`/
+/// `GLOBAL_ZTGameMgr` which are one level of pointer indirection away from the real singleton.
+fn global_bfuimgr() -> *const u32 {
+    (get_module_base("zoo.exe") as u32 + 0x0023_5c54) as *const u32
+}
+
+/// The two dialog-`45000` element ids `ZTResearchBranch::update` looks up (`DAT_0063b94e`/
+/// `DAT_0063b942+2`, both confirmed by reading the installed `zoo.exe`'s `.data` section directly: raw
+/// `u16`s `2`/`6` respectively), each added to the shared dialog id `45000` also passed to
+/// `confirmDialog` directly. Fixed data-section literals (not runtime/locale-dependent like Phase E's
+/// `CURRENCYFMTA` fields), so hardcoded rather than read live.
+const RESEARCH_DIALOG_ICON_ELEMENT_ID: i32 = 45000 + 2;
+const RESEARCH_DIALOG_LABEL_ELEMENT_ID: i32 = 45000 + 6;
+const RESEARCH_DIALOG_ID: i32 = 45000;
+
+/// `s_ui/sharedui/exclaim/exclaim` - the icon animation `ZTResearchBranch::update` plays for both the
+/// "research complete" and "no more research" dialogs (and, per
+/// `resources/decompiles/ZTAnimal_showEscapedAnimalAlert.c`, the escaped-animal alert too - the same
+/// shared dialog idiom reused elsewhere in the game). A fixed asset path literal, not something read
+/// from game memory.
+const RESEARCH_EXCLAIM_ANIMATION: &[u8] = b"ui/sharedui/exclaim/exclaim\0";
+
+/// Looks up one of `ZTResearchBranch::update`'s two dialog-`45000` elements via the real
+/// `BFUIMgr::getElement`, returning `None` for a null result (matching vanilla's own null checks
+/// before touching either element further).
+fn get_research_dialog_element(id: i32) -> Option<*const u32> {
+    let element = unsafe { bfuimgr::GET_ELEMENT_0.original()(global_bfuimgr(), id) };
+    (!element.is_null()).then_some(element)
+}
+
+/// The icon-animation + confirm-dialog tail `ZTResearchBranch::update` runs on program completion,
+/// once for "research complete" and (reusing the very same `icon`/`label_present` values, not
+/// re-fetched - matching vanilla, which reuses the same two elements for both) again for "no more
+/// research" if `pick_random_program` didn't find a new one. See `ZTResearchBranch::update`'s own doc
+/// comment for why the dialog's caption text itself is deliberately not set here.
+fn show_research_dialog(icon: Option<*const u32>, label_present: bool) {
+    if let Some(icon) = icon {
+        unsafe {
+            uicontrol::SET_ANIMATION.original()(icon, RESEARCH_EXCLAIM_ANIMATION.as_ptr() as *const i8, true);
+        }
+    }
+    if label_present {
+        unsafe {
+            bfuimgr::CONFIRM_DIALOG_0.original()(global_bfuimgr(), RESEARCH_DIALOG_ID, 0u32, 0i8, 1i8, 0i32);
+        }
+    }
+}
+
+/// `DAT_00635040`, confirmed by reading the installed `zoo.exe`'s `.data` section directly (float
+/// bytes `89 88 08 3d`, exactly `1.0f32 / 30.0f32`'s bit pattern) - the reciprocal of the `30.0`
+/// day-scale constant `days_remaining_on_program` already confirms elsewhere in this file, consistent
+/// with `cost` being a *monthly* figure (per the `.cfg` `cost=` examples, e.g. `min=400`) that
+/// `funding_text` displays as a *daily* cost.
+const MONTHLY_TO_DAILY_COST_SCALE: f32 = 1.0 / 30.0;
+
+/// Reimplementation of the specific `bfinternat::getMoneyText` overload `ZTResearchBranch::getFundingText`
+/// calls - confirmed against the installed `zoo.exe`'s real machine code (not just the decompile) at
+/// address `0x0040eca1`: formats `value` with a plain `%d` (a whole-dollar amount, no cents - unlike
+/// the sibling overload at `0x004ef4d4`, which takes a float and formats with `%.2f`), then hands that
+/// numeral string to `GetCurrencyFormatA`. `getFundingText` always passes `useGrouping = false` for this
+/// call, which - per the same disassembly - temporarily forces `CURRENCYFMTA::Grouping` to `0` around
+/// the call (confirmed live: the real output has no thousands separator). Every other `CURRENCYFMTA`
+/// field, including `NumDigits` (confirmed live to be `0` in the running game, not the `2` the *other*
+/// overload's decompile forces - the two must not be confused), plus the locale id, is read live from
+/// the exact fixed globals vanilla itself reads/mutates around this same call site
+/// (`DAT_0063806c`/`lpFormat_0063b3a8`), rather than hardcoded from the static image, so this matches
+/// whatever the running game's own locale-init code has set them to.
+fn get_money_text(value: i32) -> String {
+    let base = get_module_base("zoo.exe") as u32;
+    let num_digits = get_from_memory::<u32>(base + 0x0023_b3a8);
+    let leading_zero = get_from_memory::<u32>(base + 0x0023_b3ac);
+    let decimal_sep = get_from_memory::<u32>(base + 0x0023_b3b4);
+    let thousand_sep = get_from_memory::<u32>(base + 0x0023_b3b8);
+    let negative_order = get_from_memory::<u32>(base + 0x0023_b3bc);
+    let positive_order = get_from_memory::<u32>(base + 0x0023_b3c0);
+    let currency_symbol = get_from_memory::<u32>(base + 0x0023_b3c4);
+    let locale = get_from_memory::<u32>(base + 0x0023_806c);
+
+    let format = CURRENCYFMTA {
+        NumDigits: num_digits,
+        LeadingZero: leading_zero,
+        Grouping: 0,
+        lpDecimalSep: PSTR(decimal_sep as *mut u8),
+        lpThousandSep: PSTR(thousand_sep as *mut u8),
+        NegativeOrder: negative_order,
+        PositiveOrder: positive_order,
+        lpCurrencySymbol: PSTR(currency_symbol as *mut u8),
+    };
+
+    let Ok(value_cstr) = CString::new(value.to_string()) else {
+        return String::new();
+    };
+    let mut buffer = [0u8; 0x200];
+    let written = unsafe {
+        GetCurrencyFormatA(locale, 0, PCSTR(value_cstr.as_ptr() as *const u8), Some(&format as *const CURRENCYFMTA), Some(&mut buffer))
+    };
+    if written <= 0 {
+        return String::new();
+    }
+    crate::encoding_utils::decode_game_text(&buffer[..(written as usize - 1)])
 }
 
 impl fmt::Display for ZTResearchBranch {
@@ -626,12 +1550,136 @@ impl fmt::Display for ZTResearchBranch {
 #[derive(Debug)]
 #[repr(C)]
 pub struct ZTResearchMgr {
-    pad0: [u8; 0x8],                          // 0x00 - vtable? the byte at 0x01 is read by `ZTResearchBranch::pickRandomProgram` as an unconfirmed flag gating an expansion-availability check
+    pad0: [u8; 0x8],                          // 0x00 - vtable? see `always_check_expansion` below for the flag byte both `ZTResearchBranch::update`/`pickRandomProgram` read via pointer arithmetic that lands just past this struct's own confirmed 0x18 bytes, not a real field of it
     elapsed_ticks: u32,                       // 0x08 - accumulates `ZTResearchMgr::update`'s delta; once ~359 in-game days have accrued, every branch is updated and this resets to 0
     branch_array: ZTArray<ZTResearchBranch>,  // 0x0c
 }
 
+/// Pure prediction for `ZTResearchMgr::update`'s accumulator/day-count bookkeeping, per
+/// `resources/decompiles/ZTResearchMgr_update.c`/`.asm`. `delta_ticks` is added to
+/// `elapsed_ticks_before` using plain 32-bit wrapping arithmetic (confirmed by the `.c`/`.asm`'s
+/// `dword`-typed accumulator - it really does wrap, not saturate or widen). The result is then
+/// converted to a day count via `(elapsed_ticks * 0x1c20) / 60000`; the `.asm`'s
+/// `LEA`/`SHL`/multiply-by-`0x45e7b273`/`SHR` sequence is the standard "divide by constant" reciprocal-
+/// multiplication idiom applied to the **already 32-bit-wrapped** product `elapsed_ticks * 0x1c20` (the
+/// `LEA`/`SHL` chain computing that product is itself plain 32-bit register arithmetic, so it silently
+/// wraps for large `elapsed_ticks` before the division ever happens) - so this reimplementation
+/// deliberately uses `wrapping_mul` rather than a widened 64-bit product, to match vanilla exactly
+/// including that overflow quirk. Once the day count exceeds `0x167` (359), the real function zeroes
+/// `elapsed_ticks` and advances every branch by that many days; returns `(new_elapsed_ticks, 0)` when no
+/// threshold crossing happens (no branch update), or `(0, days)` when one does.
+///
+/// The real function's return value is not modeled here at all: per its own decompile, `dVar1` starts
+/// as `elapsed_ticks * 0x147ae260` but gets unconditionally overwritten with `this->branch_array`'s raw
+/// pointer on every loop iteration whenever the threshold is crossed - a decompiler/register-reuse
+/// artifact, not a meaningful return value the game relies on.
+fn predict_update(elapsed_ticks_before: u32, delta_ticks: u32) -> (u32, u32) {
+    let elapsed_ticks = elapsed_ticks_before.wrapping_add(delta_ticks);
+    let days = elapsed_ticks.wrapping_mul(0x1c20) / 60000;
+    if days > 0x167 {
+        (0, days)
+    } else {
+        (elapsed_ticks, 0)
+    }
+}
+
+#[cfg(test)]
+mod predict_update_tests {
+    use super::*;
+
+    #[test]
+    fn accumulates_without_crossing_threshold() {
+        assert_eq!(predict_update(100, 50), (150, 0));
+    }
+
+    #[test]
+    fn day_count_of_359_does_not_trigger() {
+        // accumulated=2999 -> 2999*7200/60000 = 359 (floor); the real function only triggers when
+        // the day count is *greater than* 359 (`0x167 < uVar4`, not `<=`).
+        assert_eq!(predict_update(0, 2999), (2999, 0));
+    }
+
+    #[test]
+    fn day_count_of_360_resets_and_returns_days() {
+        // accumulated=3000 -> 3000*7200/60000 = 360 exactly, crossing the threshold.
+        assert_eq!(predict_update(0, 3000), (0, 360));
+    }
+
+    #[test]
+    fn elapsed_ticks_wraps_on_accumulation() {
+        assert_eq!(predict_update(u32::MAX, 1), (0, 0));
+    }
+
+    #[test]
+    fn ticks_to_day_conversion_wraps_like_vanilla() {
+        // 596524 * 0x1c20 = 4294972800, which overflows u32::MAX (4294967295) by 5504 - so the
+        // wrapped product divided by 60000 gives 0 days, even though the true (non-wrapping) division
+        // would be ~71583 days, well past the threshold. This deliberately replicates the vanilla
+        // overflow quirk rather than "fixing" it.
+        assert_eq!(predict_update(0, 596_524), (596_524, 0));
+    }
+}
+
+/// Resolves `GLOBAL_ZTGameMgr` fresh from its raw memory slot, for the same reason
+/// `global_always_check_expansion` below bypasses `globals()`'s cached resolution instead of using
+/// `globals().ztgamemgr_ptr()` directly - see that function's own doc comment. `ZTResearchBranch::update`
+/// needs this for both the affordability check and `subtract_cash`.
+fn global_ztgamemgr_ptr() -> *mut crate::ztgamemgr::ZTGameMgr {
+    get_from_memory::<u32>(get_module_base("zoo.exe") as u32 + 0x0023_8048) as *mut crate::ztgamemgr::ZTGameMgr
+}
+
+/// Resolves `GLOBAL_ZTResearchMgr` fresh from its raw memory slot and reads its
+/// `ZTResearchMgr::always_check_expansion` flag - used by `ZTResearchBranch::update` instead of
+/// `globals().ztresearchmgr()`, whose `CachedGlobalInstance` resolves the pointer chain **once** and
+/// caches it forever, unlike vanilla's own `MOV EAX, GLOBAL_ZTResearchMgr` (a fresh read every call).
+/// That mismatch is invisible in real gameplay (there is only ever one real singleton, and the cache
+/// resolves to it correctly once constructed), but breaks
+/// `reimplementation_tests::live_support::with_global_ztresearchmgr_ptr`'s test-time redirection - which
+/// patches this same raw slot, exactly like vanilla reads it, but has no way to invalidate `Globals`'
+/// separate cache. Returns `false` if the global hasn't been constructed yet (`globals()`'s own accessors
+/// null-check the same way; vanilla itself has no such guard here, but nothing calls `ZTResearchBranch::
+/// update` before the real singleton exists either way).
+fn global_always_check_expansion() -> bool {
+    let mgr_ptr = get_from_memory::<u32>(get_module_base("zoo.exe") as u32 + 0x0023_9010);
+    if mgr_ptr != 0 {
+        unsafe { &*(mgr_ptr as *const ZTResearchMgr) }.always_check_expansion()
+    } else {
+        false
+    }
+}
+
 impl ZTResearchMgr {
+    /// The flag byte `ZTResearchBranch::update`/`pickRandomProgram` both read via
+    /// `GLOBAL_ZTResearchMgr+1` pointer arithmetic in the `.c` decompiles - since `ZTResearchMgr` itself
+    /// is typed as `0x18` bytes there (its own confirmed size), that `+1` scales to byte offset `0x18`,
+    /// confirmed directly against the real `.asm` for both call sites (`MOV %CL, byte ptr [EAX + 0x18]`
+    /// in `ZTResearchBranch_update.asm`; `*(char *)(local_1c + 1)` with `local_1c` typed
+    /// `ZTResearchMgr *` in `ZTResearchBranch_pickRandomProgram.c`) - one byte past this struct's own
+    /// fields entirely (previously misdocumented here as literal byte offset `0x01`, before this
+    /// pointer-arithmetic scaling was worked out for Phase F). Read raw via pointer arithmetic rather
+    /// than modeled as a struct field, to avoid inflating `ZTResearchMgr`'s own independently-confirmed
+    /// size.
+    ///
+    /// When `true`, `update`/`pick_random_program` always run the per-category `isExpansionDisabled`
+    /// check instead of only when `getAnyExpansionsDisabled()` is true; the flag's own deeper purpose
+    /// is otherwise unconfirmed.
+    fn always_check_expansion(&self) -> bool {
+        get_from_memory::<u8>((self as *const Self as u32) + 0x18) != 0
+    }
+
+    /// Exposed for the live `reimplementation_tests` comparison harness - see `predict_update`.
+    pub(crate) fn elapsed_ticks(&self) -> u32 {
+        self.elapsed_ticks
+    }
+
+    /// Exposed for the live `reimplementation_tests` comparison harness, to seed a synthetic manager's
+    /// accumulator before comparing `ZTResearchMgr::update` against the reimplementation - see
+    /// `predict_update`.
+    #[cfg(feature = "reimplementation-tests")]
+    pub(crate) fn set_elapsed_ticks(&mut self, value: u32) {
+        self.elapsed_ticks = value;
+    }
+
     pub fn branch_count(&self) -> usize {
         self.branch_array.len()
     }
@@ -670,6 +1718,27 @@ impl ZTResearchMgr {
             .find(|program| program.id == id)
     }
 
+    /// Mutable counterpart to `get_branch`, used by `research_save_reimplementation`'s promoted
+    /// `load` detour to apply a saved `current_funding_level` to the matching branch.
+    fn get_branch_mut(&self, id: i32) -> Option<&'static mut ZTResearchBranch> {
+        self.branches_mut().find(|branch| branch.id == id)
+    }
+
+    /// Mutable counterpart to `get_category`, used by `research_save_reimplementation`'s promoted
+    /// `load` detour to apply a saved `enabled` flag to the matching category.
+    fn get_category_mut(&self, id: i32) -> Option<&'static mut ZTResearchCategory> {
+        self.branches_mut().flat_map(|branch| branch.categories_mut()).find(|category| category.id == id)
+    }
+
+    /// Mutable counterpart to `get_program`, used by `research_save_reimplementation`'s promoted
+    /// `load` detour to apply a saved `current_progress` to the matching program.
+    fn get_program_mut(&self, id: i32) -> Option<&'static mut ZTResearchProgram> {
+        self.branches_mut()
+            .flat_map(|branch| branch.categories_mut())
+            .flat_map(|category| category.programs_mut())
+            .find(|program| program.id == id)
+    }
+
     /// Reimplementation of `OOAnalyzer::ZTResearchMgr::setEffectDiscount`: applies a percentage
     /// discount to the `target_cost` of every program whose effect kind matches `kind`.
     pub fn set_effect_discount(&self, kind: ZTResearchEffectKind, discount_pct: i32) {
@@ -680,19 +1749,32 @@ impl ZTResearchMgr {
         }
     }
 
-    /// Calls the vanilla `ZTResearchMgr::update`. `delta_ticks` is added to an internal accumulator;
-    /// once enough time has accrued every branch is advanced (see `pad0`/`elapsed_ticks` above).
-    pub fn update(&mut self, delta_ticks: i32) -> i32 {
-        unsafe { ztresearchmgr::UPDATE.original()((self as *mut Self) as *const u32, delta_ticks as u32) }
+    /// Native reimplementation of `ZTResearchMgr::update`'s accumulator/day-count bookkeeping (see
+    /// `predict_update`): `delta_ticks` is added to `elapsed_ticks`; once enough time has accrued,
+    /// `elapsed_ticks` resets to `0` and every branch is advanced by the elapsed day count via
+    /// `ZTResearchBranch::update` - still a call into the original implementation (see its own doc
+    /// comment), same as everywhere else in this file that isn't independently reimplemented.
+    pub fn update(&mut self, delta_ticks: u32) {
+        let (new_elapsed_ticks, days) = predict_update(self.elapsed_ticks, delta_ticks);
+        self.elapsed_ticks = new_elapsed_ticks;
+        if days > 0 {
+            for branch in self.branches_mut() {
+                branch.update(days);
+            }
+        }
     }
 
-    /// Calls the vanilla `ZTResearchMgr::save`. `file` is whatever file-handle pointer the original
-    /// `WriteBytesToFile` calls expect.
+    /// Calls `ZTResearchMgr::save`. `file` is whatever file-handle pointer the original
+    /// `WriteBytesToFile` calls expect. By default (see `research_save_reimplementation::detours`)
+    /// this address is detoured onto that module's native reimplementation
+    /// (`serialize(&snapshot_mgr(self))`, written via `standalone::WRITE_BYTES_TO_FILE`); under the
+    /// `vanilla-research-save` feature no detour is installed and `.original()` reaches genuine
+    /// vanilla code instead.
     pub fn save(&self, file: *const u32) -> bool {
         unsafe { ztresearchmgr::SAVE.original()((self as *const Self) as *const u32, file) != 0 }
     }
 
-    /// Calls the vanilla `ZTResearchMgr::load` - the save-file counterpart to `save()`. Per
+    /// Calls `ZTResearchMgr::load` - the save-file counterpart to `save()`. Per
     /// `resources/decompiles/ZTResearchMgr_load.c`/`.asm`, `load` always starts by resetting every
     /// branch's `current_funding_level` to `0`, every category's `enabled` to `1`, and calling
     /// `ZTResearchProgram::reset()` on every program (which itself zeroes `current_progress` and, for
@@ -707,19 +1789,39 @@ impl ZTResearchMgr {
     /// `current_progress >= target_cost` and `ZTResearchBranch::pick_random_program()` on every
     /// branch (consuming the game's RNG stream). Does **not** load research definitions from `.cfg`
     /// files - that's `ZTResearchBranch::load_branch`/`ZTResearchCategory::load_category`/
-    /// `ZTResearchProgram::load_program`.
+    /// `ZTResearchProgram::load_program`. By default this address is detoured onto
+    /// `research_save_reimplementation::detours::load`, a native reimplementation of exactly the
+    /// behavior described above (reading the stream via `standalone::DEALLOCATE`); under the
+    /// `vanilla-research-save` feature no detour is installed and `.original()` reaches genuine
+    /// vanilla code instead.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
         unsafe { ztresearchmgr::LOAD.original()((self as *mut Self) as *const u32, file, version) }
     }
 
-    /// Calls the vanilla `ZTResearchMgr::forceResearch` (the class-level half of the "research
-    /// cheat"): immediately completes every branch's current program via
-    /// `ZTResearchProgram::on_completion`, optionally carrying remaining progress into the next
-    /// program. Unlike the actual in-game cheat button, this does *not* refresh the world/UI
-    /// afterward - use the free function `force_research_cheat()` for that (it calls this with
+    /// Reimplementation of `ZTResearchMgr::forceResearch` (the class-level half of the "research
+    /// cheat"). Per `resources/decompiles/ZTResearchMgr_forceResearch.c`: for every branch, for every
+    /// category, for every program (**not** just each branch's currently-selected program - the
+    /// decompile walks every category's full `program_array`), calls `ZTResearchProgram::on_completion`
+    /// unconditionally, then, only if `continue_program` is `true`, sets that program's
+    /// `current_progress` to its `target_cost` (this is the "optionally carrying remaining progress"
+    /// behavior - it does not check whether the program was already complete); once every category in
+    /// a branch has been processed, calls `ZTResearchBranch::pick_random_program` once for that branch
+    /// (left as a call into the original - see `pick_random_program`'s own doc comment on why). Unlike
+    /// the actual in-game cheat button, this does *not* refresh the world/UI afterward - use the free
+    /// function `force_research_cheat()` for that (it calls the vanilla standalone cheat function with
     /// `continue_program` hardcoded to `false`, matching what the button does, plus the refresh).
     pub fn force_research(&mut self, continue_program: bool) {
-        unsafe { ztresearchmgr::FORCE_RESEARCH.original()((self as *mut Self) as *const u32, continue_program) }
+        for branch in self.branches_mut() {
+            for category in branch.categories_mut() {
+                for program in category.programs_mut() {
+                    program.on_completion();
+                    if continue_program {
+                        program.current_progress = program.target_cost;
+                    }
+                }
+            }
+            branch.pick_random_program();
+        }
     }
 
     /// Calls the vanilla `ZTResearchMgr::clearBranches`: destroys and frees every branch (and
@@ -1033,6 +2135,7 @@ pub fn init() {
     );
 
     research_config_reimplementation::init();
+    research_save_reimplementation::init();
 }
 
 /// Native reimplementation of the `.cfg`-driven research tree loading
@@ -1821,6 +2924,184 @@ mod research_config_reimplementation {
             mgr.branch_array = ZTArray::from_raw_parts(start, start, buffer_end);
             mgr.elapsed_ticks = 0;
         }
+
+        /// Pure, no-live-game-dependency tests for this module's postconditions (see each function's
+        /// own doc comment above for what it's meant to do). A genuine live A/B comparison against real
+        /// vanilla destructors isn't viable here - vanilla's own clear/destroy logic expects to free
+        /// vanilla-game-heap-allocated children, while every builder in this crate (including this test
+        /// module's own, below) is Rust-`Box`/`Vec`-allocated; calling `.original()` on a Rust-allocated
+        /// tree would be undefined behavior. As a descendant of `destruction`, this module reaches every
+        /// `pub(super)` function here, plus every `raw_mem::*` helper (via `destruction`'s own
+        /// `use super::{raw_mem::*, *};`), with no visibility changes needed. Deliberately builds its
+        /// own small test-only trees (distinct from `reimplementation_tests::live_support`, matching
+        /// that module's own documented reason for not sharing code across the opposite-feature-flag
+        /// boundary) that populate real non-null `cached_name`/`cached_desc`/`icon_ptr` content, so
+        /// these tests actually exercise `free_buffer_string`/`free_owned_cstring`'s non-null path -
+        /// `live_support`'s builders never do, since they leave those fields zeroed for live-comparison
+        /// safety.
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+
+            fn build_test_program(id: i32) -> *mut ZTResearchProgram {
+                Box::into_raw(Box::new(ZTResearchProgram {
+                    config_file: BFConfigFile::default(),
+                    cached_name: alloc_buffer_string("program name"),
+                    cached_desc: alloc_buffer_string("program desc"),
+                    desc_id: 0,
+                    icon_ptr: alloc_owned_cstring(Some("icon.bmp")),
+                    entity_icon_ptr: alloc_owned_cstring(Some("entity_icon.bmp")),
+                    id,
+                    target_cost: 0.0,
+                    current_progress: 0.0,
+                    priority: 0,
+                    target_id: -1,
+                    effect_kind_raw: -1,
+                    effect_param_0: 0,
+                    effect_param_1: -1,
+                    effect_param_2: 0,
+                    help_id: 0,
+                }))
+            }
+
+            fn build_test_category(id: i32, program_count: usize) -> *mut ZTResearchCategory {
+                let programs: Vec<u32> = (0..program_count).map(|i| build_test_program(i as i32) as u32).collect();
+                Box::into_raw(Box::new(ZTResearchCategory {
+                    config_file: BFConfigFile::default(),
+                    id,
+                    cached_name: alloc_buffer_string("category name"),
+                    cached_desc: alloc_buffer_string("category desc"),
+                    icon_ptr: alloc_owned_cstring(Some("category_icon.bmp")),
+                    help_id: 0,
+                    expansion_id: 0,
+                    enabled: 1,
+                    pad2: [0; 3],
+                    program_array: ptr_array_from_vec(programs),
+                }))
+            }
+
+            fn build_test_branch(id: i32, category_count: usize, funding_level_count: usize) -> *mut ZTResearchBranch {
+                let categories: Vec<u32> = (0..category_count).map(|i| build_test_category(i as i32, 0) as u32).collect();
+                let funding_table = vec![ZTResearchFundingLevel { name_id: 0, rate: 0.0, cost: 0.0 }; funding_level_count];
+                let (funding_table_start, funding_table_end, funding_table_capacity) = funding_table_from_vec(funding_table);
+                Box::into_raw(Box::new(ZTResearchBranch {
+                    config_file: BFConfigFile::default(),
+                    id,
+                    cached_name: alloc_buffer_string("branch name"),
+                    cached_desc: alloc_buffer_string("branch desc"),
+                    icon_ptr: alloc_owned_cstring(Some("branch_icon.bmp")),
+                    noprogicon_ptr: alloc_owned_cstring(Some("noprogicon.bmp")),
+                    current_category_ptr: 0,
+                    current_program_ptr: 0,
+                    category_array: ptr_array_from_vec(categories),
+                    current_funding_level: 0,
+                    funding_table_start,
+                    funding_table_end,
+                    funding_table_capacity,
+                }))
+            }
+
+            #[test]
+            fn reset_category_contents_clears_and_reallocates_in_place() {
+                let category_ptr = build_test_category(42, 2);
+                let category = unsafe { &mut *category_ptr };
+                let original_program_array_capacity = category.program_array.capacity();
+                assert!(original_program_array_capacity > 0);
+
+                reset_category_contents(category);
+
+                assert_eq!(category.id, -1);
+                let (name_start, _, _) = category.cached_name.raw_parts();
+                assert_ne!(name_start, 0, "cached_name must be re-allocated, not left null");
+                assert_eq!(category.cached_name.copy_to_string(), "");
+                let (desc_start, _, _) = category.cached_desc.raw_parts();
+                assert_ne!(desc_start, 0, "cached_desc must be re-allocated, not left null");
+                assert_eq!(category.cached_desc.copy_to_string(), "");
+                assert_eq!(category.enabled, 1);
+                assert_eq!(category.icon_ptr, 0);
+                assert_eq!(category.program_array.len(), 0);
+                assert_eq!(category.program_array.capacity(), original_program_array_capacity);
+
+                // Manual teardown - `reset_category_contents` only resets in place, it doesn't free
+                // the category object or its own remaining buffers.
+                free_ptr_array(&category.program_array);
+                free_buffer_string(&category.cached_desc);
+                free_buffer_string(&category.cached_name);
+                drop(unsafe { Box::from_raw(category_ptr) });
+            }
+
+            #[test]
+            fn reset_branch_contents_clears_and_reallocates_in_place() {
+                let branch_ptr = build_test_branch(7, 2, 3);
+                let branch = unsafe { &mut *branch_ptr };
+                branch.current_category_ptr = 0x1234; // arbitrary non-zero sentinel, cleared unconditionally
+                branch.current_program_ptr = 0x5678;
+                let original_category_array_capacity = branch.category_array.capacity();
+                let original_funding_table_capacity = branch.funding_table_capacity;
+                assert!(original_category_array_capacity > 0);
+
+                reset_branch_contents(branch);
+
+                assert_eq!(branch.id, -1);
+                let (name_start, _, _) = branch.cached_name.raw_parts();
+                assert_ne!(name_start, 0, "cached_name must be re-allocated, not left null");
+                assert_eq!(branch.cached_name.copy_to_string(), "");
+                let (desc_start, _, _) = branch.cached_desc.raw_parts();
+                assert_ne!(desc_start, 0, "cached_desc must be re-allocated, not left null");
+                assert_eq!(branch.cached_desc.copy_to_string(), "");
+                assert_eq!(branch.icon_ptr, 0);
+                assert_eq!(branch.noprogicon_ptr, 0);
+                assert_eq!(branch.current_category_ptr, 0);
+                assert_eq!(branch.current_program_ptr, 0);
+                assert_eq!(branch.category_array.len(), 0);
+                assert_eq!(branch.category_array.capacity(), original_category_array_capacity);
+                assert_eq!(branch.current_funding_level, 0);
+                assert_eq!(branch.funding_table_end, branch.funding_table_start);
+                assert_eq!(branch.funding_table_capacity, original_funding_table_capacity, "funding table capacity must be retained, not freed");
+
+                // Manual teardown - `reset_branch_contents` only resets in place, it doesn't free the
+                // branch object or its own remaining buffers.
+                free_funding_table(branch);
+                free_ptr_array(&branch.category_array);
+                free_buffer_string(&branch.cached_desc);
+                free_buffer_string(&branch.cached_name);
+                drop(unsafe { Box::from_raw(branch_ptr) });
+            }
+
+            #[test]
+            fn destroy_program_does_not_panic() {
+                let program_ptr = build_test_program(1);
+                unsafe { destroy_program(program_ptr) };
+            }
+
+            #[test]
+            fn destroy_category_does_not_panic() {
+                let category_ptr = build_test_category(1, 2);
+                unsafe { destroy_category(category_ptr) };
+            }
+
+            #[test]
+            fn destroy_branch_does_not_panic() {
+                let branch_ptr = build_test_branch(1, 2, 2);
+                unsafe { destroy_branch(branch_ptr) };
+            }
+
+            #[test]
+            fn clear_branches_empties_array_and_resets_elapsed_ticks() {
+                let branches: Vec<u32> = (0..2).map(|i| build_test_branch(i, 1, 1) as u32).collect();
+                let mut mgr = ZTResearchMgr { pad0: [0; 8], elapsed_ticks: 123, branch_array: ptr_array_from_vec(branches) };
+                let original_branch_array_capacity = mgr.branch_array.capacity();
+                assert!(original_branch_array_capacity > 0);
+
+                clear_branches(&mut mgr);
+
+                assert_eq!(mgr.elapsed_ticks(), 0);
+                assert_eq!(mgr.branch_array.len(), 0);
+                assert_eq!(mgr.branch_array.capacity(), original_branch_array_capacity);
+
+                free_ptr_array(&mgr.branch_array);
+            }
+        }
     }
 
     /// Shadow-mode arm: only `loadBranches` observes/compares; the six lifecycle functions are plain
@@ -2032,22 +3313,29 @@ mod research_config_reimplementation {
 /// each category's `enabled` flag, and each program's `current_progress`. Confirmed byte-for-byte from
 /// `resources/decompiles/ZTResearchMgr_save.c` and cross-checked against `ZTResearchMgr_load.c`/`.asm`.
 ///
-/// This is **shadow-mode only**: nothing here ever runs during real save/load (`ZTResearchMgr::save`/
-/// `load` are not detoured), it exists purely to be exercised by the live proptest-vs-`.original()`
-/// comparison in `reimplementation_tests` (see `live_support`, gated by the `reimplementation-tests`
-/// feature).
+/// **Promoted to the live path** (see `detours` below): by default `ZTResearchMgr::save`/`load` are
+/// detoured to run this module's logic directly against the real save stream (via
+/// `standalone::WRITE_BYTES_TO_FILE`/`DEALLOCATE`, the same `fwrite`/`fread`-shaped primitives vanilla
+/// itself goes through), rather than calling `.original()`. The `vanilla-research-save` feature keeps
+/// the pre-promotion behavior available (no detour installed at all - `ZTResearchMgr::save`/`load`'s
+/// `.original()` calls reach genuine vanilla code) for regression comparison, mirroring
+/// `research_config_reimplementation`'s `vanilla-research-config` convention.
 ///
 /// `load`'s actual behavior is considerably more than "read the stream and apply it" - see
-/// `predict_load`'s doc comment - including two side effects deliberately **not** modeled or compared
-/// here: `ZTResearchProgram::on_completion()` (called on any program whose `current_progress` ends up
-/// `>= target_cost`) and `ZTResearchBranch::pick_random_program()` (called on every branch, consuming
-/// the game's RNG stream). Both are already treated elsewhere in this file as too complex/consequential
-/// to reimplement (see `ZTResearchProgram::on_completion`/`ZTResearchBranch::pick_random_program`'s own
-/// doc comments) - `live_support` neutralizes `on_completion` for its synthetic programs by fixing
-/// `effect_kind_raw` to an always-unset value (see `live_support::build_program`) rather than trying to
-/// predict or avoid it structurally.
+/// `predict_load`'s doc comment - including two side effects the pure `predict_load` helper
+/// deliberately does **not** model, but the live `detours::load` below does perform, natively, using
+/// already-promoted machinery: `ZTResearchProgram::on_completion()` (called on any program whose
+/// `current_progress` ends up `>= target_cost`, from Phase A's `on_completion`) and
+/// `ZTResearchBranch::pick_random_program()` (called on every branch, consuming the game's RNG stream -
+/// still a call into the original implementation, see its own doc comment on why). `live_support` below
+/// neutralizes `on_completion` for its synthetic programs by fixing `effect_kind_raw` to an
+/// always-unset value (see `live_support::build_program`) so the live proptest-vs-`.original()`
+/// comparison in `reimplementation_tests` stays side-effect-tolerant.
 pub(crate) mod research_save_reimplementation {
     use std::collections::HashMap;
+
+    #[cfg(not(feature = "vanilla-research-save"))]
+    use openzt_detour_macro::detour_mod;
 
     use super::*;
 
@@ -2157,6 +3445,13 @@ pub(crate) mod research_save_reimplementation {
         pub(crate) progress_bits: HashMap<i32, u32>,
     }
 
+    /// The save-game format version at which `ZTResearchMgr::load` starts reading/writing research
+    /// data at all - below this, `load` still runs its unconditional reset (and the
+    /// `on_completion`/`pick_random_program` tail) but never touches `file`. Shared between
+    /// `predict_load` (the pure prediction) and `detours::load` (the live promoted implementation)
+    /// below so the threshold can't drift between the two.
+    const MIN_VERSION_WITH_RESEARCH_DATA: u32 = 0x28;
+
     /// Predicts what `ZTResearchMgr::load` leaves in `current_funding_level`/`enabled`/
     /// `current_progress` (excluding the `on_completion`/`pick_random_program` side effects - see the
     /// module doc comment above), given the ids it already knows about and the stream's records.
@@ -2182,7 +3477,6 @@ pub(crate) mod research_save_reimplementation {
         let mut enabled: HashMap<i32, u8> = category_ids.iter().map(|&id| (id, 1)).collect();
         let mut progress_bits: HashMap<i32, u32> = program_ids.iter().map(|&id| (id, 0.0f32.to_bits())).collect();
 
-        const MIN_VERSION_WITH_RESEARCH_DATA: u32 = 0x28;
         if version >= MIN_VERSION_WITH_RESEARCH_DATA {
             for record in records {
                 match *record {
@@ -2281,6 +3575,177 @@ pub(crate) mod research_save_reimplementation {
         }
     }
 
+    /// Live-stream read primitives `detours::load` uses to walk `file` record by record - the read
+    /// counterpart to `standalone::WRITE_BYTES_TO_FILE`, which `detours::save` calls directly since a
+    /// single whole-buffer write needs no incremental helper. Mirrors
+    /// `reimplementation_tests::io_redirect`'s redirect target exactly (`standalone::DEALLOCATE`, the
+    /// `fread`-shaped primitive - the name is a decompiler artifact, not descriptive) so the two stay
+    /// interchangeable: in a `reimplementation-tests` build with a capture/replay window active,
+    /// `DEALLOCATE.original()` calls here transparently hit `io_redirect`'s in-memory buffer instead of
+    /// a real file, exactly like every other call to that address.
+    #[cfg(not(feature = "vanilla-research-save"))]
+    mod stream_io {
+        use openzt_detour::generated::standalone::DEALLOCATE;
+
+        use crate::util::get_from_memory;
+
+        /// CRT `FILE`-shaped EOF flag: bit `0x20` of the `_flag` word at offset `0xc`, dereferenced
+        /// directly from `file` exactly like `ZTResearchMgr_load.c`/`.asm` does. Checked before every
+        /// record read, as a defensive backstop alongside the stream's own `-1` terminator, in case a
+        /// stream (e.g. an old/foreign save) ends without ever writing one.
+        pub(super) fn is_eof(file: *const u32) -> bool {
+            get_from_memory::<u32>((file as u32) + 0xc) & 0x20 != 0
+        }
+
+        pub(super) fn read_i32(file: *const u32) -> Option<i32> {
+            let mut buf = 0i32;
+            let ok = unsafe { DEALLOCATE.original()(&mut buf as *mut i32 as *const u32, 4, 1, file as *const u8) };
+            (ok == 1).then_some(buf)
+        }
+
+        pub(super) fn read_u8(file: *const u32) -> Option<u8> {
+            let mut buf = 0u8;
+            let ok = unsafe { DEALLOCATE.original()(&mut buf as *mut u8 as *const u32, 1, 1, file as *const u8) };
+            (ok == 1).then_some(buf)
+        }
+    }
+
+    /// Detours `ZTResearchMgr::save`/`load` onto this module's native reimplementation - the default,
+    /// promoted arm (see the module doc comment above). `save` computes its whole byte buffer purely
+    /// from already-owned `ZTResearchMgr` state before writing anything, so there's nothing to roll
+    /// back if that computation ever panicked; `load` starts mutating `this` (via
+    /// `ZTResearchProgram::reset()`) as its very first step, matching vanilla's own unconditional
+    /// reset, so - like `research_config_reimplementation`'s `apply_all` arm - there is no safe
+    /// fallback to vanilla once that begins.
+    #[cfg(not(feature = "vanilla-research-save"))]
+    #[detour_mod]
+    mod detours {
+        use openzt_detour::generated::ztresearchmgr::{LOAD, SAVE};
+        use tracing::{error, warn};
+
+        use super::{stream_io, *};
+        use crate::util::{mut_from_memory, ref_from_memory};
+
+        #[detour(SAVE)]
+        unsafe extern "thiscall" fn save(this: *const u32, file: *const u32) -> u8 {
+            let mgr = unsafe { ref_from_memory::<ZTResearchMgr>(this) };
+            let bytes = serialize(&snapshot_mgr(mgr));
+
+            let ok = unsafe { standalone::WRITE_BYTES_TO_FILE.original()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) };
+            if !ok {
+                error!("research-save-reimplementation: WriteBytesToFile failed writing {} research bytes", bytes.len());
+            }
+            ok as u8
+        }
+
+        #[detour(LOAD)]
+        unsafe extern "thiscall" fn load(this: *const u32, file: *const u32, version: u32) -> bool {
+            let mgr = unsafe { mut_from_memory::<ZTResearchMgr>(this) };
+
+            // Unconditional reset, regardless of `version` or what (if anything) `file` holds - matches
+            // `ZTResearchMgr_load.c`: every branch's `current_funding_level` to `0`, every category's
+            // `enabled` to `1`, and `ZTResearchProgram::reset()` (not just zeroing `current_progress`)
+            // on every program.
+            for branch in mgr.branches_mut() {
+                branch.current_funding_level = 0;
+                for category in branch.categories_mut() {
+                    category.set_enabled(true);
+                    for program in category.programs_mut() {
+                        program.reset();
+                    }
+                }
+            }
+
+            let mut read_ok = true;
+            if version >= MIN_VERSION_WITH_RESEARCH_DATA {
+                read_ok = stream_io::read_i32(file).is_some(); // header, discarded - matches parse()/predict_load
+                while read_ok && !stream_io::is_eof(file) {
+                    let Some(kind) = stream_io::read_i32(file) else {
+                        read_ok = false;
+                        break;
+                    };
+                    if kind < 0 {
+                        break; // terminator: stop reading, fall through to the tail below
+                    }
+                    let Some(id) = stream_io::read_i32(file) else {
+                        read_ok = false;
+                        break;
+                    };
+                    if kind > 2 {
+                        read_ok = false; // unrecognized kind: matches parse() rejecting it, but here it
+                        break; //          also aborts the whole load, same as a genuine read failure
+                    }
+                    match kind {
+                        0 => {
+                            let Some(value) = stream_io::read_i32(file) else {
+                                read_ok = false;
+                                break;
+                            };
+                            if let Some(branch) = mgr.get_branch_mut(id) {
+                                let count = branch.funding_level_count() as u32;
+                                branch.current_funding_level = if (value as u32) < count { value } else { 0 };
+                            }
+                        }
+                        1 => {
+                            let Some(value) = stream_io::read_u8(file) else {
+                                read_ok = false;
+                                break;
+                            };
+                            if let Some(category) = mgr.get_category_mut(id) {
+                                category.set_enabled(value != 0);
+                            }
+                        }
+                        2 => {
+                            let Some(value) = stream_io::read_i32(file) else {
+                                read_ok = false;
+                                break;
+                            };
+                            if let Some(program) = mgr.get_program_mut(id) {
+                                program.current_progress = f32::from_bits(value as u32);
+                            }
+                        }
+                        _ => unreachable!("kind already range-checked above"),
+                    }
+                }
+            }
+
+            if !read_ok {
+                warn!("research-save-reimplementation: ZTResearchMgr::load stream read failed (version {version}); aborting without the on_completion/pick_random_program tail, matching vanilla");
+                return false;
+            }
+
+            // Tail: matches `ZTResearchMgr_load.c` - runs regardless of `version`/whether any records
+            // were actually read, using the already-native `on_completion` from Phase A.
+            for program in mgr.branches_mut().flat_map(|b| b.categories_mut()).flat_map(|c| c.programs_mut()) {
+                if program.is_complete() {
+                    program.on_completion();
+                }
+            }
+            for branch in mgr.branches_mut() {
+                branch.pick_random_program();
+            }
+
+            true
+        }
+    }
+
+    /// Installs the `save`/`load` detour (the `not(vanilla-research-save)` default arm above). Under
+    /// `vanilla-research-save`, deliberately installs nothing at all: `ZTResearchMgr::save`/`load`'s
+    /// `.original()` calls (see `ztresearch::ZTResearchMgr::save`/`load`) then reach genuine,
+    /// untouched vanilla code, keeping the live proptest-vs-`.original()` comparison in
+    /// `reimplementation_tests` meaningful - unlike `research_config_reimplementation`'s shadow arm,
+    /// there's no always-on production comparison/logging to install here, since that live-comparison
+    /// battery already covers it.
+    #[cfg(not(feature = "vanilla-research-save"))]
+    pub fn init() {
+        if let Err(e) = unsafe { detours::init_detours() } {
+            error!("Failed to initialise research-save-reimplementation detours: {e:?}");
+        }
+    }
+
+    #[cfg(feature = "vanilla-research-save")]
+    pub fn init() {}
+
     /// Synthetic `ZTResearchBranch`/`ZTResearchCategory`/`ZTResearchProgram` construction/teardown for
     /// the live `reimplementation_tests` comparison harness. Deliberately **not** shared with
     /// `research_config_reimplementation::construction`/`raw_mem` above - that module is compiled only
@@ -2291,16 +3756,20 @@ pub(crate) mod research_save_reimplementation {
     pub(crate) mod live_support {
         use super::*;
 
-        /// A program to splice into a synthetic category. `effect_kind_raw` is always fixed to `-1`
-        /// (unset) rather than generated - see the module doc comment above: this is what keeps
-        /// `ZTResearchProgram::on_completion()` (triggered by `load` whenever `current_progress` ends
-        /// up `>= target_cost`) a guaranteed no-op, regardless of what values a test case generates for
-        /// `current_progress`/`target_cost`, instead of risking a dispatch into `setAvail`/
-        /// `setBuildingUpgrade`/etc. with ids that don't correspond to any real entity.
+        /// A program to splice into a synthetic category. `effect_kind_raw` is caller-controlled -
+        /// most call sites still pin it to `-1` (unset), which keeps `ZTResearchProgram::on_completion()`
+        /// (triggered by `load` whenever `current_progress` ends up `>= target_cost`) a guaranteed
+        /// no-op regardless of what values a test case generates for `current_progress`/`target_cost`,
+        /// instead of risking a dispatch into `setAvail`/`setBuildingUpgrade`/etc. with ids that don't
+        /// correspond to any real entity. `ZTRESEARCHMGR_LOAD`'s own tree-building deliberately varies
+        /// this field instead, reusing `build_standalone_program`'s already-proven-safe sentinel field
+        /// values (`target_id`/`effect_param_0..2`) for every kind, so `on_completion`'s dispatch is
+        /// exercised for real rather than staying a guaranteed no-op.
         pub(crate) struct GeneratedProgram {
             pub(crate) id: i32,
             pub(crate) target_cost: f32,
             pub(crate) current_progress: f32,
+            pub(crate) effect_kind_raw: i32,
         }
 
         /// A category to splice into a synthetic branch. `expansion_id` is always fixed to `0` (the
@@ -2367,6 +3836,9 @@ pub(crate) mod research_save_reimplementation {
         }
 
         fn build_program(spec: &GeneratedProgram) -> *mut ZTResearchProgram {
+            // Same "no matching live entity" sentinel `build_standalone_program` uses for every
+            // `effect_kind_raw` - see that function's own doc comment for why `-1` in particular.
+            const NO_MATCHING_ENTITY: i32 = -1;
             let program = Box::new(ZTResearchProgram {
                 config_file: BFConfigFile::default(),
                 cached_name: ZTBufferString::from_raw_parts(0, 0, 0),
@@ -2378,10 +3850,10 @@ pub(crate) mod research_save_reimplementation {
                 target_cost: spec.target_cost,
                 current_progress: spec.current_progress,
                 priority: 0,
-                target_id: -1,
-                effect_kind_raw: -1,
+                target_id: NO_MATCHING_ENTITY,
+                effect_kind_raw: spec.effect_kind_raw,
                 effect_param_0: 0,
-                effect_param_1: 0,
+                effect_param_1: NO_MATCHING_ENTITY,
                 effect_param_2: 0,
                 help_id: 0,
             });
@@ -2392,6 +3864,84 @@ pub(crate) mod research_save_reimplementation {
             if ptr.is_null() {
                 return;
             }
+            drop(unsafe { Box::from_raw(ptr) });
+        }
+
+        /// Builds a standalone `ZTResearchProgram` for the `ON_COMPLETION`/`RESET` live comparison
+        /// test in `reimplementation_tests` - deliberately not wired into any category/branch/mgr,
+        /// since `on_completion`/`reset` only ever touch `this`. Every field but `effect_kind_raw` is
+        /// fixed to a value that makes every underlying effect call in
+        /// `dispatch_on_completion`/`dispatch_reset` a safe no-op: `target_id` (and, for
+        /// `EffectDiscount`'s reuse of `effect_param_1` as an entity-type id - see
+        /// `ResearchEffects::set_effect_discount`'s underlying `_setEffectDiscount.c`) is set to a
+        /// value with no matching live `BFEntityType`, since `setAvail`/`setBuildingUpgrade`/
+        /// `set*Characteristic`/`setTrickAvailable`/`setEffectDiscount` all walk `GLOBAL_ZTWorldMgr`'s
+        /// entity list looking for a match before touching anything else (see their own decompiles).
+        /// Uses `-1`, not an extreme value like `i32::MIN`, for this - `-1` is the well-precedented
+        /// "unset"/no-target sentinel real `.cfg`-loaded programs already use throughout this file
+        /// (see `target_id`'s own field doc comment), so vanilla's id-lookup path is guaranteed to
+        /// already handle it gracefully; an extreme value risks tripping an unrelated edge case (e.g.
+        /// an unchecked hash/index derived from the id) in code that was never written to expect one.
+        pub(crate) fn build_standalone_program(effect_kind_raw: i32) -> *mut ZTResearchProgram {
+            const NO_MATCHING_ENTITY: i32 = -1;
+            Box::into_raw(Box::new(ZTResearchProgram {
+                config_file: BFConfigFile::default(),
+                cached_name: ZTBufferString::from_raw_parts(0, 0, 0),
+                cached_desc: ZTBufferString::from_raw_parts(0, 0, 0),
+                desc_id: 0,
+                icon_ptr: 0,
+                entity_icon_ptr: 0,
+                id: 0,
+                target_cost: 0.0,
+                current_progress: 0.0,
+                priority: 0,
+                target_id: NO_MATCHING_ENTITY,
+                effect_kind_raw,
+                effect_param_0: 0,
+                effect_param_1: NO_MATCHING_ENTITY,
+                effect_param_2: 0,
+                help_id: 0,
+            }))
+        }
+
+        pub(crate) fn destroy_standalone_program(ptr: *mut ZTResearchProgram) {
+            if ptr.is_null() {
+                return;
+            }
+            drop(unsafe { Box::from_raw(ptr) });
+        }
+
+        /// Builds a standalone `ZTResearchBranch` for the `FUNDING_TEXT` live comparison test - not
+        /// spliced into any `ZTResearchMgr`'s `branch_array`, since `getFundingText`/`funding_text`
+        /// only ever read `this` (no `GLOBAL_ZTResearchMgr` dependency, unlike `load`'s tail). `levels`
+        /// becomes the branch's inline funding table verbatim, in order; `rate` is always fixed to
+        /// `0.0` since `funding_text` never reads it (only `cost`/`name_id` feed its output).
+        pub(crate) fn build_standalone_funding_branch(current_funding_level: i32, levels: &[(i32, f32)]) -> *mut ZTResearchBranch {
+            let funding_table = levels.iter().map(|&(name_id, cost)| ZTResearchFundingLevel { name_id, rate: 0.0, cost }).collect();
+            let (funding_table_start, funding_table_end, funding_table_capacity) = funding_table_from_vec(funding_table);
+            Box::into_raw(Box::new(ZTResearchBranch {
+                config_file: BFConfigFile::default(),
+                id: 0,
+                cached_name: ZTBufferString::from_raw_parts(0, 0, 0),
+                cached_desc: ZTBufferString::from_raw_parts(0, 0, 0),
+                icon_ptr: 0,
+                noprogicon_ptr: 0,
+                current_category_ptr: 0,
+                current_program_ptr: 0,
+                category_array: ZTArray::from_raw_parts(0, 0, 0),
+                current_funding_level,
+                funding_table_start,
+                funding_table_end,
+                funding_table_capacity,
+            }))
+        }
+
+        pub(crate) fn destroy_standalone_funding_branch(ptr: *mut ZTResearchBranch) {
+            if ptr.is_null() {
+                return;
+            }
+            let branch = unsafe { &*ptr };
+            free_funding_table(branch.funding_table_start, branch.funding_table_capacity);
             drop(unsafe { Box::from_raw(ptr) });
         }
 
@@ -2527,6 +4077,167 @@ pub(crate) mod research_save_reimplementation {
 
             save_to_memory(slot, original);
             result
+        }
+
+        /// Builds a standalone branch/category/program/funding-level for the `ZTRESEARCHBRANCH_UPDATE`
+        /// live comparison test - one category (enabled, `expansion_id` fixed to `0` like
+        /// `GeneratedCategory` elsewhere in this module, for the same "keep `isExpansionDisabled` a safe,
+        /// deterministic call" reason) holding one program, wired up as the branch's own
+        /// `current_category`/`current_program` (unlike `build_branch` above, which always leaves those
+        /// null - `ZTResearchBranch::update` needs both set to do anything), plus a one-entry funding
+        /// table at `current_funding_level = 0`. Returns the branch pointer; `destroy_update_test_branch`
+        /// frees everything transitively.
+        pub(crate) fn build_update_test_branch(target_cost: f32, initial_progress: f32, funding_rate: f32, funding_cost: f32) -> *mut ZTResearchBranch {
+            let program_ptr = build_program(&GeneratedProgram { id: 0, target_cost, current_progress: initial_progress, effect_kind_raw: -1 });
+
+            let category_ptr = Box::into_raw(Box::new(ZTResearchCategory {
+                config_file: BFConfigFile::default(),
+                id: 0,
+                cached_name: ZTBufferString::from_raw_parts(0, 0, 0),
+                cached_desc: ZTBufferString::from_raw_parts(0, 0, 0),
+                icon_ptr: 0,
+                help_id: 0,
+                expansion_id: 0,
+                enabled: 1,
+                pad2: [0; 3],
+                program_array: ptr_array_from_vec(vec![program_ptr as u32]),
+            }));
+
+            let funding_table = vec![ZTResearchFundingLevel { name_id: 0, rate: funding_rate, cost: funding_cost }];
+            let (funding_table_start, funding_table_end, funding_table_capacity) = funding_table_from_vec(funding_table);
+
+            Box::into_raw(Box::new(ZTResearchBranch {
+                config_file: BFConfigFile::default(),
+                id: 0,
+                cached_name: ZTBufferString::from_raw_parts(0, 0, 0),
+                cached_desc: ZTBufferString::from_raw_parts(0, 0, 0),
+                icon_ptr: 0,
+                noprogicon_ptr: 0,
+                current_category_ptr: category_ptr as u32,
+                current_program_ptr: program_ptr as u32,
+                category_array: ptr_array_from_vec(vec![category_ptr as u32]),
+                current_funding_level: 0,
+                funding_table_start,
+                funding_table_end,
+                funding_table_capacity,
+            }))
+        }
+
+        pub(crate) fn destroy_update_test_branch(ptr: *mut ZTResearchBranch) {
+            destroy_branch(ptr);
+        }
+
+        /// Splices one `build_update_test_branch` branch into a standalone `ZTResearchMgr`, runs `f`
+        /// with `GLOBAL_ZTResearchMgr` pointed at it (`ZTResearchBranch::update` reads the global's own
+        /// `always_check_expansion` flag directly, same as `pick_random_program` - see
+        /// `with_global_ztresearchmgr_ptr`'s own doc comment), then tears everything down.
+        /// `Box::new(ZTResearchMgr {..})` alone (as `with_standalone_mgr` uses) allocates exactly
+        /// `ZTResearchMgr`'s own confirmed `0x18` bytes - reading `always_check_expansion`'s flag byte at
+        /// offset `0x18` on such an instance reads whatever uninitialized heap byte happens to follow,
+        /// which every *other* live test tolerates (it doesn't change their outcome either way - see
+        /// `GeneratedCategory`'s own `expansion_id = 0` fixed-value doc comment) but would make
+        /// `ZTRESEARCHBRANCH_UPDATE` non-deterministic, since it's the first comparison whose outcome
+        /// (whether `isExpansionDisabled` even runs) actually depends on that flag. This wrapper adds an
+        /// explicit, zeroed byte right after `ZTResearchMgr`'s own fields so the flag reads a
+        /// deterministic `false` instead.
+        #[repr(C)]
+        struct MgrWithZeroedExpansionFlag {
+            mgr: ZTResearchMgr,
+            always_check_expansion_flag: u8,
+            _pad: [u8; 3],
+        }
+
+        pub(crate) fn with_update_test_branch<R>(
+            target_cost: f32,
+            initial_progress: f32,
+            funding_rate: f32,
+            funding_cost: f32,
+            f: impl FnOnce(&mut ZTResearchMgr) -> R,
+        ) -> R {
+            let mut wrapper = Box::new(MgrWithZeroedExpansionFlag {
+                mgr: ZTResearchMgr { pad0: [0; 8], elapsed_ticks: 0, branch_array: ZTArray::from_raw_parts(0, 0, 0) },
+                always_check_expansion_flag: 0,
+                _pad: [0; 3],
+            });
+            let branch_ptr = build_update_test_branch(target_cost, initial_progress, funding_rate, funding_cost);
+            wrapper.mgr.branch_array = ptr_array_from_vec(vec![branch_ptr as u32]);
+
+            let result = with_global_ztresearchmgr_ptr(&mut wrapper.mgr, f);
+
+            destroy_update_test_branch(branch_ptr);
+            result
+        }
+
+        /// One branch's synthetic state for `build_update_test_branches`/`with_update_test_branches` -
+        /// the N-branch generalization of `build_update_test_branch`/`with_update_test_branch` above,
+        /// used by `ZTRESEARCHMGR_UPDATE`'s nonzero-branch-count extension to exercise
+        /// `ZTResearchMgr::update` actually iterating multiple branches and threading the correct `days`
+        /// count to each - something the zero-branch `with_standalone_mgr(&[], ...)` case structurally
+        /// can't cover.
+        #[derive(Debug)]
+        pub(crate) struct UpdateTestBranchSpec {
+            pub(crate) target_cost: f32,
+            pub(crate) initial_progress: f32,
+            pub(crate) funding_rate: f32,
+            pub(crate) funding_cost: f32,
+        }
+
+        /// Builds one `build_update_test_branch`-shaped branch per `specs` entry, in order.
+        /// `destroy_update_test_branch` frees each returned pointer individually.
+        fn build_update_test_branches(specs: &[UpdateTestBranchSpec]) -> Vec<*mut ZTResearchBranch> {
+            specs
+                .iter()
+                .map(|spec| build_update_test_branch(spec.target_cost, spec.initial_progress, spec.funding_rate, spec.funding_cost))
+                .collect()
+        }
+
+        /// Splices one `build_update_test_branch`-shaped branch per `specs` entry into a standalone
+        /// `ZTResearchMgr` (via the same `MgrWithZeroedExpansionFlag` wrapper `with_update_test_branch`
+        /// uses, for the same deterministic-`always_check_expansion`-flag reason), runs `f` with
+        /// `GLOBAL_ZTResearchMgr` pointed at it, then tears everything down.
+        pub(crate) fn with_update_test_branches<R>(specs: &[UpdateTestBranchSpec], f: impl FnOnce(&mut ZTResearchMgr) -> R) -> R {
+            let mut wrapper = Box::new(MgrWithZeroedExpansionFlag {
+                mgr: ZTResearchMgr { pad0: [0; 8], elapsed_ticks: 0, branch_array: ZTArray::from_raw_parts(0, 0, 0) },
+                always_check_expansion_flag: 0,
+                _pad: [0; 3],
+            });
+            let branch_ptrs = build_update_test_branches(specs);
+            wrapper.mgr.branch_array = ptr_array_from_vec(branch_ptrs.iter().map(|&ptr| ptr as u32).collect());
+
+            let result = with_global_ztresearchmgr_ptr(&mut wrapper.mgr, f);
+
+            for ptr in branch_ptrs {
+                destroy_update_test_branch(ptr);
+            }
+            result
+        }
+
+        /// Temporarily pins the real, live `ZTGameMgr` singleton's budget to `cash`, runs `f`, then
+        /// restores whatever it held before this call. Used by the `ZTRESEARCHBRANCH_UPDATE` comparison
+        /// so both the real and reimplemented `ZTResearchBranch::update` calls see the exact same
+        /// available cash, regardless of what either call's own `subtractCash` side effect (or anything
+        /// else running in the live game) did to the real budget in between - deliberately mutates the
+        /// real singleton in place rather than constructing/redirecting to a synthetic one, since
+        /// `subtractCash` also calls `ZTUI::main::setMoneyText`, which - unlike the narrowly-scoped
+        /// vanilla calls the rest of this file's live tests exercise - is a real UI refresh that likely
+        /// depends on other parts of `ZTGameMgr`/the wider UI state actually being initialized.
+        pub(crate) fn with_ztgamemgr_cash<R>(cash: f32, f: impl FnOnce() -> R) -> R {
+            let gamemgr = unsafe { &mut *global_ztgamemgr_ptr() };
+            let original = gamemgr.cash();
+            gamemgr.set_cash(cash);
+
+            let result = f();
+
+            unsafe { &mut *global_ztgamemgr_ptr() }.set_cash(original);
+            result
+        }
+
+        /// Exposed for `reimplementation_tests` to null-check `GLOBAL_ZTGameMgr`'s raw slot before
+        /// running the `ZTRESEARCHBRANCH_UPDATE` comparison - mirrors the existing
+        /// `globals().ztworldmgr_ptr().is_null()` guard `run_on_completion_reset_test_and_exit` already
+        /// uses for `GLOBAL_ZTWorldMgr`.
+        pub(crate) fn ztgamemgr_ptr_is_null() -> bool {
+            global_ztgamemgr_ptr().is_null()
         }
     }
 }
