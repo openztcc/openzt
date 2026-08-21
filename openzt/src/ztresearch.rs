@@ -216,14 +216,17 @@ fn dispatch_reset(effects: &mut impl ResearchEffects, program: &mut ZTResearchPr
 
 /// The real `ResearchEffects`: calls straight into the addresses `on_completion`/`reset` dispatch to
 /// in vanilla, via `openzt-detour/src/generated.rs`. `set_building_upgrade`/`set_trick_available`/
-/// `set_effect_discount` still mask their raw return value to its low byte before checking success:
+/// `set_effect_discount` used to mask their raw return value to its low byte before checking success:
 /// per their own decompiles, they return `CONCAT31(garbage, success_flag)` - the upper 3 bytes are
 /// whatever was left over in EAX from an unrelated prior call, not part of the real result. Confirmed
 /// live: without the mask, `ZTRESEARCHPROGRAM_ON_COMPLETION_RESET`'s live comparison test
 /// intermittently reported a spurious success for e.g. `TrickAvailable` even when the real call's
-/// actual (low-byte) result was failure. `set_entity_characteristic`/`set_genus_characteristic`/
-/// `set_family_characteristic`/`set_food_characteristic` don't need the mask - Ghidra now types their
-/// return as `bool` (the other three are still typed `u32` pending the same retype).
+/// actual (low-byte) result was failure. A Ghidra regen has since retyped all six of these (this trio
+/// included) to return `bool` rather than `u32`/`i8`/etc - matching the real, single-byte C++ `bool`
+/// these functions actually return - so the manual mask is gone: `bool`'s `extern "cdecl"` ABI already
+/// reads only the low byte (`AL`) the same way vanilla's own callers do, which is exactly what the
+/// mask was manually working around. Re-confirmed live post-regen against the same
+/// `ZTRESEARCHPROGRAM_ON_COMPLETION_RESET` test that originally caught the garbage-upper-bytes bug.
 struct LiveResearchEffects;
 
 impl ResearchEffects for LiveResearchEffects {
@@ -241,8 +244,7 @@ impl ResearchEffects for LiveResearchEffects {
                 program.effect_param_1,
                 program.effect_param_2,
                 install as i8,
-            ) & 0xff
-                != 0
+            )
         }
     }
 
@@ -291,14 +293,11 @@ impl ResearchEffects for LiveResearchEffects {
     }
 
     fn set_trick_available(&mut self, program: &ZTResearchProgram) -> bool {
-        unsafe { standalone::SET_TRICK_AVAILABLE.original()(program.target_id, program.effect_param_0 as u32) & 0xff != 0 }
+        unsafe { standalone::SET_TRICK_AVAILABLE.original()(program.target_id, program.effect_param_0 as u32) }
     }
 
     fn set_effect_discount(&mut self, program: &ZTResearchProgram) -> bool {
-        unsafe {
-            standalone::SET_EFFECT_DISCOUNT.original()(program.target_id, program.effect_param_0, program.effect_param_1, program.effect_param_2) & 0xff
-                != 0
-        }
+        unsafe { standalone::SET_EFFECT_DISCOUNT.original()(program.target_id, program.effect_param_0, program.effect_param_1, program.effect_param_2) }
     }
 
     fn add_completed_research(&mut self, program_ptr: *mut ZTResearchProgram) {
@@ -962,13 +961,37 @@ impl ZTResearchBranch {
     /// Reimplementation of `OOAnalyzer::ZTResearchBranch::pctRemainingOnProgram`. Returns `None`
     /// when there is no selected program or the active funding level isn't contributing (rate <= 0),
     /// mirroring the vanilla function's `-1` sentinel return.
+    ///
+    /// The float-to-int conversion deliberately does *not* round to nearest, despite Ghidra's
+    /// decompile naming its helper `ROUND()`, and does *not* use Rust's plain `as i32` saturating
+    /// cast either - both confirmed live (`ZTRESEARCHBRANCH_PCT_DAYS_REMAINING` in
+    /// `reimplementation_tests`):
+    ///
+    /// - It **truncates toward zero**, not round-to-nearest: confirmed live for
+    ///   `target_cost=-8576.077, current_progress=-4133.11` (true value ≈`51.807`), where vanilla
+    ///   returned `51`, not the `52` `.round()` (or any nearest-rounding) would give. This matches
+    ///   `private/resources/decompiles/ZTResearchBranch_pctRemainingOnProgram.asm` exactly: right
+    ///   before `FISTP`, it does `FSTCW`/`OR AH,0xc`/`FLDCW` to force the x87 rounding-control field
+    ///   to `11` (round-toward-zero) for just that one instruction, then restores the original
+    ///   control word - the classic MSVC codegen for a plain C `(int)x` cast (whose standard-mandated
+    ///   semantics *are* truncation toward zero), not an actual `round()` call. `f32::trunc()` below
+    ///   reproduces this directly.
+    /// - For a value that doesn't fit a 64-bit integer (NaN, ±Infinity, or a magnitude beyond
+    ///   `i64`'s range), x87's masked-invalid-operation behavior makes `FISTP` store the "integer
+    ///   indefinite" pattern `0x8000_0000_0000_0000` into its 64-bit destination (`FISTP` only has a
+    ///   64-bit integer store form - x87 has no 32-bit one - so the real return value is the low
+    ///   dword of that 64-bit store, the rest discarded). That pattern's low dword is `0`, confirmed
+    ///   live for `target_cost=0.0` - *not*
+    ///   `i32::MIN`/`i32::MAX`, which is what `f32 as i32`'s saturating cast would (wrongly) produce
+    ///   for -Infinity/+Infinity.
     pub fn pct_remaining_on_program(&self) -> Option<i32> {
         let program = self.current_program()?;
         let rate = self.current_funding_rate()?;
         if rate <= 0.0 {
             return None;
         }
-        Some((((program.target_cost - program.current_progress) * 100.0) / program.target_cost).round() as i32)
+        let raw = (((program.target_cost - program.current_progress) * 100.0) / program.target_cost).trunc();
+        Some(if raw.is_finite() { raw as i64 as i32 } else { 0 })
     }
 
     /// Reimplementation of `OOAnalyzer::ZTResearchBranch::daysRemainingOnProgram`. Same guards as
@@ -1112,10 +1135,12 @@ impl ZTResearchBranch {
 /// `current_program_ptr`/`current_funding_level`/funding table, so real `ZTResearchProgram`/
 /// `ZTResearchBranch` instances can be built directly on Rust's own allocator without any of
 /// `reimplementation_tests::live_support`'s machinery (which is feature-gated behind
-/// `reimplementation-tests`/`proptest`, unavailable to a plain `cargo test` run). Deliberately *not*
-/// compared live against the real `PCT_REMAINING_ON_PROGRAM`/`DAYS_REMAINING_ON_PROGRAM` addresses -
-/// see the module doc comment above these methods' own definitions for why (their auto-detected
-/// `FunctionDef` signatures are almost certainly wrong ABI detection).
+/// `reimplementation-tests`/`proptest`, unavailable to a plain `cargo test` run). Also covered live
+/// in `reimplementation_tests` (`ZTRESEARCHBRANCH_PCT_DAYS_REMAINING`) against the real
+/// `ztresearchbranch::PCT_REMAINING_ON_PROGRAM`/`DAYS_REMAINING_ON_PROGRAM` - originally these
+/// `FunctionDef`s' auto-detected signatures were wrong (`-> i64` and no return type at all), which
+/// is why that live test didn't exist at first; a Ghidra regen has since fixed both to their
+/// confirmed-correct `-> i32`/`-> f32`.
 #[cfg(test)]
 mod pct_days_remaining_tests {
     use super::*;
@@ -1241,38 +1266,44 @@ mod pct_days_remaining_tests {
     }
 
     #[test]
-    fn zero_target_cost_with_zero_progress_is_a_zero_over_zero_nan_that_saturates_to_zero() {
+    fn zero_target_cost_with_zero_progress_is_a_zero_over_zero_nan_that_becomes_zero() {
         let program = build_test_program(0.0, 0.0);
         let branch = build_test_branch(program as u32, 0, &[30.0]);
-        // (0.0 - 0.0) * 100.0 / 0.0 == NaN; NaN.round() is still NaN; `NaN as i32` saturates to 0
-        // under Rust's saturating float-to-int cast semantics.
+        // (0.0 - 0.0) * 100.0 / 0.0 == NaN; NaN.round() is still NaN, not `is_finite()`, so
+        // `pct_remaining_on_program` returns 0 - matching vanilla's x87 `FISTP` "integer
+        // indefinite" behavior for a value that can't convert to an integer (confirmed live via
+        // `ZTRESEARCHBRANCH_PCT_DAYS_REMAINING`; see that method's own doc comment).
         assert_eq!(branch.pct_remaining_on_program(), Some(0));
-        // (0.0 - 0.0) * 30.0 / rate == 0.0 exactly (the numerator is a real zero, not a NaN), so this
-        // case doesn't exercise the same saturating cast for `days_remaining_on_program` (it returns
-        // `f32`, not `i32`, so there's no cast to saturate at all).
+        // (0.0 - 0.0) * 30.0 / rate == 0.0 exactly (the numerator is a real zero, not a NaN), so
+        // this case doesn't exercise that conversion for `days_remaining_on_program` at all (it
+        // returns `f32`, not `i32`, so there's no int conversion to begin with).
         assert_eq!(branch.days_remaining_on_program(), Some(0.0));
         destroy_test_branch(&branch);
         destroy_test_program(program);
     }
 
     #[test]
-    fn zero_target_cost_with_positive_progress_saturates_to_i32_min() {
+    fn zero_target_cost_with_positive_progress_is_negative_infinity_that_becomes_zero() {
         let program = build_test_program(0.0, 5.0);
         let branch = build_test_branch(program as u32, 0, &[30.0]);
-        // (0.0 - 5.0) * 100.0 / 0.0 == -inf; (-inf).round() == -inf; `-inf as i32` saturates to
-        // `i32::MIN` under Rust's saturating float-to-int cast semantics.
-        assert_eq!(branch.pct_remaining_on_program(), Some(i32::MIN));
+        // (0.0 - 5.0) * 100.0 / 0.0 == -inf, not `is_finite()`, so `pct_remaining_on_program`
+        // returns 0. Confirmed live (`ZTRESEARCHBRANCH_PCT_DAYS_REMAINING`) against real vanilla,
+        // which disagreed with this crate's older `f32 as i32` saturating-cast implementation here
+        // (that cast saturates -inf to `i32::MIN`, but vanilla's x87 `FISTP` "integer indefinite"
+        // value's low dword - the only part any real caller reads - is 0, not `i32::MIN`).
+        assert_eq!(branch.pct_remaining_on_program(), Some(0));
         destroy_test_branch(&branch);
         destroy_test_program(program);
     }
 
     #[test]
-    fn zero_target_cost_with_negative_progress_saturates_to_i32_max() {
+    fn zero_target_cost_with_negative_progress_is_positive_infinity_that_becomes_zero() {
         let program = build_test_program(0.0, -5.0);
         let branch = build_test_branch(program as u32, 0, &[30.0]);
-        // (0.0 - (-5.0)) * 100.0 / 0.0 == +inf; (+inf).round() == +inf; `+inf as i32` saturates to
-        // `i32::MAX` under Rust's saturating float-to-int cast semantics.
-        assert_eq!(branch.pct_remaining_on_program(), Some(i32::MAX));
+        // (0.0 - (-5.0)) * 100.0 / 0.0 == +inf, not `is_finite()`, so `pct_remaining_on_program`
+        // returns 0 - the same x87 `FISTP` "integer indefinite" behavior as the positive-progress
+        // case above, confirmed live the same way (vanilla does not saturate to `i32::MAX` here).
+        assert_eq!(branch.pct_remaining_on_program(), Some(0));
         destroy_test_branch(&branch);
         destroy_test_program(program);
     }
@@ -1288,11 +1319,24 @@ mod pct_days_remaining_tests {
     }
 
     #[test]
-    fn pct_rounds_half_away_from_zero_at_the_boundary() {
-        // (200.0 - 1.0) * 100.0 / 200.0 == 99.5, which `f32::round` rounds away from zero to 100.0.
+    fn pct_truncates_toward_zero_at_the_boundary() {
+        // (200.0 - 1.0) * 100.0 / 200.0 == 99.5, which `f32::trunc` truncates toward zero to 99.0 -
+        // vanilla does *not* round to nearest here, confirmed live (see `pct_remaining_on_program`'s
+        // own doc comment for the live case that caught this).
         let program = build_test_program(200.0, 1.0);
         let branch = build_test_branch(program as u32, 0, &[30.0]);
-        assert_eq!(branch.pct_remaining_on_program(), Some(100));
+        assert_eq!(branch.pct_remaining_on_program(), Some(99));
+        destroy_test_branch(&branch);
+        destroy_test_program(program);
+    }
+
+    #[test]
+    fn pct_truncates_toward_zero_for_negative_values() {
+        // (-8576.077 - -4133.11) * 100.0 / -8576.077 == 51.8067..., which `f32::trunc` truncates
+        // toward zero to 51.0. The live case that first caught the round-vs-truncate mismatch.
+        let program = build_test_program(-8576.077, -4133.11);
+        let branch = build_test_branch(program as u32, 0, &[3.9904687]);
+        assert_eq!(branch.pct_remaining_on_program(), Some(51));
         destroy_test_branch(&branch);
         destroy_test_program(program);
     }

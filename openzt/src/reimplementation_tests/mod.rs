@@ -589,6 +589,7 @@ mod detour_zoo_main {
         fail_flag |= run_ztunit_get_footprint_tests(&mut failure_log);
         fail_flag |= run_ztanimal_get_footprint_tests(&mut failure_log);
         fail_flag |= run_research_branch_funding_test(&mut failure_log);
+        fail_flag |= run_research_branch_pct_days_remaining_test(&mut failure_log);
 
         // ZTRESEARCHMGR_SAVE: compares the real ZTResearchMgr::save's captured output against
         // research_save_reimplementation::serialize(&snapshot_mgr(mgr)) for generated synthetic trees.
@@ -1074,10 +1075,10 @@ mod detour_zoo_main {
                         let real_ptr = live_support::build_standalone_program(effect_kind_raw);
                         let reimpl_ptr = live_support::build_standalone_program(effect_kind_raw);
 
-                        let real_on_completion = unsafe { ztresearchprogram::ON_COMPLETION.original()(real_ptr as *const u32) } & 0xff;
+                        let real_on_completion = unsafe { ztresearchprogram::ON_COMPLETION.original()(real_ptr as *const u32) } as u32;
                         let reimpl_on_completion = unsafe { (*reimpl_ptr).on_completion() };
 
-                        let real_reset = unsafe { ztresearchprogram::RESET.original()(real_ptr as *const u32) } & 0xff;
+                        let real_reset = unsafe { ztresearchprogram::RESET.original()(real_ptr as *const u32) } as u32;
                         let reimpl_reset = unsafe { (*reimpl_ptr).reset() };
 
                         live_support::destroy_standalone_program(real_ptr);
@@ -1615,6 +1616,111 @@ mod detour_zoo_main {
                 current_funding_level,
                 level_count,
                 increase
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// Real vanilla's `daysRemainingOnProgram` runs its whole `FSUB`/`FMUL`/`FDIV` chain on the x87
+    /// stack, which computes at 80-bit extended precision internally and only rounds down to a
+    /// 32-bit `f32` once, at the very end (when the caller stores the `ST(0)` return value) - unlike
+    /// `days_remaining_on_program`'s Rust arithmetic, which (per strict IEEE-754 `f32` semantics,
+    /// with no `ST(0)`-equivalent extended-precision accumulator) rounds to `f32` after *each*
+    /// intermediate operation. Confirmed live: for `target_cost=8832.339, current_progress=0.0,
+    /// funding_rate=2.0866816`, real vanilla returns `126981.6` and this crate's arithmetic returns
+    /// `126981.59` - a one-part-in-1.6e7 difference, consistent with a single-ULP x87-vs-strict-`f32`
+    /// rounding difference, not a logic bug (a real formula/order-of-operations bug would produce a
+    /// far larger, `target_cost`/`rate`-dependent difference, not a fixed few-ULP one). So this
+    /// comparison uses a relative-tolerance check for `days`, not `prop_assert_eq!`'s exact equality.
+    fn days_approximately_eq(real: Option<f32>, reimpl: Option<f32>) -> bool {
+        match (real, reimpl) {
+            (None, None) => true,
+            (Some(real), Some(reimpl)) => {
+                // 64 ULPs' worth of relative slack for a 3-operation `f32` chain - generous next to
+                // the single-ULP-scale difference actually observed live, but still ~1500x tighter
+                // than the smallest realistic logic-bug difference (e.g. a missing `* 30.0`, or
+                // dividing by the wrong field, both of which change the result by orders of magnitude).
+                let tolerance = 64.0 * f32::EPSILON * real.abs().max(reimpl.abs()).max(1.0);
+                (real - reimpl).abs() <= tolerance
+            }
+            _ => false,
+        }
+    }
+
+    /// ZTRESEARCHBRANCH_PCT_DAYS_REMAINING: compares the real `ZTResearchBranch::pctRemainingOnProgram`/
+    /// `daysRemainingOnProgram` (`ztresearchbranch::PCT_REMAINING_ON_PROGRAM`/`DAYS_REMAINING_ON_PROGRAM`
+    /// - a Ghidra regen has since fixed these `FunctionDef`s' auto-detected signatures, which were
+    /// originally wrong: `-> i64` and no return type at all, respectively. See `pct_remaining_on_program`'s
+    /// own doc comment in `ztresearch.rs` for the disassembly evidence that drove that fix) against the
+    /// reimplemented `pct_remaining_on_program`/`days_remaining_on_program`, on a single branch built via
+    /// `live_support::build_update_test_branch`. Both real and reimplemented sides read the exact same
+    /// branch instance - these methods are `&self`-only with no side effects, so unlike the funding-level
+    /// tests above there's no need to build two independent trees. `target_cost` includes an explicit
+    /// `0.0` case alongside a general range: dividing by zero, `pct`'s only real edge case (`days`
+    /// divides by `rate`, never `target_cost` - see its own doc comment in `ztresearch.rs`), produces a
+    /// NaN/±Infinity that has to survive `pct`'s float-to-int conversion - this is exactly the case that
+    /// originally caught the reimplementation's `f32 as i32` saturating cast disagreeing with vanilla's
+    /// `FISTP`-based one (see `pct_remaining_on_program`'s own doc comment). Whether there's a real
+    /// "None" for a given case is derived from `current_funding_rate() > 0.0` (the same guard both real
+    /// and reimplemented code apply) rather than trusting `pct`'s raw `-1` return as a sentinel - `-1` is
+    /// also a legitimate in-range percentage (e.g. progress just past target_cost), so it can't be told
+    /// apart from the guard-failure sentinel by value alone.
+    fn run_research_branch_pct_days_remaining_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTRESEARCHBRANCH_PCT_DAYS_REMAINING";
+        let mut fail_flag = false;
+
+        let target_cost_strategy = prop_oneof![Just(0.0f32), -10000.0f32..10000.0f32];
+
+        match runner.run(&(target_cost_strategy, -10000.0f32..10000.0f32, -5.0f32..5.0f32), |(target_cost, current_progress, funding_rate)| {
+            let branch_ptr = live_support::build_update_test_branch(target_cost, current_progress, funding_rate, 0.0);
+            let branch_ref = unsafe { &*branch_ptr };
+
+            let raw_real_pct = unsafe { ztresearchbranch::PCT_REMAINING_ON_PROGRAM.original()(branch_ptr as *const u32) };
+            let raw_real_days = unsafe { ztresearchbranch::DAYS_REMAINING_ON_PROGRAM.original()(branch_ptr as *const u32) };
+            let rate_contributing = branch_ref.current_funding_rate().is_some_and(|rate| rate > 0.0);
+            let real_pct = rate_contributing.then_some(raw_real_pct);
+            let real_days = rate_contributing.then_some(raw_real_days);
+
+            let reimpl_pct = branch_ref.pct_remaining_on_program();
+            let reimpl_days = branch_ref.days_remaining_on_program();
+
+            live_support::destroy_update_test_branch(branch_ptr);
+
+            prop_assert_eq!(
+                real_pct,
+                reimpl_pct,
+                "pct_remaining_on_program mismatch for target_cost={}, current_progress={}, funding_rate={}",
+                target_cost,
+                current_progress,
+                funding_rate
+            );
+            prop_assert!(
+                days_approximately_eq(real_days, reimpl_days),
+                "days_remaining_on_program mismatch for target_cost={}, current_progress={}, funding_rate={}: real={:?}, reimpl={:?}",
+                target_cost,
+                current_progress,
+                funding_rate,
+                real_days,
+                reimpl_days
             );
             Ok(())
         }) {
