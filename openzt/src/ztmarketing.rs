@@ -197,14 +197,28 @@ impl ZTMarketing {
 
     /// Reimplementation of `OOAnalyzer::ZTMarketing::update`, per
     /// `resources/decompiles/ZTMarketing_update.c`: `days` in-game days of the *current* funding
-    /// level's `cost` (unlike `getFundingText`, which bounds-checks the index, this reads
-    /// `funding_level(current_funding_level)` completely unchecked - matching vanilla's own raw
-    /// `*(this + 0x10) + 8 + *(this + 0xc) * 0xc` pointer arithmetic exactly, with no guard against an
+    /// level's `cost` (unlike `getFundingText`, which bounds-checks the index, vanilla's own version of
+    /// this reads `funding_level(current_funding_level)` completely unchecked - matching vanilla's own
+    /// raw `*(this + 0x10) + 8 + *(this + 0xc) * 0xc` pointer arithmetic, with no guard against an
     /// empty/out-of-range table). If affordable against `GLOBAL_ZTGameMgr`'s live budget, spends it via
     /// `ZooStatus::spendMarketing` then `ZTGameMgr::subtractCash` - the same two-call shape and shared
     /// `DAYS_TO_FUNDING_SCALE` constant `ZTResearchBranch::update` uses (see that method's own doc
     /// comment in `ztresearch.rs`), just with no progress/completion side effect at all.
+    ///
+    /// The empty-table case *is* guarded here, unlike vanilla: `increase_funding`/`decrease_funding`/
+    /// `set_funding_level` all maintain `current_funding_level < funding_level_count()` whenever the
+    /// table is non-empty, so the only way this method could ever see an invalid index is a genuinely
+    /// empty table (`vector_start == 0`) - which real vanilla never ships (its own `mktgnorm.cfg` always
+    /// has four levels), but a live bug in `marketing_config_reimplementation`'s own parsing once did
+    /// produce (a crash on opening the zoo status menu, traced to `funding_level(0)` reading from a null
+    /// `vector_start`). Vanilla's own unchecked read would have crashed identically in that state, so
+    /// this guard doesn't diverge from any state vanilla itself is ever in - it only prevents this
+    /// specific reimplementation from crashing on a config it (through its own bug, or a malformed mod)
+    /// failed to populate, which vanilla's parser would never do to itself.
     pub fn update(&self, days: u32) {
+        if self.funding_level_count() == 0 {
+            return;
+        }
         let level = self.funding_level(self.current_funding_level as usize);
         let cash_delta = days as f32 * level.cost() * DAYS_TO_FUNDING_SCALE;
         let game_mgr = unsafe { &mut *global_ztgamemgr_ptr() };
@@ -583,7 +597,7 @@ pub(crate) mod marketing_save_reimplementation {
 mod marketing_config_reimplementation {
     use openzt_configparser::ini::Ini;
     use openzt_detour_macro::detour_mod;
-    use tracing::{debug, error};
+    use tracing::{error, info};
 
     use super::*;
     use crate::{encoding_utils::decode_game_text, resource_manager::lazyresourcemap::get_file};
@@ -684,7 +698,12 @@ mod marketing_config_reimplementation {
             let Some(ini) = read_cfg(path) else {
                 return false;
             };
-            let levels: Vec<ZTMarketingFundingLevel> = values(&ini, "marketing", "marketing").iter().map(|block| load_funding_level(&ini, block)).collect();
+            // Confirmed live against the real `mktgnorm.cfg`: the block-name list is `[marketing]
+            // funding=<block>...` - the *key* is `funding`, not another `marketing=` (that doubling
+            // only applies to the top-level file's own `[marketing] marketing=<path>` value, read by
+            // `ZTMarketingMgr::load_configurations` below). Same key/shape as
+            // `ztresearch::research_config_reimplementation`'s `[branch] funding=normal` list.
+            let levels: Vec<ZTMarketingFundingLevel> = values(&ini, "marketing", "funding").iter().map(|block| load_funding_level(&ini, block)).collect();
             let (start, end, capacity_end) = funding_table_from_vec(levels);
             self.vector_start = start;
             self.vector_end = end;
@@ -738,6 +757,7 @@ mod marketing_config_reimplementation {
             self.marketing_ptr = marketing_ptr as u32;
 
             let cfg_path = first(&top_ini, "marketing", "marketing").unwrap_or_default();
+            info!("marketing-config-reimplementation: resolved funding cfg path '{cfg_path}' from top-level file");
             let ok = unsafe { &mut *marketing_ptr }.load_configuration(&cfg_path);
             if !ok {
                 unsafe { &mut *marketing_ptr }.set_funding_level(0);
@@ -749,6 +769,14 @@ mod marketing_config_reimplementation {
     /// Detours `ZTMarketingMgr::loadConfigurations`/`clearConfigurations` onto this module's native
     /// reimplementation - the only two entry points that need detouring (see the module doc comment
     /// above for why `ZTMarketing::loadConfiguration`/`clearConfiguration` don't need their own).
+    ///
+    /// Confirmed live (2026-08-22) against the real `mktg.cfg`/`mktgnorm.cfg`: `mktg.cfg`'s own
+    /// `[marketing] marketing=mktgnorm.cfg` top-level pointer matches `first(top_ini, "marketing",
+    /// "marketing")` exactly, and `mktgnorm.cfg`'s `[marketing] funding=none/min/normal/max` block list
+    /// (plus each block's `name=`/`cost=`/`benefit=`) matches `load_configuration`'s parsing exactly -
+    /// see that method's own doc comment for the one place this originally differed (`"funding"`, not a
+    /// second `"marketing"` key, for the block-name list) and the crash that mismatch caused before it
+    /// was fixed.
     #[detour_mod]
     mod detours {
         use openzt_detour::generated::ztmarketingmgr::{CLEAR_CONFIGURATIONS, LOAD_CONFIGURATIONS};
@@ -772,7 +800,8 @@ mod marketing_config_reimplementation {
 
             let mgr = unsafe { mut_from_memory::<ZTMarketingMgr>(this) };
             let ok = mgr.load_configurations(&path_str);
-            debug!("marketing-config-reimplementation: loadConfigurations(\"{path_str}\") replaced natively -> {ok}");
+            let level_count = mgr.marketing().map(|m| m.funding_levels().len()).unwrap_or(0);
+            info!("marketing-config-reimplementation: loadConfigurations(\"{path_str}\") replaced natively -> {ok} ({level_count} funding levels)");
             ok as u32
         }
 
