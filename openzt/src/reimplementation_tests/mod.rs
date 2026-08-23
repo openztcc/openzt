@@ -1158,6 +1158,9 @@ mod detour_zoo_main {
         fail_flag |= run_branch_update_test(&mut failure_log);
         fail_flag |= run_research_mgr_update_branches_test(&mut failure_log);
         fail_flag |= run_marketing_update_test(&mut failure_log);
+        if std::env::var("OPENZT_REPRO_MARKETING_CRASH").is_ok() {
+            fail_flag |= run_marketing_update_boundary_test(&mut failure_log);
+        }
         fail_flag |= run_marketing_funding_text_test(&mut failure_log);
         fail_flag |= run_marketingmgr_load_configurations_test(&mut failure_log);
 
@@ -1923,14 +1926,17 @@ mod detour_zoo_main {
     /// multi-level table, not just the single-entry case.
     ///
     /// Restricted to the *insufficient-cash* case exactly like `ZTRESEARCHBRANCH_UPDATE` - see that
-    /// test's own doc comment in `ztresearch.rs`'s harness for why: `ZTGameMgr::subtractCash` also
-    /// reaches `ZTUI::main::setMoneyText`, a real UI refresh not safely touchable from this injection
-    /// point. (A no-op detour on `setMoneyText` alone was tried, to safely exercise the genuinely
-    /// *affordable* `<=` branch too - it still crashed the live test run, so something else inside
-    /// `subtractCash`/`spendMarketing` at this injection point is also unsafe; not investigated further.)
-    /// `available_cash` is instead pinned just *below* the real `cash_delta` (rather than a fixed `0.0`),
-    /// so every generated case still approaches the `<=` boundary as closely as safely possible without
-    /// ever crossing into the affordable/spend path.
+    /// test's own doc comment in `ztresearch.rs`'s harness for why: taking the real affordable `<=`
+    /// branch calls `ZooStatus::spendMarketing`/`ZTGameMgr::subtractCash` on the real `GLOBAL_ZTGameMgr`
+    /// singleton, which crashes the live harness at this early `updateSim`-first-tick injection point
+    /// *when `zoo.exe` is running under Windows' "Windows 7" compatibility mode* - confirmed root-caused
+    /// (WER + `cdb`, see `ztmarketing-update-setmoneytext-crash-investigation.md`) to that compat shim
+    /// specifically, not `setMoneyText` (no-op'd and still crashed), not an uninitialized `ZooStatus`
+    /// month-index (forced to `0` and still crashed), and not fatal at all with the compat shim off. Kept
+    /// restricted anyway since a real player could plausibly have that compat mode enabled too.
+    /// `available_cash` is instead pinned just *below* the real `cash_delta` (rather than a fixed `0.0`), so every generated
+    /// case still approaches the `<=` boundary as closely as safely possible without ever crossing into
+    /// the affordable/spend path.
     fn run_marketing_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let runner_config = ProptestConfig {
             failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
@@ -2013,6 +2019,50 @@ mod detour_zoo_main {
         }
 
         fail_flag
+    }
+
+    /// Deterministic single-case reproduction of the `ZTMARKETING_UPDATE` affordable-branch crash - see
+    /// `ztmarketing-update-setmoneytext-crash-investigation.md` for the full writeup. Calls only the
+    /// real `ZTMarketingMgr::update` (`ZTMARKETINGMGR_UPDATE.original()`), skipping the reimplemented
+    /// side entirely, so a crash unambiguously means the real vanilla call path (matching every capture
+    /// in that doc). `available_cash` is pinned to exactly `cash_delta` (the `<=` boundary itself, never
+    /// exercised by `run_marketing_update_test` above), forcing the real side onto the affordable
+    /// `spendMarketing`/`subtractCash` branch every time. Gated behind the `OPENZT_REPRO_MARKETING_CRASH`
+    /// env var (unset by default) since this reliably corrupts process memory and crashes - only meant
+    /// to be enabled manually while investigating live under a debugger.
+    fn run_marketing_update_boundary_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMARKETING_UPDATE_BOUNDARY_REPRO";
+
+        if marketing_live_support::ztgamemgr_ptr_is_null() {
+            info!("Skipping {}: GLOBAL_ZTGameMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTGameMgr not initialized)", test_name));
+            return false;
+        }
+
+        const DAYS_TO_FUNDING_SCALE: f32 = 1.0 / 43200.0;
+        let delta_ticks: u32 = 5000;
+        let cost: f32 = 100.0;
+        let levels: Vec<(i32, f32)> = vec![(0, cost)];
+        let (_, days) = predict_mgr_update(0, delta_ticks);
+        let cash_delta = days as f32 * cost * DAYS_TO_FUNDING_SCALE;
+
+        let real_marketing_ptr = marketing_live_support::build_standalone_marketing_with_levels(0, &levels);
+        let real_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, real_marketing_ptr);
+
+        info!(
+            "{}: about to call real ZTMarketingMgr::update with available_cash == cash_delta ({}) - this is expected to crash",
+            test_name, cash_delta
+        );
+        marketing_live_support::with_ztgamemgr_cash(cash_delta, || unsafe {
+            ZTMARKETINGMGR_UPDATE.original()((real_mgr_ptr as *mut ZTMarketingMgr) as *const u32, delta_ticks);
+        });
+        info!("{}: real call returned without crashing", test_name);
+
+        marketing_live_support::destroy_standalone_marketing_mgr(real_mgr_ptr);
+        marketing_live_support::destroy_standalone_marketing(real_marketing_ptr);
+
+        write_success_line(failure_log, test_name);
+        false
     }
 
     /// ZTMARKETING_GET_FUNDING_TEXT: compares the real `ZTMarketing::getFundingText`'s output against
