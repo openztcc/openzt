@@ -14,9 +14,12 @@
 //! `GLOBAL_ZTGameMgr` -> `0x00238048`, `GLOBAL_ZTAdvTerrainMgr` -> `0x00238058`), all of which match
 //! the addresses already hard-coded in `globals.rs`.
 //!
-//! Only the funding-level mutators (`increase_funding`/`decrease_funding`/`set_funding_level`) are
-//! natively reimplemented so far - the rest of the plan's items (`update`, `save`/`load`,
-//! `getFundingText`, the config-loading pipeline) are still TODO.
+//! The funding-level mutators (`increase_funding`/`decrease_funding`/`set_funding_level`), `update`,
+//! `save`/`load`, `getFundingText`, and the `.cfg`-driven config-loading pipeline
+//! (`marketing_config_reimplementation`, below) are all natively reimplemented. Only
+//! `ZTMarketingMgr::create`/`instantiate`/`destroy` remain unreimplemented - they have no confirmed
+//! Windows address at all (macOS-decompile only), so replicating them would require new
+//! Ghidra/decompiling work outside this module's scope.
 
 use std::mem::size_of;
 
@@ -251,7 +254,7 @@ pub struct ZTMarketingMgr {
 /// wraps via plain 32-bit addition (the decompile's `dword`-typed accumulator), matching vanilla's own
 /// wraparound behavior exactly - see `ztresearch::predict_update`'s doc comment for why this uses
 /// `wrapping_add`/`wrapping_mul` rather than a widened intermediate.
-fn predict_mgr_update(tick_accumulator_before: u32, delta_ticks: u32) -> (u32, u32) {
+pub(crate) fn predict_mgr_update(tick_accumulator_before: u32, delta_ticks: u32) -> (u32, u32) {
     let tick_accumulator = tick_accumulator_before.wrapping_add(delta_ticks);
     let days = tick_accumulator.wrapping_mul(0x1c20) / 60000;
     if days > 0x167 {
@@ -306,6 +309,16 @@ impl ZTMarketingMgr {
     #[cfg(feature = "reimplementation-tests")]
     pub(crate) fn set_tick_accumulator(&mut self, value: u32) {
         self.tick_accumulator = value;
+    }
+
+    /// Exposed for the live `reimplementation_tests` comparison harness, to check `marketing_ptr`'s raw
+    /// non-null/null state directly without constructing a reference to memory that may already be
+    /// freed - see `clear_configurations`'s own doc comment on why the pointer is deliberately left
+    /// dangling (non-null, but stale) rather than nulled. `marketing()`/`marketing_mut()` would
+    /// construct such a reference, which this deliberately avoids.
+    #[cfg(feature = "reimplementation-tests")]
+    pub(crate) fn marketing_ptr_raw(&self) -> u32 {
+        self.marketing_ptr
     }
 
     /// Native reimplementation of `ZTMarketingMgr::update`'s accumulator/day-count bookkeeping (see
@@ -650,6 +663,106 @@ mod marketing_config_reimplementation {
         }
     }
 
+    /// Reads the `[marketing] funding=<block>...` block-name list and loads one
+    /// `ZTMarketingFundingLevel` per named block, in order - the exact key that commit `0f91236`
+    /// (`"Fix issue with marketing config parsing"`) fixed: an earlier version of this code read a
+    /// second `"marketing"` key here instead of `"funding"`, which silently produced an empty table
+    /// (not a parse error) and crashed the game on opening the zoo status menu once
+    /// `ZTMarketing::update` read past the empty funding vector. See `parse_tests` below for the
+    /// regression coverage.
+    fn parse_funding_levels(ini: &Ini) -> Vec<ZTMarketingFundingLevel> {
+        values(ini, "marketing", "funding").iter().map(|block| load_funding_level(ini, block)).collect()
+    }
+
+    /// Reads the top-level file's `[marketing] marketing=<path>` value - the resource-relative path to
+    /// the actual funding `.cfg` file (e.g. `mktgnorm.cfg`) - or `None` if absent. Named `marketing` at
+    /// this level only; the funding-level block-name list one file down is the *different* `funding` key
+    /// `parse_funding_levels` reads - see that function's own doc comment for the bug this distinction
+    /// caused when the two were confused.
+    fn resolve_funding_cfg_path(ini: &Ini) -> Option<String> {
+        first(ini, "marketing", "marketing")
+    }
+
+    #[cfg(test)]
+    mod parse_tests {
+        use super::*;
+
+        fn parse_ini(raw: &str) -> Ini {
+            let mut ini = Ini::new_cs();
+            ini.set_comment_symbols(&[';']);
+            ini.read(raw.to_string()).expect("test INI should parse");
+            ini
+        }
+
+        #[test]
+        fn parses_funding_block_list_with_name_cost_benefit() {
+            let ini = parse_ini(
+                "[marketing]\n\
+                 funding = none\n\
+                 funding = min\n\
+                 funding = normal\n\
+                 funding = max\n\
+                 \n\
+                 [none]\n\
+                 name = 23100\n\
+                 cost = 0.0\n\
+                 benefit = 0\n\
+                 \n\
+                 [min]\n\
+                 name = 23101\n\
+                 cost = 50.0\n\
+                 benefit = 1\n\
+                 \n\
+                 [normal]\n\
+                 name = 23102\n\
+                 cost = 100.0\n\
+                 benefit = 2\n\
+                 \n\
+                 [max]\n\
+                 name = 23103\n\
+                 cost = 200.0\n\
+                 benefit = 3\n",
+            );
+
+            let levels = parse_funding_levels(&ini);
+            assert_eq!(levels.len(), 4);
+            assert_eq!((levels[0].name_id(), levels[0].cost(), levels[0].benefit()), (23100, 0.0, 0));
+            assert_eq!((levels[1].name_id(), levels[1].cost(), levels[1].benefit()), (23101, 50.0, 1));
+            assert_eq!((levels[2].name_id(), levels[2].cost(), levels[2].benefit()), (23102, 100.0, 2));
+            assert_eq!((levels[3].name_id(), levels[3].cost(), levels[3].benefit()), (23103, 200.0, 3));
+        }
+
+        /// Regression test for commit `0f91236`: a file that (incorrectly, like the pre-fix code) only
+        /// has the top-level `marketing=<path>` key under `[marketing]`, and no `funding` key, must
+        /// parse to an empty table - not panic, and not silently read `marketing`'s own value as a
+        /// block-name list. See `parse_funding_levels`'s own doc comment for the crash this caused live.
+        #[test]
+        fn wrong_key_produces_empty_vec_not_a_panic_or_malformed_table() {
+            let ini = parse_ini("[marketing]\nmarketing = none min normal max\n");
+            let levels = parse_funding_levels(&ini);
+            assert!(levels.is_empty());
+        }
+
+        #[test]
+        fn missing_funding_key_produces_empty_vec_not_a_panic() {
+            let ini = parse_ini("[marketing]\nunrelated = 1\n");
+            let levels = parse_funding_levels(&ini);
+            assert!(levels.is_empty());
+        }
+
+        #[test]
+        fn resolves_top_level_marketing_path() {
+            let ini = parse_ini("[marketing]\nmarketing = mktgnorm.cfg\n");
+            assert_eq!(resolve_funding_cfg_path(&ini), Some("mktgnorm.cfg".to_string()));
+        }
+
+        #[test]
+        fn resolve_funding_cfg_path_returns_none_when_absent() {
+            let ini = parse_ini("[marketing]\nfunding = none\n");
+            assert_eq!(resolve_funding_cfg_path(&ini), None);
+        }
+    }
+
     /// Leaks `vec` into a fresh 3-pointer funding-table (all-zero if empty) - same shape as
     /// `live_support::funding_table_from_vec`, duplicated here since that copy is
     /// `#[cfg(feature = "reimplementation-tests")]`-gated and this module must exist unconditionally
@@ -703,7 +816,7 @@ mod marketing_config_reimplementation {
             // only applies to the top-level file's own `[marketing] marketing=<path>` value, read by
             // `ZTMarketingMgr::load_configurations` below). Same key/shape as
             // `ztresearch::research_config_reimplementation`'s `[branch] funding=normal` list.
-            let levels: Vec<ZTMarketingFundingLevel> = values(&ini, "marketing", "funding").iter().map(|block| load_funding_level(&ini, block)).collect();
+            let levels = parse_funding_levels(&ini);
             let (start, end, capacity_end) = funding_table_from_vec(levels);
             self.vector_start = start;
             self.vector_end = end;
@@ -713,6 +826,13 @@ mod marketing_config_reimplementation {
     }
 
     impl ZTMarketingMgr {
+        /// `ZTMarketing` instances in this pipeline are constructed/destroyed via Rust's own allocator
+        /// (`Box::new`/`Box::from_raw`, in both `load_configurations` and `clear_configurations` below)
+        /// rather than calling the confirmed native `CONSTRUCTOR`/`ZTMARKETING` addresses - a deliberate
+        /// choice, not an oversight: the `#[repr(C)]` struct is layout-equivalent, and nothing else in
+        /// this path ever touches the embedded `BFConfigFile` sub-object through vanilla code, so there's
+        /// no vanilla-side state a native ctor/dtor call would need to initialize/tear down here.
+        ///
         /// Reimplementation of `ZTMarketingMgr::clearConfigurations`: resets the tick accumulator to
         /// `0` and, if a `ZTMarketing` exists, destroys and frees it - but, per the implementation
         /// plan's item 6, deliberately does **not** null `marketing_ptr` afterward. This is a real
@@ -878,23 +998,6 @@ pub(crate) mod live_support {
         let marketing = unsafe { &*ptr };
         free_funding_table(marketing.vector_start, marketing.vector_capacity_end);
         drop(unsafe { Box::from_raw(ptr) });
-    }
-
-    /// Builds a standalone `ZTMarketing` with a single funding-level entry at index `0` (matching
-    /// `current_funding_level`'s default) whose `cost` is `funding_cost` - used by the
-    /// `ZTMARKETING_UPDATE` live comparison test, which needs a real, non-empty table for
-    /// `ZTMarketing::update`'s unchecked `funding_level(current_funding_level)` read (see that
-    /// method's own doc comment on `ztmarketing.rs`) to be safe.
-    pub(crate) fn build_standalone_marketing_with_cost(funding_cost: f32) -> *mut ZTMarketing {
-        let table = vec![ZTMarketingFundingLevel { name: 0, benefit: 0, cost: funding_cost }];
-        let (vector_start, vector_end, vector_capacity_end) = funding_table_from_vec(table);
-        Box::into_raw(Box::new(ZTMarketing {
-            config_file: BFConfigFile::default(),
-            current_funding_level: 0,
-            vector_start,
-            vector_end,
-            vector_capacity_end,
-        }))
     }
 
     /// Builds a standalone `ZTMarketing` for the `ZTMARKETING_GET_FUNDING_TEXT` live comparison test -

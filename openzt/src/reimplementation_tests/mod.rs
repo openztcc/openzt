@@ -31,6 +31,17 @@ pub fn init() {
 
         io_redirect::init();
 
+        // Installs `hooks::init_hooks()` (via `resource_manager::init()`), which detours
+        // `BFResourceMgr::CONSTRUCTOR`/`ADD_PATH`, `BFResource::ATTEMPT`/`PREPARE`, all 30
+        // `BFResourcePtr::DELREF_*` overloads, and `ztui_general::GET_INFO_IMAGE_NAME` - installed here,
+        // before `detour_zoo_main`'s own battery runs (and before the real `BFResourceMgr` singleton is
+        // constructed during game boot), so `LAZY_RESOURCE_MAP` gets populated the same way it would in
+        // a production build. Needed so the ZTMARKETINGMGR_LOAD_CONFIGURATIONS test's own
+        // `load_configurations()` call can resolve real game resources via `get_file` - vanilla's own
+        // `ZTMarketingMgr::loadConfigurations` doesn't need this (it reads through the game's native
+        // resource system directly), but this crate's reimplementation does.
+        crate::resource_manager::init();
+
         // Installs `research_save_reimplementation`'s `SAVE`/`LOAD` detour (the `not(vanilla-research-save)`
         // default arm - a no-op under the `vanilla-research-save` feature) before `detour_zoo_main`'s own
         // battery runs, so the ZTRESEARCHMGR_SAVE/ZTRESEARCHMGR_LOAD tests' `mgr.save()`/`mgr.load()` calls
@@ -79,11 +90,13 @@ mod detour_zoo_main {
     use std::{
         backtrace::Backtrace,
         cell::Cell,
+        ffi::CStr,
         fs::OpenOptions,
         io::Write,
+        mem::size_of,
         sync::{
             atomic::{AtomicBool, Ordering},
-            Once,
+            Once, OnceLock,
         },
     };
 
@@ -95,10 +108,11 @@ mod detour_zoo_main {
     use openzt_detour::generated::bfapp::LOAD_LANG_DLLS;
     use openzt_detour::generated::bfentity::GET_FOOTPRINT as BFENTITY_GET_FOOTPRINT;
     use openzt_detour::generated::bftile::GET_LOCAL_ELEVATION;
+    use openzt_detour::generated::standalone;
     use openzt_detour::generated::ztanimal::GET_FOOTPRINT as ZTANIMAL_GET_FOOTPRINT;
     use openzt_detour::generated::ztapp::UPDATE_SIM;
     use openzt_detour::generated::ztmarketing;
-    use openzt_detour::generated::ztmarketingmgr::UPDATE as ZTMARKETINGMGR_UPDATE;
+    use openzt_detour::generated::ztmarketingmgr::{CLEAR_CONFIGURATIONS as ZTMARKETINGMGR_CLEAR_CONFIGURATIONS, LOAD_CONFIGURATIONS, UPDATE as ZTMARKETINGMGR_UPDATE};
     use openzt_detour::generated::ztresearchbranch;
     use openzt_detour::generated::ztresearchbranch::GET_FUNDING_TEXT as ZTRESEARCHBRANCH_GET_FUNDING_TEXT;
     use openzt_detour::generated::ztresearchbranch::UPDATE as ZTRESEARCHBRANCH_UPDATE;
@@ -116,7 +130,7 @@ mod detour_zoo_main {
         globals::globals,
         util::{get_from_memory, ZTBufferString, ZTString},
         ztmapview::BFTile,
-        ztmarketing::{live_support as marketing_live_support, marketing_save_reimplementation, ZTMarketingMgr},
+        ztmarketing::{live_support as marketing_live_support, marketing_save_reimplementation, predict_mgr_update, ZTMarketing, ZTMarketingMgr},
         ztresearch::research_save_reimplementation::{self, live_support, SaveRecord},
         ztresearch::{ZTResearchBranch, ZTResearchEffectKind, ZTResearchMgr},
         ztworldmgr::{BFEntity, IVec3, ZTAnimal, ZTUnit},
@@ -604,6 +618,7 @@ mod detour_zoo_main {
         fail_flag |= run_marketingmgr_update_test(&mut failure_log);
         fail_flag |= run_marketingmgr_save_test(&mut failure_log);
         fail_flag |= run_marketingmgr_load_test(&mut failure_log);
+        fail_flag |= run_marketingmgr_clear_configurations_test(&mut failure_log);
 
         // ZTRESEARCHMGR_SAVE: compares the real ZTResearchMgr::save's captured output against
         // research_save_reimplementation::serialize(&snapshot_mgr(mgr)) for generated synthetic trees.
@@ -1045,6 +1060,25 @@ mod detour_zoo_main {
     static EARLY_TESTS_FAILED: AtomicBool = AtomicBool::new(false);
     static RAN_UPDATE_SIM_TESTS: Once = Once::new();
 
+    /// The resource-relative path vanilla's own boot-time `ZTMarketingMgr::loadConfigurations` call
+    /// passes (e.g. `"mktg.cfg"`) - captured by `detour_capture_marketing_load_configurations_path`
+    /// below, so `run_marketingmgr_load_configurations_test` can reuse the real path rather than
+    /// hardcoding a guess. Only the first call's path is kept (`OnceLock::set` silently no-ops on a
+    /// second call) - vanilla only calls this once during boot.
+    static CAPTURED_MARKETING_PATH: OnceLock<String> = OnceLock::new();
+
+    /// Transparent path-capture detour on `ZTMarketingMgr::loadConfigurations` - always calls through
+    /// to the original unconditionally and never alters its return value or behavior, just records
+    /// whatever path vanilla itself passes into `CAPTURED_MARKETING_PATH`. Installed unconditionally
+    /// (this harness never calls `marketing_config_reimplementation::init()`, so there's no other
+    /// detour on this address to conflict with here).
+    #[detour(LOAD_CONFIGURATIONS)]
+    unsafe extern "thiscall" fn detour_capture_marketing_load_configurations_path(this: *const u32, path: *const i8) -> u32 {
+        let path_str = unsafe { CStr::from_ptr(path) }.to_string_lossy().into_owned();
+        let _ = CAPTURED_MARKETING_PATH.set(path_str);
+        unsafe { LOAD_CONFIGURATIONS_DETOUR.call(this, path) }
+    }
+
     #[detour(UPDATE_SIM)]
     unsafe extern "thiscall" fn detour_update_sim(this_ptr: *const u32, param_2: u32) {
         RAN_UPDATE_SIM_TESTS.call_once(run_on_completion_reset_test_and_exit);
@@ -1125,6 +1159,7 @@ mod detour_zoo_main {
         fail_flag |= run_research_mgr_update_branches_test(&mut failure_log);
         fail_flag |= run_marketing_update_test(&mut failure_log);
         fail_flag |= run_marketing_funding_text_test(&mut failure_log);
+        fail_flag |= run_marketingmgr_load_configurations_test(&mut failure_log);
 
         if fail_flag {
             error!("Proptest failed for some cases, check the failure log at: {}", failure_log_path);
@@ -1872,23 +1907,30 @@ mod detour_zoo_main {
     }
 
     /// ZTMARKETING_UPDATE: compares the real `ZTMarketingMgr::update`'s effect on a *wired-in*
-    /// `ZTMarketing` (a one-entry funding table at index `0`, so `ZTMarketing::update`'s unchecked
-    /// `funding_level(current_funding_level)` read is always safe) against the reimplemented `update`,
-    /// with `tick_accumulator` fixed so a threshold crossing always happens (`delta_ticks` generated
-    /// `3000..10000`, always `> 359` days' worth per `predict_mgr_update`) - so `ZTMarketing::update`
-    /// genuinely runs on both sides, not just the accumulator bookkeeping already covered by
-    /// `ZTMARKETINGMGR_UPDATE` above. Run from `run_on_completion_reset_test_and_exit`'s `updateSim`
-    /// injection point rather than the earlier `LOAD_LANG_DLLS` battery, same as
-    /// `ZTRESEARCHBRANCH_UPDATE`/`ZTRESEARCHMGR_UPDATE_BRANCHES` - `GLOBAL_ZTGameMgr` isn't constructed
-    /// yet at `LOAD_LANG_DLLS` (confirmed live: this test reported "skipped" there before moving here).
+    /// `ZTMarketing` against the reimplemented `update`, with `tick_accumulator` fixed so a threshold
+    /// crossing always happens (`delta_ticks` generated `3000..10000`, always `> 359` days' worth per
+    /// `predict_mgr_update`) - so `ZTMarketing::update` genuinely runs on both sides, not just the
+    /// accumulator bookkeeping already covered by `ZTMARKETINGMGR_UPDATE` above. Run from
+    /// `run_on_completion_reset_test_and_exit`'s `updateSim` injection point rather than the earlier
+    /// `LOAD_LANG_DLLS` battery, same as `ZTRESEARCHBRANCH_UPDATE`/`ZTRESEARCHMGR_UPDATE_BRANCHES` -
+    /// `GLOBAL_ZTGameMgr` isn't constructed yet at `LOAD_LANG_DLLS` (confirmed live: this test reported
+    /// "skipped" there before moving here).
     ///
-    /// Restricted to the *insufficient-cash* case exactly like `ZTRESEARCHBRANCH_UPDATE`
-    /// (`AVAILABLE_CASH = 0.0`, `funding_cost` generated strictly positive) - see that test's own doc
-    /// comment in `ztresearch.rs`'s harness for why: `ZTGameMgr::subtractCash` also calls
-    /// `ZTUI::main::setMoneyText`, a real UI refresh not safely touchable from this injection point.
-    /// What this test *does* cover live: that `ZTMarketing::update` reads the right funding level, the
-    /// right day count, and leaves the budget/index untouched when unaffordable - on both sides
-    /// identically.
+    /// The funding table has `1..5` entries (`ZTMarketing::update`'s unchecked
+    /// `funding_level(current_funding_level)` read needs a real, non-empty table to be safe - see that
+    /// method's own doc comment), with `current_funding_level` spanning the whole table rather than
+    /// fixed at index `0`, so this covers `ZTMarketingMgr::update`'s day-count threading into a
+    /// multi-level table, not just the single-entry case.
+    ///
+    /// Restricted to the *insufficient-cash* case exactly like `ZTRESEARCHBRANCH_UPDATE` - see that
+    /// test's own doc comment in `ztresearch.rs`'s harness for why: `ZTGameMgr::subtractCash` also
+    /// reaches `ZTUI::main::setMoneyText`, a real UI refresh not safely touchable from this injection
+    /// point. (A no-op detour on `setMoneyText` alone was tried, to safely exercise the genuinely
+    /// *affordable* `<=` branch too - it still crashed the live test run, so something else inside
+    /// `subtractCash`/`spendMarketing` at this injection point is also unsafe; not investigated further.)
+    /// `available_cash` is instead pinned just *below* the real `cash_delta` (rather than a fixed `0.0`),
+    /// so every generated case still approaches the `<=` boundary as closely as safely possible without
+    /// ever crossing into the affordable/spend path.
     fn run_marketing_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let runner_config = ProptestConfig {
             failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
@@ -1904,43 +1946,59 @@ mod detour_zoo_main {
             return fail_flag;
         }
 
-        const AVAILABLE_CASH: f32 = 0.0;
+        // Mirrors `ZTMarketing::update`'s own `DAYS_TO_FUNDING_SCALE` constant (private to `ztmarketing`)
+        // so the generated `available_cash` can land just below the real `cash_delta`. `cash_delta`
+        // itself is `days * cost * scale`, not `delta_ticks * cost * scale` - `days` is
+        // `predict_mgr_update`'s own tick-to-day conversion, not `delta_ticks` verbatim.
+        const DAYS_TO_FUNDING_SCALE: f32 = 1.0 / 43200.0;
 
-        match runner.run(&(3000u32..10000, 1f32..1000f32), |(delta_ticks, funding_cost)| {
-            let real_marketing_ptr = marketing_live_support::build_standalone_marketing_with_cost(funding_cost);
-            let real_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, real_marketing_ptr);
-            marketing_live_support::with_ztgamemgr_cash(AVAILABLE_CASH, || unsafe {
-                ZTMARKETINGMGR_UPDATE.original()((real_mgr_ptr as *mut ZTMarketingMgr) as *const u32, delta_ticks);
-            });
-            let real_tick_accumulator = unsafe { &*real_mgr_ptr }.tick_accumulator();
-            let real_index = unsafe { &*real_marketing_ptr }.current_funding_level();
-            marketing_live_support::destroy_standalone_marketing_mgr(real_mgr_ptr);
-            marketing_live_support::destroy_standalone_marketing(real_marketing_ptr);
+        match runner.run(
+            &(3000u32..10000, prop::collection::vec(1f32..1000f32, 1..5), any::<usize>()),
+            |(delta_ticks, costs, raw_index)| {
+                let current_funding_level = (raw_index % costs.len()) as u32;
+                let levels: Vec<(i32, f32)> = costs.iter().map(|&cost| (0i32, cost)).collect();
+                let selected_cost = costs[current_funding_level as usize];
+                let (_, days) = predict_mgr_update(0, delta_ticks);
+                let cash_delta = days as f32 * selected_cost * DAYS_TO_FUNDING_SCALE;
+                let available_cash = (cash_delta - 0.01).max(0.0);
 
-            let reimpl_marketing_ptr = marketing_live_support::build_standalone_marketing_with_cost(funding_cost);
-            let reimpl_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, reimpl_marketing_ptr);
-            marketing_live_support::with_ztgamemgr_cash(AVAILABLE_CASH, || unsafe { &mut *reimpl_mgr_ptr }.update(delta_ticks));
-            let reimpl_tick_accumulator = unsafe { &*reimpl_mgr_ptr }.tick_accumulator();
-            let reimpl_index = unsafe { &*reimpl_marketing_ptr }.current_funding_level();
-            marketing_live_support::destroy_standalone_marketing_mgr(reimpl_mgr_ptr);
-            marketing_live_support::destroy_standalone_marketing(reimpl_marketing_ptr);
+                let real_marketing_ptr = marketing_live_support::build_standalone_marketing_with_levels(current_funding_level, &levels);
+                let real_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, real_marketing_ptr);
+                marketing_live_support::with_ztgamemgr_cash(available_cash, || unsafe {
+                    ZTMARKETINGMGR_UPDATE.original()((real_mgr_ptr as *mut ZTMarketingMgr) as *const u32, delta_ticks);
+                });
+                let real_tick_accumulator = unsafe { &*real_mgr_ptr }.tick_accumulator();
+                let real_index = unsafe { &*real_marketing_ptr }.current_funding_level();
+                marketing_live_support::destroy_standalone_marketing_mgr(real_mgr_ptr);
+                marketing_live_support::destroy_standalone_marketing(real_marketing_ptr);
 
-            prop_assert_eq!(
-                real_tick_accumulator,
-                reimpl_tick_accumulator,
-                "tick_accumulator mismatch for delta_ticks={}, funding_cost={}",
-                delta_ticks,
-                funding_cost
-            );
-            prop_assert_eq!(
-                real_index,
-                reimpl_index,
-                "current_funding_level mismatch for delta_ticks={}, funding_cost={}",
-                delta_ticks,
-                funding_cost
-            );
-            Ok(())
-        }) {
+                let reimpl_marketing_ptr = marketing_live_support::build_standalone_marketing_with_levels(current_funding_level, &levels);
+                let reimpl_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, reimpl_marketing_ptr);
+                marketing_live_support::with_ztgamemgr_cash(available_cash, || unsafe { &mut *reimpl_mgr_ptr }.update(delta_ticks));
+                let reimpl_tick_accumulator = unsafe { &*reimpl_mgr_ptr }.tick_accumulator();
+                let reimpl_index = unsafe { &*reimpl_marketing_ptr }.current_funding_level();
+                marketing_live_support::destroy_standalone_marketing_mgr(reimpl_mgr_ptr);
+                marketing_live_support::destroy_standalone_marketing(reimpl_marketing_ptr);
+
+                prop_assert_eq!(
+                    real_tick_accumulator,
+                    reimpl_tick_accumulator,
+                    "tick_accumulator mismatch for delta_ticks={}, current_funding_level={}, costs={:?}",
+                    delta_ticks,
+                    current_funding_level,
+                    costs
+                );
+                prop_assert_eq!(
+                    real_index,
+                    reimpl_index,
+                    "current_funding_level mismatch for delta_ticks={}, current_funding_level={}, costs={:?}",
+                    delta_ticks,
+                    current_funding_level,
+                    costs
+                );
+                Ok(())
+            },
+        ) {
             Ok(_) => {
                 info!("Proptest passed for {}", test_name);
                 write_success_line(failure_log, test_name);
@@ -2144,6 +2202,133 @@ mod detour_zoo_main {
         }
 
         fail_flag
+    }
+
+    /// ZTMARKETINGMGR_CLEAR_CONFIGURATIONS: compares the real `ZTMarketingMgr::clearConfigurations`
+    /// against the reimplemented `clear_configurations`, confirming both leave `tick_accumulator == 0`
+    /// and - the real vanilla quirk the implementation plan's item 6 calls out - `marketing_ptr` left
+    /// dangling (non-null, pointing at now-freed memory) rather than nulled. The stale pointer is never
+    /// dereferenced further here, only checked for non-nullness via `marketing_ptr_raw()`.
+    ///
+    /// Unlike every other real-vanilla call this file makes elsewhere (which only ever read memory),
+    /// `clearConfigurations` actually **frees** the owned `ZTMarketing` - and this codebase's confirmed
+    /// custom `standalone::OPERATOR_NEW` allocator makes freeing a Rust `Box`-allocated `ZTMarketing`
+    /// through vanilla's own destructor/delete path a genuine cross-heap risk. So the "real" side's
+    /// `ZTMarketing` is instead allocated via that same `OPERATOR_NEW` and initialized via the confirmed
+    /// native `ztmarketing::CONSTRUCTOR` - left at the ctor's default (empty funding table, index `0`),
+    /// since the quirk under test doesn't depend on table content - so the real free that
+    /// `clearConfigurations` performs stays heap-consistent with how the memory was allocated.
+    fn run_marketingmgr_clear_configurations_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETINGMGR_CLEAR_CONFIGURATIONS";
+        let mut fail_flag = false;
+
+        match runner.run(&any::<u32>(), |tick_accumulator| {
+            let real_raw = unsafe { standalone::OPERATOR_NEW.original()(size_of::<ZTMarketing>() as u32) };
+            prop_assume!(!real_raw.is_null());
+            let real_marketing_ptr = unsafe { ztmarketing::CONSTRUCTOR.original()(real_raw as *const u32) } as *mut ZTMarketing;
+
+            let real_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(tick_accumulator, real_marketing_ptr);
+            unsafe { ZTMARKETINGMGR_CLEAR_CONFIGURATIONS.original()((real_mgr_ptr as *mut ZTMarketingMgr) as *const u32) };
+            let real_mgr = unsafe { &*real_mgr_ptr };
+            let real_tick_accumulator = real_mgr.tick_accumulator();
+            let real_marketing_ptr_nonnull = real_mgr.marketing_ptr_raw() != 0;
+            marketing_live_support::destroy_standalone_marketing_mgr(real_mgr_ptr);
+
+            let reimpl_marketing_ptr = marketing_live_support::build_standalone_marketing(0, 0);
+            let reimpl_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(tick_accumulator, reimpl_marketing_ptr);
+            unsafe { &mut *reimpl_mgr_ptr }.clear_configurations();
+            let reimpl_mgr = unsafe { &*reimpl_mgr_ptr };
+            let reimpl_tick_accumulator = reimpl_mgr.tick_accumulator();
+            let reimpl_marketing_ptr_nonnull = reimpl_mgr.marketing_ptr_raw() != 0;
+            marketing_live_support::destroy_standalone_marketing_mgr(reimpl_mgr_ptr);
+
+            prop_assert_eq!(real_tick_accumulator, 0, "real tick_accumulator not reset for tick_accumulator={}", tick_accumulator);
+            prop_assert_eq!(reimpl_tick_accumulator, 0, "reimplemented tick_accumulator not reset for tick_accumulator={}", tick_accumulator);
+            prop_assert!(real_marketing_ptr_nonnull, "real marketing_ptr unexpectedly nulled for tick_accumulator={}", tick_accumulator);
+            prop_assert!(reimpl_marketing_ptr_nonnull, "reimplemented marketing_ptr unexpectedly nulled for tick_accumulator={}", tick_accumulator);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTMARKETINGMGR_LOAD_CONFIGURATIONS: compares the real, live `globals().ztmarketingmgr()`'s
+    /// funding table - populated by vanilla's own untouched boot-time `loadConfigurations` call, whose
+    /// path was captured live by `detour_capture_marketing_load_configurations_path` into
+    /// `CAPTURED_MARKETING_PATH` - against this crate's own `ZTMarketingMgr::load_configurations`
+    /// reimplementation, run directly (not through any detour) on a standalone `ZTMarketingMgr` with the
+    /// exact same captured path. Not a proptest - there is exactly one real path/one real answer to
+    /// compare against, not a space of generated cases. Skipped (not failed) if the path was never
+    /// captured, or if `GLOBAL_ZTMarketingMgr` itself isn't initialized yet at this injection point.
+    fn run_marketingmgr_load_configurations_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMARKETINGMGR_LOAD_CONFIGURATIONS";
+
+        let Some(path) = CAPTURED_MARKETING_PATH.get() else {
+            info!("Skipping {}: no path captured from ZTMarketingMgr::loadConfigurations", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no path captured)", test_name));
+            return false;
+        };
+
+        if globals().ztmarketingmgr_ptr().is_null() {
+            info!("Skipping {}: GLOBAL_ZTMarketingMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTMarketingMgr not initialized)", test_name));
+            return false;
+        }
+
+        let expected_marketing = globals().ztmarketingmgr().marketing();
+        let expected_levels: Vec<(i32, i32, u32)> =
+            expected_marketing.map(|m| m.funding_levels().iter().map(|l| (l.name_id(), l.benefit(), l.cost().to_bits())).collect()).unwrap_or_default();
+        let expected_index = expected_marketing.map(|m| m.current_funding_level()).unwrap_or(0);
+
+        let mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, std::ptr::null_mut());
+        let mgr = unsafe { &mut *mgr_ptr };
+        mgr.load_configurations(path);
+
+        let actual_marketing = mgr.marketing();
+        let actual_levels: Vec<(i32, i32, u32)> =
+            actual_marketing.map(|m| m.funding_levels().iter().map(|l| (l.name_id(), l.benefit(), l.cost().to_bits())).collect()).unwrap_or_default();
+        let actual_index = actual_marketing.map(|m| m.current_funding_level()).unwrap_or(0);
+
+        mgr.clear_configurations();
+        marketing_live_support::destroy_standalone_marketing_mgr(mgr_ptr);
+
+        if expected_levels == actual_levels && expected_index == actual_index {
+            info!("{} passed for path '{}'", test_name, path);
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            error!(
+                "{} failed for path '{}': expected_levels={:?}, actual_levels={:?}, expected_index={}, actual_index={}",
+                test_name, path, expected_levels, actual_levels, expected_index, actual_index
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!(
+                        "Test Failed {}: path '{}', expected_levels={:?}, actual_levels={:?}, expected_index={}, actual_index={}\n",
+                        test_name, path, expected_levels, actual_levels, expected_index, actual_index
+                    )
+                    .as_bytes(),
+                );
+            }
+            true
+        }
     }
 
     /// Real vanilla's `daysRemainingOnProgram` runs its whole `FSUB`/`FMUL`/`FDIV` chain on the x87
