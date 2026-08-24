@@ -210,7 +210,7 @@ pub mod bfcategory {
     use super::*;
 
     #[cfg_attr(feature = "detour-validation", validate_detour("bfcategory/get_value"))]
-    pub const GET_VALUE: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i32) -> *const i32> = FunctionDef{address: 0x00410ec0, function_type: PhantomData};
+    pub const GET_VALUE: FunctionDef<unsafe extern "thiscall" fn(*const u32, i32) -> i32> = FunctionDef{address: 0x00410ec0, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfcategory/set_from_int_list"))]
     pub const SET_FROM_INT_LIST: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i32, i32, i32)> = FunctionDef{address: 0x004b40f1, function_type: PhantomData};
 }
@@ -9015,6 +9015,8 @@ pub mod standalone {
     pub const VALIDATE_NEIGHBOR_PATHS: FunctionDef<unsafe extern "cdecl" fn(*const u32, i32)> = FunctionDef{address: 0x00451aa6, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/can_put_path"))]
     pub const CAN_PUT_PATH: FunctionDef<unsafe extern "cdecl" fn(*const u32, *const u32, i32) -> u32> = FunctionDef{address: 0x00451e44, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("standalone/fclose"))]
+    pub const FCLOSE: FunctionDef<unsafe extern "cdecl" fn(*const u32) -> u32> = FunctionDef{address: 0x00453334, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/check_characteristics_0"))]
     pub const CHECK_CHARACTERISTICS_0: FunctionDef<unsafe extern "cdecl" fn(*const i32) -> bool> = FunctionDef{address: 0x004537fe, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/refill_animal_display"))]
@@ -9179,6 +9181,8 @@ pub mod standalone {
     pub const NULLSUB_17: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x004b31cf, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/time"))]
     pub const TIME: FunctionDef<unsafe extern "cdecl" fn(*const i32)> = FunctionDef{address: 0x004bc0c7, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("standalone/fopen"))]
+    pub const FOPEN: FunctionDef<unsafe extern "cdecl" fn(*const i8, *const i8) -> *const u32> = FunctionDef{address: 0x004c641b, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/nullsub_18"))]
     pub const NULLSUB_18: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x004c6761, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/nullsub_19"))]
