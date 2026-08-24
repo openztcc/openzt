@@ -85,6 +85,10 @@ mod ztresearch;
 /// ZTMarketingFundingLevel classes, which drive the zoo's marketing spend and funding-level selection.
 mod ztmarketing;
 
+/// ztthoughtmgr module has structs and methods for the vanilla ZTThoughtMgr/ZTThought classes, which
+/// track the "thought bubble" messages guests/animals display (e.g. "caught prey").
+mod ztthoughtmgr;
+
 mod experimental;
 
 /// Roof tag extension for scenery entities
@@ -197,6 +201,7 @@ mod zoo_init {
             zthabitatmgr::init();
             ztresearch::init();
             ztmarketing::init();
+            ztthoughtmgr::init();
         }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }

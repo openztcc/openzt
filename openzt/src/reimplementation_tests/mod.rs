@@ -90,7 +90,7 @@ mod detour_zoo_main {
     use std::{
         backtrace::Backtrace,
         cell::Cell,
-        ffi::CStr,
+        ffi::{CStr, CString},
         fs::OpenOptions,
         io::Write,
         mem::size_of,
@@ -120,6 +120,10 @@ mod detour_zoo_main {
     use openzt_detour::generated::ztresearchmgr::FORCE_RESEARCH as ZTRESEARCHMGR_FORCE_RESEARCH;
     use openzt_detour::generated::ztresearchmgr::UPDATE as ZTRESEARCHMGR_UPDATE;
     use openzt_detour::generated::ztresearchprogram;
+    use openzt_detour::generated::ztthought as gen_ztthought;
+    use openzt_detour::generated::ztthoughtmgr as gen_ztthoughtmgr;
+    use openzt_detour::generated::zthabitatmgr;
+    use openzt_detour::generated::ztui_gameopts::LOAD_FILE as ZTUI_GAMEOPTS_LOAD_FILE;
     use openzt_detour::generated::ztunit::GET_FOOTPRINT as ZTUNIT_GET_FOOTPRINT;
     use openzt_detour::FunctionDef;
     use proptest::prelude::*;
@@ -128,11 +132,13 @@ mod detour_zoo_main {
     use crate::{
         bfentitytype::{BFEntityType, ZTAnimalType, ZTUnitType},
         globals::globals,
-        util::{get_from_memory, ZTBufferString, ZTString},
+        util::{get_from_memory, save_to_memory, ZTBufferString, ZTString},
+        zthabitatmgr::ZTHabitat,
         ztmapview::BFTile,
         ztmarketing::{live_support as marketing_live_support, marketing_save_reimplementation, predict_mgr_update, ZTMarketing, ZTMarketingMgr},
         ztresearch::research_save_reimplementation::{self, live_support, SaveRecord},
         ztresearch::{ZTResearchBranch, ZTResearchEffectKind, ZTResearchMgr},
+        ztthoughtmgr::{live_support as thought_live_support, ZTThought, ZTThoughtMgr},
         ztworldmgr::{BFEntity, IVec3, ZTAnimal, ZTUnit},
     };
 
@@ -619,6 +625,16 @@ mod detour_zoo_main {
         fail_flag |= run_marketingmgr_save_test(&mut failure_log);
         fail_flag |= run_marketingmgr_load_test(&mut failure_log);
         fail_flag |= run_marketingmgr_clear_configurations_test(&mut failure_log);
+
+        fail_flag |= run_thoughtmgr_add_thought_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_remove_thoughts_by_thinker_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_remove_thoughts_by_object_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_remove_thoughts_by_habitat_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_get_thoughts_by_thinker_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_get_thoughts_by_object_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_get_thoughts_by_habitat_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_save_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_load_test(&mut failure_log);
 
         // ZTRESEARCHMGR_SAVE: compares the real ZTResearchMgr::save's captured output against
         // research_save_reimplementation::serialize(&snapshot_mgr(mgr)) for generated synthetic trees.
@@ -1163,12 +1179,126 @@ mod detour_zoo_main {
         }
         fail_flag |= run_marketing_funding_text_test(&mut failure_log);
         fail_flag |= run_marketingmgr_load_configurations_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_load_modern_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_add_thought_animal_override_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_populate_thoughts_test(&mut failure_log);
+        fail_flag |= run_thought_get_string_test(&mut failure_log);
+
+        // Third injection point: load a real save file directly (no UI/file-dialog involved - see
+        // `run_load_live_zoo`'s own doc comment), so `GLOBAL_ZTWorldMgr`/`GLOBAL_ZTHabitatMgr` go from
+        // empty/synthetic to real, populated state. Everything below this line runs against that real
+        // zoo instead of a standalone/synthetic struct.
+        if run_load_live_zoo(&mut failure_log) {
+            fail_flag |= run_habitat_get_habitat_ptr_live_test(&mut failure_log);
+        }
 
         if fail_flag {
             error!("Proptest failed for some cases, check the failure log at: {}", failure_log_path);
             std::process::exit(1);
         }
         std::process::exit(0);
+    }
+
+    /// Default path for `run_load_live_zoo`'s save file - a real save (not embedded/synthetic) placed
+    /// in the actual Zoo Tycoon "Saved Games" directory, overridable via `OPENZT_TEST_ZOO` for anyone
+    /// whose install lives elsewhere. Mirrors `OPENZT_TEST_LOG`'s override pattern.
+    const DEFAULT_TEST_ZOO_PATH: &str = r"C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\Saved Games\reimplementation-test-zoo.zoo";
+
+    /// Loads `OPENZT_TEST_ZOO` (or `DEFAULT_TEST_ZOO_PATH`) into the running game, bringing up a real,
+    /// fully-populated `GLOBAL_ZTWorldMgr`/`GLOBAL_ZTHabitatMgr`/etc. - unlike every test above this
+    /// point in the battery, which only ever build standalone/synthetic structs (see e.g.
+    /// `run_thoughtmgr_load_modern_test`'s doc comment on why `ZTHabitatMgr::get_habitat_ptr` couldn't
+    /// safely be exercised with real tile coordinates before this existed).
+    ///
+    /// Reverse-engineered from `ZTUI::gameopts::loadGame`/`ZTUI::clickContinue` (`gameopts_loadGame.c`/
+    /// `ZTUI_clickContinue.c`): both are thin wrappers that (a) get a file path (file-picker dialog, or
+    /// the `lastfile` ini value) as a real CRT `FILE*` via `FUN_004c641b` (a plain `fopen(path, mode)`
+    /// wrapper vanilla uses everywhere - see `standalone::FOPEN`'s own doc comment) and (b) hand that
+    /// `FILE*` to `ZTUI::gameopts::loadFile` (`ZTUI_GAMEOPTS_LOAD_FILE`), which does the actual work:
+    /// resets state, `expansionselect::setExpansionID`, `BFWorldMgr::load` (the call that actually walks
+    /// the save format and populates every manager), and `unpauseGame` if needed. This function calls
+    /// `FOPEN`/`LOAD_FILE`/`FCLOSE` directly, skipping the file-picker dialog and the "Continue"/"Load"
+    /// UI click handlers (`ZTUI::clickContinue`/`ZTUI::gameopts::triggerLoad`) entirely - neither
+    /// handler's own tail (menu fade, hiding the main-menu overlay, cursor state) touches
+    /// `GLOBAL_ZTWorldMgr`/`GLOBAL_ZTHabitatMgr`, so skipping it costs nothing for state-comparison
+    /// purposes, only the visual "you're now looking at your zoo" transition.
+    ///
+    /// Returns `true` only on a real load success (`LOAD_FILE`'s low byte non-zero) - logging either way,
+    /// the same pattern every other test in this file uses via `write_success_line`.
+    fn run_load_live_zoo(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "LOAD_LIVE_ZOO";
+        let path = std::env::var("OPENZT_TEST_ZOO").unwrap_or_else(|_| DEFAULT_TEST_ZOO_PATH.to_string());
+
+        let path_cstring = match CString::new(path.clone()) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("{}: path {:?} contains a NUL byte: {}", test_name, path, e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: path {:?} contains a NUL byte: {}\n", test_name, path, e).as_bytes());
+                }
+                return false;
+            }
+        };
+        let mode_cstring = c"rb";
+
+        let file_ptr = unsafe { standalone::FOPEN.original()(path_cstring.as_ptr(), mode_cstring.as_ptr()) };
+        if file_ptr.is_null() {
+            error!("{}: fopen failed for {:?} (file missing? see OPENZT_TEST_ZOO)", test_name, path);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: fopen failed for {:?}\n", test_name, path).as_bytes());
+            }
+            return false;
+        }
+
+        let load_result = unsafe { ZTUI_GAMEOPTS_LOAD_FILE.original()(file_ptr as *const u8) };
+        unsafe { standalone::FCLOSE.original()(file_ptr) };
+
+        let success = (load_result & 0xff) != 0;
+        if success {
+            info!("{}: loaded {:?}", test_name, path);
+            write_success_line(failure_log, test_name);
+        } else {
+            error!("{}: LOAD_FILE reported failure (raw result {:#010x}) for {:?}", test_name, load_result, path);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: LOAD_FILE reported failure (raw result {:#010x}) for {:?}\n", test_name, load_result, path).as_bytes());
+            }
+        }
+        success
+    }
+
+    /// Compares the real `ZTHabitatMgr::getHabitat` (`zthabitatmgr::GET_HABITAT`, `0x00410bf9`) against
+    /// the reimplemented `get_habitat_ptr`, for small in-range tile coordinates, now that
+    /// `run_load_live_zoo` has populated `other_array_start`/`other_array_end` with a real zoo's bounds.
+    /// Before a zoo was loaded this exact call crashed live with a real `STATUS_ACCESS_VIOLATION` (see
+    /// `run_thoughtmgr_load_modern_test`'s doc comment) because `get_habitat_ptr` does no
+    /// bounds-checking of its own - both sides succeeding here, in addition to matching, is itself
+    /// further confirmation the live-zoo injection point is safe.
+    fn run_habitat_get_habitat_ptr_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTHABITATMGR_GET_HABITAT_PTR_LIVE";
+        let mgr_ptr = globals().zthabitatmgr_ptr() as *const u32;
+        let habitat_mgr = globals().zthabitatmgr();
+
+        let mut fail_flag = false;
+        for x in 0..5i32 {
+            for y in 0..5i32 {
+                let real = unsafe { zthabitatmgr::GET_HABITAT.original()(mgr_ptr, x, y) };
+                let reimpl = habitat_mgr.get_habitat_ptr(x, y);
+                if real != reimpl {
+                    error!("{}: mismatch at ({}, {}): real={:#010x}, reimpl={:#010x}", test_name, x, y, real, reimpl);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(
+                            format!("Test Failed {}: mismatch at ({}, {}): real={:#010x}, reimpl={:#010x}\n", test_name, x, y, real, reimpl).as_bytes(),
+                        );
+                    }
+                    fail_flag = true;
+                }
+            }
+        }
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        }
+        fail_flag
     }
 
     /// One funding-level entry: `name_id` is always one of the real, known-valid `research.ini`
@@ -2468,6 +2598,919 @@ mod detour_zoo_main {
                 real_days,
                 reimpl_days
             );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    // ============================================================================================
+    // Phase H (ZTThoughtMgr.md): live comparison battery for ZTThoughtMgr/ZTThought - see
+    // `crate::ztthoughtmgr`'s own module doc comment for the struct-layout/allocator background every
+    // helper below leans on. `ZTTHOUGHTMGR_ADD_THOUGHT`/`_REMOVE_THOUGHTS_BY_*`/`_GET_THOUGHTS_BY_*`/
+    // `_SAVE`/`_LOAD` are self-contained (no `GLOBAL_ZTWorldMgr`/string-table dependency) and run from
+    // the early `detour_target` battery above, same as the `ZTMARKETINGMGR_*` tests; `_POPULATE_THOUGHTS`
+    // and `ZTTHOUGHT_GET_STRING` need `GLOBAL_ZTWorldMgr`/language DLLs respectively, so they run from
+    // `run_on_completion_reset_test_and_exit`'s own later chain instead - see that function's own doc
+    // comment for why.
+    // ============================================================================================
+
+    /// Field tuple used to compare two `ZTThought`s structurally via their existing public getters -
+    /// `ZTThought` derives neither `PartialEq` nor a public constructor, so this is simpler than adding
+    /// either just for these tests.
+    fn thought_fields(t: &ZTThought) -> (u32, u32, u32, i32, i32, u32, u32, u32) {
+        (t.string_id(), t.thinker_id(), t.object_id(), t.tile_x(), t.tile_y(), t.thinker_ptr(), t.object_ptr(), t.habitat_ptr())
+    }
+
+    /// ZTTHOUGHTMGR_ADD_THOUGHT: compares the real `ZTThoughtMgr::addThought`'s effect on list
+    /// order/length against the reimplemented `add_thought`, across a generated sequence of calls and a
+    /// small `max_thoughts` cap (so cap-trimming is actually exercised, not just the uncapped insert
+    /// path). Restricted to `thinker_ptr = object_ptr = habitat_ptr = 0` for every call - `ZTThought::new`
+    /// dereferences all three when non-null (to resolve `thinker_id`/`object_id`/the habitat-flag gate),
+    /// and there's no live entity/habitat this standalone test could safely point them at; `0` is the
+    /// same "no dependency" sentinel this file already uses throughout (e.g. `GeneratedProgram`'s own
+    /// `target_id`/`effect_param_1`). This still fully exercises `addThought`'s own cap-trim/insertion-
+    /// order logic, the part this test actually targets.
+    fn run_thoughtmgr_add_thought_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_ADD_THOUGHT";
+        let mut fail_flag = false;
+
+        match runner.run(&(1u32..5, prop::collection::vec(any::<u32>(), 0..8)), |(max_thoughts, string_ids)| {
+            let real_ptr = thought_live_support::build_standalone_mgr(max_thoughts);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(max_thoughts);
+
+            for &string_id in &string_ids {
+                unsafe {
+                    gen_ztthoughtmgr::ADD_THOUGHT.original()(real_ptr as *const u32, string_id, std::ptr::null(), std::ptr::null(), std::ptr::null());
+                }
+                unsafe { &mut *reimpl_ptr }.add_thought(string_id, 0, 0, 0);
+            }
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+            let real_len = unsafe { &*real_ptr }.len();
+            let reimpl_len = unsafe { &*reimpl_ptr }.len();
+
+            thought_live_support::destroy_standalone_mgr_leaking_nodes(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_len, reimpl_len, "length mismatch for max_thoughts={}, string_ids={:?}", max_thoughts, string_ids);
+            prop_assert_eq!(real_fields, reimpl_fields, "content mismatch for max_thoughts={}, string_ids={:?}", max_thoughts, string_ids);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// Seeds `mgr` with one `ZTThought` per `specs` entry (`(string_id, thinker_ptr, object_ptr,
+    /// habitat_ptr)`), front-to-back in `specs`' own order, via `insert_front` - a pure Rust helper with
+    /// no vanilla call, safe to use to build identical starting state for both the real and
+    /// reimplemented sides of a removal/lookup comparison (only the removal/lookup call itself is what's
+    /// under test). `thinker_id`/`object_id`/`tile_x`/`tile_y` are irrelevant to every consumer of this
+    /// helper (`removeThoughtsBy*`/`getThoughtsBy*` only ever compare `thinker_ptr`/`object_ptr`/
+    /// `habitat_ptr`, never dereferencing them), so they're left at ctor defaults.
+    fn seed_thoughts(mgr: &mut ZTThoughtMgr, specs: &[(u32, u32, u32, u32)]) {
+        for &(string_id, thinker_ptr, object_ptr, habitat_ptr) in specs {
+            mgr.insert_front(thought_live_support::new_thought(string_id, 0, 0, -1, -1, thinker_ptr, object_ptr, habitat_ptr));
+        }
+    }
+
+    fn thought_spec_strategy() -> impl Strategy<Value = (u32, u32, u32, u32)> {
+        (any::<u32>(), 0u32..5, 0u32..5, 0u32..5)
+    }
+
+    /// ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_THINKER: compares the real `ZTThoughtMgr::removeThoughtsByThinker`
+    /// against the reimplemented `remove_thoughts_by_thinker`, on two identically-seeded standalone
+    /// managers (`seed_thoughts`). `thinker_ptr`/`object_ptr`/`habitat_ptr` are generated over a small
+    /// `0..5` range - never dereferenced by this call, only ever pointer-compared (confirmed by
+    /// `remove_thoughts_by_thinker`'s own doc comment in `ztthoughtmgr.rs`) - so `target` collides with a
+    /// seeded value often enough to exercise real removals, not just the no-op case.
+    fn run_thoughtmgr_remove_thoughts_by_thinker_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_THINKER";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5), |(specs, target)| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *real_ptr }, &specs);
+            seed_thoughts(unsafe { &mut *reimpl_ptr }, &specs);
+
+            unsafe {
+                gen_ztthoughtmgr::REMOVE_THOUGHTS_BY_THINKER.original()(real_ptr as *const u32, target as *const u32);
+            }
+            unsafe { &mut *reimpl_ptr }.remove_thoughts_by_thinker(target);
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}", specs, target);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_OBJECT: same shape as
+    /// `run_thoughtmgr_remove_thoughts_by_thinker_test`, comparing `removeThoughtsByObject`/
+    /// `remove_thoughts_by_object` instead.
+    fn run_thoughtmgr_remove_thoughts_by_object_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_OBJECT";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5), |(specs, target)| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *real_ptr }, &specs);
+            seed_thoughts(unsafe { &mut *reimpl_ptr }, &specs);
+
+            unsafe {
+                gen_ztthoughtmgr::REMOVE_THOUGHTS_BY_OBJECT.original()(real_ptr as *const u32, target as *const u32);
+            }
+            unsafe { &mut *reimpl_ptr }.remove_thoughts_by_object(target);
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}", specs, target);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_HABITAT: same shape again, additionally generating `force` -
+    /// `removeThoughtsByHabitat` has a third outcome `removeThoughtsBy{Thinker,Object}` don't: a
+    /// matching thought with a live `object_ptr` survives with its `habitat_ptr` link cleared instead of
+    /// being removed outright, unless `force` is set (see `remove_thoughts_by_habitat`'s own doc comment
+    /// in `ztthoughtmgr.rs`).
+    fn run_thoughtmgr_remove_thoughts_by_habitat_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_HABITAT";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5, any::<bool>()), |(specs, target, force)| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *real_ptr }, &specs);
+            seed_thoughts(unsafe { &mut *reimpl_ptr }, &specs);
+
+            unsafe {
+                gen_ztthoughtmgr::REMOVE_THOUGHTS_BY_HABITAT.original()(real_ptr as *const u32, target as *const i32, force as i8);
+            }
+            unsafe { &mut *reimpl_ptr }.remove_thoughts_by_habitat(target, force);
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}, force={}", specs, target, force);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_GET_THOUGHTS_BY_THINKER: compares the real, undetoured `getThoughtsByThinker`'s
+    /// output - a real vanilla temporary list, walked read-only via
+    /// `thought_live_support::read_only_wrap_vanilla_list` (see its own doc comment in `ztthoughtmgr.rs`
+    /// for the confirmed layout evidence) - against the reimplemented `get_thoughts_by_thinker`, on a
+    /// single seeded standalone manager (both calls only ever read the manager's own list, so - unlike
+    /// the removal tests above - there's no need for two independent instances).
+    fn run_thoughtmgr_get_thoughts_by_thinker_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_GET_THOUGHTS_BY_THINKER";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5, 1i32..5), |(specs, target, max_count)| {
+            let mgr_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *mgr_ptr }, &specs);
+            let mgr = unsafe { &*mgr_ptr };
+
+            let mut real_sentinel: u32 = 0;
+            unsafe {
+                gen_ztthoughtmgr::GET_THOUGHTS_BY_THINKER.original()(
+                    mgr_ptr as *const u32,
+                    &raw mut real_sentinel as *const i32,
+                    target as *const i32,
+                    max_count,
+                );
+            }
+            let real_wrapper = thought_live_support::read_only_wrap_vanilla_list(real_sentinel);
+            let real_fields: Vec<_> = real_wrapper.iter().map(thought_fields).collect();
+
+            let reimpl_fields: Vec<_> = mgr.get_thoughts_by_thinker(target, max_count as usize).into_iter().map(|t| thought_fields(t)).collect();
+
+            thought_live_support::destroy_standalone_mgr(mgr_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}, max_count={}", specs, target, max_count);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_GET_THOUGHTS_BY_OBJECT: same shape as
+    /// `run_thoughtmgr_get_thoughts_by_thinker_test`, for `getThoughtsByObject`/`get_thoughts_by_object`.
+    /// `max_count` is passed as `max_count as *const i32` - `GET_THOUGHTS_BY_OBJECT`'s own `generated.rs`
+    /// signature types this parameter `*const i32`, but confirmed live (this test originally passed the
+    /// *address* of a local holding `max_count`, which broke the cap entirely - both matches came back
+    /// for a `max_count` of `1`) and via the decompile (`piVar3 = param_3;` assigns the raw parameter
+    /// *value*, then decrements it as a bare integer, never dereferencing it) that the real calling
+    /// convention passes the count by value for every one of the three `getThoughtsBy*` functions - the
+    /// `*const i32` typing is a Ghidra type-inference artifact from that same decrement-as-pointer-
+    /// arithmetic pattern, not a real indirection.
+    fn run_thoughtmgr_get_thoughts_by_object_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_GET_THOUGHTS_BY_OBJECT";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5, 1i32..5), |(specs, target, max_count)| {
+            let mgr_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *mgr_ptr }, &specs);
+            let mgr = unsafe { &*mgr_ptr };
+
+            let mut real_sentinel: u32 = 0;
+            unsafe {
+                gen_ztthoughtmgr::GET_THOUGHTS_BY_OBJECT.original()(
+                    mgr_ptr as *const u32,
+                    &raw mut real_sentinel as *const i32,
+                    target as *const i32,
+                    max_count as *const i32,
+                );
+            }
+            let real_wrapper = thought_live_support::read_only_wrap_vanilla_list(real_sentinel);
+            let real_fields: Vec<_> = real_wrapper.iter().map(thought_fields).collect();
+
+            let reimpl_fields: Vec<_> = mgr.get_thoughts_by_object(target, max_count as usize).into_iter().map(|t| thought_fields(t)).collect();
+
+            thought_live_support::destroy_standalone_mgr(mgr_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}, max_count={}", specs, target, max_count);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_GET_THOUGHTS_BY_HABITAT: same shape as
+    /// `run_thoughtmgr_get_thoughts_by_object_test`, including `max_count`'s own by-value passing - for
+    /// `getThoughtsByHabitat`/`get_thoughts_by_habitat`.
+    fn run_thoughtmgr_get_thoughts_by_habitat_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_GET_THOUGHTS_BY_HABITAT";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5, 1i32..20), |(specs, target, max_count)| {
+            let mgr_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *mgr_ptr }, &specs);
+            let mgr = unsafe { &*mgr_ptr };
+
+            let mut real_sentinel: u32 = 0;
+            unsafe {
+                gen_ztthoughtmgr::GET_THOUGHTS_BY_HABITAT.original()(
+                    mgr_ptr as *const u32,
+                    &raw mut real_sentinel as *const i32,
+                    target as *const i32,
+                    max_count as *const i32,
+                );
+            }
+            let real_wrapper = thought_live_support::read_only_wrap_vanilla_list(real_sentinel);
+            let real_fields: Vec<_> = real_wrapper.iter().map(thought_fields).collect();
+
+            let reimpl_fields: Vec<_> = mgr.get_thoughts_by_habitat(target, max_count as usize).into_iter().map(|t| thought_fields(t)).collect();
+
+            thought_live_support::destroy_standalone_mgr(mgr_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}, max_count={}", specs, target, max_count);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_SAVE: compares the real `ZTThoughtMgr::save`'s captured output (via `io_redirect`,
+    /// the same `WRITE_BYTES_TO_FILE` redirect the research/marketing `_SAVE` tests use - and the exact
+    /// primitive `ZTThought::save`/`ZTThoughtMgr::save`'s own `write_dword` goes through, see that
+    /// function's doc comment in `ztthoughtmgr.rs`) against the reimplemented `save`, on two
+    /// identically-seeded standalone managers.
+    fn run_thoughtmgr_save_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_SAVE";
+        let mut fail_flag = false;
+
+        let record_strategy = (any::<u32>(), any::<u32>(), any::<u32>(), -2i32..4, -2i32..4);
+        match runner.run(&prop::collection::vec(record_strategy, 0..6), |records| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            for &(string_id, thinker_id, object_id, tile_x, tile_y) in &records {
+                unsafe { &mut *real_ptr }.insert_front(thought_live_support::new_thought(string_id, thinker_id, object_id, tile_x, tile_y, 0, 0, 0));
+                unsafe { &mut *reimpl_ptr }.insert_front(thought_live_support::new_thought(string_id, thinker_id, object_id, tile_x, tile_y, 0, 0, 0));
+            }
+
+            let dummy_file: u32 = 0;
+            io_redirect::begin_capture();
+            unsafe { gen_ztthoughtmgr::SAVE.original()(real_ptr as *const u32, &dummy_file as *const u32) };
+            let real_bytes = io_redirect::end_capture();
+
+            io_redirect::begin_capture();
+            let _ = unsafe { &*reimpl_ptr }.save(&dummy_file as *const u32);
+            let reimpl_bytes = io_redirect::end_capture();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_bytes, reimpl_bytes, "save byte mismatch for records={:?}", records);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_LOAD: compares the real `ZTThoughtMgr::load`'s effect on list content/order (and its
+    /// own return value) against the reimplemented `load`, for a generated stream of legacy-format
+    /// `(string_id, object_id, thinker_id)` records and `version < 0x1e` - the pre-`0x1e` legacy branch
+    /// (see `ZTThought::load`'s own doc comment in `ztthoughtmgr.rs`). Deliberately restricted to this
+    /// range: `version >= 0x1e` triggers `ZTThought::load`'s own `thinker_id`/`object_id` -> pointer
+    /// resolution via `ZTWorldMgr::resolve_entity_by_id`, which needs `GLOBAL_ZTWorldMgr` initialized -
+    /// not true yet at this early injection point (see `ZTRESEARCHPROGRAM_ON_COMPLETION_RESET`'s own
+    /// doc comment for the same constraint). `object_id`/`thinker_id` are generated over a small `0..3`
+    /// range specifically to exercise `ZTThoughtMgr::load`'s own survival gate (a legacy-format record
+    /// only splices into the list if both ids end up `0` - since neither ever resolves to a real pointer
+    /// in this version range, see that method's own doc comment) landing on both sides of it, not just
+    /// the trivially-true `id == 0` case every record would hit under `any::<u32>()`.
+    fn run_thoughtmgr_load_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_LOAD";
+        let mut fail_flag = false;
+
+        let record_strategy = (any::<u32>(), 0u32..3, 0u32..3);
+        match runner.run(&(prop::collection::vec(record_strategy, 0..6), 0u32..0x1e), |(records, version)| {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&(records.len() as u32).to_le_bytes());
+            for &(string_id, object_id, thinker_id) in &records {
+                bytes.extend_from_slice(&string_id.to_le_bytes());
+                bytes.extend_from_slice(&object_id.to_le_bytes());
+                bytes.extend_from_slice(&thinker_id.to_le_bytes());
+            }
+
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            let file_buffer = [0u32; 4];
+
+            io_redirect::begin_replay(bytes.clone());
+            let real_ret = unsafe { gen_ztthoughtmgr::LOAD.original()(real_ptr as *const u32, file_buffer.as_ptr(), version) };
+            io_redirect::end_replay();
+
+            io_redirect::begin_replay(bytes);
+            let reimpl_ret = unsafe { &mut *reimpl_ptr }.load(file_buffer.as_ptr(), version);
+            io_redirect::end_replay();
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr_leaking_nodes(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_ret, reimpl_ret, "load() return mismatch for records={:?}, version={}", records, version);
+            prop_assert_eq!(real_fields, reimpl_fields, "loaded content mismatch for records={:?}, version={}", records, version);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_LOAD_MODERN: compares the real `ZTThoughtMgr::load`'s effect against the
+    /// reimplemented `load` for the `version >= 0x1e` branch (see `ZTThought::load`'s own doc comment
+    /// in `ztthoughtmgr.rs`) - the branch `ZTTHOUGHTMGR_LOAD` above deliberately never exercises, since
+    /// it drives inline `ZTWorldMgr::resolve_entity_by_id`/`ZTHabitatMgr::get_habitat_ptr` resolution
+    /// that needs both globals initialized. Runs from `run_on_completion_reset_test_and_exit`'s own
+    /// later chain, like `ZTTHOUGHTMGR_POPULATE_THOUGHTS`/`ZTTHOUGHT_GET_STRING` below.
+    ///
+    /// `thinker_id`/`object_id` stay in the same small `0..5` range `ZTTHOUGHTMGR_POPULATE_THOUGHTS`
+    /// already uses (real entity ids are never this low in a fresh test process, so
+    /// `resolve_entity_by_id` deterministically returns null on both sides). Every record's tile is
+    /// fixed at the `(-1, -1)` "no tile" sentinel - deliberately, not generated: an earlier version of
+    /// this test generated small in-range tile coordinates to also exercise
+    /// `ZTHabitatMgr::get_habitat_ptr`, and that crashed live (confirmed via a real
+    /// `STATUS_ACCESS_VIOLATION` in `res-openzttest.dll`, caught by Windows Error Reporting - see
+    /// `ztthoughtmgr-implementation-review.md`'s own notes on this). Unlike `ZTWorldMgr::
+    /// resolve_entity_by_id`, `get_habitat_ptr` performs no bounds-checking at all against its own
+    /// `other_array_start`/`other_array_end` fields (`zthabitatmgr.rs`'s own `get_habitat_ptr`), and at
+    /// this early injection point (before any zoo is loaded) that array is apparently too small/empty for
+    /// even single-digit coordinates to stay in-bounds - so any tile-based exercise of this path is
+    /// deferred pending a safe way to bound it (see the review file), not attempted here.
+    ///
+    /// `truncate_at`, when `Some`, cuts the serialized byte stream short (bounded to the stream's own
+    /// generated length) - folds in short-read coverage `ZTTHOUGHTMGR_LOAD` doesn't have, at no extra
+    /// cost: both sides' `load()` return value and resulting list content are still compared via the
+    /// same `prop_assert_eq!`s below. Safe the same way `ZTRESEARCHMGR_LOAD_CORRUPT_STREAM` already is:
+    /// `io_redirect::deallocate` just returns failure once the replay buffer runs out, never touching
+    /// out-of-bounds memory.
+    fn run_thoughtmgr_load_modern_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTTHOUGHTMGR_LOAD_MODERN";
+
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let mut fail_flag = false;
+
+        let record_strategy = (any::<u32>(), 0u32..5, 0u32..5);
+        let strategy = prop::collection::vec(record_strategy, 0..6).prop_flat_map(|records| {
+            let total_len = 4 + records.len() * 20;
+            (Just(records), 0x1eu32..0x40, prop::option::of(0usize..total_len))
+        });
+
+        match runner.run(&strategy, |(records, version, truncate_at)| {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&(records.len() as u32).to_le_bytes());
+            for &(string_id, thinker_id, object_id) in &records {
+                bytes.extend_from_slice(&string_id.to_le_bytes());
+                bytes.extend_from_slice(&thinker_id.to_le_bytes());
+                bytes.extend_from_slice(&object_id.to_le_bytes());
+                bytes.extend_from_slice(&(-1i32 as u32).to_le_bytes());
+                bytes.extend_from_slice(&(-1i32 as u32).to_le_bytes());
+            }
+            if let Some(cut) = truncate_at {
+                bytes.truncate(cut);
+            }
+
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            let file_buffer = [0u32; 4];
+
+            io_redirect::begin_replay(bytes.clone());
+            let real_ret = unsafe { gen_ztthoughtmgr::LOAD.original()(real_ptr as *const u32, file_buffer.as_ptr(), version) };
+            io_redirect::end_replay();
+
+            io_redirect::begin_replay(bytes);
+            let reimpl_ret = unsafe { &mut *reimpl_ptr }.load(file_buffer.as_ptr(), version);
+            io_redirect::end_replay();
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr_leaking_nodes(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(
+                real_ret,
+                reimpl_ret,
+                "load() return mismatch for records={:?}, version={}, truncate_at={:?}",
+                records,
+                version,
+                truncate_at
+            );
+            prop_assert_eq!(
+                real_fields,
+                reimpl_fields,
+                "loaded content mismatch for records={:?}, version={}, truncate_at={:?}",
+                records,
+                version,
+                truncate_at
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_ADD_THOUGHT_ANIMAL_OVERRIDE: exercises the animal-subtype override branch inside
+    /// `add_thought` (`resolve_object_own_habitat_ptr`'s two vtable calls in `ztthoughtmgr.rs`) - the
+    /// least-tested/least-understood branch flagged by the implementation review. Closed now that
+    /// decompiles exist for both vtable slots: `ZTAnimalType::isCastClass` at `0x004020cd`
+    /// (`ZTAnimalType_isCastClass.c`) and `ZTAnimal::getHabitat` at `0x00410685`
+    /// (`ZTAnimal_getHabitat.c`, which calls `ZTAnimal_calcHabitat.c`, which calls `ZTUnit_getHabitat.c`).
+    ///
+    /// Both the "real" (`ADD_THOUGHT.original()`) and "reimplemented" (`add_thought`) sides dispatch
+    /// through the exact same real vanilla function pointers here - `resolve_object_own_habitat_ptr` is a
+    /// call-through wrapper around vanilla's own vtable slots, not reimplemented logic (see its own doc
+    /// comment). So this test isn't validating a separate vanilla habitat-resolution algorithm; it's
+    /// validating that OUR sequencing (vtable offsets, `this`/argument marshalling, override-vs-fallback
+    /// logic) matches vanilla's own `addThought.asm` exactly.
+    ///
+    /// The fixture: a `ZTAnimal` (zeroed via `ZTAnimal::new_for_test`; entity type built via
+    /// `ZTAnimalType::new_for_test` so its vtable is the real, confirmed `0x00630268` - slot `0x1c`
+    /// resolves to the confirmed `isCastClass` override) with its own vtable field (offset `0`, otherwise
+    /// left at `new_for_test`'s zeroed default) overwritten to the real `ZTAnimal` vtable `0x0062ff54` via
+    /// a raw memory write, so slot `0x24c` resolves to the confirmed `getHabitat` override. Per
+    /// `ZTAnimalType_isCastClass.c`, this type check always returns true when called on a genuine
+    /// `ZTAnimalType`-vtabled object (the tag argument matches this exact override's own hardcoded
+    /// self-tag: `if (param_1 != &DAT_00638690) { ...delegate to base... } return 1;`), so this fixture
+    /// reliably exercises the override-taken path, not the fallback.
+    ///
+    /// `getHabitat`'s own chain (`calcHabitat` -> `ZTUnit::getHabitat`) reads `BFEntity::getTile()` (a
+    /// real vanilla, non-virtual call - not this crate's own `ztworldmgr` reimplementation) and a
+    /// show-info flag at a currently-unmapped `BFUnit` offset (`ZTUnit_getHabitat.c`'s `field_0x251`);
+    /// the fixture's zeroed base leaves that flag `0`, skipping the `ZTShowMgr` branch entirely (a plain
+    /// data-field guard, not a dispatch), and `pos = (0, 0, 0)` (also zeroed) is expected to miss real
+    /// vanilla's own tile lookup at this injection point (no zoo loaded yet). Unlike `ZTHabitatMgr::
+    /// get_habitat_ptr` (see `ZTTHOUGHTMGR_LOAD_MODERN`'s own doc comment for the crash that caused),
+    /// `BFEntity::getTile` is a normal, heavily-exercised-by-vanilla-itself lookup with its own real
+    /// bounds check, not a rarely-called, unguarded array read - still confirmed live here rather than
+    /// just assumed.
+    fn run_thoughtmgr_add_thought_animal_override_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_ADD_THOUGHT_ANIMAL_OVERRIDE";
+        let mut fail_flag = false;
+
+        match runner.run(&(any::<u32>(), 0u32..5), |(string_id, fallback_habitat_ptr)| {
+            let entity_type = ZTAnimalType::new_for_test(IVec3::default(), 0, IVec3::default(), IVec3::default());
+            let animal = ZTAnimal::new_for_test(&entity_type as *const ZTAnimalType as u32, 0, 0, false, false);
+            let animal_addr = &animal as *const ZTAnimal as u32;
+            save_to_memory::<u32>(animal_addr, 0x0062_ff54u32);
+
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+
+            unsafe {
+                gen_ztthoughtmgr::ADD_THOUGHT.original()(
+                    real_ptr as *const u32,
+                    string_id,
+                    std::ptr::null(),
+                    animal_addr as *const u32,
+                    fallback_habitat_ptr as *const u32,
+                );
+            }
+            unsafe { &mut *reimpl_ptr }.add_thought(string_id, 0, animal_addr, fallback_habitat_ptr);
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr_leaking_nodes(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(
+                real_fields,
+                reimpl_fields,
+                "content mismatch for string_id={}, fallback_habitat_ptr={:#x}",
+                string_id,
+                fallback_habitat_ptr
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_POPULATE_THOUGHTS: compares the real `ZTThoughtMgr::populateThoughts`'s effect on
+    /// every thought's resolved `thinker_ptr`/`object_ptr`/`habitat_ptr`/`tile_x`/`tile_y` against the
+    /// reimplemented `populate_thoughts`, on two identically-seeded standalone managers. Needs
+    /// `GLOBAL_ZTWorldMgr` initialized (`ZTThought::populate` calls `ZTWorldMgr::resolve_entity_by_id`
+    /// unconditionally), so this runs from `run_on_completion_reset_test_and_exit`'s own later chain,
+    /// not the early `detour_target` battery - see that function's own doc comment.
+    /// `thinker_id`/`object_id` are generated over a small `0..5` range: real entities essentially never
+    /// have ids this low (same reasoning as `thought_spec_strategy`'s own pointer range), so
+    /// `resolve_entity_by_id` returns null on both sides for the overwhelming majority of cases - a safe,
+    /// deterministic "no match" - while still leaving room for a genuine match if one ever does exist, in
+    /// which case both sides resolve the exact same real entity/habitat identically.
+    fn run_thoughtmgr_populate_thoughts_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_POPULATE_THOUGHTS";
+        let mut fail_flag = false;
+
+        let record_strategy = (any::<u32>(), 0u32..5, 0u32..5);
+        match runner.run(&prop::collection::vec(record_strategy, 0..6), |records| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            for &(string_id, thinker_id, object_id) in &records {
+                unsafe { &mut *real_ptr }.insert_front(thought_live_support::new_thought(string_id, thinker_id, object_id, -1, -1, 0, 0, 0));
+                unsafe { &mut *reimpl_ptr }.insert_front(thought_live_support::new_thought(string_id, thinker_id, object_id, -1, -1, 0, 0, 0));
+            }
+
+            unsafe { gen_ztthoughtmgr::POPULATE_THOUGHTS.original()(real_ptr as *const u32) };
+            unsafe { &mut *reimpl_ptr }.populate_thoughts();
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for records={:?}", records);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// Writes `name` into `entity`'s `name` field (`+0x108`, a `ZTBufferString` - see `BFEntity`'s own
+    /// field-offset doc comment in `ztworldmgr.rs`) by raw offset write, the same technique
+    /// `thought_ui_detours::add_thought_to_list_box` in `ztthoughtmgr.rs` already uses to build a
+    /// `ZTBufferString`-shaped buffer. `entity` must not move after this call - its address is baked
+    /// into the write. Returns the backing byte buffer, which the caller must keep alive at least as
+    /// long as `entity` is read through (`get_string`'s `name()`/`copy_to_string()` reads straight
+    /// through the pointers written here).
+    fn set_bfentity_name(entity: &BFEntity, name: &str) -> Vec<u8> {
+        let mut encoded = name.as_bytes().to_vec();
+        let len = encoded.len() as u32;
+        encoded.push(0);
+        let start = encoded.as_ptr() as u32;
+        let entity_addr = entity as *const BFEntity as u32;
+        save_to_memory::<u32>(entity_addr + 0x108, start);
+        save_to_memory::<u32>(entity_addr + 0x10c, start + len);
+        save_to_memory::<u32>(entity_addr + 0x110, start + encoded.len() as u32);
+        encoded
+    }
+
+    /// Writes `name` into `habitat`'s `exhibit_name` field (`+0x154`, a `ZTBoundedString` - see
+    /// `ZTHabitat`'s own field-offset doc comment in `zthabitatmgr.rs`) by raw offset write - see
+    /// `set_bfentity_name`'s own doc comment for the shared reasoning (same technique, only the field
+    /// shape differs: `ZTBoundedString` is a 2-pointer `start_ptr`/`end_ptr` pair, no separate
+    /// `buffer_end_ptr`).
+    fn set_habitat_exhibit_name(habitat: &ZTHabitat, name: &str) -> Vec<u8> {
+        let mut encoded = name.as_bytes().to_vec();
+        let len = encoded.len() as u32;
+        encoded.push(0);
+        let start = encoded.as_ptr() as u32;
+        let habitat_addr = habitat as *const ZTHabitat as u32;
+        save_to_memory::<u32>(habitat_addr + 0x154, start);
+        save_to_memory::<u32>(habitat_addr + 0x158, start + len);
+        encoded
+    }
+
+    /// Which of `get_string`'s three substitution branches a `ZTTHOUGHT_GET_STRING` case exercises - see
+    /// `get_string`'s own doc comment in `ztthoughtmgr.rs` for the branch priority (object before
+    /// habitat before "no substitution").
+    #[derive(Debug, Clone)]
+    enum GetStringSubstitution {
+        None,
+        Object(String),
+        Habitat(String),
+    }
+
+    fn get_string_substitution_strategy() -> impl Strategy<Value = GetStringSubstitution> {
+        prop_oneof![
+            Just(GetStringSubstitution::None),
+            "[a-zA-Z0-9 ]{0,16}".prop_map(GetStringSubstitution::Object),
+            "[a-zA-Z0-9 ]{0,16}".prop_map(GetStringSubstitution::Habitat),
+        ]
+    }
+
+    /// ZTTHOUGHT_GET_STRING: compares the real `ZTThought::getString`'s output against the reimplemented
+    /// `get_string`, across all three substitution branches (see `get_string`'s own doc comment in
+    /// `ztthoughtmgr.rs`): no substitution (`object_ptr = habitat_ptr = 0`), object-name substitution
+    /// (a fixture `BFEntity` with its `name` field set via `set_bfentity_name`), and habitat exhibit-name
+    /// substitution (a fixture `ZTHabitat` with `exhibit_name` set via `set_habitat_exhibit_name`).
+    /// `get_string` only ever reads these two fields directly (no vtable dispatch), so a zeroed fixture
+    /// with just the name field populated is a safe, complete stand-in for a real live `BFEntity`/
+    /// `ZTHabitat` - unlike e.g. `resolve_object_own_habitat_ptr`'s vtable calls, which this test doesn't
+    /// touch (`object_ptr`/`habitat_ptr` are set directly on the `ZTThought` fixture, never passed
+    /// through `add_thought`). Runs from `run_on_completion_reset_test_and_exit`'s own later chain, not
+    /// the early `detour_target` battery - same reasoning as `ZTRESEARCHBRANCH_FUNDING_TEXT` above
+    /// (language DLLs, which `load_string_by_id`/`BFApp::loadString` both depend on, aren't loaded yet at
+    /// the early injection point).
+    fn run_thought_get_string_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHT_GET_STRING";
+        let mut fail_flag = false;
+
+        match runner.run(&(any::<u32>(), get_string_substitution_strategy()), |(string_id, case)| {
+            let entity_storage = BFEntity::new_for_test(0, 0, 0);
+            let habitat_storage: ZTHabitat = unsafe { std::mem::zeroed() };
+            let _name_buf: Option<Vec<u8>>;
+
+            let (object_ptr, habitat_ptr) = match &case {
+                GetStringSubstitution::None => {
+                    _name_buf = None;
+                    (0u32, 0u32)
+                }
+                GetStringSubstitution::Object(name) => {
+                    _name_buf = Some(set_bfentity_name(&entity_storage, name));
+                    (&entity_storage as *const BFEntity as u32, 0u32)
+                }
+                GetStringSubstitution::Habitat(name) => {
+                    _name_buf = Some(set_habitat_exhibit_name(&habitat_storage, name));
+                    (0u32, &habitat_storage as *const ZTHabitat as u32)
+                }
+            };
+
+            let thought = thought_live_support::new_thought(string_id, 0, 0, -1, -1, 0, object_ptr, habitat_ptr);
+
+            let mut buffer = [0u32; 3];
+            unsafe {
+                gen_ztthought::GET_STRING.original()(&thought as *const ZTThought as *const u32, buffer.as_mut_ptr() as *const u32);
+            }
+            let real_text = get_from_memory::<ZTBufferString>(buffer.as_ptr() as u32).copy_to_string();
+            let reimpl_text = thought.get_string();
+
+            prop_assert_eq!(real_text, reimpl_text, "get_string mismatch for string_id={}, case={:?}", string_id, case);
             Ok(())
         }) {
             Ok(_) => {

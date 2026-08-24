@@ -143,7 +143,7 @@ pub struct BFEntity { // Full size is 0x154 bytes
     name: ZTBufferString,      // 0x108
     pos: IVec3,              // 0x114
     height_above_terrain: u32, // 0x120
-    padding4: [u8; 0x4],       // ----- padding: 4 bytes
+    id: u32,                   // 0x124 - this entity's own numeric id, used by ZTThought to store thinker/object references (see ztthoughtmgr.rs)
     inner_class_ptr: u32,      // 0x128
     rotation: i32,             // 0x12c
     padding_2: [u8; 0xc],      // ----- padding: 28 bytes
@@ -638,6 +638,41 @@ impl ZTWorldMgr {
             y: tile_y * TILE_SIZE + local_pos.y,
             z: world_z,
         }
+    }
+
+    /// Resolves a `BFEntity`'s numeric `id` (see `BFEntity::id`, `+0x124`) back to its live pointer,
+    /// via `ZTWorldMgr`'s own vtable slot 9 (offset `0x24`, target address `0x0041176c`) - the mechanism
+    /// `ZTThought::populate`/`load` use to re-resolve `thinker_ptr`/`object_ptr` after a save/load
+    /// round-trip, since only the numeric id (not the raw pointer) survives a save. Modeled directly on
+    /// `BFEntity::vtable_get_footprint`'s pattern of reading a function pointer at `vtable + offset` and
+    /// transmuting it to an `extern "thiscall" fn`; unlike that method, `ZTWorldMgr` has no named
+    /// `vtable` field (it's folded into `paddin_0`), so this reads the vtable pointer from `self`'s own
+    /// address instead.
+    ///
+    /// Offset `0x24` (not the originally-planned `0x90`/"slot 36") is confirmed by
+    /// `private/docs/vtables/ZTWorldMgr.md`'s own full vtable dump: `ZTWorldMgr`'s vtable has exactly 23
+    /// entries (`0x0`-`0x58`), inherited from `BFWorldMgr` (`ZTWorldMgr extends BFWorldMgr` directly, the
+    /// primary base at `vftptr_0x0` - no `this`-pointer adjustment needed), and slot 9/offset `0x24`
+    /// holds `0x0041176c` in both classes' dumps (inherited unchanged) - confirmed live: the original
+    /// `0x90` offset reads well past the vtable's actual end and calls through garbage, crashing
+    /// `ZTTHOUGHTMGR_POPULATE_THOUGHTS` (`reimplementation_tests`) - the first live exercise of this
+    /// method anywhere in the codebase (both `ZTThought::populate`'s `version >= 0x1e` `load` branch and
+    /// `populate_thoughts` itself went untested live until Phase H). The real vanilla
+    /// `ZTThought::populate` (`ZTThought_populate.c`) calls the *same* `0x0041176c` target through its
+    /// own vtable read, so the same live test's "real" side - unaffected by this Rust-side offset bug -
+    /// is what caught the mismatch.
+    ///
+    /// The trailing flag byte the vtable function itself takes is hardcoded to `1` here rather than
+    /// exposed as a parameter - every call site seen in the decompile passes `1`, the same
+    /// "known-constant-argument" convention `vtable_get_footprint` already uses for its own trailing
+    /// `param_2: 0`.
+    pub fn resolve_entity_by_id(&self, id: u32) -> *mut BFEntity {
+        let vtable = get_from_memory::<u32>(self as *const Self as u32);
+        let function_address = get_from_memory::<u32>(vtable + 0x24);
+        let resolve_fn = unsafe {
+            std::mem::transmute::<u32, extern "thiscall" fn(this: *const ZTWorldMgr, id: u32, flag: u8) -> *mut BFEntity>(function_address)
+        };
+        resolve_fn(self, id, 1)
     }
 }
 

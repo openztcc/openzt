@@ -1423,13 +1423,34 @@ mod predict_branch_progress_tests {
     }
 }
 
-/// `GLOBAL_BFUIMgr`'s own fixed address (`0x00635c54`, confirmed via `private/docs/vtables/BFUIMgr.md`:
-/// "address confirmed via its own constructor overwriting `BFMgr`'s vtable") - a plain static object,
-/// not a pointer slot (every call site takes its address directly, e.g.
-/// `BFUIMgr::getElement((BFUIMgr*)&GLOBAL_BFUIMgr, ...)`), unlike `GLOBAL_ZTResearchMgr`/
-/// `GLOBAL_ZTGameMgr` which are one level of pointer indirection away from the real singleton.
+/// `GLOBAL_BFUIMgr`'s own fixed address, `0x00638de0` - a plain static object, not a pointer slot
+/// (every call site takes its address directly, e.g. `BFUIMgr::getElement((BFUIMgr*)&GLOBAL_BFUIMgr,
+/// ...)`), unlike `GLOBAL_ZTResearchMgr`/`GLOBAL_ZTGameMgr` which are one level of pointer indirection
+/// away from the real singleton.
+///
+/// **`0x00635c54` (this function's value until a live-debugging session confirmed the bug) is wrong -
+/// that's `BFUIMgr`'s own *vtable* address (`private/docs/vtables/BFUIMgr.md`, `.rdata`, confirmed
+/// via `windows_vtables.csv`), not `&GLOBAL_BFUIMgr` itself.** The two got conflated because Ghidra's
+/// decompiles symbolically label call sites as `&GLOBAL_BFUIMgr` without ever showing the numeric
+/// address next to it, and the vtable's own OOAnalyzer class name (`cls_0x635c54`) happens to embed
+/// the same-looking hex suffix - but a live object's fields must be writable (its constructor writes
+/// `this->mbr_0x4 = 0` etc.) while a vtable lives in read-only `.rdata`, so they can never be the same
+/// address for a non-trivial class. Confirmed live (2026-08-24): breaking on `BFUIMgr::getElement`
+/// (`0x0040157d`) during ordinary menu loading (i.e. from a genuine, un-detoured vanilla call site, not
+/// our own code) caught `ecx=00638de0`, and `dd 638de0 L4` showed its first dword (the object's own
+/// vtable pointer) is exactly `00635c54` - matching the confirmed vtable address, proving `0x638de0` is
+/// the real instance and `0x635c54` is only its vtable. `openzt/src/ztui.rs`'s own
+/// `const BFUIMGR_PTR: u32 = 0x00638de0;` had this right all along (used the same way, as `this` for
+/// the same `GET_ELEMENT_0`) - this function was the only place carrying the wrong value. Passing the
+/// vtable's address as `this` doesn't fail every lookup (`getElement`'s hot path just reads garbage
+/// `.rdata` fields at small offsets past the 2-entry vtable, e.g. `vtable+0x38` happens to land on a
+/// literal `0xffffffff` in the padding immediately after it), so this bug did occasionally survive
+/// undetected; it reproduces as a genuine access-violation crash in `OOAnalyzer::BFTile::meth_0x40152b`
+/// (`getElement`'s internal tree-lookup helper) as soon as a caller's own logic actually depends on
+/// that garbage read - which is what made every `ztthoughtmgr.rs` UI-consumer detour crash on selecting
+/// any entity with a thought list.
 fn global_bfuimgr() -> *const u32 {
-    (get_module_base("zoo.exe") as u32 + 0x0023_5c54) as *const u32
+    (get_module_base("zoo.exe") as u32 + 0x0023_8de0) as *const u32
 }
 
 /// The two dialog-`45000` element ids `ZTResearchBranch::update` looks up (`DAT_0063b94e`/

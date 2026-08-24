@@ -42,14 +42,22 @@ impl ZTHabitatMgr {
         self.get_habitat(tile.pos.x, tile.pos.y)
     }
 
-    // TODO: Should return Option<ZTExhibit> where ZTExhibit is a enum of ZTHabitat or ZTTankExhibit
-    pub fn get_habitat(&self, pos_x: i32, pos_y: i32) -> Option<ZTHabitat> {
+    /// Raw pointer variant of `get_habitat`, for callers that need the address itself (e.g.
+    /// `ZTThought::populate`, which stores it verbatim as `habitat_ptr`) rather than a copy of the
+    /// pointed-to `ZTHabitat`. Returns `0` (null) if no habitat occupies the tile, matching vanilla's
+    /// own `ZTHabitatMgr::getHabitat` return value directly.
+    pub fn get_habitat_ptr(&self, pos_x: i32, pos_y: i32) -> u32 {
         let base_ptr = self.other_array_start;
         let offset_1 = pos_x as u32 * 0xc;
         let intermediate_ptr = get_from_memory::<u32>(base_ptr + offset_1);
 
         let offset_2 = pos_y as u32 * 0x28;
-        let ptr = get_from_memory::<u32>(intermediate_ptr + offset_2);
+        get_from_memory::<u32>(intermediate_ptr + offset_2)
+    }
+
+    // TODO: Should return Option<ZTExhibit> where ZTExhibit is a enum of ZTHabitat or ZTTankExhibit
+    pub fn get_habitat(&self, pos_x: i32, pos_y: i32) -> Option<ZTHabitat> {
+        let ptr = self.get_habitat_ptr(pos_x, pos_y);
 
         // TODO: Check vtable ptr and return ZTHabitat or ZTTankExhibit?
 
@@ -104,7 +112,9 @@ impl fmt::Display for ZTHabitatMgr {
 pub struct ZTHabitat {
     vtable: u32,                 // 0x000
     zt_show_info_ptr: u32,       // 0x004
-    pad1: [u8; 0x38],            // ----------------------- padding: 56 bytes
+    pad1a: [u8; 0x24],           // ----------------------- padding: 36 bytes
+    unknown_flag_0x2c: u8,       // 0x02c // Gates ZTThought::ZTThought's acceptance of a passed-in habitat pointer (see ztthoughtmgr.rs); ZTHabitat::recalculateCharacteristics also early-returns when this is set. Meaning not otherwise confirmed.
+    pad1b: [u8; 0x13],           // ----------------------- padding: 19 bytes
     exhibit_tile_ptr: u32,       // 0x040 // Seems incorrect?
     pad2: [u8; 0x48],            // ----------------------- padding: 72 bytes
     entrance_tile_ptr: u32,      // 0x08c
