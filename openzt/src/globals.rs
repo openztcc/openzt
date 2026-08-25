@@ -59,6 +59,12 @@ pub struct ZTThoughtMgr {
     _private: [u8; 0],
 }
 
+/// Opaque type for ZTMegatileMgr
+#[repr(C)]
+pub struct ZTMegatileMgr {
+    _private: [u8; 0],
+}
+
 /// Walks a pointer chain and returns the final address.
 ///
 /// # Arguments
@@ -151,6 +157,7 @@ pub struct Globals {
     ztresearchmgr: CachedGlobalInstance<ZTResearchMgr>,
     ztmarketingmgr: CachedGlobalInstance<ZTMarketingMgr>,
     ztthoughtmgr: CachedGlobalInstance<ZTThoughtMgr>,
+    ztmegatilemgr: CachedGlobalInstance<ZTMegatileMgr>,
 }
 
 impl Globals {
@@ -265,6 +272,20 @@ impl Globals {
             self.ztthoughtmgr.get() as *mut crate::ztthoughtmgr::ZTThoughtMgr
         }
     }
+
+    /// Returns a shared reference to the ZTMegatileMgr (read-only).
+    pub fn ztmegatilemgr(&self) -> &crate::ztmegatilemgr::ZTMegatileMgr {
+        unsafe {
+            &*(self.ztmegatilemgr.get() as *const crate::ztmegatilemgr::ZTMegatileMgr)
+        }
+    }
+
+    /// Returns a raw mutable pointer to the ZTMegatileMgr for mutation.
+    pub fn ztmegatilemgr_ptr(&self) -> *mut crate::ztmegatilemgr::ZTMegatileMgr {
+        unsafe {
+            self.ztmegatilemgr.get() as *mut crate::ztmegatilemgr::ZTMegatileMgr
+        }
+    }
 }
 
 // SAFETY: Globals only contains CachedGlobalInstance values which are Send + Sync
@@ -315,6 +336,10 @@ fn ensure_globals() -> &'static Globals {
             ztmarketingmgr: CachedGlobalInstance::new(base + 0x00239000, &[0]),
             // 0x639090 (Ghidra address, default base 0x400000) -> RVA 0x239090
             ztthoughtmgr: CachedGlobalInstance::new(base + 0x00239090, &[0]),
+            // 0x639004 (Ghidra address, default base 0x400000) -> RVA 0x239004. Confirmed directly via
+            // Ghidra (OOAnalyzer-assigned symbol `GLOBAL_ZTMegatileMgr`), in the same neighborhood as
+            // ZTMarketingMgr/ZTResearchMgr/ZTThoughtMgr (0x639000/0x639010/0x639090).
+            ztmegatilemgr: CachedGlobalInstance::new(base + 0x00239004, &[0]),
         }
     })
 }
