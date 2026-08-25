@@ -210,7 +210,7 @@ pub mod bfcategory {
     use super::*;
 
     #[cfg_attr(feature = "detour-validation", validate_detour("bfcategory/get_value"))]
-    pub const GET_VALUE: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i32) -> *const i32> = FunctionDef{address: 0x00410ec0, function_type: PhantomData};
+    pub const GET_VALUE: FunctionDef<unsafe extern "thiscall" fn(*const u32, i32) -> i32> = FunctionDef{address: 0x00410ec0, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfcategory/set_from_int_list"))]
     pub const SET_FROM_INT_LIST: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i32, i32, i32)> = FunctionDef{address: 0x004b40f1, function_type: PhantomData};
 }
