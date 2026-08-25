@@ -1,28 +1,21 @@
 //! Structs and methods for the vanilla `ZTMegatileMgr`/`ZTMegatile` classes: terrain "megatile" (5x5
 //! tile block) characteristic recalculation - guest density and per-`BFCategory` "esthetic" averages,
 //! consumed by `ZTGuest::fCrowdDensityMegatile`/`fEstheticBonusMegatile` (not detoured by this file;
-//! they read this memory raw, by pointer-chasing, which is exactly why the struct layout below has to
-//! be byte-exact rather than merely behaviorally equivalent).
+//! they read this memory raw, by pointer-chasing, so the struct layout below must be byte-exact rather
+//! than merely behaviorally equivalent).
 //!
-//! Allocator strategy: **100% vanilla-owned, everywhere in this file.** Unlike `ztthoughtmgr.rs`
-//! (Rust/`Box`-owned from the point OpenZT loads) or `ztresearch.rs`'s default-mode branches
-//! (full Rust-side reconstruction), this module never allocates a single byte of its own. The outer
-//! `vector<vector<ZTMegatile>>` grid and every embedded `std::map<int,float>` stay allocated and
-//! mutated through vanilla's own resolved-address STL helpers (see the raw-address consts below) -
-//! reads are done natively (safe against either allocator, since they never touch allocator
-//! bookkeeping), and any write that could allocate/free (`vector::resize`, `map::insert`, `map::clear`)
-//! is call-through only. This sidesteps the cross-allocator heap corruption class of bug entirely: see
-//! `CLAUDE.md`'s own warning about mixing `Box` and vanilla's freelist, which does not apply here
-//! because there is no `Box` on either side of any mutation in this file.
+//! Allocator strategy: **100% vanilla-owned, everywhere in this file.** This module never allocates a
+//! single byte of its own. The outer `vector<vector<ZTMegatile>>` grid and every embedded
+//! `std::map<int,float>` stay allocated and mutated through vanilla's own resolved-address STL helpers
+//! (see the raw-address consts below); any write that could allocate/free (`vector::resize`,
+//! `map::insert`, `map::clear`) is call-through only. See `CLAUDE.md`'s warning about mixing `Box` and
+//! vanilla's freelist - it doesn't apply here since there is no `Box` on either side of any mutation in
+//! this file.
 //!
-//! Implementation order (risk-sequenced, matches the plan this module was built from): `update()` first
-//! (trivial scalar logic, zero container-mutation risk), then `recalculate_characteristics()` (mutates
-//! an existing map in place, never resizes/reallocates the outer vectors), then `init()` last (the only
-//! vector-resize/allocation path, and therefore the highest risk of genuine heap corruption if a
-//! helper's inferred signature is wrong). The live `reimplementation-tests` comparison battery (see
-//! `live_support` below and `reimplementation_tests::ZTMEGATILEMGR_*`) is the real verification
-//! mechanism for the STL helper calls, not code review - several of their exact signatures are inferred
-//! from decompiled call sites rather than confirmed, and are flagged as such at each site below.
+//! `update()`/`recalculate_characteristics()` never resize the outer vectors; `init()` is the only
+//! vector-resize/allocation path. STL helper signatures are inferred from decompiled call sites rather
+//! than confirmed from symbols; the live `reimplementation-tests` battery (see `live_support` below and
+//! `reimplementation_tests::ZTMEGATILEMGR_*`) is the verification mechanism for them, not code review.
 
 use std::mem;
 
@@ -256,21 +249,21 @@ impl ZTMegatileMgr {
     /// Reimplementation of `OOAnalyzer::ZTMegatileMgr::recalculateCharacteristics`, per
     /// `ZTMegatileMgr_recalculateCharacteristics.c`. Two passes over the live map:
     ///
-    /// 1. Reset every currently-allocated megatile: `guest_count = 0`, `category_map.clear()` (via the
-    ///    confirmed vanilla `map::clear` helper - see [`category_map_clear`]), `esthetic_bonus = 0.0`.
+    /// 1. Reset every currently-allocated megatile: `guest_count = 0`, `category_map.clear()` (via
+    ///    [`category_map_clear`]), `esthetic_bonus = 0.0`.
     /// 2. For every real map tile `(x, y)`, walk its guest-occupant list (an intrusive circular list
     ///    whose sentinel pointer lives at the tile's own `+0x0`, node shape `{next, prev, entity_ptr}`)
     ///    counting residents whose entity type passes the `ZTGuestType` check
     ///    (`DAT_00638700`/`RVA_GUEST_TYPE_CHECK_ARG`, via the same vtable-slot-`0x1c` "isKindOf" pattern
-    ///    `ztthoughtmgr::resolve_object_own_habitat_ptr` already established), then for each of the
-    ///    tile's 4 "corner" entity pointers (`+0x4`/`+0x8`/`+0xc`/`+0x10`) whose type passes the
-    ///    `ZTSceneryType`-ish check (`DAT_00638670`), accumulates that entity type's per-category
-    ///    `BFCategory::getValue` (already confirmed at `bfcategory::GET_VALUE`) divided by the entity's
-    ///    own footprint divisor (`+0x150`) into the owning megatile's `category_map`, plus its
-    ///    `esthetic_bonus`-source field (`+0x11c`) into `esthetic_bonus` the same way.
+    ///    as `ztthoughtmgr::resolve_object_own_habitat_ptr`), then for each of the tile's 4 "corner"
+    ///    entity pointers (`+0x4`/`+0x8`/`+0xc`/`+0x10`) whose type passes the `ZTSceneryType`-ish check
+    ///    (`DAT_00638670`), accumulates that entity type's per-category `BFCategory::getValue`
+    ///    (`bfcategory::GET_VALUE`) divided by the entity's own footprint divisor (`+0x150`) into the
+    ///    owning megatile's `category_map`, plus its `esthetic_bonus`-source field (`+0x11c`) into
+    ///    `esthetic_bonus` the same way.
     ///
     /// Only the not-found branch of the per-category accumulation calls through to vanilla (the
-    /// find-or-insert helper, [`category_map_find_or_insert`]) - once a node exists, writing its `value`
+    /// find-or-insert helper, [`accumulate_category_value`]) - once a node exists, writing its `value`
     /// field is a plain memory write, safe regardless of allocator (see the module doc comment).
     pub fn recalculate_characteristics(&mut self) {
         for column in 0..self.megatile_columns() {
@@ -351,21 +344,16 @@ impl ZTMegatileMgr {
 
     /// Reimplementation of `OOAnalyzer::ZTMegatileMgr::init`, per `ZTMegatileMgr_init.c`. Resizes the
     /// outer `vector<vector<ZTMegatile>>` to `tile_y_count` columns, then each column's inner
-    /// `vector<ZTMegatile>` to `tile_x_count` entries - preserved exactly as the decompile has it, even
-    /// though this looks transposed relative to `recalculate_characteristics`'s own x/5-outer,
-    /// y/5-inner indexing (see that method's doc comment): this is a faithful translation of vanilla's
-    /// own (possibly asymmetric-map-unfriendly) behavior, not something this reimplementation tries to
-    /// "fix" - see the module doc comment's fidelity-over-editorializing stance.
+    /// `vector<ZTMegatile>` to `tile_x_count` entries - transposed relative to
+    /// `recalculate_characteristics`'s own x/5-outer, y/5-inner indexing (see that method's doc
+    /// comment), but preserved exactly as the decompile has it: a faithful translation of vanilla's own
+    /// behavior rather than something this reimplementation tries to "fix".
     ///
     /// The riskiest code in this file: the outer/inner vector resize helpers
     /// ([`outer_vector_erase`]/[`outer_vector_insert_n`]/[`inner_vector_erase_tail`]/
     /// [`inner_vector_insert_n`]) have calling conventions reconstructed from a decompile that reuses
-    /// the same stack slots (`local_10`/`local_14`/`local_c`) for multiple, logically-unrelated
-    /// purposes across the function - see [`inner_vector_insert_n`]'s own doc comment for the specific
-    /// trap this caused (a `this->head = <garbage>`-shaped "constructor" call that turned out to be
-    /// entirely unrelated to the value actually passed to the insert helper). Per the module doc
-    /// comment, this is implemented and live-tested last, only once `update`/`recalculate_characteristics`
-    /// are confirmed working.
+    /// the same stack slots for multiple, logically-unrelated purposes across the function - see each
+    /// helper's own doc comment for specifics.
     pub fn init(&mut self, tile_x_count: i32, tile_y_count: i32) {
         let outer_target = tile_y_count.max(0) as usize;
         let current_outer = self.megatile_columns();
@@ -399,16 +387,13 @@ impl ZTMegatileMgr {
                     inner_vector_erase_tail(row, inner_target);
                 }
             } else if inner_target > current_inner {
-                // A genuinely null value pointer here (rather than the address of a real, correctly-
-                // sized `ZTMegatile`) makes the callee skip per-element construction entirely, leaving
-                // new slots as raw uninitialized allocator memory - confirmed by disassembling the
-                // fast-path helper (`0x4c8962`) the insert dispatcher calls into: it does
+                // A null value pointer here makes the callee skip per-element construction entirely,
+                // leaving new slots as raw uninitialized allocator memory - confirmed by disassembling
+                // the fast-path helper (`0x4c8962`) the insert dispatcher calls into: it does
                 // `test esi,esi; je <skip>` on the value pointer before the per-element
-                // construct-from-value call. And a `category_map.head: null` *within* that value isn't
-                // safe either - see [`empty_category_map_sentinel`]'s own doc comment for the live crash
-                // that ruled it out. The fill value needs a real empty-tree sentinel for `head` (`parent:
-                // null`, `left`/`right` self-referential) - see `inner_vector_insert_n`'s own doc comment
-                // for why `local_14` in the decompile still looks like "just 4 zero bytes" despite this.
+                // construct-from-value call. A `category_map.head: null` within that value isn't safe
+                // either - see [`empty_category_map_sentinel`]'s own doc comment. The fill value needs a
+                // real empty-tree sentinel for `head` (`parent: null`, `left`/`right` self-referential).
                 let fill = ZTMegatile { guest_count: 0, category_map: MapHeader { head: empty_category_map_sentinel(), size: 0, _reserved: 0 }, esthetic_bonus: 0.0 };
                 unsafe {
                     inner_vector_insert_n(row, (inner_target - current_inner) as u32, &fill);
@@ -458,21 +443,14 @@ unsafe fn category_map_clear(map: &mut MapHeader) {
 }
 
 /// A `head: null` `MapHeader` is *not* a safe "empty map" to hand to vanilla's own map/tree code as a
-/// copy-construction source: disassembling the fault site directly (live-reproduced crash, `zoo.exe`
-/// RVA `0xdd35f`, inside the `category_map` copy-constructor called from the "sufficient capacity"
-/// insert path at `0x5cccb7`) shows `mov edx,[ecx]; cmp [edx+4],edi` unconditionally dereferencing
-/// `head` (`edx`) to read its `parent` field, before ever checking `size`, unlike
-/// [`category_map_clear`]. That `parent == NULL` comparison (`edi` is `xor`-zeroed a few instructions
-/// earlier and never reassigned) is the copy-ctor's *actual* "is the source subtree empty" check - a
-/// **self-referential** `parent` (this function's first attempt) reads as "non-empty, `parent` is the
-/// real root", making the copy-ctor walk `parent` as if it were a genuine data node (reading its `key`
-/// at `+0x10`, recursing into its `left`/`right` at `+8`/`+0xc` - which, being self-referential too,
-/// cycles back into the same fake node) instead of taking the empty-tree fast path - a subtler, later
-/// crash at the *same* code address (a fresh miscompare a few cycles into the resulting bogus
-/// recursion) rather than the original null-dereference, which is why the live crash's RVA didn't
-/// change even though the root cause did. `parent: null` is what a genuinely empty `std::map`'s header
-/// has, and is what this copy-ctor's own check requires; `left`/`right` are left self-referential to
-/// match a real empty-tree header's usual shape, though the observed check here never inspects them.
+/// copy-construction source: the `category_map` copy-constructor (`zoo.exe` RVA `0xdd35f`, called from
+/// the "sufficient capacity" insert path at `0x5cccb7`) does `mov edx,[ecx]; cmp [edx+4],edi`,
+/// unconditionally dereferencing `head` (`edx`) to read its `parent` field before ever checking `size`,
+/// unlike [`category_map_clear`]. That `parent == NULL` comparison is the copy-ctor's actual "is the
+/// source subtree empty" check, so `parent` must be genuinely null (not self-referential) for the
+/// empty-tree fast path to be taken; a self-referential `parent` gets walked as if it were a real data
+/// node instead. `left`/`right` are left self-referential to match a real empty-tree header's usual
+/// shape, though this copy-ctor's own check never inspects them.
 ///
 /// Leaked (`'static`, so it outlives every call that might reference it - see `CLAUDE.md`'s
 /// cross-allocator warning: this is read-only data handed to vanilla to copy *from*, never freed by
@@ -550,9 +528,9 @@ unsafe fn accumulate_category_value(map: &mut MapHeader, category_id: i32, delta
 /// old_end)` call - confirmed directly in `ZTMegatileMgr_init.asm`: `this` (`ECX`) is set from
 /// `LEA ESI,[ECX_orig+0x18]` (i.e. `&mgr->row_start`, the address of the embedded
 /// `vector<MegatileRow>` header at offset `0x18`), **not** the `ZTMegatileMgr*` itself - passing the
-/// manager pointer directly (as an earlier version of this function did) makes the callee read/write
-/// `vtable`/`flag`/`dirty`/`tick_accumulator` as if they were `begin`/`end`/`capacity_end`, corrupting
-/// the manager without touching the real vector header. Address `0x0047cea0`, RVA `0x0007cea0`.
+/// manager pointer directly makes the callee read/write `vtable`/`flag`/`dirty`/`tick_accumulator` as if
+/// they were `begin`/`end`/`capacity_end`, corrupting the manager without touching the real vector
+/// header. Address `0x0047cea0`, RVA `0x0007cea0`.
 unsafe fn outer_vector_erase(mgr: &mut ZTMegatileMgr, first: *mut MegatileRow, last: *mut MegatileRow) {
     let erase_fn = unsafe {
         mem::transmute::<u32, extern "thiscall" fn(*mut *mut MegatileRow, *mut MegatileRow, *mut MegatileRow)>(get_module_base("zoo.exe") as u32 + 0x0007_cea0)
@@ -601,20 +579,15 @@ unsafe fn inner_vector_erase_tail(row: &mut MegatileRow, new_len: usize) {
 }
 
 /// Inner `vector<ZTMegatile>::insert(end(), n, value)`. `ZTMegatileMgr_init.c` renders the value
-/// argument as `&local_14` (`undefined1 local_14 [4]`, unconditionally zeroed just before the call) -
-/// *not* the `local_10`/`cls_0x4012a6` tree object a few lines above, which is an unrelated scratch
-/// allocation pushed onto a freelist at `DAT_00638008` at the end of the same loop iteration and never
-/// passed to this call at all. `local_14`'s small size looks like it might signal a "default-insert,
-/// no real value" path, but disassembling the fast-path helper this dispatcher calls into (`0x4c8962`)
-/// rules that out: it does `test esi,esi; je <skip-construct>` on the value pointer itself (null
-/// skips per-element construction, leaving raw allocator memory - *not* default-construction), and a
-/// *non-null* pointer - which `&local_14` is - unconditionally reaches a real per-element
-/// construct-from-value call reading a full `ZTMegatile`-shaped source. So vanilla's own `local_14`
-/// over-reads into whatever's adjacent to it on `init()`'s much larger stack frame for the trailing 16
-/// bytes; this reimplementation instead passes a genuinely valid, correctly-sized, zeroed `ZTMegatile`
-/// (`category_map` `head: null, size: 0`) so the copy-construct path sees a well-defined empty source
-/// rather than relying on adjacent-stack-garbage happening to look empty. Address `0x004c8489`, RVA
-/// `0x000c8489`.
+/// argument as `&local_14` (`undefined1 local_14 [4]`, unconditionally zeroed just before the call),
+/// not the unrelated `local_10`/`cls_0x4012a6` tree scratch object a few lines above. The insert
+/// dispatcher's fast-path helper (`0x4c8962`) does `test esi,esi; je <skip-construct>` on the value
+/// pointer (null skips per-element construction, leaving raw allocator memory), and any non-null
+/// pointer - including `&local_14` - reaches a real per-element construct-from-value call reading a
+/// full `ZTMegatile`-shaped source. Vanilla's own `local_14` therefore over-reads into whatever's
+/// adjacent to it on the stack for the trailing bytes; this reimplementation instead passes a genuinely
+/// valid, correctly-sized, zeroed `ZTMegatile` (`category_map` `head: null, size: 0`) so the
+/// copy-construct path sees a well-defined empty source. Address `0x004c8489`, RVA `0x000c8489`.
 unsafe fn inner_vector_insert_n(row: &mut MegatileRow, n: u32, value: &ZTMegatile) {
     let insert_fn = unsafe {
         mem::transmute::<u32, extern "thiscall" fn(*mut MegatileRow, *mut ZTMegatile, u32, *const ZTMegatile)>(get_module_base("zoo.exe") as u32 + 0x000c_8489)
