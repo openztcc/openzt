@@ -1372,7 +1372,7 @@ const DAYS_TO_FUNDING_SCALE: f32 = 1.0 / 43200.0;
 /// subtracted, progress accumulated - when `cash_delta <= available_cash`; insufficient cash leaves
 /// both unchanged for this call (silently - no partial progress, no debt), signalled here by returning
 /// `(0.0, 0.0)`.
-fn predict_branch_progress(days: u32, funding_cost: f32, funding_rate: f32, available_cash: f32) -> (f32, f32) {
+pub(crate) fn predict_branch_progress(days: u32, funding_cost: f32, funding_rate: f32, available_cash: f32) -> (f32, f32) {
     let cash_delta = days as f32 * funding_cost * DAYS_TO_FUNDING_SCALE;
     if cash_delta <= available_cash {
         let progress_delta = days as f32 * funding_rate * DAYS_TO_FUNDING_SCALE;
@@ -1423,13 +1423,13 @@ mod predict_branch_progress_tests {
     }
 }
 
-/// `GLOBAL_BFUIMgr`'s own fixed address (`0x00635c54`, confirmed via `private/docs/vtables/BFUIMgr.md`:
-/// "address confirmed via its own constructor overwriting `BFMgr`'s vtable") - a plain static object,
-/// not a pointer slot (every call site takes its address directly, e.g.
-/// `BFUIMgr::getElement((BFUIMgr*)&GLOBAL_BFUIMgr, ...)`), unlike `GLOBAL_ZTResearchMgr`/
-/// `GLOBAL_ZTGameMgr` which are one level of pointer indirection away from the real singleton.
+/// `GLOBAL_BFUIMgr`'s own fixed address, `0x00638de0` - a plain static object, not a pointer slot
+/// (every call site takes its address directly, e.g. `BFUIMgr::getElement((BFUIMgr*)&GLOBAL_BFUIMgr,
+/// ...)`), unlike `GLOBAL_ZTResearchMgr`/`GLOBAL_ZTGameMgr` which are one level of pointer indirection
+/// away from the real singleton. `0x00635c54` is `BFUIMgr`'s own vtable address, not the object
+/// itself - do not confuse the two.
 fn global_bfuimgr() -> *const u32 {
-    (get_module_base("zoo.exe") as u32 + 0x0023_5c54) as *const u32
+    (get_module_base("zoo.exe") as u32 + 0x0023_8de0) as *const u32
 }
 
 /// The two dialog-`45000` element ids `ZTResearchBranch::update` looks up (`DAT_0063b94e`/
@@ -1493,7 +1493,11 @@ const MONTHLY_TO_DAILY_COST_SCALE: f32 = 1.0 / 30.0;
 /// the exact fixed globals vanilla itself reads/mutates around this same call site
 /// (`DAT_0063806c`/`lpFormat_0063b3a8`), rather than hardcoded from the static image, so this matches
 /// whatever the running game's own locale-init code has set them to.
-fn get_money_text(value: i32) -> String {
+///
+/// `pub(crate)`: also used by `ztmarketing::ZTMarketing::funding_text`, which calls the same
+/// `bfinternat::getMoneyText` overload with a different pre-scale on `cost` (none, vs.
+/// `MONTHLY_TO_DAILY_COST_SCALE` here).
+pub(crate) fn get_money_text(value: i32) -> String {
     let base = get_module_base("zoo.exe") as u32;
     let num_digits = get_from_memory::<u32>(base + 0x0023_b3a8);
     let leading_zero = get_from_memory::<u32>(base + 0x0023_b3ac);
@@ -1573,7 +1577,7 @@ pub struct ZTResearchMgr {
 /// as `elapsed_ticks * 0x147ae260` but gets unconditionally overwritten with `this->branch_array`'s raw
 /// pointer on every loop iteration whenever the threshold is crossed - a decompiler/register-reuse
 /// artifact, not a meaningful return value the game relies on.
-fn predict_update(elapsed_ticks_before: u32, delta_ticks: u32) -> (u32, u32) {
+pub(crate) fn predict_update(elapsed_ticks_before: u32, delta_ticks: u32) -> (u32, u32) {
     let elapsed_ticks = elapsed_ticks_before.wrapping_add(delta_ticks);
     let days = elapsed_ticks.wrapping_mul(0x1c20) / 60000;
     if days > 0x167 {
@@ -2136,6 +2140,9 @@ pub fn init() {
 
     research_config_reimplementation::init();
     research_save_reimplementation::init();
+    research_force_research_reimplementation::init();
+    research_program_completion_reimplementation::init();
+    research_update_reimplementation::init();
 }
 
 /// Native reimplementation of the `.cfg`-driven research tree loading
@@ -3304,6 +3311,115 @@ mod research_config_reimplementation {
     pub fn init() {
         if let Err(e) = unsafe { detours::init_detours() } {
             error!("Failed to initialise research-config-reimplementation detours: {e:?}");
+        }
+    }
+}
+
+/// Detours `ZTResearchMgr::forceResearch` onto `ZTResearchMgr::force_research` above (see its own doc
+/// comment). Unlike the `update` family below, this never touches cash/`GLOBAL_ZTGameMgr` - it only
+/// dispatches `on_completion`/sets `current_progress`/picks a random program - so there's no known crash
+/// risk and it's promoted unconditionally. `force_research_cheat()` (the actual live "force research"
+/// Lua command) still calls the real vanilla standalone cheat function to get its world/UI refresh, but
+/// that function's own internal call to `ZTResearchMgr::forceResearch` is now redirected here.
+pub(crate) mod research_force_research_reimplementation {
+    use openzt_detour_macro::detour_mod;
+
+    use super::*;
+
+    #[detour_mod]
+    mod detours {
+        use openzt_detour::generated::ztresearchmgr::FORCE_RESEARCH;
+
+        use super::*;
+        use crate::util::mut_from_memory;
+
+        #[detour(FORCE_RESEARCH)]
+        unsafe extern "thiscall" fn force_research(this: *const u32, continue_program: bool) {
+            let mgr = unsafe { mut_from_memory::<ZTResearchMgr>(this) };
+            mgr.force_research(continue_program);
+        }
+    }
+
+    /// Installs the `forceResearch` detour (the arm above). Called from `ztresearch::init()`.
+    pub fn init() {
+        if let Err(e) = unsafe { detours::init_detours() } {
+            error!("Failed to initialise research-force-research-reimplementation detours: {e:?}");
+        }
+    }
+}
+
+/// Detours `ZTResearchProgram::onCompletion`/`reset` onto `ZTResearchProgram::on_completion`/`reset`
+/// above (see their own doc comments). Every other promoted call site in this file already calls these
+/// two directly as plain Rust methods (`research_config_reimplementation`'s program construction,
+/// `research_save_reimplementation::load`'s tail, and `research_force_research_reimplementation`) - the
+/// one path that didn't was vanilla's own `ZTResearchBranch::update` internally calling the real vanilla
+/// `onCompletion` before that detour was promoted too (now unconditional, see
+/// `research_update_reimplementation` below). This detour closes that gap so `on_completion`/`reset` run
+/// through the reimplementation universally, independent of `update`. Like
+/// `force_research`, neither touches cash/`GLOBAL_ZTGameMgr`, so there's no known crash risk and this is
+/// promoted unconditionally.
+pub(crate) mod research_program_completion_reimplementation {
+    use openzt_detour_macro::detour_mod;
+
+    use super::*;
+
+    #[detour_mod]
+    mod detours {
+        use openzt_detour::generated::ztresearchprogram::{ON_COMPLETION, RESET};
+
+        use super::*;
+        use crate::util::mut_from_memory;
+
+        #[detour(ON_COMPLETION)]
+        unsafe extern "thiscall" fn on_completion(this: *const u32) -> bool {
+            let program = unsafe { mut_from_memory::<ZTResearchProgram>(this) };
+            program.on_completion() != 0
+        }
+
+        #[detour(RESET)]
+        unsafe extern "thiscall" fn reset(this: *const u32) -> bool {
+            let program = unsafe { mut_from_memory::<ZTResearchProgram>(this) };
+            program.reset() != 0
+        }
+    }
+
+    /// Installs the `onCompletion`/`reset` detours (the arm above). Called from `ztresearch::init()`.
+    pub fn init() {
+        if let Err(e) = unsafe { detours::init_detours() } {
+            error!("Failed to initialise research-program-completion-reimplementation detours: {e:?}");
+        }
+    }
+}
+
+/// Detours `ZTResearchMgr::update` onto `ZTResearchMgr::update`/`ZTResearchBranch::update` above (see
+/// their own doc comments for the accumulator/eligibility/progress/cash logic).
+pub(crate) mod research_update_reimplementation {
+    use openzt_detour_macro::detour_mod;
+
+    use super::*;
+
+    #[detour_mod]
+    mod detours {
+        use openzt_detour::generated::ztresearchmgr::UPDATE;
+
+        use super::*;
+        use crate::util::mut_from_memory;
+
+        /// Real vanilla's own `int` return here is a decompiler artifact (leftover `EAX` from an
+        /// intermediate multiply, per `ZTResearchMgr_update.c`) - the function is logically `void` and no
+        /// real caller ever consumes it, so this always returns `0`.
+        #[detour(UPDATE)]
+        unsafe extern "thiscall" fn update(this: *const u32, delta_ticks: u32) -> i32 {
+            let mgr = unsafe { mut_from_memory::<ZTResearchMgr>(this) };
+            mgr.update(delta_ticks);
+            0
+        }
+    }
+
+    /// Installs the `update` detour (the arm above). Called unconditionally from `ztresearch::init()`.
+    pub fn init() {
+        if let Err(e) = unsafe { detours::init_detours() } {
+            error!("Failed to initialise research-update-reimplementation detours: {e:?}");
         }
     }
 }

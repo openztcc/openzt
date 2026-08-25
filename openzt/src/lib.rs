@@ -81,6 +81,18 @@ mod zthabitatmgr;
 /// classes, which drive the zoo's research tree, funding levels and program completion effects.
 mod ztresearch;
 
+/// ztmarketing module has structs and methods for the vanilla ZTMarketingMgr/ZTMarketing/
+/// ZTMarketingFundingLevel classes, which drive the zoo's marketing spend and funding-level selection.
+mod ztmarketing;
+
+/// ztthoughtmgr module has structs and methods for the vanilla ZTThoughtMgr/ZTThought classes, which
+/// track the "thought bubble" messages guests/animals display (e.g. "caught prey").
+mod ztthoughtmgr;
+
+/// ztmegatilemgr module has structs and methods for the vanilla ZTMegatileMgr/ZTMegatile classes, which
+/// recalculate terrain "megatile" (5x5 tile block) guest-density/esthetic-bonus characteristics.
+mod ztmegatilemgr;
+
 mod experimental;
 
 /// Roof tag extension for scenery entities
@@ -192,6 +204,9 @@ mod zoo_init {
             ztmapview::init();
             zthabitatmgr::init();
             ztresearch::init();
+            ztmarketing::init();
+            ztthoughtmgr::init();
+            ztmegatilemgr::init();
         }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }

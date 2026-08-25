@@ -31,13 +31,15 @@ pub fn init() {
 
         io_redirect::init();
 
-        // Installs `research_save_reimplementation`'s `SAVE`/`LOAD` detour (the `not(vanilla-research-save)`
-        // default arm - a no-op under the `vanilla-research-save` feature) before `detour_zoo_main`'s own
-        // battery runs, so the ZTRESEARCHMGR_SAVE/ZTRESEARCHMGR_LOAD tests' `mgr.save()`/`mgr.load()` calls
-        // exercise the actual promoted live path, not just the pure `serialize`/`predict_load` helpers
-        // against untouched vanilla. Deliberately scoped to just this one detour, not the full
-        // `ztresearch::init()` production init chain, which this harness never calls.
+        // Installs `resource_manager::init()`'s hooks so `LAZY_RESOURCE_MAP` is populated before
+        // `detour_zoo_main`'s battery runs, letting `ZTMARKETINGMGR_LOAD_CONFIGURATIONS`'s
+        // `load_configurations()` call resolve real game resources via `get_file`.
+        crate::resource_manager::init();
+
+        // Installs the research/marketing `SAVE`/`LOAD` detours so the corresponding comparison tests'
+        // `mgr.save()`/`mgr.load()` calls exercise the actual promoted live path.
         crate::ztresearch::research_save_reimplementation::init();
+        crate::ztmarketing::marketing_save_reimplementation::init();
 
         unsafe { detour_zoo_main::init_detours() }.is_err().then(|| {
             error!("Error initialising zoo_main detours");
@@ -74,11 +76,13 @@ mod detour_zoo_main {
     use std::{
         backtrace::Backtrace,
         cell::Cell,
+        ffi::{CStr, CString},
         fs::OpenOptions,
         io::Write,
+        mem::size_of,
         sync::{
             atomic::{AtomicBool, Ordering},
-            Once,
+            Once, OnceLock,
         },
     };
 
@@ -90,8 +94,11 @@ mod detour_zoo_main {
     use openzt_detour::generated::bfapp::LOAD_LANG_DLLS;
     use openzt_detour::generated::bfentity::GET_FOOTPRINT as BFENTITY_GET_FOOTPRINT;
     use openzt_detour::generated::bftile::GET_LOCAL_ELEVATION;
+    use openzt_detour::generated::standalone;
     use openzt_detour::generated::ztanimal::GET_FOOTPRINT as ZTANIMAL_GET_FOOTPRINT;
     use openzt_detour::generated::ztapp::UPDATE_SIM;
+    use openzt_detour::generated::ztmarketing;
+    use openzt_detour::generated::ztmarketingmgr::{CLEAR_CONFIGURATIONS as ZTMARKETINGMGR_CLEAR_CONFIGURATIONS, LOAD_CONFIGURATIONS, UPDATE as ZTMARKETINGMGR_UPDATE};
     use openzt_detour::generated::ztresearchbranch;
     use openzt_detour::generated::ztresearchbranch::GET_FUNDING_TEXT as ZTRESEARCHBRANCH_GET_FUNDING_TEXT;
     use openzt_detour::generated::ztresearchbranch::UPDATE as ZTRESEARCHBRANCH_UPDATE;
@@ -99,6 +106,11 @@ mod detour_zoo_main {
     use openzt_detour::generated::ztresearchmgr::FORCE_RESEARCH as ZTRESEARCHMGR_FORCE_RESEARCH;
     use openzt_detour::generated::ztresearchmgr::UPDATE as ZTRESEARCHMGR_UPDATE;
     use openzt_detour::generated::ztresearchprogram;
+    use openzt_detour::generated::ztthought as gen_ztthought;
+    use openzt_detour::generated::ztthoughtmgr as gen_ztthoughtmgr;
+    use openzt_detour::generated::ztmegatilemgr as gen_ztmegatilemgr;
+    use openzt_detour::generated::zthabitatmgr;
+    use openzt_detour::generated::ztui_gameopts::LOAD_FILE as ZTUI_GAMEOPTS_LOAD_FILE;
     use openzt_detour::generated::ztunit::GET_FOOTPRINT as ZTUNIT_GET_FOOTPRINT;
     use openzt_detour::FunctionDef;
     use proptest::prelude::*;
@@ -107,10 +119,14 @@ mod detour_zoo_main {
     use crate::{
         bfentitytype::{BFEntityType, ZTAnimalType, ZTUnitType},
         globals::globals,
-        util::{get_from_memory, ZTBufferString, ZTString},
+        util::{get_from_memory, save_to_memory, ZTBufferString, ZTString},
+        zthabitatmgr::ZTHabitat,
         ztmapview::BFTile,
+        ztmarketing::{live_support as marketing_live_support, marketing_save_reimplementation, predict_mgr_update, ZTMarketing, ZTMarketingMgr},
         ztresearch::research_save_reimplementation::{self, live_support, SaveRecord},
-        ztresearch::{ZTResearchBranch, ZTResearchEffectKind, ZTResearchMgr},
+        ztresearch::{predict_branch_progress, predict_update, ZTResearchBranch, ZTResearchEffectKind, ZTResearchMgr},
+        ztthoughtmgr::{live_support as thought_live_support, ZTThought, ZTThoughtMgr},
+        ztmegatilemgr::live_support as megatile_live_support,
         ztworldmgr::{BFEntity, IVec3, ZTAnimal, ZTUnit},
     };
 
@@ -590,6 +606,23 @@ mod detour_zoo_main {
         fail_flag |= run_ztanimal_get_footprint_tests(&mut failure_log);
         fail_flag |= run_research_branch_funding_test(&mut failure_log);
         fail_flag |= run_research_branch_pct_days_remaining_test(&mut failure_log);
+        fail_flag |= run_marketing_increase_funding_test(&mut failure_log);
+        fail_flag |= run_marketing_decrease_funding_test(&mut failure_log);
+        fail_flag |= run_marketing_set_funding_level_test(&mut failure_log);
+        fail_flag |= run_marketingmgr_update_test(&mut failure_log);
+        fail_flag |= run_marketingmgr_save_test(&mut failure_log);
+        fail_flag |= run_marketingmgr_load_test(&mut failure_log);
+        fail_flag |= run_marketingmgr_clear_configurations_test(&mut failure_log);
+
+        fail_flag |= run_thoughtmgr_add_thought_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_remove_thoughts_by_thinker_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_remove_thoughts_by_object_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_remove_thoughts_by_habitat_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_get_thoughts_by_thinker_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_get_thoughts_by_object_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_get_thoughts_by_habitat_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_save_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_load_test(&mut failure_log);
 
         // ZTRESEARCHMGR_SAVE: compares the real ZTResearchMgr::save's captured output against
         // research_save_reimplementation::serialize(&snapshot_mgr(mgr)) for generated synthetic trees.
@@ -1031,6 +1064,21 @@ mod detour_zoo_main {
     static EARLY_TESTS_FAILED: AtomicBool = AtomicBool::new(false);
     static RAN_UPDATE_SIM_TESTS: Once = Once::new();
 
+    /// The resource-relative path vanilla's own boot-time `ZTMarketingMgr::loadConfigurations` call
+    /// passes (e.g. `"mktg.cfg"`) - captured below so `run_marketingmgr_load_configurations_test` can
+    /// reuse the real path. Only the first call's path is kept.
+    static CAPTURED_MARKETING_PATH: OnceLock<String> = OnceLock::new();
+
+    /// Transparent path-capture detour on `ZTMarketingMgr::loadConfigurations` - always calls through
+    /// to the original and never alters its return value or behavior, just records the path into
+    /// `CAPTURED_MARKETING_PATH`.
+    #[detour(LOAD_CONFIGURATIONS)]
+    unsafe extern "thiscall" fn detour_capture_marketing_load_configurations_path(this: *const u32, path: *const i8) -> u32 {
+        let path_str = unsafe { CStr::from_ptr(path) }.to_string_lossy().into_owned();
+        let _ = CAPTURED_MARKETING_PATH.set(path_str);
+        unsafe { LOAD_CONFIGURATIONS_DETOUR.call(this, path) }
+    }
+
     #[detour(UPDATE_SIM)]
     unsafe extern "thiscall" fn detour_update_sim(this_ptr: *const u32, param_2: u32) {
         RAN_UPDATE_SIM_TESTS.call_once(run_on_completion_reset_test_and_exit);
@@ -1108,13 +1156,339 @@ mod detour_zoo_main {
 
         fail_flag |= run_funding_text_test(&mut failure_log);
         fail_flag |= run_branch_update_test(&mut failure_log);
+        fail_flag |= run_branch_update_reimpl_boundary_test(&mut failure_log);
         fail_flag |= run_research_mgr_update_branches_test(&mut failure_log);
+        fail_flag |= run_marketing_update_test(&mut failure_log);
+        fail_flag |= run_marketing_update_boundary_test(&mut failure_log);
+        fail_flag |= run_marketing_update_reimpl_boundary_test(&mut failure_log);
+        fail_flag |= run_marketing_funding_text_test(&mut failure_log);
+        fail_flag |= run_marketingmgr_load_configurations_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_load_modern_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_add_thought_animal_override_test(&mut failure_log);
+        fail_flag |= run_thoughtmgr_populate_thoughts_test(&mut failure_log);
+        fail_flag |= run_thought_get_string_test(&mut failure_log);
+
+        // Loads a real save file directly, so GLOBAL_ZTWorldMgr/GLOBAL_ZTHabitatMgr go from
+        // empty/synthetic to real, populated state. Everything below this line runs against that real
+        // zoo instead of a standalone/synthetic struct.
+        if run_load_live_zoo(&mut failure_log) {
+            fail_flag |= run_habitat_get_habitat_ptr_live_test(&mut failure_log);
+            // Risk-sequenced per ztmegatilemgr.rs's module doc comment: update() first (trivial scalar
+            // logic), then recalculate_characteristics() (in-place map mutation, no vector resize), then
+            // the category-map node-layout live check, then init() last (the only vector-resize path).
+            fail_flag |= run_megatilemgr_update_test(&mut failure_log);
+            fail_flag |= run_megatilemgr_recalculate_characteristics_test(&mut failure_log);
+            fail_flag |= run_megatile_category_map_layout_test(&mut failure_log);
+            fail_flag |= run_megatilemgr_init_test(&mut failure_log);
+        }
 
         if fail_flag {
             error!("Proptest failed for some cases, check the failure log at: {}", failure_log_path);
             std::process::exit(1);
         }
         std::process::exit(0);
+    }
+
+    /// Default path for `run_load_live_zoo`'s save file - a real save (not embedded/synthetic) placed
+    /// in the actual Zoo Tycoon "Saved Games" directory, overridable via `OPENZT_TEST_ZOO` for anyone
+    /// whose install lives elsewhere.
+    const DEFAULT_TEST_ZOO_PATH: &str = r"C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\Saved Games\reimplementation-test-zoo.zoo";
+
+    /// Loads `OPENZT_TEST_ZOO` (or `DEFAULT_TEST_ZOO_PATH`) into the running game, bringing up a real,
+    /// fully-populated `GLOBAL_ZTWorldMgr`/`GLOBAL_ZTHabitatMgr`/etc. - unlike every test above this
+    /// point in the battery, which only ever build standalone/synthetic structs.
+    ///
+    /// Calls `FOPEN`/`ZTUI_GAMEOPTS_LOAD_FILE`/`FCLOSE` directly - the same primitives
+    /// `ZTUI::gameopts::loadGame`/`ZTUI::clickContinue` use, minus the file-picker dialog and UI click
+    /// handlers, neither of which touches `GLOBAL_ZTWorldMgr`/`GLOBAL_ZTHabitatMgr`.
+    ///
+    /// Returns `true` only on a real load success (`LOAD_FILE`'s low byte non-zero).
+    fn run_load_live_zoo(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "LOAD_LIVE_ZOO";
+        let path = std::env::var("OPENZT_TEST_ZOO").unwrap_or_else(|_| DEFAULT_TEST_ZOO_PATH.to_string());
+
+        let path_cstring = match CString::new(path.clone()) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("{}: path {:?} contains a NUL byte: {}", test_name, path, e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: path {:?} contains a NUL byte: {}\n", test_name, path, e).as_bytes());
+                }
+                return false;
+            }
+        };
+        let mode_cstring = c"rb";
+
+        let file_ptr = unsafe { standalone::FOPEN.original()(path_cstring.as_ptr(), mode_cstring.as_ptr()) };
+        if file_ptr.is_null() {
+            error!("{}: fopen failed for {:?} (file missing? see OPENZT_TEST_ZOO)", test_name, path);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: fopen failed for {:?}\n", test_name, path).as_bytes());
+            }
+            return false;
+        }
+
+        let load_result = unsafe { ZTUI_GAMEOPTS_LOAD_FILE.original()(file_ptr as *const u8) };
+        unsafe { standalone::FCLOSE.original()(file_ptr) };
+
+        let success = (load_result & 0xff) != 0;
+        if success {
+            info!("{}: loaded {:?}", test_name, path);
+            write_success_line(failure_log, test_name);
+        } else {
+            error!("{}: LOAD_FILE reported failure (raw result {:#010x}) for {:?}", test_name, load_result, path);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: LOAD_FILE reported failure (raw result {:#010x}) for {:?}\n", test_name, load_result, path).as_bytes());
+            }
+        }
+        success
+    }
+
+    /// Compares the real `ZTHabitatMgr::getHabitat` against the reimplemented `get_habitat_ptr`, for
+    /// small in-range tile coordinates, now that `run_load_live_zoo` has populated
+    /// `other_array_start`/`other_array_end` with a real zoo's bounds (`get_habitat_ptr` does no
+    /// bounds-checking of its own, so this needs a real, loaded zoo to be safe).
+    fn run_habitat_get_habitat_ptr_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTHABITATMGR_GET_HABITAT_PTR_LIVE";
+        let mgr_ptr = globals().zthabitatmgr_ptr() as *const u32;
+        let habitat_mgr = globals().zthabitatmgr();
+
+        let mut fail_flag = false;
+        for x in 0..5i32 {
+            for y in 0..5i32 {
+                let real = unsafe { zthabitatmgr::GET_HABITAT.original()(mgr_ptr, x, y) };
+                let reimpl = habitat_mgr.get_habitat_ptr(x, y);
+                if real != reimpl {
+                    error!("{}: mismatch at ({}, {}): real={:#010x}, reimpl={:#010x}", test_name, x, y, real, reimpl);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(
+                            format!("Test Failed {}: mismatch at ({}, {}): real={:#010x}, reimpl={:#010x}\n", test_name, x, y, real, reimpl).as_bytes(),
+                        );
+                    }
+                    fail_flag = true;
+                }
+            }
+        }
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        }
+        fail_flag
+    }
+
+    /// ZTMEGATILEMGR_UPDATE: compares the real `ZTMegatileMgr::update`'s effect on
+    /// `dirty`/`tick_accumulator` against the reimplemented `update`, for `delta_ticks` below the
+    /// `0x1d4b` threshold only. Snapshots the live singleton's scalars, calls the real
+    /// `UPDATE.original()`, records the result as expected, restores the snapshot (via
+    /// `megatile_live_support::restore_scalars`), calls the reimplemented `update()`, and compares.
+    /// Runs after `run_load_live_zoo` so the live singleton is a real, populated grid - see
+    /// `ztmegatilemgr.rs`'s own module doc comment for why this is implemented/tested first.
+    ///
+    /// Deliberately never crosses the threshold here: doing so calls through to
+    /// `recalculate_characteristics` as a side effect (real or reimplemented, either way), which is
+    /// exercised directly and more thoroughly by `run_megatilemgr_recalculate_characteristics_test`
+    /// below - no need for this test to also trigger it as a side effect. The threshold/dirty-flag
+    /// transition logic itself is still fully covered by `ztmegatilemgr::tests::update_state_*` (pure,
+    /// no live memory touched).
+    fn run_megatilemgr_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMEGATILEMGR_UPDATE";
+        let mgr_ptr = globals().ztmegatilemgr_ptr();
+        if mgr_ptr.is_null() {
+            info!("Skipping {}: GLOBAL_ZTMegatileMgr not initialized", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTMegatileMgr not initialized)", test_name));
+            return false;
+        }
+        let real_this = mgr_ptr as *const u32;
+
+        let runner_config = ProptestConfig { failure_persistence: Some(Box::new(super::NoopFailurePersistence)), ..ProptestConfig::default() };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let mut fail_flag = false;
+        match runner.run(&(0u32..0x1000u32), |delta_ticks| {
+            let mgr = unsafe { &mut *mgr_ptr };
+            // Force a known-safe starting accumulator (not just restore the pre-call value) - the live
+            // singleton's own accumulator may already be close to the threshold from real game ticks
+            // that ran before this test, and `delta_ticks + before_accumulator` crossing `0x1d4b` would
+            // hit the same live recalc crash this test exists to avoid (see the doc comment above).
+            megatile_live_support::restore_scalars(mgr, false, 0);
+            let before_dirty = false;
+            let before_accumulator = 0u32;
+
+            unsafe { gen_ztmegatilemgr::UPDATE.original()(real_this, delta_ticks as i32) };
+            let expected_dirty = mgr.is_dirty();
+            let expected_accumulator = mgr.tick_accumulator();
+
+            megatile_live_support::restore_scalars(mgr, before_dirty, before_accumulator);
+            mgr.update(delta_ticks);
+            let reimpl_dirty = mgr.is_dirty();
+            let reimpl_accumulator = mgr.tick_accumulator();
+
+            // A recalculation triggered by either side (real or reimplemented) already leaves the grid
+            // in a self-consistent state per its own logic - `ZTMEGATILEMGR_RECALCULATE_CHARACTERISTICS`
+            // is the dedicated test for whether that recalculation itself matches, so this test only
+            // compares the scalars `update` itself owns.
+            prop_assert_eq!(reimpl_dirty, expected_dirty, "dirty mismatch for delta_ticks={}", delta_ticks);
+            prop_assert_eq!(reimpl_accumulator, expected_accumulator, "tick_accumulator mismatch for delta_ticks={}", delta_ticks);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+        fail_flag
+    }
+
+    /// Compares two megatile-grid snapshots allowing a small tolerance on the float fields
+    /// (`esthetic_bonus`) - real vanilla x87 arithmetic and Rust's SSE2 `f32` arithmetic can differ in
+    /// the last bit or two despite following the same formula, which isn't a meaningful mismatch for
+    /// this test. `guest_count` (an integer accumulation) is still compared exactly.
+    fn grids_approximately_equal(expected: &megatile_live_support::GridSnapshot, actual: &megatile_live_support::GridSnapshot) -> bool {
+        if expected.columns.len() != actual.columns.len() {
+            return false;
+        }
+        expected.columns.iter().zip(actual.columns.iter()).all(|(e_col, a_col)| {
+            e_col.len() == a_col.len()
+                && e_col.iter().zip(a_col.iter()).all(|(&(e_guests, e_bonus), &(a_guests, a_bonus))| e_guests == a_guests && (e_bonus - a_bonus).abs() < 0.01)
+        })
+    }
+
+    /// ZTMEGATILEMGR_RECALCULATE_CHARACTERISTICS: compares the real
+    /// `ZTMegatileMgr::recalculateCharacteristics`'s effect on the full megatile grid against the
+    /// reimplemented `recalculate_characteristics`. Recalculation is a pure function of live world state
+    /// (every field is zeroed then recomputed from scratch each call - see that method's own doc
+    /// comment), so this simply runs the real call, snapshots as expected, runs the reimplemented call
+    /// on top, and snapshots again - no restore needed.
+    fn run_megatilemgr_recalculate_characteristics_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMEGATILEMGR_RECALCULATE_CHARACTERISTICS";
+        let mgr_ptr = globals().ztmegatilemgr_ptr();
+        if mgr_ptr.is_null() {
+            write_success_line(failure_log, &format!("{} (skipped: ZTMegatileMgr not initialized)", test_name));
+            return false;
+        }
+        let mgr = unsafe { &mut *mgr_ptr };
+        let real_this = mgr_ptr as *const u32;
+
+        unsafe { gen_ztmegatilemgr::RECALCULATE_CHARACTERISTICS.original()(real_this) };
+        let expected = megatile_live_support::snapshot_grid(mgr);
+
+        mgr.recalculate_characteristics();
+        let actual = megatile_live_support::snapshot_grid(mgr);
+
+        if grids_approximately_equal(&expected, &actual) {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            error!("{}: grid mismatch after recalculate_characteristics", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: grid mismatch\n", test_name).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// ZTMEGATILE_CATEGORY_MAP_LAYOUT: validates the reconstructed `MapHeader`/`TreeNode` layout itself,
+    /// independent of the tests above. After a real `RECALCULATE_CHARACTERISTICS.original()` call on the
+    /// live singleton, walks every populated `ZTMegatile`'s `category_map` via `category_value()` for
+    /// every key in the observed range `0x251f..0x2523` (9503-9506) and asserts every returned value is
+    /// finite. `category_value`'s own step cap turns a wrong left/right offset guess into a graceful
+    /// `None` rather than a live hang - see its doc comment - so this test's real signal is "did any
+    /// value come back non-finite", which would mean the walk landed somewhere nonsensical.
+    fn run_megatile_category_map_layout_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMEGATILE_CATEGORY_MAP_LAYOUT";
+        let mgr_ptr = globals().ztmegatilemgr_ptr();
+        if mgr_ptr.is_null() {
+            write_success_line(failure_log, &format!("{} (skipped: ZTMegatileMgr not initialized)", test_name));
+            return false;
+        }
+        let mgr = unsafe { &*mgr_ptr };
+        let real_this = mgr_ptr as *const u32;
+        unsafe { gen_ztmegatilemgr::RECALCULATE_CHARACTERISTICS.original()(real_this) };
+
+        let keys: Vec<i32> = (0x251fi32..0x2523).collect();
+        let mut fail_flag = false;
+        for column in 0..mgr.megatile_columns() {
+            for row in 0..mgr.megatile_rows_in_column(column) {
+                let Some(mt) = mgr.megatile(column, row) else {
+                    continue;
+                };
+                for &key in &keys {
+                    if let Some(v) = mt.category_value(key) {
+                        if !v.is_finite() {
+                            error!("{}: non-finite value {} for key {:#x} at column={}, row={}", test_name, v, key, column, row);
+                            fail_flag = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTMEGATILEMGR_INIT: run last, and only after the other three are passing - `init()` resizes the
+    /// outer/inner vectors (the actual allocation-adjacent call), the single highest-risk piece in
+    /// `ztmegatilemgr.rs`. For a few small tile-count targets (both shrinking and growing relative to the
+    /// live map's own size), calls the real `INIT.original()` to capture the resulting grid dimensions,
+    /// resets to a different size, then calls the reimplemented `init()` for the same target and compares
+    /// dimensions. Restores the live singleton to the real map's own dimensions afterward regardless of
+    /// outcome, via the real vanilla `init`/`recalculateCharacteristics`, so nothing later depends on
+    /// whatever the last reimplemented call left behind.
+    fn run_megatilemgr_init_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMEGATILEMGR_INIT";
+        let mgr_ptr = globals().ztmegatilemgr_ptr();
+        if mgr_ptr.is_null() {
+            write_success_line(failure_log, &format!("{} (skipped: ZTMegatileMgr not initialized)", test_name));
+            return false;
+        }
+        let mgr = unsafe { &mut *mgr_ptr };
+        let real_this = mgr_ptr as *const u32;
+
+        let world = globals().ztworldmgr();
+        let original_x = world.map_x_size as i32;
+        let original_y = world.map_y_size as i32;
+
+        let mut fail_flag = false;
+        for &(x, y) in &[(3i32, 3i32), (8i32, 8i32), (original_x, original_y)] {
+            unsafe { gen_ztmegatilemgr::INIT.original()(real_this, x as u32, y as u32) };
+            let expected_columns = mgr.megatile_columns();
+            let expected_rows: Vec<usize> = (0..expected_columns).map(|c| mgr.megatile_rows_in_column(c)).collect();
+
+            unsafe { gen_ztmegatilemgr::INIT.original()(real_this, 1, 1) };
+            mgr.init(x, y);
+            let actual_columns = mgr.megatile_columns();
+            let actual_rows: Vec<usize> = (0..actual_columns).map(|c| mgr.megatile_rows_in_column(c)).collect();
+
+            if actual_columns != expected_columns || actual_rows != expected_rows {
+                error!(
+                    "{}: dimension mismatch for ({}, {}): expected {} columns {:?}, got {} columns {:?}",
+                    test_name, x, y, expected_columns, expected_rows, actual_columns, actual_rows
+                );
+                fail_flag = true;
+            }
+        }
+
+        // Restore real state regardless of outcome.
+        unsafe { gen_ztmegatilemgr::INIT.original()(real_this, original_x as u32, original_y as u32) };
+        unsafe { gen_ztmegatilemgr::RECALCULATE_CHARACTERISTICS.original()(real_this) };
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
     }
 
     /// One funding-level entry: `name_id` is always one of the real, known-valid `research.ini`
@@ -1192,20 +1566,17 @@ mod detour_zoo_main {
     /// (covered separately by the `ZTRESEARCHPROGRAM_ON_COMPLETION_RESET`/`ZTRESEARCHMGR_FORCE_RESEARCH`
     /// tests) never actually run on either side.
     ///
-    /// Further restricted to the *insufficient-cash* case - `AVAILABLE_CASH` is fixed to `0.0` and
-    /// `funding_cost`/`days` are generated strictly positive, so `cash_delta` is always `> 0.0 ==
-    /// available_cash` and neither side's `subtractCash`/`subtract_cash` ever actually runs. This is
-    /// deliberate, not an oversight: `ZTGameMgr::subtractCash` also calls `ZTUI::main::setMoneyText`,
-    /// a real UI refresh - empirically (crashes with varying exception codes/offsets across repeated
-    /// live runs, before this restriction was added) that call depends on UI/window state that isn't
-    /// safely touchable from this harness's injection point, the same "downstream, not reimplemented"
-    /// surface this file already declines to reimplement elsewhere. The *affordable* branch's math
-    /// (`cash_delta`/`progress_delta` computation, and applying them) is still covered - by
-    /// `predict_branch_progress`'s own pure proptests, which need no live game/UI state at all - just
-    /// not compared byte-for-byte against a live `subtractCash` call here. What this test *does* cover
-    /// live: the full eligibility gate (`always_check_expansion`/`getAnyExpansionsDisabled`/
-    /// `isExpansionDisabled`/category-enabled/program-selected checks) and confirms both sides leave
-    /// `current_progress` identically unchanged when unaffordable.
+    /// `available_cash` is generated as `cash_delta * cash_multiplier` for `cash_multiplier` in
+    /// `0.0..2.0` (`cash_delta` computed from the same generated `days`/`funding_cost` via
+    /// `predict_branch_progress(.., f32::MAX).0`), so roughly half of generated cases land unaffordable
+    /// and half affordable - exercising both `ZTGameMgr::subtractCash`/`subtract_cash` on the real and
+    /// reimplemented sides. This used to be restricted to the *insufficient-cash* case only, because of
+    /// a real bug: `openzt-detour/src/generated.rs`'s `SUBTRACT_CASH` `FunctionDef` declared one `f32`
+    /// stack arg, but the real `ZTGameMgr::subtractCash` takes `(f32, bool)` per its `.asm`'s `RET 8` -
+    /// a 4-byte stack imbalance on every `.original()` call. That's now fixed (see
+    /// `ztmarketing-update-setmoneytext-crash-investigation.md`'s "Resolution" section), so the
+    /// affordable branch is safe to exercise here too. The exact `available_cash == cash_delta` boundary
+    /// is separately covered deterministically by `run_branch_update_reimpl_boundary_test` below.
     fn run_branch_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let runner_config = ProptestConfig {
             failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
@@ -1221,15 +1592,17 @@ mod detour_zoo_main {
             return fail_flag;
         }
 
-        const AVAILABLE_CASH: f32 = 0.0;
         const TARGET_COST: f32 = 1_000_000.0;
 
         match runner.run(
-            &(1u32..1000u32, -1000f32..1000f32, 1f32..1000f32, 0f32..1000f32),
-            |(days, funding_rate, funding_cost, initial_progress)| {
+            &(1u32..1000u32, -1000f32..1000f32, 1f32..1000f32, 0f32..1000f32, 0.0f32..2.0f32),
+            |(days, funding_rate, funding_cost, initial_progress, cash_multiplier)| {
+                let (cash_delta, _) = predict_branch_progress(days, funding_cost, funding_rate, f32::MAX);
+                let available_cash = (cash_delta * cash_multiplier).max(0.0);
+
                 let real_progress = live_support::with_update_test_branch(TARGET_COST, initial_progress, funding_rate, funding_cost, |mgr| {
                     let branch = mgr.branch_mut(0);
-                    live_support::with_ztgamemgr_cash(AVAILABLE_CASH, || unsafe {
+                    live_support::with_ztgamemgr_cash(available_cash, || unsafe {
                         ZTRESEARCHBRANCH_UPDATE.original()((branch as *mut ZTResearchBranch) as *const u32, days);
                     });
                     branch.current_program().map(|p| p.current_progress())
@@ -1237,18 +1610,19 @@ mod detour_zoo_main {
 
                 let reimpl_progress = live_support::with_update_test_branch(TARGET_COST, initial_progress, funding_rate, funding_cost, |mgr| {
                     let branch = mgr.branch_mut(0);
-                    live_support::with_ztgamemgr_cash(AVAILABLE_CASH, || branch.update(days));
+                    live_support::with_ztgamemgr_cash(available_cash, || branch.update(days));
                     branch.current_program().map(|p| p.current_progress())
                 });
 
                 prop_assert_eq!(
                     real_progress,
                     reimpl_progress,
-                    "current_progress mismatch for days={}, funding_rate={}, funding_cost={}, initial_progress={}",
+                    "current_progress mismatch for days={}, funding_rate={}, funding_cost={}, initial_progress={}, available_cash={}",
                     days,
                     funding_rate,
                     funding_cost,
-                    initial_progress
+                    initial_progress,
+                    available_cash
                 );
                 Ok(())
             },
@@ -1269,6 +1643,44 @@ mod detour_zoo_main {
         fail_flag
     }
 
+    /// Deterministic single-case regression for the *reimplemented* side of `ZTRESEARCHBRANCH_UPDATE`'s
+    /// affordable branch - the actual previously-buggy path (`ZTResearchBranch::update` ->
+    /// `ZTGameMgr::spend_research`/`subtract_cash`, routed through our own `SPEND_RESEARCH`/`SUBTRACT_CASH`
+    /// `FunctionDef`s). Mirrors `run_marketing_update_reimpl_boundary_test`'s shape/rationale - see
+    /// `ztmarketing-update-setmoneytext-crash-investigation.md`'s "Resolution" section and "Suggested next
+    /// steps" item 7.
+    ///
+    /// Calls only the reimplemented `ZTResearchBranch::update`, skipping `.original()` entirely. `TARGET_COST`
+    /// stays fixed far above any possible progress delta (same rationale as `run_branch_update_test` above), so
+    /// completion/`on_completion`/UI never runs here - this is narrowly about the `subtract_cash` boundary call
+    /// surviving. `available_cash` is pinned to exactly `cash_delta`, forcing the affordable branch.
+    fn run_branch_update_reimpl_boundary_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTRESEARCHBRANCH_UPDATE_REIMPL_BOUNDARY_REPRO";
+
+        if live_support::ztgamemgr_ptr_is_null() {
+            info!("Skipping {}: GLOBAL_ZTGameMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTGameMgr not initialized)", test_name));
+            return false;
+        }
+
+        const TARGET_COST: f32 = 1_000_000.0;
+        let days: u32 = 5;
+        let funding_rate: f32 = 30.0;
+        let funding_cost: f32 = 100.0;
+        let initial_progress: f32 = 0.0;
+        let (cash_delta, _) = predict_branch_progress(days, funding_cost, funding_rate, f32::MAX);
+
+        live_support::with_update_test_branch(TARGET_COST, initial_progress, funding_rate, funding_cost, |mgr| {
+            let branch = mgr.branch_mut(0);
+            info!("{}: about to call reimplemented ZTResearchBranch::update with available_cash == cash_delta ({})", test_name, cash_delta);
+            live_support::with_ztgamemgr_cash(cash_delta, || branch.update(days));
+            info!("{}: reimplemented call returned without crashing", test_name);
+        });
+
+        write_success_line(failure_log, test_name);
+        false
+    }
+
     /// ZTRESEARCHMGR_UPDATE (branch-count extension): compares the real `ZTResearchMgr::update`'s
     /// effect on `elapsed_ticks` and every branch's currently-selected program's `current_progress`
     /// against the reimplemented `update`, for 1-3 synthetic branches built via
@@ -1277,12 +1689,27 @@ mod detour_zoo_main {
     /// first test that actually exercises `ZTResearchMgr::update` iterating multiple branches and
     /// threading the correct `days` count to each (via `ZTResearchBranch::update`, native since Phase F).
     ///
-    /// Restricted the same way `ZTRESEARCHBRANCH_UPDATE` is - `target_cost` fixed far above any possible
-    /// progress delta and the *insufficient-cash* case only (`AVAILABLE_CASH = 0.0`, `funding_cost`
-    /// generated strictly positive) - so `on_completion`/`pick_random_program`/the `subtractCash`-driven
-    /// UI refresh never run on either side; see `run_branch_update_test`'s own doc comment for why that
-    /// restriction exists and stays in place here too. `funding_rate` is fixed to `0.0`, documented as
-    /// inert under this restriction like every other fixed-but-unused field in `live_support`.
+    /// `target_cost` stays fixed far above any possible progress delta, same rationale as
+    /// `run_branch_update_test` above, so `on_completion`/`pick_random_program`/UI never run on either
+    /// side. Unlike that test, cash affordability here is drawn from one *shared* pool across every
+    /// branch in a call: `ZTResearchMgr::update` (ztresearch.rs) iterates branches sequentially, and
+    /// each `ZTResearchBranch::update` reads/spends the real, shared `GLOBAL_ZTGameMgr` cash fresh - so
+    /// cash genuinely depletes across branches within one call, not per-branch. `available_cash` is
+    /// `total_cash_delta * cash_multiplier` (`cash_multiplier` in `0.0..2.0`), where `total_cash_delta`
+    /// sums every branch's own `cash_delta` (via `predict_branch_progress(.., f32::MAX).0`) for the
+    /// shared `days` count the whole call receives. A multiplier below `1.0` naturally produces
+    /// "prefix affordable, suffix not" cases as an earlier branch exhausts the shared pool - exercising
+    /// real sequential depletion, not just per-branch affordability in isolation.
+    ///
+    /// This used to be restricted to the *insufficient-cash* case only (`AVAILABLE_CASH = 0.0`,
+    /// `funding_rate` fixed inert at `0.0`), because of a real bug: `openzt-detour/src/generated.rs`'s
+    /// `SUBTRACT_CASH` `FunctionDef` declared one `f32` stack arg, but the real
+    /// `ZTGameMgr::subtractCash` takes `(f32, bool)` per its `.asm`'s `RET 8` - a 4-byte stack imbalance
+    /// on every `.original()` call. That's now fixed (see
+    /// `ztmarketing-update-setmoneytext-crash-investigation.md`'s "Resolution" section), so
+    /// `funding_rate` is now generated too - a fixed `0.0` would leave `current_progress` trivially
+    /// unchanged regardless of whether the affordable-branch math is right, silently defeating the
+    /// comparison now that cash is sometimes affordable.
     fn run_research_mgr_update_branches_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let runner_config = ProptestConfig {
             failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
@@ -1298,20 +1725,23 @@ mod detour_zoo_main {
             return fail_flag;
         }
 
-        const AVAILABLE_CASH: f32 = 0.0;
         const TARGET_COST: f32 = 1_000_000.0;
-        const FUNDING_RATE: f32 = 0.0;
 
-        let branch_spec_strategy = (1f32..1000f32, 0f32..1000f32).prop_map(|(funding_cost, initial_progress)| {
-            live_support::UpdateTestBranchSpec { target_cost: TARGET_COST, initial_progress, funding_rate: FUNDING_RATE, funding_cost }
+        let branch_spec_strategy = (-1000f32..1000f32, 1f32..1000f32, 0f32..1000f32).prop_map(|(funding_rate, funding_cost, initial_progress)| {
+            live_support::UpdateTestBranchSpec { target_cost: TARGET_COST, initial_progress, funding_rate, funding_cost }
         });
 
         match runner.run(
-            &(any::<u32>(), any::<u32>(), prop::collection::vec(branch_spec_strategy, 1..4)),
-            |(elapsed_ticks_before, delta_ticks, branch_specs)| {
+            &(any::<u32>(), any::<u32>(), prop::collection::vec(branch_spec_strategy, 1..4), 0.0f32..2.0f32),
+            |(elapsed_ticks_before, delta_ticks, branch_specs, cash_multiplier)| {
+                let (_, days) = predict_update(elapsed_ticks_before, delta_ticks);
+                let total_cash_delta: f32 =
+                    branch_specs.iter().map(|s| predict_branch_progress(days, s.funding_cost, s.funding_rate, f32::MAX).0).sum();
+                let available_cash = (total_cash_delta * cash_multiplier).max(0.0);
+
                 let (real_elapsed_ticks, real_progress_bits) = live_support::with_update_test_branches(&branch_specs, |mgr| {
                     mgr.set_elapsed_ticks(elapsed_ticks_before);
-                    live_support::with_ztgamemgr_cash(AVAILABLE_CASH, || unsafe {
+                    live_support::with_ztgamemgr_cash(available_cash, || unsafe {
                         ZTRESEARCHMGR_UPDATE.original()((mgr as *mut ZTResearchMgr) as *const u32, delta_ticks);
                     });
                     let progress_bits =
@@ -1321,7 +1751,7 @@ mod detour_zoo_main {
 
                 let (reimpl_elapsed_ticks, reimpl_progress_bits) = live_support::with_update_test_branches(&branch_specs, |mgr| {
                     mgr.set_elapsed_ticks(elapsed_ticks_before);
-                    live_support::with_ztgamemgr_cash(AVAILABLE_CASH, || mgr.update(delta_ticks));
+                    live_support::with_ztgamemgr_cash(available_cash, || mgr.update(delta_ticks));
                     let progress_bits =
                         mgr.branches().flat_map(|b| b.current_program()).map(|p| p.current_progress().to_bits()).collect::<Vec<_>>();
                     (mgr.elapsed_ticks(), progress_bits)
@@ -1635,6 +2065,726 @@ mod detour_zoo_main {
         fail_flag
     }
 
+    /// ZTMARKETING_INCREASE_FUNDING: compares the real `ZTMarketing::increaseFunding` against the
+    /// reimplemented `increase_funding`, on two independent standalone `ZTMarketing`s (not spliced into
+    /// any `ZTMarketingMgr`, since `increaseFunding` only reads/writes `this`). `current_funding_level`
+    /// spans `0..6` against funding tables of `0..5` entries, to cover in-range/top-of-range/
+    /// one-past-the-end starting values. Compares both the resulting index and vanilla's masked
+    /// low-byte return value.
+    fn run_marketing_increase_funding_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETING_INCREASE_FUNDING";
+        let mut fail_flag = false;
+
+        match runner.run(&(0u32..6, 0usize..5), |(current_funding_level, level_count)| {
+            let real_ptr = marketing_live_support::build_standalone_marketing(current_funding_level, level_count);
+            let real_ret = unsafe { ztmarketing::INCREASE_FUNDING.original()(real_ptr as *const u32) };
+            let real_index = unsafe { &*real_ptr }.current_funding_level();
+            marketing_live_support::destroy_standalone_marketing(real_ptr);
+
+            let reimpl_ptr = marketing_live_support::build_standalone_marketing(current_funding_level, level_count);
+            let reimpl_marketing = unsafe { &mut *reimpl_ptr };
+            let reimpl_ret = reimpl_marketing.increase_funding();
+            let reimpl_index = reimpl_marketing.current_funding_level();
+            marketing_live_support::destroy_standalone_marketing(reimpl_ptr);
+
+            prop_assert_eq!(
+                real_index,
+                reimpl_index,
+                "current_funding_level mismatch for start={}, level_count={}",
+                current_funding_level,
+                level_count
+            );
+            prop_assert_eq!(
+                (real_ret & 0xff) != 0,
+                reimpl_ret,
+                "return-flag mismatch for start={}, level_count={}",
+                current_funding_level,
+                level_count
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTMARKETING_DECREASE_FUNDING: same shape as `run_marketing_increase_funding_test`, comparing
+    /// `ZTMarketing::decreaseFunding` against `decrease_funding`.
+    fn run_marketing_decrease_funding_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETING_DECREASE_FUNDING";
+        let mut fail_flag = false;
+
+        match runner.run(&(0u32..6, 0usize..5), |(current_funding_level, level_count)| {
+            let real_ptr = marketing_live_support::build_standalone_marketing(current_funding_level, level_count);
+            let real_ret = unsafe { ztmarketing::DECREASE_FUNDING.original()(real_ptr as *const u32) };
+            let real_index = unsafe { &*real_ptr }.current_funding_level();
+            marketing_live_support::destroy_standalone_marketing(real_ptr);
+
+            let reimpl_ptr = marketing_live_support::build_standalone_marketing(current_funding_level, level_count);
+            let reimpl_marketing = unsafe { &mut *reimpl_ptr };
+            let reimpl_ret = reimpl_marketing.decrease_funding();
+            let reimpl_index = reimpl_marketing.current_funding_level();
+            marketing_live_support::destroy_standalone_marketing(reimpl_ptr);
+
+            prop_assert_eq!(
+                real_index,
+                reimpl_index,
+                "current_funding_level mismatch for start={}, level_count={}",
+                current_funding_level,
+                level_count
+            );
+            prop_assert_eq!(
+                (real_ret & 0xff) != 0,
+                reimpl_ret,
+                "return-flag mismatch for start={}, level_count={}",
+                current_funding_level,
+                level_count
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTMARKETING_SET_FUNDING_LEVEL: compares the real `ZTMarketing::setFundingLevel` against the
+    /// reimplemented `set_funding_level`. `level` spans `0..6` against funding tables of `0..5`
+    /// entries, to cover `setFundingLevel`'s "reset to `0`" out-of-range behavior.
+    fn run_marketing_set_funding_level_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETING_SET_FUNDING_LEVEL";
+        let mut fail_flag = false;
+
+        match runner.run(&(0u32..2, 0usize..5, 0u32..6), |(current_funding_level, level_count, level)| {
+            let real_ptr = marketing_live_support::build_standalone_marketing(current_funding_level, level_count);
+            unsafe { ztmarketing::SET_FUNDING_LEVEL.original()(real_ptr as *const u32, level) };
+            let real_index = unsafe { &*real_ptr }.current_funding_level();
+            marketing_live_support::destroy_standalone_marketing(real_ptr);
+
+            let reimpl_ptr = marketing_live_support::build_standalone_marketing(current_funding_level, level_count);
+            let reimpl_marketing = unsafe { &mut *reimpl_ptr };
+            reimpl_marketing.set_funding_level(level);
+            let reimpl_index = reimpl_marketing.current_funding_level();
+            marketing_live_support::destroy_standalone_marketing(reimpl_ptr);
+
+            prop_assert_eq!(
+                real_index,
+                reimpl_index,
+                "current_funding_level mismatch for start={}, level_count={}, level={}",
+                current_funding_level,
+                level_count,
+                level
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTMARKETINGMGR_UPDATE: compares the real `ZTMarketingMgr::update`'s effect on `tick_accumulator`
+    /// against the reimplemented `update`, for a synthetic manager with no owned `ZTMarketing`
+    /// (`marketing_ptr = null`) - so `ZTMarketing::update` (which needs a live `GLOBAL_ZTGameMgr`, see
+    /// `run_marketing_update_test` below) never runs on either side.
+    fn run_marketingmgr_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETINGMGR_UPDATE";
+        let mut fail_flag = false;
+
+        match runner.run(&(any::<u32>(), any::<u32>()), |(tick_accumulator_before, delta_ticks)| {
+            let real_ptr = marketing_live_support::build_standalone_marketing_mgr(tick_accumulator_before, std::ptr::null_mut());
+            unsafe { ZTMARKETINGMGR_UPDATE.original()((real_ptr as *mut ZTMarketingMgr) as *const u32, delta_ticks) };
+            let real_tick_accumulator = unsafe { &*real_ptr }.tick_accumulator();
+            marketing_live_support::destroy_standalone_marketing_mgr(real_ptr);
+
+            let reimpl_ptr = marketing_live_support::build_standalone_marketing_mgr(tick_accumulator_before, std::ptr::null_mut());
+            unsafe { &mut *reimpl_ptr }.update(delta_ticks);
+            let reimpl_tick_accumulator = unsafe { &*reimpl_ptr }.tick_accumulator();
+            marketing_live_support::destroy_standalone_marketing_mgr(reimpl_ptr);
+
+            prop_assert_eq!(
+                real_tick_accumulator,
+                reimpl_tick_accumulator,
+                "tick_accumulator mismatch for tick_accumulator_before={}, delta_ticks={}",
+                tick_accumulator_before,
+                delta_ticks
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTMARKETING_UPDATE: compares the real `ZTMarketingMgr::update`'s effect on a *wired-in*
+    /// `ZTMarketing` against the reimplemented `update`, with `tick_accumulator` fixed so a threshold
+    /// crossing always happens (`delta_ticks` generated `3000..10000`, always `> 359` days' worth per
+    /// `predict_mgr_update`) - so `ZTMarketing::update` genuinely runs on both sides, not just the
+    /// accumulator bookkeeping already covered by `ZTMARKETINGMGR_UPDATE` above. Run from
+    /// `run_on_completion_reset_test_and_exit`'s `updateSim` injection point, since `GLOBAL_ZTGameMgr`
+    /// isn't constructed yet at the earlier `LOAD_LANG_DLLS` battery.
+    ///
+    /// The funding table has `1..5` entries (`ZTMarketing::update`'s unchecked
+    /// `funding_level(current_funding_level)` read needs a real, non-empty table to be safe), with
+    /// `current_funding_level` spanning the whole table rather than fixed at index `0`.
+    ///
+    /// `available_cash` is generated as `cash_delta * cash_multiplier` for `cash_multiplier` in
+    /// `0.0..2.0` (`cash_delta` computed the same way as `ZTMarketing::update`'s own
+    /// `DAYS_TO_FUNDING_SCALE` formula below), so roughly half of generated cases land unaffordable and
+    /// half affordable - taking the real affordable `<=` branch calls
+    /// `ZooStatus::spendMarketing`/`ZTGameMgr::subtractCash` on the real `GLOBAL_ZTGameMgr` singleton on
+    /// both sides. This used to be restricted to the *insufficient-cash* case only, because of a real
+    /// bug: `openzt-detour/src/generated.rs`'s `SUBTRACT_CASH` `FunctionDef` declared one `f32` stack
+    /// arg, but the real `ZTGameMgr::subtractCash` takes `(f32, bool)` per its `.asm`'s `RET 8` - a
+    /// 4-byte stack imbalance on every `.original()` call. That's now fixed (see
+    /// `ztmarketing-update-setmoneytext-crash-investigation.md`'s "Resolution" section), so the
+    /// affordable branch is safe to exercise here too. The exact `available_cash == cash_delta`
+    /// boundary is separately covered deterministically by `run_marketing_update_boundary_test` (real
+    /// side only) and `run_marketing_update_reimpl_boundary_test` (reimplemented side only) below.
+    fn run_marketing_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETING_UPDATE";
+        let mut fail_flag = false;
+
+        if marketing_live_support::ztgamemgr_ptr_is_null() {
+            info!("Skipping {}: GLOBAL_ZTGameMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTGameMgr not initialized)", test_name));
+            return fail_flag;
+        }
+
+        // Mirrors `ZTMarketing::update`'s own `DAYS_TO_FUNDING_SCALE` constant so the generated
+        // `available_cash` can land just below the real `cash_delta` (`days * cost * scale`, where
+        // `days` comes from `predict_mgr_update`'s tick-to-day conversion).
+        const DAYS_TO_FUNDING_SCALE: f32 = 1.0 / 43200.0;
+
+        match runner.run(
+            &(3000u32..10000, prop::collection::vec(1f32..1000f32, 1..5), any::<usize>(), 0.0f32..2.0f32),
+            |(delta_ticks, costs, raw_index, cash_multiplier)| {
+                let current_funding_level = (raw_index % costs.len()) as u32;
+                let levels: Vec<(i32, f32)> = costs.iter().map(|&cost| (0i32, cost)).collect();
+                let selected_cost = costs[current_funding_level as usize];
+                let (_, days) = predict_mgr_update(0, delta_ticks);
+                let cash_delta = days as f32 * selected_cost * DAYS_TO_FUNDING_SCALE;
+                let available_cash = (cash_delta * cash_multiplier).max(0.0);
+
+                let real_marketing_ptr = marketing_live_support::build_standalone_marketing_with_levels(current_funding_level, &levels);
+                let real_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, real_marketing_ptr);
+                marketing_live_support::with_ztgamemgr_cash(available_cash, || unsafe {
+                    ZTMARKETINGMGR_UPDATE.original()((real_mgr_ptr as *mut ZTMarketingMgr) as *const u32, delta_ticks);
+                });
+                let real_tick_accumulator = unsafe { &*real_mgr_ptr }.tick_accumulator();
+                let real_index = unsafe { &*real_marketing_ptr }.current_funding_level();
+                marketing_live_support::destroy_standalone_marketing_mgr(real_mgr_ptr);
+                marketing_live_support::destroy_standalone_marketing(real_marketing_ptr);
+
+                let reimpl_marketing_ptr = marketing_live_support::build_standalone_marketing_with_levels(current_funding_level, &levels);
+                let reimpl_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, reimpl_marketing_ptr);
+                marketing_live_support::with_ztgamemgr_cash(available_cash, || unsafe { &mut *reimpl_mgr_ptr }.update(delta_ticks));
+                let reimpl_tick_accumulator = unsafe { &*reimpl_mgr_ptr }.tick_accumulator();
+                let reimpl_index = unsafe { &*reimpl_marketing_ptr }.current_funding_level();
+                marketing_live_support::destroy_standalone_marketing_mgr(reimpl_mgr_ptr);
+                marketing_live_support::destroy_standalone_marketing(reimpl_marketing_ptr);
+
+                prop_assert_eq!(
+                    real_tick_accumulator,
+                    reimpl_tick_accumulator,
+                    "tick_accumulator mismatch for delta_ticks={}, current_funding_level={}, costs={:?}",
+                    delta_ticks,
+                    current_funding_level,
+                    costs
+                );
+                prop_assert_eq!(
+                    real_index,
+                    reimpl_index,
+                    "current_funding_level mismatch for delta_ticks={}, current_funding_level={}, costs={:?}",
+                    delta_ticks,
+                    current_funding_level,
+                    costs
+                );
+                Ok(())
+            },
+        ) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// Deterministic single-case reproduction of the `ZTMARKETING_UPDATE` affordable-branch crash.
+    /// Calls only the real `ZTMarketingMgr::update`, skipping the reimplemented side entirely, so a
+    /// crash unambiguously means the real vanilla call path. `available_cash` is pinned to exactly
+    /// `cash_delta` (the `<=` boundary itself, never exercised by `run_marketing_update_test` above),
+    /// forcing the real side onto the affordable `spendMarketing`/`subtractCash` branch every time.
+    ///
+    /// Runs unconditionally as part of the normal battery. This whole module only compiles under the
+    /// `reimplementation-tests` feature (never the shipped `openzt.dll`), so there's no production
+    /// exposure to gate against. The crash this reproduces only occurs when `zoo.exe` is running under
+    /// Windows' "Windows 7" compatibility-mode shim - with that shim off, this runs clean. If this test
+    /// ever crashes the battery, check `zoo.exe`'s Compatibility tab before assuming a regression.
+    ///
+    /// This test's crash risk was always independent of the (now-fixed) `SUBTRACT_CASH` stack-imbalance
+    /// bug documented on `run_marketing_update_test` above - it only ever calls genuine vanilla code via
+    /// `.original()`, never routing through our own buggy `FunctionDef`. See
+    /// `run_marketing_update_reimpl_boundary_test` below for the counterpart that exercises the
+    /// reimplemented side, the path that *was* affected by that bug.
+    fn run_marketing_update_boundary_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMARKETING_UPDATE_BOUNDARY_REPRO";
+
+        if marketing_live_support::ztgamemgr_ptr_is_null() {
+            info!("Skipping {}: GLOBAL_ZTGameMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTGameMgr not initialized)", test_name));
+            return false;
+        }
+
+        const DAYS_TO_FUNDING_SCALE: f32 = 1.0 / 43200.0;
+        let delta_ticks: u32 = 5000;
+        let cost: f32 = 100.0;
+        let levels: Vec<(i32, f32)> = vec![(0, cost)];
+        let (_, days) = predict_mgr_update(0, delta_ticks);
+        let cash_delta = days as f32 * cost * DAYS_TO_FUNDING_SCALE;
+
+        let real_marketing_ptr = marketing_live_support::build_standalone_marketing_with_levels(0, &levels);
+        let real_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, real_marketing_ptr);
+
+        info!(
+            "{}: about to call real ZTMarketingMgr::update with available_cash == cash_delta ({}) - known to crash under Windows 7 compatibility mode, expected clean otherwise",
+            test_name, cash_delta
+        );
+        marketing_live_support::with_ztgamemgr_cash(cash_delta, || unsafe {
+            ZTMARKETINGMGR_UPDATE.original()((real_mgr_ptr as *mut ZTMarketingMgr) as *const u32, delta_ticks);
+        });
+        info!("{}: real call returned without crashing", test_name);
+
+        marketing_live_support::destroy_standalone_marketing_mgr(real_mgr_ptr);
+        marketing_live_support::destroy_standalone_marketing(real_marketing_ptr);
+
+        write_success_line(failure_log, test_name);
+        false
+    }
+
+    /// Deterministic single-case regression for the *reimplemented* side of `ZTMARKETING_UPDATE`'s affordable
+    /// branch - the actual previously-buggy path (`ZTMarketing::update` -> `ZTGameMgr::spend_marketing`/
+    /// `subtract_cash`, routed through our own `SPEND_MARKETING`/`SUBTRACT_CASH` `FunctionDef`s - unlike
+    /// `run_marketing_update_boundary_test` above, which only ever calls genuine vanilla). See
+    /// `ztmarketing-update-setmoneytext-crash-investigation.md`'s "Resolution" section for the fixed
+    /// `SUBTRACT_CASH` signature bug, and its "Suggested next steps" item 7 for why this path specifically
+    /// needed an independent check - it had never been exercised past the always-unaffordable branch before.
+    ///
+    /// Calls only the reimplemented `ZTMarketingMgr::update`, skipping the real vanilla side entirely.
+    /// `available_cash` is pinned to exactly `cash_delta`, forcing the affordable branch every time. Runs
+    /// unconditionally as part of the normal battery, same rationale as `run_marketing_update_boundary_test`.
+    fn run_marketing_update_reimpl_boundary_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMARKETING_UPDATE_REIMPL_BOUNDARY_REPRO";
+
+        if marketing_live_support::ztgamemgr_ptr_is_null() {
+            info!("Skipping {}: GLOBAL_ZTGameMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTGameMgr not initialized)", test_name));
+            return false;
+        }
+
+        const DAYS_TO_FUNDING_SCALE: f32 = 1.0 / 43200.0;
+        let delta_ticks: u32 = 5000;
+        let cost: f32 = 100.0;
+        let levels: Vec<(i32, f32)> = vec![(0, cost)];
+        let (_, days) = predict_mgr_update(0, delta_ticks);
+        let cash_delta = days as f32 * cost * DAYS_TO_FUNDING_SCALE;
+
+        let reimpl_marketing_ptr = marketing_live_support::build_standalone_marketing_with_levels(0, &levels);
+        let reimpl_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, reimpl_marketing_ptr);
+
+        info!("{}: about to call reimplemented ZTMarketingMgr::update with available_cash == cash_delta ({})", test_name, cash_delta);
+        marketing_live_support::with_ztgamemgr_cash(cash_delta, || unsafe { &mut *reimpl_mgr_ptr }.update(delta_ticks));
+        info!("{}: reimplemented call returned without crashing", test_name);
+
+        marketing_live_support::destroy_standalone_marketing_mgr(reimpl_mgr_ptr);
+        marketing_live_support::destroy_standalone_marketing(reimpl_marketing_ptr);
+
+        write_success_line(failure_log, test_name);
+        false
+    }
+
+    /// ZTMARKETING_GET_FUNDING_TEXT: compares the real `ZTMarketing::getFundingText`'s output against
+    /// the reimplemented `ZTMarketing::funding_text`, for a standalone marketing with a generated
+    /// funding table and `current_funding_level` spanning negative/in-range/out-of-range relative to
+    /// the table's length. Same shape as `run_funding_text_test` above, reusing its
+    /// `funding_level_case_strategy` for the (name_id, cost) generation.
+    fn run_marketing_funding_text_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETING_GET_FUNDING_TEXT";
+        let mut fail_flag = false;
+
+        match runner.run(&(-2i32..4i32, prop::collection::vec(funding_level_case_strategy(), 0..3)), |(current_funding_level, levels)| {
+            let current_funding_level = current_funding_level as u32;
+            let marketing_ptr = marketing_live_support::build_standalone_marketing_with_levels(current_funding_level, &levels);
+
+            let mut buffer = [0u32; 3];
+            unsafe {
+                ztmarketing::GET_FUNDING_TEXT.original()(marketing_ptr as *const u32, buffer.as_mut_ptr() as *const u32);
+            }
+            let real_text = get_from_memory::<ZTBufferString>(buffer.as_ptr() as u32).copy_to_string();
+            let reimpl_text = unsafe { &*marketing_ptr }.funding_text();
+
+            marketing_live_support::destroy_standalone_marketing(marketing_ptr);
+
+            prop_assert_eq!(
+                real_text,
+                reimpl_text,
+                "funding_text mismatch for current_funding_level={}, levels={:?}",
+                current_funding_level,
+                levels
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTMARKETINGMGR_SAVE: compares the real `ZTMarketingMgr::save`'s captured output (via
+    /// `io_redirect`) against the single little-endian `u32` funding-level index vanilla is expected to
+    /// write - `0` when no `ZTMarketing` is owned.
+    fn run_marketingmgr_save_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETINGMGR_SAVE";
+        let mut fail_flag = false;
+
+        match runner.run(&(any::<bool>(), 0u32..10), |(has_marketing, current_funding_level)| {
+            let marketing_ptr = if has_marketing {
+                marketing_live_support::build_standalone_marketing(current_funding_level, 0)
+            } else {
+                std::ptr::null_mut()
+            };
+            let mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, marketing_ptr);
+            let mgr = unsafe { &mut *mgr_ptr };
+
+            let dummy_file: u32 = 0;
+            io_redirect::begin_capture();
+            let _ = mgr.save(&dummy_file as *const u32);
+            let captured_bytes = io_redirect::end_capture();
+
+            marketing_live_support::destroy_standalone_marketing_mgr(mgr_ptr);
+            marketing_live_support::destroy_standalone_marketing(marketing_ptr);
+
+            let expected_index: u32 = if has_marketing { current_funding_level } else { 0 };
+            let expected_bytes = expected_index.to_le_bytes().to_vec();
+
+            prop_assert_eq!(
+                captured_bytes,
+                expected_bytes,
+                "ZTMarketingMgr::save byte mismatch for has_marketing={}, current_funding_level={}",
+                has_marketing,
+                current_funding_level
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTMARKETINGMGR_LOAD: compares the real `ZTMarketingMgr::load`'s effect on the owned
+    /// `ZTMarketing`'s funding-level index (and its own return value) against
+    /// `marketing_save_reimplementation::predict_load`, for a generated funding-level table size,
+    /// starting index, save-format version (spanning both sides of the `0x3a` threshold), and stream
+    /// content - `bytes_present = false` supplies an empty replay buffer, exercising `load`'s
+    /// read-failure abort path (`predict_load`'s `None` branch) when `version` is above the threshold.
+    fn run_marketingmgr_load_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETINGMGR_LOAD";
+        let mut fail_flag = false;
+
+        match runner.run(
+            &(0u32..0x50, any::<u32>(), 0usize..6, 0u32..8, any::<bool>()),
+            |(version, saved_value, level_count, current_funding_level, bytes_present)| {
+                let marketing_ptr = marketing_live_support::build_standalone_marketing(current_funding_level, level_count);
+                let mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, marketing_ptr);
+                let mgr = unsafe { &mut *mgr_ptr };
+
+                let bytes = if bytes_present { saved_value.to_le_bytes().to_vec() } else { Vec::new() };
+                let file_buffer = [0u32; 4];
+                io_redirect::begin_replay(bytes);
+                let load_ret = mgr.load(file_buffer.as_ptr(), version);
+                io_redirect::end_replay();
+
+                let real_index = unsafe { &*marketing_ptr }.current_funding_level();
+                marketing_live_support::destroy_standalone_marketing_mgr(mgr_ptr);
+                marketing_live_support::destroy_standalone_marketing(marketing_ptr);
+
+                let read_value = bytes_present.then_some(saved_value);
+                let (expected_ok, expected_index) = marketing_save_reimplementation::predict_load(version, read_value, level_count, current_funding_level);
+
+                prop_assert_eq!(
+                    load_ret,
+                    expected_ok,
+                    "return value mismatch for version={}, level_count={}, current_funding_level={}, bytes_present={}",
+                    version,
+                    level_count,
+                    current_funding_level,
+                    bytes_present
+                );
+                prop_assert_eq!(
+                    real_index,
+                    expected_index,
+                    "current_funding_level mismatch for version={}, saved_value={}, level_count={}, current_funding_level={}, bytes_present={}",
+                    version,
+                    saved_value,
+                    level_count,
+                    current_funding_level,
+                    bytes_present
+                );
+                Ok(())
+            },
+        ) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTMARKETINGMGR_CLEAR_CONFIGURATIONS: compares the real `ZTMarketingMgr::clearConfigurations`
+    /// against the reimplemented `clear_configurations`, confirming both leave `tick_accumulator == 0`
+    /// and `marketing_ptr` left dangling (non-null, pointing at now-freed memory) rather than nulled.
+    /// The stale pointer is never dereferenced further here, only checked for non-nullness via
+    /// `marketing_ptr_raw()`.
+    ///
+    /// Unlike every other real-vanilla call this file makes elsewhere (which only ever read memory),
+    /// `clearConfigurations` actually **frees** the owned `ZTMarketing` - and freeing a Rust
+    /// `Box`-allocated `ZTMarketing` through vanilla's own destructor/delete path is a cross-heap risk.
+    /// So the "real" side's `ZTMarketing` is instead allocated via the native `standalone::OPERATOR_NEW`
+    /// and initialized via `ztmarketing::CONSTRUCTOR`, keeping the real free heap-consistent with how
+    /// the memory was allocated.
+    fn run_marketingmgr_clear_configurations_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTMARKETINGMGR_CLEAR_CONFIGURATIONS";
+        let mut fail_flag = false;
+
+        match runner.run(&any::<u32>(), |tick_accumulator| {
+            let real_raw = unsafe { standalone::OPERATOR_NEW.original()(size_of::<ZTMarketing>() as u32) };
+            prop_assume!(!real_raw.is_null());
+            let real_marketing_ptr = unsafe { ztmarketing::CONSTRUCTOR.original()(real_raw as *const u32) } as *mut ZTMarketing;
+
+            let real_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(tick_accumulator, real_marketing_ptr);
+            unsafe { ZTMARKETINGMGR_CLEAR_CONFIGURATIONS.original()((real_mgr_ptr as *mut ZTMarketingMgr) as *const u32) };
+            let real_mgr = unsafe { &*real_mgr_ptr };
+            let real_tick_accumulator = real_mgr.tick_accumulator();
+            let real_marketing_ptr_nonnull = real_mgr.marketing_ptr_raw() != 0;
+            marketing_live_support::destroy_standalone_marketing_mgr(real_mgr_ptr);
+
+            let reimpl_marketing_ptr = marketing_live_support::build_standalone_marketing(0, 0);
+            let reimpl_mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(tick_accumulator, reimpl_marketing_ptr);
+            unsafe { &mut *reimpl_mgr_ptr }.clear_configurations();
+            let reimpl_mgr = unsafe { &*reimpl_mgr_ptr };
+            let reimpl_tick_accumulator = reimpl_mgr.tick_accumulator();
+            let reimpl_marketing_ptr_nonnull = reimpl_mgr.marketing_ptr_raw() != 0;
+            marketing_live_support::destroy_standalone_marketing_mgr(reimpl_mgr_ptr);
+
+            prop_assert_eq!(real_tick_accumulator, 0, "real tick_accumulator not reset for tick_accumulator={}", tick_accumulator);
+            prop_assert_eq!(reimpl_tick_accumulator, 0, "reimplemented tick_accumulator not reset for tick_accumulator={}", tick_accumulator);
+            prop_assert!(real_marketing_ptr_nonnull, "real marketing_ptr unexpectedly nulled for tick_accumulator={}", tick_accumulator);
+            prop_assert!(reimpl_marketing_ptr_nonnull, "reimplemented marketing_ptr unexpectedly nulled for tick_accumulator={}", tick_accumulator);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTMARKETINGMGR_LOAD_CONFIGURATIONS: compares the real, live `globals().ztmarketingmgr()`'s
+    /// funding table - populated by vanilla's own untouched boot-time `loadConfigurations` call, whose
+    /// path was captured into `CAPTURED_MARKETING_PATH` - against this crate's own
+    /// `ZTMarketingMgr::load_configurations` reimplementation, run directly on a standalone
+    /// `ZTMarketingMgr` with the same captured path. Not a proptest - there's exactly one real path/one
+    /// real answer to compare. Skipped (not failed) if the path was never captured, or if
+    /// `GLOBAL_ZTMarketingMgr` itself isn't initialized yet.
+    fn run_marketingmgr_load_configurations_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMARKETINGMGR_LOAD_CONFIGURATIONS";
+
+        let Some(path) = CAPTURED_MARKETING_PATH.get() else {
+            info!("Skipping {}: no path captured from ZTMarketingMgr::loadConfigurations", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no path captured)", test_name));
+            return false;
+        };
+
+        if globals().ztmarketingmgr_ptr().is_null() {
+            info!("Skipping {}: GLOBAL_ZTMarketingMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTMarketingMgr not initialized)", test_name));
+            return false;
+        }
+
+        let expected_marketing = globals().ztmarketingmgr().marketing();
+        let expected_levels: Vec<(i32, i32, u32)> =
+            expected_marketing.map(|m| m.funding_levels().iter().map(|l| (l.name_id(), l.benefit(), l.cost().to_bits())).collect()).unwrap_or_default();
+        let expected_index = expected_marketing.map(|m| m.current_funding_level()).unwrap_or(0);
+
+        let mgr_ptr = marketing_live_support::build_standalone_marketing_mgr(0, std::ptr::null_mut());
+        let mgr = unsafe { &mut *mgr_ptr };
+        mgr.load_configurations(path);
+
+        let actual_marketing = mgr.marketing();
+        let actual_levels: Vec<(i32, i32, u32)> =
+            actual_marketing.map(|m| m.funding_levels().iter().map(|l| (l.name_id(), l.benefit(), l.cost().to_bits())).collect()).unwrap_or_default();
+        let actual_index = actual_marketing.map(|m| m.current_funding_level()).unwrap_or(0);
+
+        mgr.clear_configurations();
+        marketing_live_support::destroy_standalone_marketing_mgr(mgr_ptr);
+
+        if expected_levels == actual_levels && expected_index == actual_index {
+            info!("{} passed for path '{}'", test_name, path);
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            error!(
+                "{} failed for path '{}': expected_levels={:?}, actual_levels={:?}, expected_index={}, actual_index={}",
+                test_name, path, expected_levels, actual_levels, expected_index, actual_index
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!(
+                        "Test Failed {}: path '{}', expected_levels={:?}, actual_levels={:?}, expected_index={}, actual_index={}\n",
+                        test_name, path, expected_levels, actual_levels, expected_index, actual_index
+                    )
+                    .as_bytes(),
+                );
+            }
+            true
+        }
+    }
+
     /// Real vanilla's `daysRemainingOnProgram` runs its whole `FSUB`/`FMUL`/`FDIV` chain on the x87
     /// stack, which computes at 80-bit extended precision internally and only rounds down to a
     /// 32-bit `f32` once, at the very end (when the caller stores the `ST(0)` return value) - unlike
@@ -1722,6 +2872,867 @@ mod detour_zoo_main {
                 real_days,
                 reimpl_days
             );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    // ============================================================================================
+    // Live comparison battery for ZTThoughtMgr/ZTThought. `ZTTHOUGHTMGR_ADD_THOUGHT`/
+    // `_REMOVE_THOUGHTS_BY_*`/`_GET_THOUGHTS_BY_*`/`_SAVE`/`_LOAD` are self-contained (no
+    // `GLOBAL_ZTWorldMgr`/string-table dependency) and run from the early battery above;
+    // `_POPULATE_THOUGHTS` and `ZTTHOUGHT_GET_STRING` need `GLOBAL_ZTWorldMgr`/language DLLs
+    // respectively, so they run from `run_on_completion_reset_test_and_exit`'s later chain instead.
+    // ============================================================================================
+
+    /// Field tuple used to compare two `ZTThought`s structurally via their existing public getters -
+    /// `ZTThought` derives neither `PartialEq` nor a public constructor, so this is simpler than adding
+    /// either just for these tests.
+    fn thought_fields(t: &ZTThought) -> (u32, u32, u32, i32, i32, u32, u32, u32) {
+        (t.string_id(), t.thinker_id(), t.object_id(), t.tile_x(), t.tile_y(), t.thinker_ptr(), t.object_ptr(), t.habitat_ptr())
+    }
+
+    /// ZTTHOUGHTMGR_ADD_THOUGHT: compares the real `ZTThoughtMgr::addThought`'s effect on list
+    /// order/length against the reimplemented `add_thought`, across a generated sequence of calls and a
+    /// small `max_thoughts` cap (so cap-trimming is actually exercised). Restricted to
+    /// `thinker_ptr = object_ptr = habitat_ptr = 0` for every call - `ZTThought::new` dereferences all
+    /// three when non-null, and there's no live entity/habitat this standalone test could safely point
+    /// them at. This still fully exercises `addThought`'s own cap-trim/insertion-order logic, the part
+    /// this test actually targets.
+    fn run_thoughtmgr_add_thought_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_ADD_THOUGHT";
+        let mut fail_flag = false;
+
+        match runner.run(&(1u32..5, prop::collection::vec(any::<u32>(), 0..8)), |(max_thoughts, string_ids)| {
+            let real_ptr = thought_live_support::build_standalone_mgr(max_thoughts);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(max_thoughts);
+
+            for &string_id in &string_ids {
+                unsafe {
+                    gen_ztthoughtmgr::ADD_THOUGHT.original()(real_ptr as *const u32, string_id, std::ptr::null(), std::ptr::null(), std::ptr::null());
+                }
+                unsafe { &mut *reimpl_ptr }.add_thought(string_id, 0, 0, 0);
+            }
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+            let real_len = unsafe { &*real_ptr }.len();
+            let reimpl_len = unsafe { &*reimpl_ptr }.len();
+
+            thought_live_support::destroy_standalone_mgr_leaking_nodes(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_len, reimpl_len, "length mismatch for max_thoughts={}, string_ids={:?}", max_thoughts, string_ids);
+            prop_assert_eq!(real_fields, reimpl_fields, "content mismatch for max_thoughts={}, string_ids={:?}", max_thoughts, string_ids);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// Seeds `mgr` with one `ZTThought` per `specs` entry (`(string_id, thinker_ptr, object_ptr,
+    /// habitat_ptr)`), front-to-back, via `insert_front` - builds identical starting state for both
+    /// sides of a removal/lookup comparison. `thinker_id`/`object_id`/`tile_x`/`tile_y` are left at
+    /// ctor defaults since no consumer of this helper reads them.
+    fn seed_thoughts(mgr: &mut ZTThoughtMgr, specs: &[(u32, u32, u32, u32)]) {
+        for &(string_id, thinker_ptr, object_ptr, habitat_ptr) in specs {
+            mgr.insert_front(thought_live_support::new_thought(string_id, 0, 0, -1, -1, thinker_ptr, object_ptr, habitat_ptr));
+        }
+    }
+
+    fn thought_spec_strategy() -> impl Strategy<Value = (u32, u32, u32, u32)> {
+        (any::<u32>(), 0u32..5, 0u32..5, 0u32..5)
+    }
+
+    /// ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_THINKER: compares the real `ZTThoughtMgr::removeThoughtsByThinker`
+    /// against the reimplemented `remove_thoughts_by_thinker`, on two identically-seeded standalone
+    /// managers. `thinker_ptr`/`object_ptr`/`habitat_ptr` are generated over a small `0..5` range so
+    /// `target` collides with a seeded value often enough to exercise real removals, not just the no-op
+    /// case.
+    fn run_thoughtmgr_remove_thoughts_by_thinker_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_THINKER";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5), |(specs, target)| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *real_ptr }, &specs);
+            seed_thoughts(unsafe { &mut *reimpl_ptr }, &specs);
+
+            unsafe {
+                gen_ztthoughtmgr::REMOVE_THOUGHTS_BY_THINKER.original()(real_ptr as *const u32, target as *const u32);
+            }
+            unsafe { &mut *reimpl_ptr }.remove_thoughts_by_thinker(target);
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}", specs, target);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_OBJECT: same shape as
+    /// `run_thoughtmgr_remove_thoughts_by_thinker_test`, comparing `removeThoughtsByObject`/
+    /// `remove_thoughts_by_object` instead.
+    fn run_thoughtmgr_remove_thoughts_by_object_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_OBJECT";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5), |(specs, target)| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *real_ptr }, &specs);
+            seed_thoughts(unsafe { &mut *reimpl_ptr }, &specs);
+
+            unsafe {
+                gen_ztthoughtmgr::REMOVE_THOUGHTS_BY_OBJECT.original()(real_ptr as *const u32, target as *const u32);
+            }
+            unsafe { &mut *reimpl_ptr }.remove_thoughts_by_object(target);
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}", specs, target);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_HABITAT: same shape again, additionally generating `force` -
+    /// `removeThoughtsByHabitat` has a third outcome `removeThoughtsBy{Thinker,Object}` don't: a
+    /// matching thought with a live `object_ptr` survives with its `habitat_ptr` link cleared instead of
+    /// being removed outright, unless `force` is set.
+    fn run_thoughtmgr_remove_thoughts_by_habitat_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_HABITAT";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5, any::<bool>()), |(specs, target, force)| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *real_ptr }, &specs);
+            seed_thoughts(unsafe { &mut *reimpl_ptr }, &specs);
+
+            unsafe {
+                gen_ztthoughtmgr::REMOVE_THOUGHTS_BY_HABITAT.original()(real_ptr as *const u32, target as *const i32, force as i8);
+            }
+            unsafe { &mut *reimpl_ptr }.remove_thoughts_by_habitat(target, force);
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}, force={}", specs, target, force);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_GET_THOUGHTS_BY_THINKER: compares the real, undetoured `getThoughtsByThinker`'s
+    /// output - a real vanilla temporary list, walked read-only via
+    /// `thought_live_support::read_only_wrap_vanilla_list` - against the reimplemented
+    /// `get_thoughts_by_thinker`, on a single seeded standalone manager (both calls only read the
+    /// manager's own list, so there's no need for two independent instances).
+    fn run_thoughtmgr_get_thoughts_by_thinker_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_GET_THOUGHTS_BY_THINKER";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5, 1i32..5), |(specs, target, max_count)| {
+            let mgr_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *mgr_ptr }, &specs);
+            let mgr = unsafe { &*mgr_ptr };
+
+            let mut real_sentinel: u32 = 0;
+            unsafe {
+                gen_ztthoughtmgr::GET_THOUGHTS_BY_THINKER.original()(
+                    mgr_ptr as *const u32,
+                    &raw mut real_sentinel as *const i32,
+                    target as *const i32,
+                    max_count,
+                );
+            }
+            let real_wrapper = thought_live_support::read_only_wrap_vanilla_list(real_sentinel);
+            let real_fields: Vec<_> = real_wrapper.iter().map(thought_fields).collect();
+
+            let reimpl_fields: Vec<_> = mgr.get_thoughts_by_thinker(target, max_count as usize).into_iter().map(|t| thought_fields(t)).collect();
+
+            thought_live_support::destroy_standalone_mgr(mgr_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}, max_count={}", specs, target, max_count);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_GET_THOUGHTS_BY_OBJECT: same shape as
+    /// `run_thoughtmgr_get_thoughts_by_thinker_test`, for `getThoughtsByObject`/`get_thoughts_by_object`.
+    /// `max_count` is passed as `max_count as *const i32` - `GET_THOUGHTS_BY_OBJECT`'s `*const i32`
+    /// signature is a Ghidra type-inference artifact; the real calling convention passes the count by
+    /// value for all three `getThoughtsBy*` functions.
+    fn run_thoughtmgr_get_thoughts_by_object_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_GET_THOUGHTS_BY_OBJECT";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5, 1i32..5), |(specs, target, max_count)| {
+            let mgr_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *mgr_ptr }, &specs);
+            let mgr = unsafe { &*mgr_ptr };
+
+            let mut real_sentinel: u32 = 0;
+            unsafe {
+                gen_ztthoughtmgr::GET_THOUGHTS_BY_OBJECT.original()(
+                    mgr_ptr as *const u32,
+                    &raw mut real_sentinel as *const i32,
+                    target as *const i32,
+                    max_count as *const i32,
+                );
+            }
+            let real_wrapper = thought_live_support::read_only_wrap_vanilla_list(real_sentinel);
+            let real_fields: Vec<_> = real_wrapper.iter().map(thought_fields).collect();
+
+            let reimpl_fields: Vec<_> = mgr.get_thoughts_by_object(target, max_count as usize).into_iter().map(|t| thought_fields(t)).collect();
+
+            thought_live_support::destroy_standalone_mgr(mgr_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}, max_count={}", specs, target, max_count);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_GET_THOUGHTS_BY_HABITAT: same shape as
+    /// `run_thoughtmgr_get_thoughts_by_object_test`, including `max_count`'s own by-value passing - for
+    /// `getThoughtsByHabitat`/`get_thoughts_by_habitat`.
+    fn run_thoughtmgr_get_thoughts_by_habitat_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_GET_THOUGHTS_BY_HABITAT";
+        let mut fail_flag = false;
+
+        match runner.run(&(prop::collection::vec(thought_spec_strategy(), 0..8), 0u32..5, 1i32..20), |(specs, target, max_count)| {
+            let mgr_ptr = thought_live_support::build_standalone_mgr(1000);
+            seed_thoughts(unsafe { &mut *mgr_ptr }, &specs);
+            let mgr = unsafe { &*mgr_ptr };
+
+            let mut real_sentinel: u32 = 0;
+            unsafe {
+                gen_ztthoughtmgr::GET_THOUGHTS_BY_HABITAT.original()(
+                    mgr_ptr as *const u32,
+                    &raw mut real_sentinel as *const i32,
+                    target as *const i32,
+                    max_count as *const i32,
+                );
+            }
+            let real_wrapper = thought_live_support::read_only_wrap_vanilla_list(real_sentinel);
+            let real_fields: Vec<_> = real_wrapper.iter().map(thought_fields).collect();
+
+            let reimpl_fields: Vec<_> = mgr.get_thoughts_by_habitat(target, max_count as usize).into_iter().map(|t| thought_fields(t)).collect();
+
+            thought_live_support::destroy_standalone_mgr(mgr_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for specs={:?}, target={}, max_count={}", specs, target, max_count);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_SAVE: compares the real `ZTThoughtMgr::save`'s captured output (via `io_redirect`)
+    /// against the reimplemented `save`, on two identically-seeded standalone managers.
+    fn run_thoughtmgr_save_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_SAVE";
+        let mut fail_flag = false;
+
+        let record_strategy = (any::<u32>(), any::<u32>(), any::<u32>(), -2i32..4, -2i32..4);
+        match runner.run(&prop::collection::vec(record_strategy, 0..6), |records| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            for &(string_id, thinker_id, object_id, tile_x, tile_y) in &records {
+                unsafe { &mut *real_ptr }.insert_front(thought_live_support::new_thought(string_id, thinker_id, object_id, tile_x, tile_y, 0, 0, 0));
+                unsafe { &mut *reimpl_ptr }.insert_front(thought_live_support::new_thought(string_id, thinker_id, object_id, tile_x, tile_y, 0, 0, 0));
+            }
+
+            let dummy_file: u32 = 0;
+            io_redirect::begin_capture();
+            unsafe { gen_ztthoughtmgr::SAVE.original()(real_ptr as *const u32, &dummy_file as *const u32) };
+            let real_bytes = io_redirect::end_capture();
+
+            io_redirect::begin_capture();
+            let _ = unsafe { &*reimpl_ptr }.save(&dummy_file as *const u32);
+            let reimpl_bytes = io_redirect::end_capture();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_bytes, reimpl_bytes, "save byte mismatch for records={:?}", records);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_LOAD: compares the real `ZTThoughtMgr::load`'s effect on list content/order (and its
+    /// own return value) against the reimplemented `load`, for a generated stream of legacy-format
+    /// `(string_id, object_id, thinker_id)` records and `version < 0x1e` - the pre-`0x1e` legacy branch.
+    /// Restricted to this range: `version >= 0x1e` triggers `ZTThought::load`'s own
+    /// `thinker_id`/`object_id` -> pointer resolution via `ZTWorldMgr::resolve_entity_by_id`, which
+    /// needs `GLOBAL_ZTWorldMgr` initialized - not true yet at this early injection point.
+    /// `object_id`/`thinker_id` are generated over a small `0..3` range to land on both sides of
+    /// `ZTThoughtMgr::load`'s survival gate (a legacy-format record only splices into the list if both
+    /// ids end up `0`), not just the trivially-true `id == 0` case `any::<u32>()` would mostly hit.
+    fn run_thoughtmgr_load_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_LOAD";
+        let mut fail_flag = false;
+
+        let record_strategy = (any::<u32>(), 0u32..3, 0u32..3);
+        match runner.run(&(prop::collection::vec(record_strategy, 0..6), 0u32..0x1e), |(records, version)| {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&(records.len() as u32).to_le_bytes());
+            for &(string_id, object_id, thinker_id) in &records {
+                bytes.extend_from_slice(&string_id.to_le_bytes());
+                bytes.extend_from_slice(&object_id.to_le_bytes());
+                bytes.extend_from_slice(&thinker_id.to_le_bytes());
+            }
+
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            let file_buffer = [0u32; 4];
+
+            io_redirect::begin_replay(bytes.clone());
+            let real_ret = unsafe { gen_ztthoughtmgr::LOAD.original()(real_ptr as *const u32, file_buffer.as_ptr(), version) };
+            io_redirect::end_replay();
+
+            io_redirect::begin_replay(bytes);
+            let reimpl_ret = unsafe { &mut *reimpl_ptr }.load(file_buffer.as_ptr(), version);
+            io_redirect::end_replay();
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr_leaking_nodes(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_ret, reimpl_ret, "load() return mismatch for records={:?}, version={}", records, version);
+            prop_assert_eq!(real_fields, reimpl_fields, "loaded content mismatch for records={:?}, version={}", records, version);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_LOAD_MODERN: compares the real `ZTThoughtMgr::load`'s effect against the
+    /// reimplemented `load` for the `version >= 0x1e` branch - the branch `ZTTHOUGHTMGR_LOAD` above
+    /// never exercises, since it drives inline `ZTWorldMgr::resolve_entity_by_id`/
+    /// `ZTHabitatMgr::get_habitat_ptr` resolution that needs both globals initialized. Runs from
+    /// `run_on_completion_reset_test_and_exit`'s later chain, like
+    /// `ZTTHOUGHTMGR_POPULATE_THOUGHTS`/`ZTTHOUGHT_GET_STRING` below.
+    ///
+    /// `thinker_id`/`object_id` stay in the same small `0..5` range `ZTTHOUGHTMGR_POPULATE_THOUGHTS`
+    /// already uses (real entity ids are never this low in a fresh test process, so
+    /// `resolve_entity_by_id` deterministically returns null on both sides). Every record's tile is
+    /// fixed at the `(-1, -1)` "no tile" sentinel, not generated: `ZTHabitatMgr::get_habitat_ptr`
+    /// performs no bounds-checking against its own `other_array_start`/`other_array_end` fields, and at
+    /// this early injection point (before any zoo is loaded) that array is too small/empty for even
+    /// single-digit tile coordinates to stay in-bounds, so tile-based exercise of that path is deferred
+    /// rather than attempted here.
+    ///
+    /// `truncate_at`, when `Some`, cuts the serialized byte stream short - folds in short-read coverage
+    /// `ZTTHOUGHTMGR_LOAD` doesn't have. `io_redirect::deallocate` just returns failure once the replay
+    /// buffer runs out, never touching out-of-bounds memory.
+    fn run_thoughtmgr_load_modern_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTTHOUGHTMGR_LOAD_MODERN";
+
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let mut fail_flag = false;
+
+        let record_strategy = (any::<u32>(), 0u32..5, 0u32..5);
+        let strategy = prop::collection::vec(record_strategy, 0..6).prop_flat_map(|records| {
+            let total_len = 4 + records.len() * 20;
+            (Just(records), 0x1eu32..0x40, prop::option::of(0usize..total_len))
+        });
+
+        match runner.run(&strategy, |(records, version, truncate_at)| {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&(records.len() as u32).to_le_bytes());
+            for &(string_id, thinker_id, object_id) in &records {
+                bytes.extend_from_slice(&string_id.to_le_bytes());
+                bytes.extend_from_slice(&thinker_id.to_le_bytes());
+                bytes.extend_from_slice(&object_id.to_le_bytes());
+                bytes.extend_from_slice(&(-1i32 as u32).to_le_bytes());
+                bytes.extend_from_slice(&(-1i32 as u32).to_le_bytes());
+            }
+            if let Some(cut) = truncate_at {
+                bytes.truncate(cut);
+            }
+
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            let file_buffer = [0u32; 4];
+
+            io_redirect::begin_replay(bytes.clone());
+            let real_ret = unsafe { gen_ztthoughtmgr::LOAD.original()(real_ptr as *const u32, file_buffer.as_ptr(), version) };
+            io_redirect::end_replay();
+
+            io_redirect::begin_replay(bytes);
+            let reimpl_ret = unsafe { &mut *reimpl_ptr }.load(file_buffer.as_ptr(), version);
+            io_redirect::end_replay();
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr_leaking_nodes(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(
+                real_ret,
+                reimpl_ret,
+                "load() return mismatch for records={:?}, version={}, truncate_at={:?}",
+                records,
+                version,
+                truncate_at
+            );
+            prop_assert_eq!(
+                real_fields,
+                reimpl_fields,
+                "loaded content mismatch for records={:?}, version={}, truncate_at={:?}",
+                records,
+                version,
+                truncate_at
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_ADD_THOUGHT_ANIMAL_OVERRIDE: exercises the animal-subtype override branch inside
+    /// `add_thought` (`resolve_object_own_habitat_ptr`'s two vtable calls) - `ZTAnimalType::isCastClass`
+    /// at `0x004020cd` and `ZTAnimal::getHabitat` at `0x00410685` (via `calcHabitat` ->
+    /// `ZTUnit::getHabitat`).
+    ///
+    /// Both the "real" (`ADD_THOUGHT.original()`) and "reimplemented" (`add_thought`) sides dispatch
+    /// through the exact same real vanilla function pointers here - `resolve_object_own_habitat_ptr` is a
+    /// call-through wrapper around vanilla's own vtable slots, not reimplemented logic. So this test
+    /// isn't validating a separate vanilla habitat-resolution algorithm; it's validating that our
+    /// sequencing (vtable offsets, `this`/argument marshalling, override-vs-fallback logic) matches
+    /// vanilla's own `addThought.asm` exactly.
+    ///
+    /// The fixture: a `ZTAnimal` (zeroed via `ZTAnimal::new_for_test`; entity type built via
+    /// `ZTAnimalType::new_for_test` so its vtable is the real `0x00630268` - slot `0x1c` resolves to
+    /// `isCastClass`) with its own vtable field overwritten to the real `ZTAnimal` vtable `0x0062ff54`
+    /// via a raw memory write, so slot `0x24c` resolves to `getHabitat`. `isCastClass` always returns
+    /// true when called on a genuine `ZTAnimalType`-vtabled object, so this fixture reliably exercises
+    /// the override-taken path, not the fallback.
+    ///
+    /// `getHabitat`'s own chain reads `BFEntity::getTile()` (a real vanilla, non-virtual call) and a
+    /// show-info flag at a `BFUnit` offset; the fixture's zeroed base leaves that flag `0`, skipping the
+    /// `ZTShowMgr` branch, and `pos = (0, 0, 0)` is expected to miss real vanilla's own tile lookup at
+    /// this injection point (no zoo loaded yet).
+    fn run_thoughtmgr_add_thought_animal_override_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_ADD_THOUGHT_ANIMAL_OVERRIDE";
+        let mut fail_flag = false;
+
+        match runner.run(&(any::<u32>(), 0u32..5), |(string_id, fallback_habitat_ptr)| {
+            let entity_type = ZTAnimalType::new_for_test(IVec3::default(), 0, IVec3::default(), IVec3::default());
+            let animal = ZTAnimal::new_for_test(&entity_type as *const ZTAnimalType as u32, 0, 0, false, false);
+            let animal_addr = &animal as *const ZTAnimal as u32;
+            save_to_memory::<u32>(animal_addr, 0x0062_ff54u32);
+
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+
+            unsafe {
+                gen_ztthoughtmgr::ADD_THOUGHT.original()(
+                    real_ptr as *const u32,
+                    string_id,
+                    std::ptr::null(),
+                    animal_addr as *const u32,
+                    fallback_habitat_ptr as *const u32,
+                );
+            }
+            unsafe { &mut *reimpl_ptr }.add_thought(string_id, 0, animal_addr, fallback_habitat_ptr);
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr_leaking_nodes(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(
+                real_fields,
+                reimpl_fields,
+                "content mismatch for string_id={}, fallback_habitat_ptr={:#x}",
+                string_id,
+                fallback_habitat_ptr
+            );
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_POPULATE_THOUGHTS: compares the real `ZTThoughtMgr::populateThoughts`'s effect on
+    /// every thought's resolved `thinker_ptr`/`object_ptr`/`habitat_ptr`/`tile_x`/`tile_y` against the
+    /// reimplemented `populate_thoughts`, on two identically-seeded standalone managers. Needs
+    /// `GLOBAL_ZTWorldMgr` initialized (`ZTThought::populate` calls `ZTWorldMgr::resolve_entity_by_id`
+    /// unconditionally), so this runs from `run_on_completion_reset_test_and_exit`'s later chain, not
+    /// the early battery. `thinker_id`/`object_id` are generated over a small `0..5` range: real
+    /// entities essentially never have ids this low, so `resolve_entity_by_id` returns null on both
+    /// sides for the overwhelming majority of cases - a safe, deterministic "no match" - while still
+    /// leaving room for a genuine match.
+    fn run_thoughtmgr_populate_thoughts_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHTMGR_POPULATE_THOUGHTS";
+        let mut fail_flag = false;
+
+        let record_strategy = (any::<u32>(), 0u32..5, 0u32..5);
+        match runner.run(&prop::collection::vec(record_strategy, 0..6), |records| {
+            let real_ptr = thought_live_support::build_standalone_mgr(1000);
+            let reimpl_ptr = thought_live_support::build_standalone_mgr(1000);
+            for &(string_id, thinker_id, object_id) in &records {
+                unsafe { &mut *real_ptr }.insert_front(thought_live_support::new_thought(string_id, thinker_id, object_id, -1, -1, 0, 0, 0));
+                unsafe { &mut *reimpl_ptr }.insert_front(thought_live_support::new_thought(string_id, thinker_id, object_id, -1, -1, 0, 0, 0));
+            }
+
+            unsafe { gen_ztthoughtmgr::POPULATE_THOUGHTS.original()(real_ptr as *const u32) };
+            unsafe { &mut *reimpl_ptr }.populate_thoughts();
+
+            let real_fields: Vec<_> = unsafe { &*real_ptr }.iter().map(thought_fields).collect();
+            let reimpl_fields: Vec<_> = unsafe { &*reimpl_ptr }.iter().map(thought_fields).collect();
+
+            thought_live_support::destroy_standalone_mgr(real_ptr);
+            thought_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+            prop_assert_eq!(real_fields, reimpl_fields, "mismatch for records={:?}", records);
+            Ok(())
+        }) {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        fail_flag
+    }
+
+    /// Writes `name` into `entity`'s `name` field (`+0x108`, a `ZTBufferString`) by raw offset write.
+    /// `entity` must not move after this call - its address is baked into the write. Returns the
+    /// backing byte buffer, which the caller must keep alive at least as long as `entity` is read
+    /// through.
+    fn set_bfentity_name(entity: &BFEntity, name: &str) -> Vec<u8> {
+        let mut encoded = name.as_bytes().to_vec();
+        let len = encoded.len() as u32;
+        encoded.push(0);
+        let start = encoded.as_ptr() as u32;
+        let entity_addr = entity as *const BFEntity as u32;
+        save_to_memory::<u32>(entity_addr + 0x108, start);
+        save_to_memory::<u32>(entity_addr + 0x10c, start + len);
+        save_to_memory::<u32>(entity_addr + 0x110, start + encoded.len() as u32);
+        encoded
+    }
+
+    /// Writes `name` into `habitat`'s `exhibit_name` field (`+0x154`, a `ZTBoundedString`) by raw offset
+    /// write - same technique as `set_bfentity_name`, but `ZTBoundedString` is a 2-pointer
+    /// `start_ptr`/`end_ptr` pair with no separate `buffer_end_ptr`.
+    fn set_habitat_exhibit_name(habitat: &ZTHabitat, name: &str) -> Vec<u8> {
+        let mut encoded = name.as_bytes().to_vec();
+        let len = encoded.len() as u32;
+        encoded.push(0);
+        let start = encoded.as_ptr() as u32;
+        let habitat_addr = habitat as *const ZTHabitat as u32;
+        save_to_memory::<u32>(habitat_addr + 0x154, start);
+        save_to_memory::<u32>(habitat_addr + 0x158, start + len);
+        encoded
+    }
+
+    /// Which of `get_string`'s three substitution branches a `ZTTHOUGHT_GET_STRING` case exercises
+    /// (priority: object, then habitat, then no substitution).
+    #[derive(Debug, Clone)]
+    enum GetStringSubstitution {
+        None,
+        Object(String),
+        Habitat(String),
+    }
+
+    fn get_string_substitution_strategy() -> impl Strategy<Value = GetStringSubstitution> {
+        prop_oneof![
+            Just(GetStringSubstitution::None),
+            "[a-zA-Z0-9 ]{0,16}".prop_map(GetStringSubstitution::Object),
+            "[a-zA-Z0-9 ]{0,16}".prop_map(GetStringSubstitution::Habitat),
+        ]
+    }
+
+    /// ZTTHOUGHT_GET_STRING: compares the real `ZTThought::getString`'s output against the reimplemented
+    /// `get_string`, across all three substitution branches: no substitution (`object_ptr = habitat_ptr
+    /// = 0`), object-name substitution (a fixture `BFEntity` with its `name` field set via
+    /// `set_bfentity_name`), and habitat exhibit-name substitution (a fixture `ZTHabitat` with
+    /// `exhibit_name` set via `set_habitat_exhibit_name`). `get_string` only ever reads these two fields
+    /// directly (no vtable dispatch), so a zeroed fixture with just the name field populated is a safe,
+    /// complete stand-in for a real live `BFEntity`/`ZTHabitat`. Runs from
+    /// `run_on_completion_reset_test_and_exit`'s later chain: language DLLs, which
+    /// `load_string_by_id`/`BFApp::loadString` both depend on, aren't loaded yet at the early injection
+    /// point.
+    fn run_thought_get_string_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let test_name = "ZTTHOUGHT_GET_STRING";
+        let mut fail_flag = false;
+
+        match runner.run(&(any::<u32>(), get_string_substitution_strategy()), |(string_id, case)| {
+            let entity_storage = BFEntity::new_for_test(0, 0, 0);
+            let habitat_storage: ZTHabitat = unsafe { std::mem::zeroed() };
+            let _name_buf: Option<Vec<u8>>;
+
+            let (object_ptr, habitat_ptr) = match &case {
+                GetStringSubstitution::None => {
+                    _name_buf = None;
+                    (0u32, 0u32)
+                }
+                GetStringSubstitution::Object(name) => {
+                    _name_buf = Some(set_bfentity_name(&entity_storage, name));
+                    (&entity_storage as *const BFEntity as u32, 0u32)
+                }
+                GetStringSubstitution::Habitat(name) => {
+                    _name_buf = Some(set_habitat_exhibit_name(&habitat_storage, name));
+                    (0u32, &habitat_storage as *const ZTHabitat as u32)
+                }
+            };
+
+            let thought = thought_live_support::new_thought(string_id, 0, 0, -1, -1, 0, object_ptr, habitat_ptr);
+
+            let mut buffer = [0u32; 3];
+            unsafe {
+                gen_ztthought::GET_STRING.original()(&thought as *const ZTThought as *const u32, buffer.as_mut_ptr() as *const u32);
+            }
+            let real_text = get_from_memory::<ZTBufferString>(buffer.as_ptr() as u32).copy_to_string();
+            let reimpl_text = thought.get_string();
+
+            prop_assert_eq!(real_text, reimpl_text, "get_string mismatch for string_id={}, case={:?}", string_id, case);
             Ok(())
         }) {
             Ok(_) => {

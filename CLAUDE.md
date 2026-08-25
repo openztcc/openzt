@@ -443,6 +443,12 @@ Integration tests use an embedded mod approach where test resources are compiled
 - Tests create temporary files (e.g., `animals/test.ai`) for verification
 - **Habitat/Location Registration**: Always use the TOML key identifier (e.g., "test_habitat_a"), NOT the display name (e.g., "Test Habitat A") when looking up habitats/locations in tests
 
+### Live Reimplementation-Comparison Tests
+
+Separate from integration tests: the `reimplementation-tests` feature (`openzt/src/reimplementation_tests/`, always enabled by `openzt-test-dll`) builds standalone instances of a reimplemented struct, calls the real vanilla function via `.original()()` on one and the Rust reimplementation on the other, and compares results/state field-by-field. Same `./openzt.bat build --test` / `run --test --wait` workflow as above; results append to `openzt_test.log` (`OPENZT_TEST_LOG` env var overrides the path).
+
+**⚠️ Never free real vanilla output through Rust's allocator, or vice versa.** If a class manages its own heap objects (e.g. `ZTThoughtMgr`'s intrusive linked list, allocated through vanilla's own small-object freelist when reached via `.original()`, vs. `Box` when built by test/reimplementation code), calling `Box::from_raw`/`drop` on a node that real vanilla code allocated - or letting vanilla code's own free path touch a `Box`-allocated node - is a genuine cross-allocator heap corruption bug, not just a leak. It will crash, but Windows' Fault Tolerant Heap can silently absorb the crash (no dialog, no WER crash dump, `openzt.log` empty) after a few occurrences, making it look like the game "just exited" - a reboot is sometimes needed to see a real crash again after FTH kicks in. When a real, undetoured mutator is called live in a test and might allocate/link nodes of its own, build a leak-only teardown path for that side (free only what your own code allocated - the sentinel/outer struct - and deliberately leak anything vanilla's own allocator produced) rather than reusing the normal Box-walking cleanup. See `ztthoughtmgr.rs`'s `live_support::destroy_standalone_mgr_leaking_nodes` for a worked example.
+
 ### Game Launch Checks
 
 The build script automatically checks if Zoo Tycoon is already running before attempting to launch:

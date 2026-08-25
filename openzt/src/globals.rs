@@ -47,6 +47,24 @@ pub struct ZTResearchMgr {
     _private: [u8; 0],
 }
 
+/// Opaque type for ZTMarketingMgr
+#[repr(C)]
+pub struct ZTMarketingMgr {
+    _private: [u8; 0],
+}
+
+/// Opaque type for ZTThoughtMgr
+#[repr(C)]
+pub struct ZTThoughtMgr {
+    _private: [u8; 0],
+}
+
+/// Opaque type for ZTMegatileMgr
+#[repr(C)]
+pub struct ZTMegatileMgr {
+    _private: [u8; 0],
+}
+
 /// Walks a pointer chain and returns the final address.
 ///
 /// # Arguments
@@ -137,6 +155,9 @@ pub struct Globals {
     ztgamemgr: CachedGlobalInstance<ZTGameMgr>,
     bfresourcemgr: CachedGlobalInstance<BFResourceMgr>,
     ztresearchmgr: CachedGlobalInstance<ZTResearchMgr>,
+    ztmarketingmgr: CachedGlobalInstance<ZTMarketingMgr>,
+    ztthoughtmgr: CachedGlobalInstance<ZTThoughtMgr>,
+    ztmegatilemgr: CachedGlobalInstance<ZTMegatileMgr>,
 }
 
 impl Globals {
@@ -223,6 +244,48 @@ impl Globals {
             self.ztresearchmgr.get() as *mut crate::ztresearch::ZTResearchMgr
         }
     }
+
+    /// Returns a shared reference to the ZTMarketingMgr (read-only).
+    pub fn ztmarketingmgr(&self) -> &crate::ztmarketing::ZTMarketingMgr {
+        unsafe {
+            &*(self.ztmarketingmgr.get() as *const crate::ztmarketing::ZTMarketingMgr)
+        }
+    }
+
+    /// Returns a raw mutable pointer to the ZTMarketingMgr for mutation.
+    pub fn ztmarketingmgr_ptr(&self) -> *mut crate::ztmarketing::ZTMarketingMgr {
+        unsafe {
+            self.ztmarketingmgr.get() as *mut crate::ztmarketing::ZTMarketingMgr
+        }
+    }
+
+    /// Returns a shared reference to the ZTThoughtMgr (read-only).
+    pub fn ztthoughtmgr(&self) -> &crate::ztthoughtmgr::ZTThoughtMgr {
+        unsafe {
+            &*(self.ztthoughtmgr.get() as *const crate::ztthoughtmgr::ZTThoughtMgr)
+        }
+    }
+
+    /// Returns a raw mutable pointer to the ZTThoughtMgr for mutation.
+    pub fn ztthoughtmgr_ptr(&self) -> *mut crate::ztthoughtmgr::ZTThoughtMgr {
+        unsafe {
+            self.ztthoughtmgr.get() as *mut crate::ztthoughtmgr::ZTThoughtMgr
+        }
+    }
+
+    /// Returns a shared reference to the ZTMegatileMgr (read-only).
+    pub fn ztmegatilemgr(&self) -> &crate::ztmegatilemgr::ZTMegatileMgr {
+        unsafe {
+            &*(self.ztmegatilemgr.get() as *const crate::ztmegatilemgr::ZTMegatileMgr)
+        }
+    }
+
+    /// Returns a raw mutable pointer to the ZTMegatileMgr for mutation.
+    pub fn ztmegatilemgr_ptr(&self) -> *mut crate::ztmegatilemgr::ZTMegatileMgr {
+        unsafe {
+            self.ztmegatilemgr.get() as *mut crate::ztmegatilemgr::ZTMegatileMgr
+        }
+    }
 }
 
 // SAFETY: Globals only contains CachedGlobalInstance values which are Send + Sync
@@ -269,6 +332,14 @@ fn ensure_globals() -> &'static Globals {
             bfresourcemgr: CachedGlobalInstance::new(base + 0x002380C0, &[]),
             // 0x639010 (Ghidra address, default base 0x400000) -> RVA 0x239010
             ztresearchmgr: CachedGlobalInstance::new(base + 0x00239010, &[0]),
+            // 0x639000 (Ghidra address, default base 0x400000) -> RVA 0x239000
+            ztmarketingmgr: CachedGlobalInstance::new(base + 0x00239000, &[0]),
+            // 0x639090 (Ghidra address, default base 0x400000) -> RVA 0x239090
+            ztthoughtmgr: CachedGlobalInstance::new(base + 0x00239090, &[0]),
+            // 0x639004 (Ghidra address, default base 0x400000) -> RVA 0x239004. Confirmed directly via
+            // Ghidra (OOAnalyzer-assigned symbol `GLOBAL_ZTMegatileMgr`), in the same neighborhood as
+            // ZTMarketingMgr/ZTResearchMgr/ZTThoughtMgr (0x639000/0x639010/0x639090).
+            ztmegatilemgr: CachedGlobalInstance::new(base + 0x00239004, &[0]),
         }
     })
 }
