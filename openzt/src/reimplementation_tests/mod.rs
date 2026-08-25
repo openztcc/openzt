@@ -1176,20 +1176,19 @@ mod detour_zoo_main {
             // Risk-sequenced per ztmegatilemgr.rs's module doc comment: update() first (trivial scalar
             // logic), then recalculate_characteristics() (in-place map mutation, no vector resize), then
             // the category-map node-layout live check, then init() last (the only vector-resize path).
+            // All four ran unconditionally in the default battery for the first time once two real bugs
+            // were found and fixed - see `ztmegatilemgr-live-crash-investigation.md` for the full
+            // history: (1) `outer_vector_erase`/`outer_vector_insert_n` were passing the wrong `this`
+            // pointer (the `ZTMegatileMgr*` itself instead of `&mgr->row_start`, the embedded vector
+            // header's real address - this was the original crash, previously misdiagnosed as a vanilla
+            // exception-filter/uninitialized-global issue), and (2) `init()`'s per-column grow path
+            // needed a real, correctly-shaped empty-tree sentinel (`parent: null`, `left`/`right`
+            // self-referential) for the fill value's `category_map.head`, not a null or dummy pointer -
+            // see `empty_category_map_sentinel`'s own doc comment in `ztmegatilemgr.rs`.
             fail_flag |= run_megatilemgr_update_test(&mut failure_log);
-            // Calling `recalculateCharacteristics` (real or reimplemented - both reach the identical
-            // vanilla vtable dispatch) at this injection point live-crashed during development: a
-            // vanilla `isKindOf`-style vtable function reads a *different*, apparently-not-yet-initialized
-            // global (RVA 0x238050) for certain entity types, unrelated to anything this reimplementation
-            // controls - see `run_megatilemgr_recalculate_characteristics_test`'s own doc comment. Gated
-            // behind an opt-in env var, same precedent as `OPENZT_REPRO_MARKETING_CRASH` above, so the
-            // default battery stays crash-free while the capability to re-run these three once that
-            // global's identity/init timing is understood remains available.
-            if std::env::var("OPENZT_MEGATILE_RECALC_LIVE_TEST").is_ok() {
-                fail_flag |= run_megatilemgr_recalculate_characteristics_test(&mut failure_log);
-                fail_flag |= run_megatile_category_map_layout_test(&mut failure_log);
-                fail_flag |= run_megatilemgr_init_test(&mut failure_log);
-            }
+            fail_flag |= run_megatilemgr_recalculate_characteristics_test(&mut failure_log);
+            fail_flag |= run_megatile_category_map_layout_test(&mut failure_log);
+            fail_flag |= run_megatilemgr_init_test(&mut failure_log);
         }
 
         if fail_flag {
@@ -1294,12 +1293,12 @@ mod detour_zoo_main {
     /// Runs after `run_load_live_zoo` so the live singleton is a real, populated grid - see
     /// `ztmegatilemgr.rs`'s own module doc comment for why this is implemented/tested first.
     ///
-    /// Deliberately never crosses the threshold here (unlike the plan's original "spans both sides"
-    /// intent): doing so calls through to `recalculate_characteristics` as a side effect (real or
-    /// reimplemented, either way), which live-crashed during development - see
-    /// `run_megatilemgr_recalculate_characteristics_test`'s own doc comment for the root cause. The
-    /// threshold/dirty-flag transition logic itself is still fully covered by
-    /// `ztmegatilemgr::tests::update_state_*` (pure, no live memory touched).
+    /// Deliberately never crosses the threshold here: doing so calls through to
+    /// `recalculate_characteristics` as a side effect (real or reimplemented, either way), which is
+    /// exercised directly and more thoroughly by `run_megatilemgr_recalculate_characteristics_test`
+    /// below - no need for this test to also trigger it as a side effect. The threshold/dirty-flag
+    /// transition logic itself is still fully covered by `ztmegatilemgr::tests::update_state_*` (pure,
+    /// no live memory touched).
     fn run_megatilemgr_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZTMEGATILEMGR_UPDATE";
         let mgr_ptr = globals().ztmegatilemgr_ptr();
@@ -1376,20 +1375,16 @@ mod detour_zoo_main {
     /// comment), so this simply runs the real call, snapshots as expected, runs the reimplemented call
     /// on top, and snapshots again - no restore needed.
     ///
-    /// **Known live crash, gated behind `OPENZT_MEGATILE_RECALC_LIVE_TEST` (see the registration site
-    /// above):** calling `RECALCULATE_CHARACTERISTICS.original()` at this injection point (right after
-    /// `run_load_live_zoo`) crashed during development with an access violation *inside vanilla
-    /// zoo.exe*, not this reimplementation - `cdb` analysis of the resulting crash dump showed a
-    /// vtable-dispatched `isKindOf`-style function (reached via the confirmed-correct
-    /// `entity_type_ptr`/vtable-slot-`0x1c` mechanism this file already established working in
-    /// `ztthoughtmgr.rs`) reading a *different*, apparently-uninitialized global at RVA `0x238050` for
-    /// some entity type present in the test zoo (`eax == 0x80000003` is a fast-path that avoids this for
-    /// most entities; whatever's untagged that way falls through into the null read). Because the real
-    /// and reimplemented calls both reach this identical vanilla code through the identical dispatch,
-    /// this looks like a test-injection-timing issue (recalculating too early, before something else -
-    /// possibly `ZTAIMgr`, the RVA's neighbor in `globals.rs`'s documented cluster - finishes
-    /// initializing) rather than a bug in `recalculate_characteristics` itself. Two real bugs *were*
-    /// found and fixed via this same investigation before hitting this blocker: `bfcategory::GET_VALUE`
+    /// This test used to crash reliably (misdiagnosed at the time as a vanilla exception-filter /
+    /// uninitialized-global issue inside an `isKindOf`-style vtable function). The real cause turned out
+    /// to be entirely on this side: `outer_vector_erase`/`outer_vector_insert_n` in `ztmegatilemgr.rs`
+    /// were passing the wrong `this` pointer to vanilla's own vector-resize helpers (the
+    /// `ZTMegatileMgr*` itself instead of `&mgr->row_start`, where the embedded `vector<MegatileRow>`
+    /// header actually lives), corrupting the manager's own `vtable`/`flag`/`dirty`/`tick_accumulator`
+    /// fields instead of the vector header - see `ztmegatilemgr-live-crash-investigation.md` for the
+    /// full history and `ztmegatilemgr-review-findings.md` for the original review that flagged it.
+    /// Fixed, this test (and `ZTMEGATILE_CATEGORY_MAP_LAYOUT`/`ZTMEGATILEMGR_INIT` below) now passes
+    /// live. Two smaller real bugs were also found and fixed along the way: `bfcategory::GET_VALUE`
     /// needed `this = entity_type_ptr + 0x154` (not `entity_type_ptr` itself) and its category id
     /// argument by value (not by pointer) - both confirmed directly from
     /// `ZTMegatileMgr_recalculateCharacteristics.asm`, see `recalculate_characteristics`'s own call site.
