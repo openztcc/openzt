@@ -82,10 +82,16 @@ impl ZTGameMgr {
     }
 
     /// Calls the vanilla `ZTGameMgr::subtractCash`: subtracts `amount` from the budget, then refreshes
-    /// the on-screen money display (`ZTUI::main::setMoneyText`). Used by `ztresearch::ZTResearchBranch::update`'s
-    /// native reimplementation of the branch funding cost, among other callers.
+    /// the on-screen money display (`ZTUI::main::setMoneyText`). Used by
+    /// `ztresearch::ZTResearchBranch::update`'s native reimplementation of the branch funding cost,
+    /// among other callers.
+    ///
+    /// Takes a trailing `bool` matching the real signature (`ZTGameMgr::subtractCash(float, bool)`,
+    /// per the `.asm`'s `RET 8`). Neither platform's compiled body reads this second parameter -
+    /// passing `false` here is only to make Rust's `thiscall` codegen push the correct second stack
+    /// dword so the real function's own `ret 8` pops the right number of bytes.
     pub fn subtract_cash(&mut self, amount: f32) {
-        unsafe { SUBTRACT_CASH.original()((self as *mut Self) as *const u32, amount) }
+        unsafe { SUBTRACT_CASH.original()((self as *mut Self) as *const u32, amount, false) }
     }
 
     /// Calls the vanilla `ZooStatus::spendResearch` on the embedded `ZooStatus` finance-tracker at
@@ -102,10 +108,8 @@ impl ZTGameMgr {
     }
 
     /// Calls the vanilla `ZooStatus::spendMarketing` on the same embedded `ZooStatus` sub-object as
-    /// `spend_research` (see that method's doc comment - `ZTMarketing::update` confirms the identical
-    /// `&GameMgr->field_0x10` shape with its own call, per `resources/decompiles/ZTMarketing_update.c`).
-    /// Used by `ztmarketing::ZTMarketing::update`'s native reimplementation, called before
-    /// `subtract_cash` to match vanilla's own call order.
+    /// `spend_research`. Used by `ztmarketing::ZTMarketing::update`, called before `subtract_cash` to
+    /// match vanilla's own call order.
     pub fn spend_marketing(&mut self, amount: f32) {
         let zoostatus_ptr = (self as *mut Self as u32 + 0x10) as *const u32;
         unsafe { SPEND_MARKETING.original()(zoostatus_ptr, amount) }

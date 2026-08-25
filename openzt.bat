@@ -296,15 +296,21 @@ REM ============================================================
 :check
 SHIFT
 SET CHECK_ARGS=
+SET CHECK_MANIFEST=openzt/Cargo.toml
 :check_args_loop
 IF "%~1"=="" GOTO run_check
+IF "%~1"=="--test" (
+    SET CHECK_MANIFEST=openzt-test-dll/Cargo.toml
+    SHIFT
+    GOTO check_args_loop
+)
 SET CHECK_ARGS=!CHECK_ARGS! %1
 SHIFT
 GOTO check_args_loop
 
 :run_check
-echo Running cargo check on openzt...
-cargo check --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc !CHECK_ARGS!
+echo Running cargo check on !CHECK_MANIFEST!...
+cargo check --manifest-path !CHECK_MANIFEST! --target i686-pc-windows-msvc !CHECK_ARGS!
 
 IF !errorlevel! NEQ 0 (
     echo.
@@ -324,15 +330,21 @@ REM ============================================================
 :clippy
 SHIFT
 SET CLIPPY_ARGS=
+SET CLIPPY_MANIFEST=openzt/Cargo.toml
 :clippy_args_loop
 IF "%~1"=="" GOTO run_clippy
+IF "%~1"=="--test" (
+    SET CLIPPY_MANIFEST=openzt-test-dll/Cargo.toml
+    SHIFT
+    GOTO clippy_args_loop
+)
 SET CLIPPY_ARGS=!CLIPPY_ARGS! %1
 SHIFT
 GOTO clippy_args_loop
 
 :run_clippy
-echo Running cargo clippy on openzt...
-cargo clippy --manifest-path openzt/Cargo.toml --target i686-pc-windows-msvc !CLIPPY_ARGS!
+echo Running cargo clippy on !CLIPPY_MANIFEST!...
+cargo clippy --manifest-path !CLIPPY_MANIFEST! --target i686-pc-windows-msvc !CLIPPY_ARGS!
 
 IF !errorlevel! NEQ 0 (
     echo.
@@ -438,8 +450,8 @@ echo.
 echo Subcommands:
 echo   build              Build the DLL only
 echo   run                Build the DLL and launch the game
-echo   check              Run cargo check on openzt crate
-echo   clippy             Run cargo clippy on openzt crate
+echo   check              Run cargo check on openzt crate (pass --test to check openzt-test-dll instead)
+echo   clippy             Run cargo clippy on openzt crate (pass --test to check openzt-test-dll instead)
 echo   test               Run cargo test on openzt crate
 echo   integration-tests  Run integration tests (builds release, launches game, displays results)
 echo   update             Run cargo update on the workspace (forwards extra args, e.g. -p ^<pkg^>)

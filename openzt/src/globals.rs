@@ -311,17 +311,9 @@ fn ensure_globals() -> &'static Globals {
             bfresourcemgr: CachedGlobalInstance::new(base + 0x002380C0, &[]),
             // 0x639010 (Ghidra address, default base 0x400000) -> RVA 0x239010
             ztresearchmgr: CachedGlobalInstance::new(base + 0x00239010, &[0]),
-            // 0x639000 (Ghidra address, default base 0x400000) -> RVA 0x239000. Confirmed by
-            // querying the project's Ghidra database directly for the OOAnalyzer-assigned
-            // `GLOBAL_ZTMarketingMgr` symbol, and cross-checked against three already-known-good
-            // globals resolved the same way (GLOBAL_ZTResearchMgr -> 0x639010, GLOBAL_ZTGameMgr ->
-            // 0x638048, GLOBAL_ZTAdvTerrainMgr -> 0x638058 - all matching the addresses already
-            // hard-coded above).
+            // 0x639000 (Ghidra address, default base 0x400000) -> RVA 0x239000
             ztmarketingmgr: CachedGlobalInstance::new(base + 0x00239000, &[0]),
-            // 0x639090 (Ghidra address, default base 0x400000) -> RVA 0x239090. Confirmed directly
-            // via Ghidra (OOAnalyzer-assigned symbol `GLOBAL_ZTThoughtMgr`), in the same neighborhood
-            // as ZTMarketingMgr/ZTResearchMgr (0x639000/0x639010) and ZTGameMgr/ZTAdvTerrainMgr
-            // (0x638048/0x638058).
+            // 0x639090 (Ghidra address, default base 0x400000) -> RVA 0x239090
             ztthoughtmgr: CachedGlobalInstance::new(base + 0x00239090, &[0]),
         }
     })

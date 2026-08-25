@@ -1,25 +1,12 @@
 //! Structs and methods for the vanilla `ZTMarketingMgr`/`ZTMarketing`/`ZTMarketingFundingLevel`
 //! classes, which drive the zoo's marketing spend: a single funding-level index selects a
 //! `(name, benefit, cost)` entry from a flat table, and `ZTMarketingMgr::update` periodically spends
-//! `cost` dollars per in-game day. Structurally much simpler than `ZTResearchMgr` (see
-//! `openzt/plans/ztmarketing-implementation-plan.md`): no branch/category/program tree, no
-//! `effect_kind` dispatch, no RNG.
-//!
-//! Field layouts below are confirmed directly from Windows decompiles in `resources/decompiles/
-//! ZTMarketing*`/`ZTMarketingMgr*` (not just macOS-only guesses) - see the plan's "Known layout"
-//! section for the full evidence trail. `GLOBAL_ZTMarketingMgr`'s own address (RVA `0x00239000`,
-//! single-level pointer indirection) was confirmed by querying the project's Ghidra database
-//! directly (OOAnalyzer-assigned symbol `GLOBAL_ZTMarketingMgr`) and cross-checked against three
-//! already-known-good globals resolved the same way (`GLOBAL_ZTResearchMgr` -> `0x00239010`,
-//! `GLOBAL_ZTGameMgr` -> `0x00238048`, `GLOBAL_ZTAdvTerrainMgr` -> `0x00238058`), all of which match
-//! the addresses already hard-coded in `globals.rs`.
+//! `cost` dollars per in-game day.
 //!
 //! The funding-level mutators (`increase_funding`/`decrease_funding`/`set_funding_level`), `update`,
 //! `save`/`load`, `getFundingText`, and the `.cfg`-driven config-loading pipeline
 //! (`marketing_config_reimplementation`, below) are all natively reimplemented. Only
-//! `ZTMarketingMgr::create`/`instantiate`/`destroy` remain unreimplemented - they have no confirmed
-//! Windows address at all (macOS-decompile only), so replicating them would require new
-//! Ghidra/decompiling work outside this module's scope.
+//! `ZTMarketingMgr::create`/`instantiate`/`destroy` remain unreimplemented.
 
 use std::mem::size_of;
 
@@ -34,14 +21,13 @@ use crate::{
     ztresearch::get_money_text,
 };
 
-/// One entry in a `ZTMarketing`'s flat funding-level table. Confirmed field-for-field by
-/// `resources/decompiles/ZTMarketing_loadConfiguration.c`'s writes.
+/// One entry in a `ZTMarketing`'s flat funding-level table.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ZTMarketingFundingLevel {
-    name: i32,    // 0x0 - confirmed: the level's display-name string id
-    benefit: i32, // 0x4 - confirmed: read and stored by loadConfiguration but not read by update/save/load/getFundingText/setFundingLevel; likely consumed elsewhere in the game
-    cost: f32,    // 0x8 - confirmed: the in-game-day cash cost this level charges (see ZTMarketing::update)
+    name: i32,    // 0x0 - display-name string id
+    benefit: i32, // 0x4 - read/stored, not used elsewhere in this module
+    cost: f32,    // 0x8 - in-game-day cash cost this level charges
 }
 
 impl ZTMarketingFundingLevel {
@@ -49,8 +35,7 @@ impl ZTMarketingFundingLevel {
         self.name
     }
 
-    /// Display name/template (e.g. `"%s"`-shaped), resolved through the same string table
-    /// `ZTResearchFundingLevel::name` uses - see that method's own doc comment.
+    /// Display name/template (e.g. `"%s"`-shaped), resolved through the string table.
     pub fn name(&self) -> Option<String> {
         load_string_by_id(self.name as u32)
     }
@@ -64,36 +49,29 @@ impl ZTMarketingFundingLevel {
     }
 }
 
-/// `1.0 / 43200.0`, confirmed shared verbatim with `ZTResearchBranch::update`'s own
-/// `DAYS_TO_FUNDING_SCALE` (see that constant's doc comment in `ztresearch.rs` for how it was
-/// confirmed against the installed `zoo.exe`'s `.data` section) - `ZTMarketing::update` references the
-/// exact same `_DAT_00630d78` global, in the same `days * cost * scale` shape.
+/// Shared verbatim with `ZTResearchBranch::update`'s own `DAYS_TO_FUNDING_SCALE`.
 const DAYS_TO_FUNDING_SCALE: f32 = 1.0 / 43200.0;
 
-/// Resolves `GLOBAL_ZTGameMgr` fresh from its raw memory slot on every call, rather than going through
-/// `globals()`'s `CachedGlobalInstance` (which resolves the pointer chain once and caches it forever) -
-/// same reasoning as `ztresearch::global_ztgamemgr_ptr`, whose own doc comment explains why this
-/// matters for the `reimplementation_tests` live-comparison harness (it patches this same raw slot to
-/// redirect reads, which a cached accessor can't observe).
+/// Resolves `GLOBAL_ZTGameMgr` fresh from memory on every call rather than caching it, so the
+/// `reimplementation_tests` harness can redirect reads by patching the raw slot.
 fn global_ztgamemgr_ptr() -> *mut crate::ztgamemgr::ZTGameMgr {
     get_from_memory::<u32>(get_module_base("zoo.exe") as u32 + 0x0023_8048) as *mut crate::ztgamemgr::ZTGameMgr
 }
 
 /// The zoo's single marketing campaign. Owned (by pointer) by `ZTMarketingMgr`; there is exactly one
-/// instance, unlike `ZTResearchMgr`'s branch/category/program tree. Confirmed `operator_new(0x1c)` -
-/// 28 bytes total - via `ZTMarketingMgr_loadConfigurations.c`'s own allocation call.
+/// instance, unlike `ZTResearchMgr`'s branch/category/program tree. Allocated as 28 bytes
+/// (`operator_new(0x1c)`).
 #[derive(Debug)]
 #[repr(C)]
 pub struct ZTMarketing {
-    config_file: BFConfigFile,  // 0x00 - the inherited BFConfigFile base (see bfconfigfile.rs)
-    current_funding_level: u32, // 0x0c - confirmed: index into the funding-level table below
-    vector_start: u32, // 0x10 - confirmed: inline ZTMarketingFundingLevel table start (stride 0xc), a proper 3-pointer MSVC vector - not a ZTArray of pointers
-    vector_end: u32,   // 0x14 - confirmed
-    vector_capacity_end: u32, // 0x18 - confirmed: the destructor frees [vector_start, vector_capacity_end), not just [vector_start, vector_end)
+    config_file: BFConfigFile,  // 0x00 - inherited BFConfigFile base (see bfconfigfile.rs)
+    current_funding_level: u32, // 0x0c - index into the funding-level table below
+    vector_start: u32, // 0x10 - inline ZTMarketingFundingLevel table start (stride 0xc), MSVC 3-pointer vector
+    vector_end: u32,   // 0x14
+    vector_capacity_end: u32, // 0x18 - destructor frees [vector_start, vector_capacity_end)
 }
 
 impl ZTMarketing {
-    /// See `ZTResearchProgram::is_config_loaded`'s doc comment for the shared `BFConfigFile` shape.
     pub fn is_config_loaded(&self) -> bool {
         self.config_file.is_loaded()
     }
@@ -114,16 +92,10 @@ impl ZTMarketing {
         (0..self.funding_level_count()).map(|i| self.funding_level(i)).collect()
     }
 
-    /// The vanilla "$400"-style formatted text for the *currently selected* funding level, per
-    /// `resources/decompiles/ZTMarketing_getFundingText.c`. Bounds-checked the same way
-    /// `ZTResearchBranch::funding_text` is (out-of-range - including a negative index read as `u32` -
-    /// returns an empty string, matching vanilla's empty `BFString`-shaped triple in that branch).
-    /// Unlike research's sibling method, there's **no** day-scale pre-multiply here - the raw `cost`
-    /// field is passed straight into the money conversion (see the implementation plan's item 3: the
-    /// decompile confirms no `1/30` or `1/43200` constant appears in `getFundingText` itself, only in
-    /// `update`). Despite that, the same truncate-toward-zero FISTP idiom research's own `funding_text`
-    /// already confirmed applies here too (same `getMoneyText` overload, same call shape) - a plain
-    /// `as i32` cast in Rust already truncates toward zero, so no explicit rounding is needed.
+    /// The vanilla `"$400"`-style formatted text for the currently selected funding level.
+    /// Out-of-range index (including a negative index read as `u32`) returns an empty string. Unlike
+    /// `ZTResearchBranch::funding_text`, there's no day-scale pre-multiply - `cost` is passed straight
+    /// into the money conversion.
     pub fn funding_text(&self) -> String {
         let index = self.current_funding_level as usize;
         if index >= self.funding_level_count() {
@@ -137,26 +109,21 @@ impl ZTMarketing {
         }
     }
 
-    /// The `isFundingMaxed` boundary check vanilla inlines at every call site (`increaseFunding`'s own
-    /// saturation guard, and `_updateMarketingInfo`'s increase-button enable/disable logic) rather than
-    /// keeping as a separate function on Windows - see the implementation plan's item 0/2 analysis for
-    /// why this is exposed as a plain query instead of a detoured `.original()`-backed method.
+    /// The `isFundingMaxed` check vanilla inlines at every call site rather than keeping as a separate
+    /// function.
     pub fn is_funding_maxed(&self) -> bool {
         let count = self.funding_level_count() as u32;
         self.current_funding_level.wrapping_add(1) >= count
     }
 
-    /// The `isFundingMined` boundary check - same "inlined away on Windows" story as `is_funding_maxed`.
+    /// The `isFundingMined` check - same "inlined at call sites" story as `is_funding_maxed`.
     pub fn is_funding_mined(&self) -> bool {
         self.current_funding_level == 0
     }
 
-    /// Reimplementation of `OOAnalyzer::ZTMarketing::increaseFunding`, per
-    /// `resources/decompiles/ZTMarketing_increaseFunding.c`. An empty table always resets to index `0`
-    /// (even though the index is already `0` from the constructor - vanilla doesn't special-case this);
-    /// otherwise increments while there's room, else saturates at `count - 1`. Returns vanilla's masked
-    /// low-byte return value: `true` iff the table was empty or the index was already at/past the last
-    /// entry (i.e. exactly what a standalone `isFundingMaxed()` call would report *after* the operation).
+    /// An empty table always resets to index `0`; otherwise increments while there's room, else
+    /// saturates at `count - 1`. Returns `true` iff the table was empty or the index is at/past the
+    /// last entry after the operation.
     pub fn increase_funding(&mut self) -> bool {
         let count = self.funding_level_count() as u32;
         if count == 0 {
@@ -172,10 +139,8 @@ impl ZTMarketing {
         }
     }
 
-    /// Reimplementation of `OOAnalyzer::ZTMarketing::decreaseFunding`, per
-    /// `resources/decompiles/ZTMarketing_decreaseFunding.c`. Decrements only when the table is
-    /// non-empty and the index isn't already `0`; otherwise resets to `0`. Returns vanilla's masked
-    /// low-byte return value: `true` iff the index ended up (or already was) `0`.
+    /// Decrements only when the table is non-empty and the index isn't already `0`; otherwise resets
+    /// to `0`. Returns `true` iff the index ended up (or already was) `0`.
     pub fn decrease_funding(&mut self) -> bool {
         if self.funding_level_count() > 0 && self.current_funding_level != 0 {
             self.current_funding_level -= 1;
@@ -186,10 +151,8 @@ impl ZTMarketing {
         }
     }
 
-    /// Reimplementation of `OOAnalyzer::ZTMarketing::setFundingLevel`, per
-    /// `resources/decompiles/ZTMarketing_setFundingLevel.c`. Unlike `increase_funding`/
-    /// `decrease_funding`, out-of-range input resets to `0` rather than saturating at the last entry -
-    /// a genuinely different vanilla behavior per entry point, not something to unify away.
+    /// Unlike `increase_funding`/`decrease_funding`, out-of-range input resets to `0` rather than
+    /// saturating at the last entry.
     pub fn set_funding_level(&mut self, level: u32) {
         if level < self.funding_level_count() as u32 {
             self.current_funding_level = level;
@@ -198,26 +161,14 @@ impl ZTMarketing {
         }
     }
 
-    /// Reimplementation of `OOAnalyzer::ZTMarketing::update`, per
-    /// `resources/decompiles/ZTMarketing_update.c`: `days` in-game days of the *current* funding
-    /// level's `cost` (unlike `getFundingText`, which bounds-checks the index, vanilla's own version of
-    /// this reads `funding_level(current_funding_level)` completely unchecked - matching vanilla's own
-    /// raw `*(this + 0x10) + 8 + *(this + 0xc) * 0xc` pointer arithmetic, with no guard against an
-    /// empty/out-of-range table). If affordable against `GLOBAL_ZTGameMgr`'s live budget, spends it via
-    /// `ZooStatus::spendMarketing` then `ZTGameMgr::subtractCash` - the same two-call shape and shared
-    /// `DAYS_TO_FUNDING_SCALE` constant `ZTResearchBranch::update` uses (see that method's own doc
-    /// comment in `ztresearch.rs`), just with no progress/completion side effect at all.
+    /// `days` in-game days of the current funding level's `cost`, read unchecked - matching vanilla's
+    /// own raw pointer arithmetic with no guard against an empty/out-of-range table. If affordable
+    /// against `GLOBAL_ZTGameMgr`'s live budget, spends it via `ZooStatus::spendMarketing` then
+    /// `ZTGameMgr::subtractCash`.
     ///
-    /// The empty-table case *is* guarded here, unlike vanilla: `increase_funding`/`decrease_funding`/
-    /// `set_funding_level` all maintain `current_funding_level < funding_level_count()` whenever the
-    /// table is non-empty, so the only way this method could ever see an invalid index is a genuinely
-    /// empty table (`vector_start == 0`) - which real vanilla never ships (its own `mktgnorm.cfg` always
-    /// has four levels), but a live bug in `marketing_config_reimplementation`'s own parsing once did
-    /// produce (a crash on opening the zoo status menu, traced to `funding_level(0)` reading from a null
-    /// `vector_start`). Vanilla's own unchecked read would have crashed identically in that state, so
-    /// this guard doesn't diverge from any state vanilla itself is ever in - it only prevents this
-    /// specific reimplementation from crashing on a config it (through its own bug, or a malformed mod)
-    /// failed to populate, which vanilla's parser would never do to itself.
+    /// The empty-table case is guarded here, unlike vanilla: `increase_funding`/`decrease_funding`/
+    /// `set_funding_level` all keep `current_funding_level < funding_level_count()` whenever the table
+    /// is non-empty, so an empty table is the only way this could see an invalid index.
     pub fn update(&self, days: u32) {
         if self.funding_level_count() == 0 {
             return;
@@ -232,28 +183,21 @@ impl ZTMarketing {
     }
 }
 
-/// The zoo's marketing manager - owns exactly one `ZTMarketing` by pointer. Confirmed
-/// `operator_new(0x10)` - 16 bytes total - via `resources/decompiles/_CreateZTMarketingMgr.c` and
-/// `ZTMarketingMgr_ZTMarketingMgr.c` (the constructor).
+/// The zoo's marketing manager - owns exactly one `ZTMarketing` by pointer. Allocated as 16 bytes
+/// (`operator_new(0x10)`).
 #[derive(Debug)]
 #[repr(C)]
 pub struct ZTMarketingMgr {
     vtable: u32,           // 0x00
-    flag: u8,              // 0x04 - zeroed by the constructor; purpose not yet identified
+    flag: u8,              // 0x04 - zeroed by the constructor; purpose unknown
     _pad: [u8; 3],         // 0x05
     tick_accumulator: u32, // 0x08 - accumulates ticks in ZTMarketingMgr::update, converted to an in-game day count once enough have accrued
     marketing_ptr: u32,    // 0x0c - pointer to the single owned ZTMarketing, null until loadConfigurations succeeds
 }
 
-/// Pure prediction for `ZTMarketingMgr::update`'s accumulator/day-count bookkeeping, per
-/// `resources/decompiles/ZTMarketingMgr_update.c`/`.asm`. Bit-for-bit the same shape as
-/// `ztresearch::predict_update` (`elapsed_ticks * 0x1c20 / 60000` days, threshold `0x167` = 359) -
-/// confirmed directly from the decompile rather than assumed: the implementation plan flagged this
-/// threshold as needing independent confirmation (research's own literal could easily have been
-/// `0x168`/360 instead), and it turned out to be the exact same `0x167` constant. `tick_accumulator`
-/// wraps via plain 32-bit addition (the decompile's `dword`-typed accumulator), matching vanilla's own
-/// wraparound behavior exactly - see `ztresearch::predict_update`'s doc comment for why this uses
-/// `wrapping_add`/`wrapping_mul` rather than a widened intermediate.
+/// Pure prediction for `ZTMarketingMgr::update`'s accumulator/day-count bookkeeping. Same shape as
+/// `ztresearch::predict_update`: `elapsed_ticks * 0x1c20 / 60000` days, threshold `0x167` (359).
+/// `tick_accumulator` wraps via plain 32-bit addition, matching vanilla's own wraparound behavior.
 pub(crate) fn predict_mgr_update(tick_accumulator_before: u32, delta_ticks: u32) -> (u32, u32) {
     let tick_accumulator = tick_accumulator_before.wrapping_add(delta_ticks);
     let days = tick_accumulator.wrapping_mul(0x1c20) / 60000;
@@ -298,34 +242,29 @@ impl ZTMarketingMgr {
         (self.marketing_ptr != 0).then(|| unsafe { mut_from_memory(self.marketing_ptr) })
     }
 
-    /// Exposed for the live `reimplementation_tests` comparison harness - see `predict_mgr_update`.
+    /// Exposed for the live `reimplementation_tests` comparison harness.
     pub(crate) fn tick_accumulator(&self) -> u32 {
         self.tick_accumulator
     }
 
     /// Exposed for the live `reimplementation_tests` comparison harness, to seed a synthetic manager's
-    /// accumulator before comparing `ZTMarketingMgr::update` against the reimplementation - see
-    /// `predict_mgr_update`.
+    /// accumulator before comparing `ZTMarketingMgr::update` against the reimplementation.
     #[cfg(feature = "reimplementation-tests")]
     pub(crate) fn set_tick_accumulator(&mut self, value: u32) {
         self.tick_accumulator = value;
     }
 
     /// Exposed for the live `reimplementation_tests` comparison harness, to check `marketing_ptr`'s raw
-    /// non-null/null state directly without constructing a reference to memory that may already be
-    /// freed - see `clear_configurations`'s own doc comment on why the pointer is deliberately left
-    /// dangling (non-null, but stale) rather than nulled. `marketing()`/`marketing_mut()` would
-    /// construct such a reference, which this deliberately avoids.
+    /// non-null/null state without constructing a reference to memory that may already be freed - see
+    /// `clear_configurations`'s doc comment on why the pointer is deliberately left dangling rather than
+    /// nulled.
     #[cfg(feature = "reimplementation-tests")]
     pub(crate) fn marketing_ptr_raw(&self) -> u32 {
         self.marketing_ptr
     }
 
-    /// Native reimplementation of `ZTMarketingMgr::update`'s accumulator/day-count bookkeeping (see
-    /// `predict_mgr_update`): once enough ticks have accrued, `tick_accumulator` resets to `0` and the
-    /// owned `ZTMarketing` (if any) is advanced by the elapsed day count via `ZTMarketing::update` -
-    /// unlike `ZTResearchMgr::update`'s branch loop, there's only ever the single owned instance to
-    /// advance, matching vanilla's own `if (this->ZTMarketing != nullptr)` null guard exactly.
+    /// Once enough ticks have accrued (`predict_mgr_update`), `tick_accumulator` resets to `0` and the
+    /// owned `ZTMarketing` (if any) is advanced by the elapsed day count.
     pub fn update(&mut self, delta_ticks: u32) {
         let (new_tick_accumulator, days) = predict_mgr_update(self.tick_accumulator, delta_ticks);
         self.tick_accumulator = new_tick_accumulator;
@@ -337,15 +276,13 @@ impl ZTMarketingMgr {
     }
 
     /// Calls the vanilla `ZTMarketingMgr::save`. `file` is whatever file-handle pointer the original
-    /// `WriteBytesToFile` calls expect. By default (see `marketing_save_reimplementation`) this
-    /// address is detoured onto that module's native reimplementation; without that detour installed
-    /// this reaches genuine vanilla code instead.
+    /// `WriteBytesToFile` calls expect. By default this address is detoured onto
+    /// `marketing_save_reimplementation`'s native reimplementation.
     pub fn save(&self, file: *const u32) -> bool {
         unsafe { ztmarketingmgr::SAVE.original()((self as *const Self) as *const u32, file) }
     }
 
-    /// Calls the vanilla `ZTMarketingMgr::load` - the save-file counterpart to `save()`. See
-    /// `marketing_save_reimplementation` for the exact behavior and its native reimplementation.
+    /// Calls the vanilla `ZTMarketingMgr::load` - the save-file counterpart to `save()`.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
         unsafe { ztmarketingmgr::LOAD.original()((self as *mut Self) as *const u32, file, version) }
     }
@@ -355,14 +292,11 @@ impl ZTMarketingMgr {
 mod tests {
     use super::*;
 
-    /// Builds a `ZTMarketing` with a dummy funding table of `level_count` zeroed entries, matching
-    /// what `increase_funding`/`decrease_funding`/`set_funding_level` actually read (only the table's
-    /// *length* matters to these methods, never an entry's own content).
+    /// Builds a `ZTMarketing` with a dummy funding table of `level_count` zeroed entries - only the
+    /// table's length matters to `increase_funding`/`decrease_funding`/`set_funding_level`.
     fn marketing_with(current_funding_level: u32, level_count: usize) -> ZTMarketing {
         let stride = size_of::<ZTMarketingFundingLevel>() as u32;
-        // Not real memory - fine for these tests since increase_funding/decrease_funding/
-        // set_funding_level never dereference vector_start, only compute the table length from the
-        // three pointers' difference.
+        // Not real memory - fine here since these methods never dereference vector_start.
         let vector_start = 0x1000;
         let vector_end = vector_start + level_count as u32 * stride;
         ZTMarketing {
@@ -401,9 +335,8 @@ mod tests {
 
     #[test]
     fn increase_funding_saturates_when_already_past_top_index() {
-        // Not reachable via increase_funding/decrease_funding/set_funding_level alone, but
-        // increaseFunding's own guard is an unsigned comparison with no separate "in range" check -
-        // confirm the reimplementation saturates rather than panicking/wrapping oddly.
+        // Not reachable via increase_funding/decrease_funding/set_funding_level alone, but confirm
+        // this saturates rather than panicking/wrapping.
         let mut m = marketing_with(10, 3);
         assert!(m.increase_funding());
         assert_eq!(m.current_funding_level(), 2);
@@ -471,34 +404,26 @@ mod tests {
 }
 
 /// Native reimplementation of `ZTMarketingMgr::save`/`load`'s save-file persistence: a single
-/// little-endian `u32` - the current funding-level index (`0` if no `ZTMarketing` is loaded) -
-/// confirmed byte-for-byte from `resources/decompiles/ZTMarketingMgr_save.c`/`_load.c`. Far simpler
-/// than `ztresearch::research_save_reimplementation` (no records, no completion tail, no RNG - see the
-/// implementation plan's item 5), so this module skips straight to a single promoted phase instead of
-/// that module's separate shadow-then-promote rollout.
+/// little-endian `u32`, the current funding-level index (`0` if no `ZTMarketing` is loaded).
 ///
-/// **Promoted to the live path** (see `detours` below): by default `ZTMarketingMgr::save`/`load` are
-/// detoured to run this module's logic directly against the real save stream (via
-/// `standalone::WRITE_BYTES_TO_FILE`/`DEALLOCATE`, the same primitives
-/// `research_save_reimplementation` uses), rather than calling `.original()`.
+/// Promoted to the live path (see `detours` below): by default `ZTMarketingMgr::save`/`load` are
+/// detoured to run this module's logic directly against the real save stream, rather than calling
+/// `.original()`.
 pub(crate) mod marketing_save_reimplementation {
     use openzt_detour_macro::detour_mod;
 
     use super::*;
 
-    /// The save-format version at which `ZTMarketingMgr::load` starts reading the stream at all - per
-    /// `ZTMarketingMgr_load.c`'s `0x3a < param_2` guard (strictly greater than, not `>=`). Below this,
-    /// `load` never touches the stream *or* the current funding-level index - unlike
-    /// `ZTResearchMgr::load`, which always resets first regardless of version.
+    /// The save-format version at which `ZTMarketingMgr::load` starts reading the stream at all
+    /// (strictly greater than, not `>=`). Below this, `load` never touches the stream or the current
+    /// funding-level index.
     const MIN_VERSION_WITH_MARKETING_DATA: u32 = 0x3a;
 
     /// Predicts `ZTMarketingMgr::load`'s effect on the current funding-level index and its own return
-    /// value, given whatever value the stream read produced (`None` models a genuine read failure -
-    /// `load` returns `false` immediately in that case, without touching the index) and the
-    /// `ZTMarketing`'s current funding-level table length. The read value's clamp uses the exact same
-    /// bounds logic as `ZTMarketing::set_funding_level` (out-of-range resets to `0`, not saturate) -
-    /// per `ZTMarketingMgr_load.c`'s own `-(uint)(value < count) & value`-shaped guard, so the live
-    /// detour below just calls `set_funding_level` directly rather than duplicating this logic.
+    /// value, given whatever value the stream read produced (`None` models a read failure - `load`
+    /// returns `false` immediately, without touching the index) and the `ZTMarketing`'s current
+    /// funding-level table length. Out-of-range values reset to `0`, matching
+    /// `ZTMarketing::set_funding_level`.
     pub(crate) fn predict_load(version: u32, read_value: Option<u32>, funding_level_count: usize, index_before: u32) -> (bool, u32) {
         if version <= MIN_VERSION_WITH_MARKETING_DATA {
             return (true, index_before);
@@ -539,11 +464,7 @@ pub(crate) mod marketing_save_reimplementation {
         }
     }
 
-    /// Detours `ZTMarketingMgr::save`/`load` onto this module's native reimplementation - the default,
-    /// promoted arm (see the module doc comment above). Mirrors
-    /// `ztresearch::research_save_reimplementation::detours` in shape, but `load` needs no unconditional
-    /// reset/tail: an out-of-range or below-threshold read is a pure no-op on the index (see
-    /// `predict_load`'s doc comment), so there is nothing to roll back either way.
+    /// Detours `ZTMarketingMgr::save`/`load` onto this module's native reimplementation.
     #[detour_mod]
     mod detours {
         use openzt_detour::generated::{
@@ -586,7 +507,7 @@ pub(crate) mod marketing_save_reimplementation {
         }
     }
 
-    /// Installs the `save`/`load` detour (the arm above). Called from `ztmarketing::init()`.
+    /// Installs the `save`/`load` detour. Called from `ztmarketing::init()`.
     pub fn init() {
         if let Err(e) = unsafe { detours::init_detours() } {
             error!("Failed to initialise marketing-save-reimplementation detours: {e:?}");
@@ -594,19 +515,44 @@ pub(crate) mod marketing_save_reimplementation {
     }
 }
 
+/// Detours `ZTMarketingMgr::update` onto `ZTMarketingMgr::update`/`ZTMarketing::update` above.
+pub(crate) mod marketing_update_reimplementation {
+    use openzt_detour_macro::detour_mod;
+
+    use super::*;
+
+    #[detour_mod]
+    mod detours {
+        use openzt_detour::generated::ztmarketingmgr::UPDATE;
+
+        use super::*;
+        use crate::util::mut_from_memory;
+
+        /// Vanilla's own `int` return here is a decompiler artifact (leftover `EAX` from an
+        /// intermediate multiply) - the function is logically `void`, so this always returns `0`.
+        #[detour(UPDATE)]
+        unsafe extern "thiscall" fn update(this: *const u32, delta_ticks: u32) -> i32 {
+            let mgr = unsafe { mut_from_memory::<ZTMarketingMgr>(this) };
+            mgr.update(delta_ticks);
+            0
+        }
+    }
+
+    /// Installs the `update` detour. Called unconditionally from `ztmarketing::init()`.
+    pub fn init() {
+        if let Err(e) = unsafe { detours::init_detours() } {
+            error!("Failed to initialise marketing-update-reimplementation detours: {e:?}");
+        }
+    }
+}
+
 /// Native reimplementation of the `.cfg`-driven marketing config loading
 /// (`ZTMarketingMgr::loadConfigurations`/`ZTMarketing::loadConfiguration`/`ZTMarketingMgr::clearConfigurations`),
-/// built on the same `openzt-configparser` INI parser `ztresearch::research_config_reimplementation`
-/// uses for the much larger research tree - but far simpler here: there's only ever one `ZTMarketing`
-/// instance (no manifest-of-many, no category/program tree), and nothing outside this pipeline ever
-/// calls `ZTMarketing::loadConfiguration`/`clearConfiguration` or constructs/destroys a `ZTMarketing`
-/// directly (implementation plan item 6/7), so those stay plain Rust methods below, never detoured on
-/// their own - only the two `ZTMarketingMgr`-level entry points are.
+/// built on the `openzt-configparser` INI parser. There's only ever one `ZTMarketing` instance, so
+/// `loadConfiguration`/`clearConfiguration` stay plain Rust methods and are never detoured on their
+/// own - only the two `ZTMarketingMgr`-level entry points are.
 ///
-/// **Promoted to the live path unconditionally**, no shadow-mode/vanilla-fallback feature flag - same
-/// "no need for a separate staging phase" reasoning `marketing_save_reimplementation` already used
-/// (item 5's doc comment): there's no completion-tail/RNG dependency here either, just parsing and a
-/// straight struct-field splice.
+/// Promoted to the live path unconditionally, with no shadow-mode/vanilla-fallback flag.
 mod marketing_config_reimplementation {
     use openzt_configparser::ini::Ini;
     use openzt_detour_macro::detour_mod;
@@ -615,9 +561,8 @@ mod marketing_config_reimplementation {
     use super::*;
     use crate::{encoding_utils::decode_game_text, resource_manager::lazyresourcemap::get_file};
 
-    /// Loads and parses a resource-relative `.cfg` path with vanilla's actual comment convention
-    /// (`;` only, unlike `legacy_loading.rs`'s more lenient mod-`.cfg` parsing) - identical to
-    /// `ztresearch::research_config_reimplementation`'s own `read_cfg`.
+    /// Loads and parses a resource-relative `.cfg` path using vanilla's comment convention (`;` only,
+    /// unlike `legacy_loading.rs`'s more lenient mod-`.cfg` parsing).
     fn read_cfg(path: &str) -> Option<Ini> {
         let Some((_, data)) = get_file(path) else {
             error!("marketing-config-reimplementation: resource '{path}' not found");
@@ -635,9 +580,7 @@ mod marketing_config_reimplementation {
         }
     }
 
-    /// A value that trims to empty is indistinguishable from absent, matching `BFConfigFile::addKeyVal`.
-    /// See `ztresearch::research_config_reimplementation::values`'s doc comment for the full evidence
-    /// trail (the same `Ini::get_vec` vs. vanilla discrepancy applies here).
+    /// A value that trims to empty is treated as absent, matching `BFConfigFile::addKeyVal`.
     fn values(ini: &Ini, section: &str, key: &str) -> Vec<String> {
         ini.get_vec(section, key).unwrap_or_default().into_iter().filter(|v| !v.trim().is_empty()).collect()
     }
@@ -652,9 +595,7 @@ mod marketing_config_reimplementation {
         first(ini, section, key)?.parse().ok()
     }
 
-    /// One `[<block>] name=/cost=/benefit=` funding-level entry - per the implementation plan's item 6,
-    /// `ZTMarketing::loadConfiguration` reads `getInt("name")`/`getFloat("cost")`/`getInt("benefit")`
-    /// for each block named by the file's own `[marketing] marketing=<block>...` list.
+    /// One `[<block>] name=/cost=/benefit=` funding-level entry.
     fn load_funding_level(ini: &Ini, block: &str) -> ZTMarketingFundingLevel {
         ZTMarketingFundingLevel {
             name: first_parse(ini, block, "name").unwrap_or_default(),
@@ -664,21 +605,14 @@ mod marketing_config_reimplementation {
     }
 
     /// Reads the `[marketing] funding=<block>...` block-name list and loads one
-    /// `ZTMarketingFundingLevel` per named block, in order - the exact key that commit `0f91236`
-    /// (`"Fix issue with marketing config parsing"`) fixed: an earlier version of this code read a
-    /// second `"marketing"` key here instead of `"funding"`, which silently produced an empty table
-    /// (not a parse error) and crashed the game on opening the zoo status menu once
-    /// `ZTMarketing::update` read past the empty funding vector. See `parse_tests` below for the
-    /// regression coverage.
+    /// `ZTMarketingFundingLevel` per named block, in order.
     fn parse_funding_levels(ini: &Ini) -> Vec<ZTMarketingFundingLevel> {
         values(ini, "marketing", "funding").iter().map(|block| load_funding_level(ini, block)).collect()
     }
 
     /// Reads the top-level file's `[marketing] marketing=<path>` value - the resource-relative path to
-    /// the actual funding `.cfg` file (e.g. `mktgnorm.cfg`) - or `None` if absent. Named `marketing` at
-    /// this level only; the funding-level block-name list one file down is the *different* `funding` key
-    /// `parse_funding_levels` reads - see that function's own doc comment for the bug this distinction
-    /// caused when the two were confused.
+    /// the actual funding `.cfg` file (e.g. `mktgnorm.cfg`) - or `None` if absent. Distinct from the
+    /// `funding` key `parse_funding_levels` reads one file down.
     fn resolve_funding_cfg_path(ini: &Ini) -> Option<String> {
         first(ini, "marketing", "marketing")
     }
@@ -732,10 +666,8 @@ mod marketing_config_reimplementation {
             assert_eq!((levels[3].name_id(), levels[3].cost(), levels[3].benefit()), (23103, 200.0, 3));
         }
 
-        /// Regression test for commit `0f91236`: a file that (incorrectly, like the pre-fix code) only
-        /// has the top-level `marketing=<path>` key under `[marketing]`, and no `funding` key, must
-        /// parse to an empty table - not panic, and not silently read `marketing`'s own value as a
-        /// block-name list. See `parse_funding_levels`'s own doc comment for the crash this caused live.
+        /// A file with only the top-level `marketing=<path>` key under `[marketing]`, and no `funding`
+        /// key, must parse to an empty table - not panic.
         #[test]
         fn wrong_key_produces_empty_vec_not_a_panic_or_malformed_table() {
             let ini = parse_ini("[marketing]\nmarketing = none min normal max\n");
@@ -763,10 +695,7 @@ mod marketing_config_reimplementation {
         }
     }
 
-    /// Leaks `vec` into a fresh 3-pointer funding-table (all-zero if empty) - same shape as
-    /// `live_support::funding_table_from_vec`, duplicated here since that copy is
-    /// `#[cfg(feature = "reimplementation-tests")]`-gated and this module must exist unconditionally
-    /// (mirrors `ztresearch::research_config_reimplementation`'s own duplicate of this same helper).
+    /// Leaks `vec` into a fresh 3-pointer funding table (all-zero if empty).
     fn funding_table_from_vec(mut vec: Vec<ZTMarketingFundingLevel>) -> (u32, u32, u32) {
         if vec.is_empty() {
             return (0, 0, 0);
@@ -780,7 +709,7 @@ mod marketing_config_reimplementation {
     }
 
     /// Frees a `ZTMarketing`'s funding-table buffer - `[vector_start, vector_capacity_end)`, matching
-    /// the destructor's own range (see the implementation plan's "Known layout" section).
+    /// the destructor's own range.
     fn free_funding_table(marketing: &ZTMarketing) {
         if marketing.vector_start == 0 {
             return;
@@ -791,16 +720,10 @@ mod marketing_config_reimplementation {
     }
 
     impl ZTMarketing {
-        /// Reimplementation of `ZTMarketing::loadConfiguration`, per the implementation plan's item 6:
-        /// unconditionally resets the current funding-level index to `0` and empties the funding table
-        /// first (matching vanilla's own unconditional `clearConfiguration` call, which runs *before*
-        /// `path` is even opened - so a failure below still leaves the table empty, not whatever it
-        /// held previously), then, if `path` opens and parses, reads the `[marketing] marketing=<block>`
-        /// list and appends one `ZTMarketingFundingLevel` per named block. The old buffer is freed and
-        /// replaced with a freshly built one rather than reusing its capacity in place - behaviorally
-        /// equivalent to vanilla's manual grow-and-copy `push_back` (same resulting elements, same
-        /// order), which is all a live comparison could observe; see the plan for why the capacity-reuse
-        /// mechanics themselves don't need bit-for-bit replication.
+        /// Unconditionally resets the current funding-level index to `0` and empties the funding table
+        /// first, then, if `path` opens and parses, reads the `[marketing] marketing=<block>` list and
+        /// appends one `ZTMarketingFundingLevel` per named block. The old buffer is freed and replaced
+        /// with a freshly built one rather than reusing its capacity in place.
         pub(crate) fn load_configuration(&mut self, path: &str) -> bool {
             self.current_funding_level = 0;
             free_funding_table(self);
@@ -811,11 +734,6 @@ mod marketing_config_reimplementation {
             let Some(ini) = read_cfg(path) else {
                 return false;
             };
-            // Confirmed live against the real `mktgnorm.cfg`: the block-name list is `[marketing]
-            // funding=<block>...` - the *key* is `funding`, not another `marketing=` (that doubling
-            // only applies to the top-level file's own `[marketing] marketing=<path>` value, read by
-            // `ZTMarketingMgr::load_configurations` below). Same key/shape as
-            // `ztresearch::research_config_reimplementation`'s `[branch] funding=normal` list.
             let levels = parse_funding_levels(&ini);
             let (start, end, capacity_end) = funding_table_from_vec(levels);
             self.vector_start = start;
@@ -827,19 +745,13 @@ mod marketing_config_reimplementation {
 
     impl ZTMarketingMgr {
         /// `ZTMarketing` instances in this pipeline are constructed/destroyed via Rust's own allocator
-        /// (`Box::new`/`Box::from_raw`, in both `load_configurations` and `clear_configurations` below)
-        /// rather than calling the confirmed native `CONSTRUCTOR`/`ZTMARKETING` addresses - a deliberate
-        /// choice, not an oversight: the `#[repr(C)]` struct is layout-equivalent, and nothing else in
-        /// this path ever touches the embedded `BFConfigFile` sub-object through vanilla code, so there's
-        /// no vanilla-side state a native ctor/dtor call would need to initialize/tear down here.
+        /// (`Box::new`/`Box::from_raw`) rather than the native constructor/destructor - the
+        /// `#[repr(C)]` struct is layout-equivalent, and nothing else in this path touches the embedded
+        /// `BFConfigFile` through vanilla code.
         ///
-        /// Reimplementation of `ZTMarketingMgr::clearConfigurations`: resets the tick accumulator to
-        /// `0` and, if a `ZTMarketing` exists, destroys and frees it - but, per the implementation
-        /// plan's item 6, deliberately does **not** null `marketing_ptr` afterward. This is a real
-        /// vanilla quirk (the pointer is left dangling until a caller like `load_configurations`
-        /// immediately overwrites it), not a decompile artifact to "fix" - any caller relying on
-        /// post-clear null-safety here would already be relying on undefined vanilla behavior, so this
-        /// reimplementation doesn't add defensive nulling vanilla itself doesn't do.
+        /// Resets the tick accumulator to `0` and, if a `ZTMarketing` exists, destroys and frees it, but
+        /// deliberately does **not** null `marketing_ptr` afterward - a real vanilla quirk (the pointer
+        /// is left dangling until a caller like `load_configurations` immediately overwrites it).
         pub(crate) fn clear_configurations(&mut self) {
             self.tick_accumulator = 0;
             if self.marketing_ptr != 0 {
@@ -849,17 +761,12 @@ mod marketing_config_reimplementation {
             }
         }
 
-        /// Reimplementation of `ZTMarketingMgr::loadConfigurations`, per the implementation plan's item
-        /// 6: always calls `clear_configurations` first, then bails out (returning `false`, with
-        /// `marketing_ptr` left dangling - see that method's own doc comment) if the top-level file
-        /// can't be opened. Otherwise allocates a fresh, default `ZTMarketing` (index `0`, empty table -
-        /// matching the vanilla constructor), attaches it to `marketing_ptr` immediately, reads the
-        /// `[marketing] marketing=<path>` value giving the *actual* funding `.cfg` file, and calls
+        /// Always calls `clear_configurations` first, then bails out (returning `false`, with
+        /// `marketing_ptr` left dangling) if the top-level file can't be opened. Otherwise allocates a
+        /// fresh, default `ZTMarketing`, attaches it to `marketing_ptr` immediately, reads the
+        /// `[marketing] marketing=<path>` value giving the actual funding `.cfg` file, and calls
         /// `ZTMarketing::load_configuration` on it. On failure, `set_funding_level(0)` is called on the
-        /// already-attached, partially-populated `ZTMarketing` before returning `false` - matching
-        /// vanilla's own explicit safety reset; on success the index is left untouched at the ctor's
-        /// `0` rather than re-asserted, also matching vanilla (functionally identical either way, but
-        /// worth replicating faithfully per the plan).
+        /// already-attached `ZTMarketing` before returning `false`.
         pub(crate) fn load_configurations(&mut self, path: &str) -> bool {
             self.clear_configurations();
             let Some(top_ini) = read_cfg(path) else {
@@ -887,16 +794,7 @@ mod marketing_config_reimplementation {
     }
 
     /// Detours `ZTMarketingMgr::loadConfigurations`/`clearConfigurations` onto this module's native
-    /// reimplementation - the only two entry points that need detouring (see the module doc comment
-    /// above for why `ZTMarketing::loadConfiguration`/`clearConfiguration` don't need their own).
-    ///
-    /// Confirmed live (2026-08-22) against the real `mktg.cfg`/`mktgnorm.cfg`: `mktg.cfg`'s own
-    /// `[marketing] marketing=mktgnorm.cfg` top-level pointer matches `first(top_ini, "marketing",
-    /// "marketing")` exactly, and `mktgnorm.cfg`'s `[marketing] funding=none/min/normal/max` block list
-    /// (plus each block's `name=`/`cost=`/`benefit=`) matches `load_configuration`'s parsing exactly -
-    /// see that method's own doc comment for the one place this originally differed (`"funding"`, not a
-    /// second `"marketing"` key, for the block-name list) and the crash that mismatch caused before it
-    /// was fixed.
+    /// reimplementation - the only two entry points that need detouring.
     #[detour_mod]
     mod detours {
         use openzt_detour::generated::ztmarketingmgr::{CLEAR_CONFIGURATIONS, LOAD_CONFIGURATIONS};
@@ -908,11 +806,8 @@ mod marketing_config_reimplementation {
         unsafe extern "thiscall" fn load_configurations(this: *const u32, path: *const i8) -> u32 {
             let path_str = unsafe { std::ffi::CStr::from_ptr(path) }.to_string_lossy().into_owned();
 
-            // Peek the top-level file independently before mutating anything - if our own INI reader
-            // can't open/parse it (a resource lookup gap, or a format edge case vanilla's own parser
-            // tolerates that ours doesn't), fall back to vanilla entirely rather than risk diverging.
-            // Mirrors `ztresearch::research_config_reimplementation`'s own `load_branches` detour, which
-            // applies the same "parse first, mutate second, fall back only pre-mutation" rule.
+            // Parse the top-level file independently before mutating anything; fall back to vanilla
+            // entirely if it fails, since nothing has been mutated yet.
             if super::read_cfg(&path_str).is_none() {
                 error!("marketing-config-reimplementation: failed to independently parse '{path_str}', falling back to vanilla");
                 return unsafe { LOAD_CONFIGURATIONS_DETOUR.call(this, path) };
@@ -932,7 +827,7 @@ mod marketing_config_reimplementation {
         }
     }
 
-    /// Installs the `loadConfigurations`/`clearConfigurations` detour (the arm above). Called from
+    /// Installs the `loadConfigurations`/`clearConfigurations` detour. Called from
     /// `ztmarketing::init()`.
     pub fn init() {
         if let Err(e) = unsafe { detours::init_detours() } {
@@ -945,12 +840,12 @@ mod marketing_config_reimplementation {
 pub fn init() {
     marketing_save_reimplementation::init();
     marketing_config_reimplementation::init();
+    marketing_update_reimplementation::init();
 }
 
 /// Synthetic `ZTMarketing` construction/teardown for the live `reimplementation_tests` comparison
-/// harness. Every allocation goes through Rust's own allocator (never spliced into any real
-/// `ZTMarketingMgr`), since `increaseFunding`/`decreaseFunding`/`setFundingLevel` only ever read/write
-/// `this` - unlike research's `load`, there's no `GLOBAL_ZTMarketingMgr` dependency to worry about.
+/// harness. Every allocation goes through Rust's own allocator, never spliced into any real
+/// `ZTMarketingMgr`.
 #[cfg(feature = "reimplementation-tests")]
 pub(crate) mod live_support {
     use super::*;
@@ -976,9 +871,7 @@ pub(crate) mod live_support {
         drop(unsafe { Vec::<ZTMarketingFundingLevel>::from_raw_parts(start as *mut ZTMarketingFundingLevel, cap, cap) });
     }
 
-    /// Builds a standalone `ZTMarketing` with `level_count` dummy (zeroed) funding-level entries -
-    /// only the table's length matters to `increaseFunding`/`decreaseFunding`/`setFundingLevel`, never
-    /// an entry's own content.
+    /// Builds a standalone `ZTMarketing` with `level_count` dummy (zeroed) funding-level entries.
     pub(crate) fn build_standalone_marketing(current_funding_level: u32, level_count: usize) -> *mut ZTMarketing {
         let table = vec![ZTMarketingFundingLevel { name: 0, benefit: 0, cost: 0.0 }; level_count];
         let (vector_start, vector_end, vector_capacity_end) = funding_table_from_vec(table);
@@ -1000,10 +893,8 @@ pub(crate) mod live_support {
         drop(unsafe { Box::from_raw(ptr) });
     }
 
-    /// Builds a standalone `ZTMarketing` for the `ZTMARKETING_GET_FUNDING_TEXT` live comparison test -
-    /// not spliced into any `ZTMarketingMgr` (`getFundingText`/`funding_text` only ever read `this`, no
-    /// `GLOBAL_ZTMarketingMgr` dependency). `levels` becomes the funding table verbatim, in order -
-    /// mirrors `ztresearch::research_save_reimplementation::live_support::build_standalone_funding_branch`.
+    /// Builds a standalone `ZTMarketing` for the funding-text comparison test, with `levels` as the
+    /// funding table verbatim, in order.
     pub(crate) fn build_standalone_marketing_with_levels(current_funding_level: u32, levels: &[(i32, f32)]) -> *mut ZTMarketing {
         let table: Vec<ZTMarketingFundingLevel> = levels.iter().map(|&(name, cost)| ZTMarketingFundingLevel { name, benefit: 0, cost }).collect();
         let (vector_start, vector_end, vector_capacity_end) = funding_table_from_vec(table);
@@ -1016,13 +907,8 @@ pub(crate) mod live_support {
         }))
     }
 
-    /// Builds a standalone `ZTMarketingMgr` - **not** the real live singleton at
-    /// `globals().ztmarketingmgr_ptr()` - wired to own `marketing_ptr` (or none, if null). Unlike
-    /// `ztresearch::research_save_reimplementation::live_support::with_standalone_mgr`, `update`/
-    /// `save`/`load` never dereference `GLOBAL_ZTMarketingMgr` itself (only `this`/the owned
-    /// `ZTMarketing`), so - unlike research's `pick_random_program` - there's no global slot to patch
-    /// for any of these comparisons; a `vtable`/`flag` of `0` is fine since none of these calls are
-    /// ever reached through a virtual dispatch in these tests.
+    /// Builds a standalone `ZTMarketingMgr` - **not** the real live singleton - wired to own
+    /// `marketing_ptr` (or none, if null).
     pub(crate) fn build_standalone_marketing_mgr(tick_accumulator: u32, marketing_ptr: *mut ZTMarketing) -> *mut ZTMarketingMgr {
         Box::into_raw(Box::new(ZTMarketingMgr { vtable: 0, flag: 0, _pad: [0; 3], tick_accumulator, marketing_ptr: marketing_ptr as u32 }))
     }
@@ -1035,11 +921,7 @@ pub(crate) mod live_support {
     }
 
     /// Temporarily pins the real, live `ZTGameMgr` singleton's budget to `cash`, runs `f`, then
-    /// restores whatever it held before this call - mirrors
-    /// `ztresearch::research_save_reimplementation::live_support::with_ztgamemgr_cash` exactly (see
-    /// that function's own doc comment for why this mutates the real singleton in place rather than a
-    /// synthetic one). Used by the `ZTMARKETING_UPDATE` comparison test so both the real and
-    /// reimplemented `ZTMarketing::update` calls see the exact same available cash.
+    /// restores whatever it held before this call.
     pub(crate) fn with_ztgamemgr_cash<R>(cash: f32, f: impl FnOnce() -> R) -> R {
         let game_mgr = unsafe { &mut *global_ztgamemgr_ptr() };
         let original = game_mgr.cash();
@@ -1052,8 +934,7 @@ pub(crate) mod live_support {
     }
 
     /// Exposed for `reimplementation_tests` to null-check `GLOBAL_ZTGameMgr`'s raw slot before running
-    /// the `ZTMARKETING_UPDATE` comparison - mirrors
-    /// `ztresearch::research_save_reimplementation::live_support::ztgamemgr_ptr_is_null`.
+    /// a comparison.
     pub(crate) fn ztgamemgr_ptr_is_null() -> bool {
         global_ztgamemgr_ptr().is_null()
     }

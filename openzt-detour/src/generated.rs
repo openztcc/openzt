@@ -210,7 +210,7 @@ pub mod bfcategory {
     use super::*;
 
     #[cfg_attr(feature = "detour-validation", validate_detour("bfcategory/get_value"))]
-    pub const GET_VALUE: FunctionDef<unsafe extern "thiscall" fn(*const u32, i32) -> i32> = FunctionDef{address: 0x00410ec0, function_type: PhantomData};
+    pub const GET_VALUE: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i32) -> *const i32> = FunctionDef{address: 0x00410ec0, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfcategory/set_from_int_list"))]
     pub const SET_FROM_INT_LIST: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i32, i32, i32)> = FunctionDef{address: 0x004b40f1, function_type: PhantomData};
 }
@@ -4432,7 +4432,7 @@ pub mod ztgamemgr {
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/update"))]
     pub const UPDATE: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32)> = FunctionDef{address: 0x0041a154, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/subtract_cash"))]
-    pub const SUBTRACT_CASH: FunctionDef<unsafe extern "thiscall" fn(*const u32, f32)> = FunctionDef{address: 0x0041ef68, function_type: PhantomData};
+    pub const SUBTRACT_CASH: FunctionDef<unsafe extern "thiscall" fn(*const u32, f32, bool)> = FunctionDef{address: 0x0041ef68, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/hours_ago"))]
     pub const HOURS_AGO: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32, i32) -> *const u64> = FunctionDef{address: 0x0041f075, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/time_ago"))]
@@ -9567,6 +9567,8 @@ pub mod standalone {
     pub const FAST_ERROR_EXIT: FunctionDef<unsafe extern "cdecl" fn(u32)> = FunctionDef{address: 0x005fcf1c, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/rtl_unwind"))]
     pub const RTL_UNWIND: FunctionDef<unsafe extern "stdcall" fn(*const c_void, *const c_void, *const u32, *const c_void)> = FunctionDef{address: 0x005fd361, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("standalone/lp_top_level_exception_filter_005fd602"))]
+    pub const LP_TOP_LEVEL_EXCEPTION_FILTER_005FD602: FunctionDef<unsafe extern "stdcall" fn(*const i32) -> u32> = FunctionDef{address: 0x005fd602, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/george_w"))]
     pub const GEORGE_W: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x00607174, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/colloseum"))]

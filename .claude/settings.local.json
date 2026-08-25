@@ -46,5 +46,8 @@
     ],
     "deny": [],
     "ask": []
+  },
+  "skillOverrides": {
+    "code-review": "off"
   }
 }
