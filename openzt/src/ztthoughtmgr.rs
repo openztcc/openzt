@@ -1,16 +1,28 @@
 //! Structs and methods for the vanilla `ZTThoughtMgr`/`ZTThought` classes, which track the "thought
 //! bubble" messages guests/animals display over their heads (e.g. "caught prey", template string id
-//! `0x280a`) - a simple, small `BFMgr`-derived class owning a single intrusive, sentinel-terminated
-//! linked list of `ZTThought` records.
+//! `0x280a`) - a simple, small `BFMgr`-derived class that vanilla implements as a single intrusive,
+//! sentinel-terminated linked list of `ZTThought` records.
 //!
-//! Unlike `ZTResearchMgr`/`ZTMarketingMgr`, the persistent list and the UI's temporary output lists
-//! both use vanilla's own small-object freelist allocator, which has no confirmed Windows address for
-//! its low-level alloc/free helpers. This module's list is therefore *exclusively* Rust-owned
-//! (`Box`-allocated nodes) from the point OpenZT loads onward - the only vanilla-allocated survivor is
-//! the original sentinel node `CreateZTThoughtMgr` allocates at startup (left un-detoured), which the
-//! list helpers below must never attempt to free.
+//! The persistent list itself lives in a plain Rust `VecDeque<ZTThought>`, held in the process-global
+//! [`THOUGHT_STORES`] registry keyed by each `ZTThoughtMgr` instance's own `sentinel_ptr` field.
+//! `sentinel_ptr` is never repurposed or dereferenced by our own code anymore - it's left exactly as
+//! vanilla's `CreateZTThoughtMgr` constructor set it, purely so its value stays a stable, unique
+//! per-instance key (real singleton or test standalone alike) without needing a second identity
+//! mechanism. All four mutators (`addThought`/`removeThoughtsBy{Thinker,Object,Habitat}`), save/load, and
+//! the destructor are detoured onto Rust methods that operate on this store.
+//!
+//! The three read-only accessors (`getThoughtsBy{Thinker,Object,Habitat}`) are also detoured - see
+//! [`thought_accessor_detours`] - but only to log an error if they're ever actually invoked (no known
+//! caller reaches them) before falling through to the real vanilla body via `.original()`. That fallback
+//! stays safe post-migration specifically *because* `sentinel_ptr` is left untouched: vanilla reads a
+//! genuine, permanently self-referencing (i.e. permanently empty) sentinel node, so the fallback can only
+//! ever report zero matches, never dereference stale or incompatible memory.
 
-use std::mem;
+use std::{
+    collections::{HashMap, VecDeque},
+    mem,
+    sync::{LazyLock, Mutex},
+};
 
 use openzt_detour::generated::standalone::{DEALLOCATE, WRITE_BYTES_TO_FILE};
 
@@ -318,187 +330,87 @@ fn read_dword(file: *const u32) -> Option<u32> {
     (ok == 1).then_some(buf)
 }
 
-/// A persistent-list node: 8 bytes of intrusive links followed by the `ZTThought` payload at `+0x8`.
-/// The sentinel node vanilla allocates at startup shares this same link layout (its `data` is never
-/// read).
-#[repr(C)]
-struct ThoughtNode {
-    next: *mut ThoughtNode,
-    prev: *mut ThoughtNode,
-    data: ZTThought,
-}
-
-/// Borrowing iterator over `ZTThoughtMgr`'s persistent list, front (most-recently-inserted) to back,
-/// skipping the sentinel. Returned as `impl Iterator` from `ZTThoughtMgr::iter` so this type itself
-/// never needs to be public.
-struct ThoughtIter<'a> {
-    sentinel: *const ThoughtNode,
-    current: *const ThoughtNode,
-    _marker: std::marker::PhantomData<&'a ZTThoughtMgr>,
-}
-
-impl<'a> Iterator for ThoughtIter<'a> {
-    type Item = &'a ZTThought;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current == self.sentinel {
-            return None;
-        }
-        let node = unsafe { &*self.current };
-        self.current = node.next;
-        Some(&node.data)
-    }
-}
-
-/// Mutable counterpart to [`ThoughtIter`], used by `ZTThoughtMgr::populate_thoughts`.
-struct ThoughtIterMut<'a> {
-    sentinel: *mut ThoughtNode,
-    current: *mut ThoughtNode,
-    _marker: std::marker::PhantomData<&'a mut ZTThoughtMgr>,
-}
-
-impl<'a> Iterator for ThoughtIterMut<'a> {
-    type Item = &'a mut ZTThought;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current == self.sentinel {
-            return None;
-        }
-        let node = unsafe { &mut *self.current };
-        self.current = node.next;
-        Some(&mut node.data)
-    }
-}
+/// Process-global registry backing every `ZTThoughtMgr` instance's persistent list, keyed by that
+/// instance's own `sentinel_ptr` value (see the module doc comment for why that field, rather than the
+/// struct's own address, is the identity key). There is exactly one key in real gameplay - the live
+/// singleton's `sentinel_ptr` - but tests build multiple independent standalone instances, each with its
+/// own distinct (leaked) sentinel allocation, so this must support more than one entry.
+static THOUGHT_STORES: LazyLock<Mutex<HashMap<u32, VecDeque<ZTThought>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl ZTThoughtMgr {
     pub fn max_thoughts(&self) -> u32 {
         self.max_thoughts
     }
 
-    fn sentinel(&self) -> *mut ThoughtNode {
-        self.sentinel_ptr as *mut ThoughtNode
+    /// This instance's key into [`THOUGHT_STORES`] - its own `sentinel_ptr`, never dereferenced as a
+    /// pointer by any of the methods below.
+    fn store_key(&self) -> u32 {
+        self.sentinel_ptr
     }
 
-    /// Walks the persistent thought list front-to-back (most-recently-inserted first), skipping the
-    /// sentinel node.
-    pub fn iter(&self) -> impl Iterator<Item = &ZTThought> {
-        let sentinel = self.sentinel() as *const ThoughtNode;
-        let current = unsafe { (*sentinel).next as *const ThoughtNode };
-        ThoughtIter { sentinel, current, _marker: std::marker::PhantomData }
-    }
-
-    /// Mutable counterpart to `iter` - used by `populate_thoughts`.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ZTThought> {
-        let sentinel = self.sentinel();
-        let current = unsafe { (*sentinel).next };
-        ThoughtIterMut { sentinel, current, _marker: std::marker::PhantomData }
+    /// Walks the persistent thought list front-to-back (most-recently-inserted first), yielding owned
+    /// copies (`ZTThought` is `Copy`) - the store itself lives behind a lock scoped to this call, so
+    /// nothing can borrow out of it.
+    pub fn iter(&self) -> impl Iterator<Item = ZTThought> {
+        THOUGHT_STORES.lock().unwrap().get(&self.store_key()).into_iter().flatten().copied().collect::<Vec<_>>().into_iter()
     }
 
     pub fn len(&self) -> usize {
-        self.iter().count()
+        THOUGHT_STORES.lock().unwrap().get(&self.store_key()).map_or(0, VecDeque::len)
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Splices `thought` in as a new `Box`-owned node at the front of the list, uncapped.
-    fn link_front(&mut self, thought: ZTThought) {
-        let sentinel = self.sentinel();
-        let old_front = unsafe { (*sentinel).next };
-        let node = Box::into_raw(Box::new(ThoughtNode { next: old_front, prev: sentinel, data: thought }));
-        unsafe {
-            (*old_front).prev = node;
-            (*sentinel).next = node;
-        }
-    }
-
-    /// Splices `thought` in as a new `Box`-owned node at the *back* of the list, uncapped - what
-    /// `ZTThoughtMgr::load` builds on (the opposite end from `link_front`).
-    fn link_back(&mut self, thought: ZTThought) {
-        let sentinel = self.sentinel();
-        let old_back = unsafe { (*sentinel).prev };
-        let node = Box::into_raw(Box::new(ThoughtNode { next: sentinel, prev: old_back, data: thought }));
-        unsafe {
-            (*old_back).next = node;
-            (*sentinel).prev = node;
-        }
-    }
-
-    /// Inserts `thought` as a new `Box`-owned node at the front of the list (matching `addThought`'s
-    /// own insertion point - most-recent-first), then trims from the back until the list is at most
-    /// `max_thoughts` long, freeing every trimmed node.
+    /// Inserts `thought` at the front of the list (matching `addThought`'s own insertion point -
+    /// most-recent-first), then trims from the back until the list is at most `max_thoughts` long.
     pub(crate) fn insert_front(&mut self, thought: ZTThought) {
-        self.link_front(thought);
-        self.trim_to_cap();
-    }
-
-    fn trim_to_cap(&mut self) {
-        while self.len() > self.max_thoughts as usize {
-            let sentinel = self.sentinel();
-            let last = unsafe { (*sentinel).prev };
-            if last == sentinel {
-                break;
-            }
-            self.unlink_and_free(last);
+        let mut stores = THOUGHT_STORES.lock().unwrap();
+        let store = stores.entry(self.store_key()).or_default();
+        store.push_front(thought);
+        while store.len() > self.max_thoughts as usize {
+            store.pop_back();
         }
     }
 
-    /// Unlinks `node` from the list and frees it as a `Box`. `node` must be a real (non-sentinel) node
-    /// currently linked into this list.
-    fn unlink_and_free(&mut self, node: *mut ThoughtNode) {
-        unsafe {
-            let prev = (*node).prev;
-            let next = (*node).next;
-            (*prev).next = next;
-            (*next).prev = prev;
-            drop(Box::from_raw(node));
-        }
-    }
-
-    /// Removes and frees every node whose `ZTThought` matches `predicate`, never touching the
-    /// sentinel. Shared removal primitive for `removeThoughtsBy{Thinker,Habitat,Object}`.
+    /// Removes every thought matching `predicate`. Shared removal primitive for
+    /// `removeThoughtsBy{Thinker,Habitat,Object}`.
     pub(crate) fn remove_where(&mut self, predicate: impl Fn(&ZTThought) -> bool) {
-        let sentinel = self.sentinel();
-        let mut current = unsafe { (*sentinel).next };
-        while current != sentinel {
-            let next = unsafe { (*current).next };
-            if predicate(unsafe { &(*current).data }) {
-                self.unlink_and_free(current);
-            }
-            current = next;
+        if let Some(store) = THOUGHT_STORES.lock().unwrap().get_mut(&self.store_key()) {
+            store.retain(|t| !predicate(t));
         }
     }
 
     /// Minus the vanilla temporary-`std::list` construction the decompile builds and then immediately
-    /// frees again - a `Vec` collected directly from `iter()` is a drop-in behavioral replacement for
+    /// frees again - a `Vec` collected directly from the store is a drop-in behavioral replacement for
     /// what every caller actually consumes: an ordered, `max_count`-bounded sequence of matching
     /// `ZTThought`s.
     ///
-    /// Selection walks `iter()`'s own front-to-back (most-recently-added-first) order with a
-    /// `max_count`-then-stop cap, but the final returned order is oldest-of-the-selected-first, the
-    /// reverse of the walk/selection order - hence the explicit `.reverse()` below.
+    /// Selection walks front-to-back (most-recently-added-first) order with a `max_count`-then-stop cap,
+    /// but the final returned order is oldest-of-the-selected-first, the reverse of the walk/selection
+    /// order - hence the explicit `.reverse()` below.
     ///
     /// Matches on `thinker_ptr` (the resolved live pointer), not `thinker_id` - vanilla itself never
     /// compares against the persisted id here.
-    pub fn get_thoughts_by_thinker(&self, thinker_ptr: u32, max_count: usize) -> Vec<&ZTThought> {
-        let mut matches: Vec<&ZTThought> = self.iter().filter(|t| t.thinker_ptr() == thinker_ptr).take(max_count).collect();
+    pub fn get_thoughts_by_thinker(&self, thinker_ptr: u32, max_count: usize) -> Vec<ZTThought> {
+        let mut matches: Vec<ZTThought> = self.iter().filter(|t| t.thinker_ptr() == thinker_ptr).take(max_count).collect();
         matches.reverse();
         matches
     }
 
     /// See `get_thoughts_by_thinker`'s doc comment for the shared reasoning, including why the result
     /// is reversed after selection. Matches on `object_ptr`.
-    pub fn get_thoughts_by_object(&self, object_ptr: u32, max_count: usize) -> Vec<&ZTThought> {
-        let mut matches: Vec<&ZTThought> = self.iter().filter(|t| t.object_ptr() == object_ptr).take(max_count).collect();
+    pub fn get_thoughts_by_object(&self, object_ptr: u32, max_count: usize) -> Vec<ZTThought> {
+        let mut matches: Vec<ZTThought> = self.iter().filter(|t| t.object_ptr() == object_ptr).take(max_count).collect();
         matches.reverse();
         matches
     }
 
     /// See `get_thoughts_by_thinker`'s doc comment for the shared reasoning, including why the result
     /// is reversed after selection. Matches on `habitat_ptr`.
-    pub fn get_thoughts_by_habitat(&self, habitat_ptr: u32, max_count: usize) -> Vec<&ZTThought> {
-        let mut matches: Vec<&ZTThought> = self.iter().filter(|t| t.habitat_ptr() == habitat_ptr).take(max_count).collect();
+    pub fn get_thoughts_by_habitat(&self, habitat_ptr: u32, max_count: usize) -> Vec<ZTThought> {
+        let mut matches: Vec<ZTThought> = self.iter().filter(|t| t.habitat_ptr() == habitat_ptr).take(max_count).collect();
         matches.reverse();
         matches
     }
@@ -526,22 +438,21 @@ impl ZTThoughtMgr {
     /// Unlike `remove_where`-based removal, this doesn't just remove matches: for every thought whose
     /// `habitat_ptr` matches, if `force` is `false` *and* the thought still has a live `object_ptr`,
     /// only the habitat link is cleared (`habitat_ptr = 0`) and the thought itself survives; otherwise
-    /// (a forced removal, or the thought has no object of its own to keep it alive) the node is fully
-    /// unlinked and freed.
+    /// (a forced removal, or the thought has no object of its own to keep it alive) the thought is
+    /// removed outright.
     pub fn remove_thoughts_by_habitat(&mut self, habitat_ptr: u32, force: bool) {
-        let sentinel = self.sentinel();
-        let mut current = unsafe { (*sentinel).next };
-        while current != sentinel {
-            let next = unsafe { (*current).next };
-            let node = unsafe { &mut *current };
-            if node.data.habitat_ptr == habitat_ptr {
-                if !force && node.data.object_ptr != 0 {
-                    node.data.habitat_ptr = 0;
-                } else {
-                    self.unlink_and_free(current);
+        if let Some(store) = THOUGHT_STORES.lock().unwrap().get_mut(&self.store_key()) {
+            store.retain_mut(|t| {
+                if t.habitat_ptr != habitat_ptr {
+                    return true;
                 }
-            }
-            current = next;
+                if !force && t.object_ptr != 0 {
+                    t.habitat_ptr = 0;
+                    true
+                } else {
+                    false
+                }
+            });
         }
     }
 
@@ -558,8 +469,8 @@ impl ZTThoughtMgr {
 
     /// Reads a leading dword count (interpreted as signed - a failed or negative/zero count leaves the
     /// list untouched and returns immediately). For each of `count` records, default-constructs a
-    /// fresh `ZTThought` and calls `ZTThought::load` on it. A record is only spliced into the list (via
-    /// `link_back` - `load` itself never trims to `max_thoughts`, unlike `addThought`) if the read
+    /// fresh `ZTThought` and calls `ZTThought::load` on it. A record is only appended to the list (at
+    /// the back - `load` itself never trims to `max_thoughts`, unlike `addThought`) if the read
     /// succeeded *and* every non-zero id it carries actually resolved to a live pointer (for
     /// `version >= 0x1e` streams, where `ZTThought::load` already attempted that resolution inline); a
     /// record whose reference no longer resolves is silently dropped. Surviving records end up in read
@@ -574,12 +485,14 @@ impl ZTThoughtMgr {
         }
 
         let mut ok = true;
+        let mut stores = THOUGHT_STORES.lock().unwrap();
+        let store = stores.entry(self.store_key()).or_default();
         for _ in 0..count {
             let mut thought = ZTThought::new(0, 0, 0, 0);
             let loaded_ok = thought.load(file, version);
             ok &= loaded_ok;
             if loaded_ok && (thought.object_id == 0 || thought.object_ptr != 0) && (thought.thinker_id == 0 || thought.thinker_ptr != 0) {
-                self.link_back(thought);
+                store.push_back(thought);
             }
         }
         ok
@@ -589,28 +502,106 @@ impl ZTThoughtMgr {
     /// `ZTWorldMgr::load` for a specific pre-`0x1e` save-version range - not part of `ZTThoughtMgr::load`
     /// itself, which only performs this resolution inline for `version >= 0x1e` streams.
     pub fn populate_thoughts(&mut self) {
-        for thought in self.iter_mut() {
-            thought.populate();
+        if let Some(store) = THOUGHT_STORES.lock().unwrap().get_mut(&self.store_key()) {
+            for thought in store.iter_mut() {
+                thought.populate();
+            }
         }
     }
 
-    /// Vanilla's destructor calls a `std::list` "erase whole range" helper over the list, i.e. destroys
-    /// and frees every real node - `remove_where(|_| true)` is exactly that, reusing the same
-    /// `Box`-freeing primitive every other mutator does. The sentinel node and the `ZTThoughtMgr`
-    /// struct itself are never freed here, matching vanilla.
+    /// Vanilla's destructor destroys and frees every real node in the list. `clear` is the Rust-side
+    /// equivalent: drop every entry from this instance's store, without touching the sentinel or the
+    /// `ZTThoughtMgr` struct itself, matching vanilla.
     pub fn clear(&mut self) {
-        self.remove_where(|_| true);
+        if let Some(store) = THOUGHT_STORES.lock().unwrap().get_mut(&self.store_key()) {
+            store.clear();
+        }
     }
 }
 
-/// Registers this module's live detours: the UI-consumer detours, the mutator detours
-/// (`addThought`/`removeThoughtsBy{Thinker,Object,Habitat}`), the save/load-family detours
-/// (`save`/`load`/`populateThoughts`), and the destructor detour.
+/// Registers this module's live detours: the UI-consumer detours, the raw-accessor observability
+/// detours, the mutator detours (`addThought`/`removeThoughtsBy{Thinker,Object,Habitat}`), the
+/// save/load-family detours (`save`/`load`/`populateThoughts`), and the destructor detour.
 pub fn init() {
     thought_ui_detours::init();
+    thought_accessor_detours::init();
     thought_mutator_detours::init();
     thought_save_detours::init();
     thought_dtor_detour::init();
+}
+
+/// Detours `ZTThoughtMgr`'s three read-only accessors - `getThoughtsBy{Thinker,Object,Habitat}` - purely
+/// for observability, not behavior. An exhaustive search of the decompiled call-graph corpus in
+/// `private/resources/decompiles` found exactly three callers of these three addresses:
+/// `_fillListBox_0`/`_fillListBox_1`/`_refillThoughtsList` - and all three are already fully replaced by
+/// [`thought_ui_detours`], which calls the `Vec`-returning `get_thoughts_by_*` methods directly and never
+/// invokes `.original()` on any of these three. So as far as this codebase can confirm, nothing live ever
+/// reaches these detours at all.
+///
+/// If some other, undiscovered caller *does* still exist, reimplementing these accessors properly would
+/// mean synthesizing a vanilla-shaped output `std::list<ZTThought>` into the caller's out-param - but the
+/// caller itself (per `_fillListBox_0.c`/`_fillListBox_1.c`/`_refillThoughtsList.c`) tears that list down
+/// afterward using vanilla's own *inlined* freelist push, not a call we could intercept. Any output list
+/// we built via `Box` would then be freed through vanilla's freelist - the exact cross-allocator heap
+/// corruption CLAUDE.md warns about - and there's no confirmed Windows address for the generic small-object
+/// allocator that would let us build a genuinely vanilla-freeable list instead. Given zero known callers,
+/// that work isn't justified: each detour here just logs (so a real hit would actually get noticed) and
+/// falls through to `.original()`, which is safe *by construction* - it only reads `this`'s own
+/// `sentinel_ptr`, which the module's `VecDeque` migration deliberately leaves pointing at a genuine,
+/// permanently self-referencing (i.e. permanently empty) vanilla sentinel node. Worst case, an
+/// undiscovered caller sees an always-empty result - a cosmetic gap, never a crash.
+mod thought_accessor_detours {
+    use openzt_detour::generated::ztthoughtmgr::{GET_THOUGHTS_BY_HABITAT, GET_THOUGHTS_BY_OBJECT, GET_THOUGHTS_BY_THINKER};
+    use openzt_detour_macro::detour_mod;
+    use tracing::error;
+
+    #[detour_mod]
+    mod detours {
+        use super::*;
+
+        /// `max_count` is declared `*const i32` in `generated.rs`, but per
+        /// `ZTThoughtMgr_getThoughtsByObject.c` it's actually passed by value (a Ghidra type-inference
+        /// artifact on this parameter, unlike `getThoughtsByThinker`'s correctly-inferred `i32`) - logged
+        /// via a raw cast back to `i32`, never dereferenced.
+        #[detour(GET_THOUGHTS_BY_OBJECT)]
+        unsafe extern "thiscall" fn get_thoughts_by_object(this: *const u32, out: *const i32, object_ptr: *const i32, max_count: *const i32) -> *const i32 {
+            error!(
+                "GET_THOUGHTS_BY_OBJECT invoked directly (this={this:p}, object_ptr={object_ptr:p}, max_count={}) - no known caller should reach \
+                 this anymore now that ZTThoughtMgr's persistent list lives in a Rust-side store; falling through to the real vanilla body, which \
+                 will report zero matches against the permanently-empty sentinel it still reads",
+                max_count as i32
+            );
+            unsafe { GET_THOUGHTS_BY_OBJECT.original()(this, out, object_ptr, max_count) }
+        }
+
+        /// See `get_thoughts_by_object`'s doc comment re: `max_count`'s pointer typing.
+        #[detour(GET_THOUGHTS_BY_HABITAT)]
+        unsafe extern "thiscall" fn get_thoughts_by_habitat(this: *const u32, out: *const i32, habitat_ptr: *const i32, max_count: *const i32) -> *const i32 {
+            error!(
+                "GET_THOUGHTS_BY_HABITAT invoked directly (this={this:p}, habitat_ptr={habitat_ptr:p}, max_count={}) - no known caller should \
+                 reach this anymore now that ZTThoughtMgr's persistent list lives in a Rust-side store; falling through to the real vanilla body, \
+                 which will report zero matches against the permanently-empty sentinel it still reads",
+                max_count as i32
+            );
+            unsafe { GET_THOUGHTS_BY_HABITAT.original()(this, out, habitat_ptr, max_count) }
+        }
+
+        #[detour(GET_THOUGHTS_BY_THINKER)]
+        unsafe extern "thiscall" fn get_thoughts_by_thinker(this: *const u32, out: *const i32, thinker_ptr: *const i32, max_count: i32) -> *const i32 {
+            error!(
+                "GET_THOUGHTS_BY_THINKER invoked directly (this={this:p}, thinker_ptr={thinker_ptr:p}, max_count={max_count}) - no known caller \
+                 should reach this anymore now that ZTThoughtMgr's persistent list lives in a Rust-side store; falling through to the real vanilla \
+                 body, which will report zero matches against the permanently-empty sentinel it still reads"
+            );
+            unsafe { GET_THOUGHTS_BY_THINKER.original()(this, out, thinker_ptr, max_count) }
+        }
+    }
+
+    pub fn init() {
+        if let Err(e) = unsafe { detours::init_detours() } {
+            error!("Failed to initialise ztthoughtmgr raw-accessor observability detours: {e:?}");
+        }
+    }
 }
 
 /// Detours the three UI functions that used to be `getThoughtsBy*`'s only consumers of the vanilla
@@ -889,13 +880,29 @@ mod thought_dtor_detour {
     }
 }
 
-/// Live-comparison test support for `reimplementation_tests` - builds/tears down standalone,
-/// heap-allocated `ZTThoughtMgr`/`ZTThought` instances not spliced into the real singleton, and wraps
-/// vanilla-allocated temporary list output for reading. Nothing here ever frees vanilla-allocated
-/// memory through `Box`, or `Box`-allocated memory through vanilla's own freelist.
+/// Live-comparison test support for `reimplementation_tests`. Since the production `ZTThoughtMgr`
+/// methods no longer touch `sentinel_ptr`'s raw memory at all (the persistent list lives in
+/// [`THOUGHT_STORES`] instead), the live-comparison suite needs a *separate*, explicit way to drive and
+/// read a genuine vanilla-shaped `ThoughtNode` chain - this module provides both: the registry-based
+/// helpers production code also uses (`build_standalone_mgr`/`destroy_standalone_mgr`), and a set of
+/// `*_raw_chain*` helpers that operate directly on `sentinel_ptr`'s intrusive chain, for seeding/reading
+/// instances a test drives through a real, undetoured `.original()` call.
+///
+/// Nothing here ever frees vanilla-allocated memory through `Box`, or `Box`-allocated memory through
+/// vanilla's own freelist - see each function's own doc comment for which allocator it assumes.
 #[cfg(feature = "reimplementation-tests")]
 pub(crate) mod live_support {
     use super::*;
+
+    /// A persistent-list node: 8 bytes of intrusive links followed by the `ZTThought` payload at `+0x8`.
+    /// The sentinel node vanilla allocates at startup shares this same link layout (its `data` is never
+    /// read). Test-only: no production code walks this layout anymore.
+    #[repr(C)]
+    pub(crate) struct ThoughtNode {
+        next: *mut ThoughtNode,
+        prev: *mut ThoughtNode,
+        data: ZTThought,
+    }
 
     /// Builds a `ZTThought` with every field directly settable - unlike `ZTThought::new`, which
     /// dereferences `thinker_ptr`/`object_ptr`/`habitat_arg` when non-null to resolve
@@ -920,9 +927,14 @@ pub(crate) mod live_support {
         ZTThought { vtable, string_id, thinker_id, object_id, tile_x, tile_y, thinker_ptr, object_ptr, habitat_ptr }
     }
 
-    /// Builds a standalone `ZTThoughtMgr` with a freshly heap-allocated, self-referencing sentinel node
-    /// - not spliced into the real singleton. Heap-allocates the `ZTThoughtMgr` itself too (returned as
-    /// a raw pointer, for passing to real vanilla `.original()()` calls).
+    /// Builds a standalone `ZTThoughtMgr` with a freshly heap-allocated, self-referencing sentinel node,
+    /// never spliced into the real singleton. Heap-allocates the `ZTThoughtMgr` itself too (returned as
+    /// a raw pointer, for passing to real vanilla `.original()()` calls). The sentinel is a genuine,
+    /// self-referencing `ThoughtNode` (not just an opaque placeholder): any real, undetoured vanilla call
+    /// against this instance (`ADD_THOUGHT.original()`, `GET_THOUGHTS_BY_THINKER.original()`, ...) reads
+    /// `sentinel_ptr` as a real intrusive-list pointer and needs it to be one. Reimplemented-side methods
+    /// never dereference it, only using its value as a [`THOUGHT_STORES`] key, so the exact same
+    /// construction is safe and sufficient for both real and reimplemented standalone instances.
     pub(crate) fn build_standalone_mgr(max_thoughts: u32) -> *mut ZTThoughtMgr {
         let sentinel = Box::into_raw(Box::new(ThoughtNode {
             next: std::ptr::null_mut(),
@@ -936,48 +948,115 @@ pub(crate) mod live_support {
         Box::into_raw(Box::new(ZTThoughtMgr { vtable: 0, flag: 0, _pad: [0; 3], sentinel_ptr: sentinel as u32, max_thoughts }))
     }
 
-    /// Frees every real node (via `clear`, the same primitive the real destructor detour uses), then
-    /// the sentinel node and the `ZTThoughtMgr` allocation itself.
+    /// Splices `thought` in as a new `Box`-owned node at the front of `mgr`'s *raw* `sentinel_ptr`
+    /// chain, bypassing [`THOUGHT_STORES`] entirely - use this to seed the "real" side of a live
+    /// comparison that will drive `mgr` through a genuine, undetoured `.original()` call (which reads
+    /// `sentinel_ptr` directly and knows nothing about our Rust-side store).
+    pub(crate) fn seed_raw_chain(mgr: &ZTThoughtMgr, thought: ZTThought) {
+        let sentinel = mgr.sentinel_ptr as *mut ThoughtNode;
+        let old_front = unsafe { (*sentinel).next };
+        let node = Box::into_raw(Box::new(ThoughtNode { next: old_front, prev: sentinel, data: thought }));
+        unsafe {
+            (*old_front).prev = node;
+            (*sentinel).next = node;
+        }
+    }
+
+    /// Walks a raw, sentinel-terminated `ThoughtNode` chain starting from `sentinel_ptr`, front-to-back,
+    /// returning owned copies. Used both for `mgr`'s own persistent-list chain (via [`read_raw_chain`])
+    /// and for a vanilla-allocated temporary output list a `getThoughtsBy*` `.original()` call wrote its
+    /// sentinel into (the two share the same node layout, only the allocator differs). Never mutates or
+    /// frees anything - safe regardless of which allocator produced the chain.
+    pub(crate) fn read_raw_chain_from_sentinel(sentinel_ptr: u32) -> Vec<ZTThought> {
+        let sentinel = sentinel_ptr as *const ThoughtNode;
+        let mut result = Vec::new();
+        let mut current = unsafe { (*sentinel).next as *const ThoughtNode };
+        while current != sentinel {
+            result.push(unsafe { (*current).data });
+            current = unsafe { (*current).next };
+        }
+        result
+    }
+
+    /// See [`read_raw_chain_from_sentinel`]. Convenience wrapper for reading `mgr`'s own persistent-list
+    /// chain directly (as opposed to a separate temporary output list's sentinel).
+    pub(crate) fn read_raw_chain(mgr: &ZTThoughtMgr) -> Vec<ZTThought> {
+        read_raw_chain_from_sentinel(mgr.sentinel_ptr)
+    }
+
+    /// Frees every `Box`-owned node currently in `mgr`'s raw chain, without touching the sentinel. Safe
+    /// only when every node presently linked is genuinely `Box`-owned - i.e. `mgr` was seeded via
+    /// [`seed_raw_chain`], and any `.original()` call made against it since only *removed* nodes (which
+    /// vanilla frees via its own freelist push, already gone from the chain by the time this walks it) or
+    /// mutated fields in place, never *allocated* new ones. Never call this after a call that could have
+    /// allocated (`ADD_THOUGHT`/`LOAD`) - see [`destroy_standalone_mgr_leaking_nodes`] for that case.
+    fn free_raw_chain_nodes(mgr: &ZTThoughtMgr) {
+        let sentinel = mgr.sentinel_ptr as *mut ThoughtNode;
+        let mut current = unsafe { (*sentinel).next };
+        while current != sentinel {
+            let next = unsafe { (*current).next };
+            drop(unsafe { Box::from_raw(current) });
+            current = next;
+        }
+    }
+
+    /// Tears down a standalone instance whose raw chain holds only `Box`-owned nodes (see
+    /// [`free_raw_chain_nodes`]) and which was never registered in [`THOUGHT_STORES`] - i.e. a "real"
+    /// comparison instance seeded via [`seed_raw_chain`] and driven only through `.original()` calls that
+    /// remove/mutate but never allocate.
+    pub(crate) fn free_raw_chain_mgr(ptr: *mut ZTThoughtMgr) {
+        if ptr.is_null() {
+            return;
+        }
+        let mgr = unsafe { &*ptr };
+        free_raw_chain_nodes(mgr);
+        drop(unsafe { Box::from_raw(mgr.sentinel_ptr as *mut ThoughtNode) });
+        drop(unsafe { Box::from_raw(ptr) });
+    }
+
+    /// Tears down a standalone instance seeded on *both* sides at once (see `seed_thoughts_both` in the
+    /// live-comparison suite) - i.e. its raw chain holds `Box`-owned nodes (safe to free per
+    /// [`free_raw_chain_nodes`]) *and* it has a [`THOUGHT_STORES`] entry from also being driven through a
+    /// reimplemented-method call. Frees both representations, then the sentinel and the struct itself.
+    pub(crate) fn destroy_standalone_mgr_both(ptr: *mut ZTThoughtMgr) {
+        if ptr.is_null() {
+            return;
+        }
+        let mgr = unsafe { &*ptr };
+        free_raw_chain_nodes(mgr);
+        THOUGHT_STORES.lock().unwrap().remove(&mgr.store_key());
+        drop(unsafe { Box::from_raw(mgr.sentinel_ptr as *mut ThoughtNode) });
+        drop(unsafe { Box::from_raw(ptr) });
+    }
+
+    /// Tears down a standalone instance driven only through reimplemented methods (its data, if any,
+    /// lives entirely in [`THOUGHT_STORES`] - its raw chain was never linked into and stays a bare,
+    /// self-referencing sentinel). Removes the store entry, then frees the sentinel and the struct.
     pub(crate) fn destroy_standalone_mgr(ptr: *mut ZTThoughtMgr) {
         if ptr.is_null() {
             return;
         }
-        let mgr = unsafe { &mut *ptr };
-        mgr.clear();
-        drop(unsafe { Box::from_raw(mgr.sentinel()) });
+        let mgr = unsafe { &*ptr };
+        THOUGHT_STORES.lock().unwrap().remove(&mgr.store_key());
+        drop(unsafe { Box::from_raw(mgr.sentinel_ptr as *mut ThoughtNode) });
         drop(unsafe { Box::from_raw(ptr) });
     }
 
     /// Frees only the sentinel node and the `ZTThoughtMgr` allocation itself, without walking/freeing
-    /// any linked list nodes - use this instead of `destroy_standalone_mgr` whenever real vanilla code
-    /// (the real, undetoured `ADD_THOUGHT`/`LOAD`) may have linked nodes it allocated through vanilla's
-    /// own small-object freelist into this manager's list: those nodes must never be freed through
-    /// `Box` (a cross-allocator free is undefined behavior / heap corruption), so this deliberately
-    /// leaks them - a one-time, per-proptest-case leak, reclaimed at process exit. The sentinel node
-    /// itself is still safe to free normally here: `ADD_THOUGHT`/`LOAD` only ever relink its
-    /// `next`/`prev` fields to point at newly inserted nodes, never reallocate or hand its own address
-    /// to the freelist.
+    /// any raw-chain nodes - use this instead of `free_raw_chain_mgr` whenever real vanilla code (the
+    /// real, undetoured `ADD_THOUGHT`/`LOAD`) may have linked nodes it allocated through vanilla's own
+    /// small-object freelist into this manager's list: those nodes must never be freed through `Box` (a
+    /// cross-allocator free is undefined behavior / heap corruption), so this deliberately leaks them - a
+    /// one-time, per-proptest-case leak, reclaimed at process exit. The sentinel node itself is still
+    /// safe to free normally here: `ADD_THOUGHT`/`LOAD` only ever relink its `next`/`prev` fields to
+    /// point at newly inserted nodes, never reallocate or hand its own address to the freelist.
     pub(crate) fn destroy_standalone_mgr_leaking_nodes(ptr: *mut ZTThoughtMgr) {
         if ptr.is_null() {
             return;
         }
         let mgr = unsafe { &*ptr };
-        drop(unsafe { Box::from_raw(mgr.sentinel()) });
+        drop(unsafe { Box::from_raw(mgr.sentinel_ptr as *mut ThoughtNode) });
         drop(unsafe { Box::from_raw(ptr) });
-    }
-
-    /// Wraps a vanilla-allocated sentinel pointer - the out-param `getThoughtsBy*` writes - as a
-    /// throwaway `ZTThoughtMgr` purely so `.iter()` can walk it. The temporary list's own sentinel is
-    /// self-referencing and its matched-entry nodes are `{next, prev, ZTThought}` at stride `0x2c` -
-    /// byte-for-byte identical to our own `ThoughtNode`/persistent-list shape; only the allocator
-    /// differs (vanilla's own small-object freelist, never `Box`). Never call any mutating method
-    /// (`insert_front`/`remove_where`/`clear`/...) on the result - freeing or writing through
-    /// `Box`-shaped assumptions here would corrupt the freelist heap. The vanilla list itself is
-    /// deliberately never freed by this test harness - there's no confirmed address for the freelist's
-    /// own free-node routine - a one-time, per-proptest-case leak of a handful of `0x2c`-byte nodes,
-    /// reclaimed at process exit.
-    pub(crate) fn read_only_wrap_vanilla_list(sentinel_ptr: u32) -> ZTThoughtMgr {
-        ZTThoughtMgr { vtable: 0, flag: 0, _pad: [0; 3], sentinel_ptr, max_thoughts: u32::MAX }
     }
 }
 
@@ -1013,20 +1092,16 @@ mod tests {
         }
     }
 
-    /// Builds a standalone `ZTThoughtMgr` with a freshly heap-allocated, self-referencing sentinel
-    /// node - never spliced into the real singleton. Leaks the sentinel (acceptable for short-lived
-    /// unit tests).
+    /// Builds a standalone `ZTThoughtMgr` backed by its own entry in [`THOUGHT_STORES`] - never spliced
+    /// into the real singleton. `sentinel_ptr` is never dereferenced by any production method anymore;
+    /// it's just a unique registry key here, so a plain leaked one-byte allocation is enough (no need
+    /// for a real `ThoughtNode`-shaped placeholder, which is test-only harness scoped to the
+    /// `reimplementation-tests` feature these plain unit tests don't enable). Leaks that placeholder
+    /// (acceptable for short-lived unit tests, and guarantees the key is never reused across tests
+    /// sharing a stack slot).
     fn build_test_mgr(max_thoughts: u32) -> ZTThoughtMgr {
-        let sentinel = Box::into_raw(Box::new(ThoughtNode {
-            next: std::ptr::null_mut(),
-            prev: std::ptr::null_mut(),
-            data: thought_fixture(0, 0),
-        }));
-        unsafe {
-            (*sentinel).next = sentinel;
-            (*sentinel).prev = sentinel;
-        }
-        ZTThoughtMgr { vtable: 0, flag: 0, _pad: [0; 3], sentinel_ptr: sentinel as u32, max_thoughts }
+        let sentinel_ptr = Box::into_raw(Box::new(0u8)) as u32;
+        ZTThoughtMgr { vtable: 0, flag: 0, _pad: [0; 3], sentinel_ptr, max_thoughts }
     }
 
     #[test]

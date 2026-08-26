@@ -4,9 +4,11 @@
 //! `cost` dollars per in-game day.
 //!
 //! The funding-level mutators (`increase_funding`/`decrease_funding`/`set_funding_level`), `update`,
-//! `save`/`load`, `getFundingText`, and the `.cfg`-driven config-loading pipeline
-//! (`marketing_config_reimplementation`, below) are all natively reimplemented. Only
-//! `ZTMarketingMgr::create`/`instantiate`/`destroy` remain unreimplemented.
+//! `save`/`load`, `getFundingText`, the `.cfg`-driven config-loading pipeline
+//! (`marketing_config_reimplementation`, below), and the vtable destructor (`marketing_dtor_detour`,
+//! below) are all natively reimplemented. Only `ZTMarketingMgr::create`/`instantiate` (construction, not
+//! teardown) remain unreimplemented - `ztmarketingmgr::CONSTRUCTOR`/`CREATE_ZTMARKETING_MGR` in
+//! `generated.rs` are the confirmed addresses, just not yet redirected onto a Rust-side allocation path.
 
 use std::mem::size_of;
 
@@ -761,6 +763,14 @@ mod marketing_config_reimplementation {
             }
         }
 
+        /// The destructor body: frees the owned `ZTMarketing` (and its funding table) exactly like
+        /// `clear_configurations`, since there's nothing left to tear down beyond what that method
+        /// already does. Never frees `self` (`this`) itself - see `marketing_dtor_detour`'s doc comment
+        /// for why.
+        pub(crate) fn destroy(&mut self) {
+            self.clear_configurations();
+        }
+
         /// Always calls `clear_configurations` first, then bails out (returning `false`, with
         /// `marketing_ptr` left dangling) if the top-level file can't be opened. Otherwise allocates a
         /// fresh, default `ZTMarketing`, attaches it to `marketing_ptr` immediately, reads the
@@ -836,11 +846,50 @@ mod marketing_config_reimplementation {
     }
 }
 
+/// Detours `ZTMarketingMgr`'s vtable destructor slot - the scalar deleting destructor at `0x00504f89`
+/// (`ZTMARKETING_MGR_1` in `generated.rs`) - onto [`ZTMarketingMgr::destroy`]. Vanilla's own version of
+/// this function calls the real destructor body (`ZTMARKETING_MGR_0`, `0x00504f73`), then conditionally
+/// calls `operator delete` on `this` if the caller-supplied flag byte's low bit is set. Left undetoured,
+/// that real body runs `operator delete` on `marketing_ptr` - the funding-table buffer and `ZTMarketing`
+/// struct our own `marketing_config_reimplementation` allocates through Rust's global allocator - the
+/// same cross-allocator hazard CLAUDE.md's "Live Reimplementation-Comparison Tests" section documents
+/// for `ZTThoughtMgr`. Since `ZTMarketingMgr` is a process-lifetime singleton and no address for the real
+/// vanilla `operator delete` this class would use is known or needed, this reimplementation only ever
+/// frees the funding table and the `Box`-allocated `ZTMarketing`, never the flag-gated `this` itself.
+/// `ZTMARKETING_MGR_0` (the real destructor body's own address, only ever reached indirectly through
+/// this wrapper) is intentionally left un-detoured: nothing else in vanilla calls it directly.
+mod marketing_dtor_detour {
+    use openzt_detour::generated::ztmarketingmgr::ZTMARKETING_MGR_1;
+    use openzt_detour_macro::detour_mod;
+    use tracing::error;
+
+    use super::*;
+    use crate::util::mut_from_memory;
+
+    #[detour_mod]
+    mod detours {
+        use super::*;
+
+        #[detour(ZTMARKETING_MGR_1)]
+        unsafe extern "thiscall" fn ztmarketingmgr_dtor(this: *const u32, _flags: u8) -> *const u32 {
+            unsafe { mut_from_memory::<ZTMarketingMgr>(this) }.destroy();
+            this
+        }
+    }
+
+    pub fn init() {
+        if let Err(e) = unsafe { detours::init_detours() } {
+            error!("Failed to initialise ztmarketingmgr destructor detour: {e:?}");
+        }
+    }
+}
+
 /// registers the marketing module's live detours
 pub fn init() {
     marketing_save_reimplementation::init();
     marketing_config_reimplementation::init();
     marketing_update_reimplementation::init();
+    marketing_dtor_detour::init();
 }
 
 /// Synthetic `ZTMarketing` construction/teardown for the live `reimplementation_tests` comparison

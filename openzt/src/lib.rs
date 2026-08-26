@@ -93,6 +93,14 @@ mod ztthoughtmgr;
 /// recalculate terrain "megatile" (5x5 tile block) guest-density/esthetic-bonus characteristics.
 mod ztmegatilemgr;
 
+/// ztawardmgr module has structs and methods for the vanilla ZTAwardMgr class, which tracks earned
+/// zoo-achievement awards and the award.cfg catalogue.
+mod ztawardmgr;
+
+/// ztguest module reimplements ZTGuest's three megatile-reading methods (fCrowdDensityMegatile/
+/// fEstheticBonusMegatile/fStinkyMegatile) - closes the last vanilla read path into ZTMegatileMgr's grid.
+mod ztguest;
+
 mod experimental;
 
 /// Roof tag extension for scenery entities
@@ -207,6 +215,8 @@ mod zoo_init {
             ztmarketing::init();
             ztthoughtmgr::init();
             ztmegatilemgr::init();
+            ztawardmgr::init();
+            ztguest::init();
         }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }

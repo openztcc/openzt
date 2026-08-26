@@ -472,6 +472,124 @@ For features not covered by integration tests:
 3. Test console commands if applicable
 4. Check for game crashes or memory issues
 
+## Reimplementation Pattern
+
+This section documents how a vanilla `ZT*Mgr`/`BF*Mgr` class gets fully reimplemented in Rust (see
+`openzt/plans/zt-mgr-classes-reimplementation-roadmap.md` for which classes are done/candidates). Established
+by `ztmarketing.rs`/`ztresearch.rs`/`ztthoughtmgr.rs`/`ztmegatilemgr.rs`.
+
+### `openzt-detour/src/generated.rs`
+
+- Auto-generated from a Ghidra analysis pass run **outside this repo** - there is no generator script checked
+  in. **Never hand-patch this file's existing entries** - a regeneration silently discards hand-edits. The one
+  sanctioned exception is adding an entry for a function Ghidra's pass hasn't picked up yet: add it inside the
+  relevant `pub mod <classname> { ... }` block with a `// Hand-added: <reason>` comment directly above it,
+  matching the existing hand-added block's style (search the file for `Hand-added` to find the precedent).
+- One `pub mod <lowercase_classname> { ... }` block per C++ class (free functions live under `standalone` or a
+  UI-area module like `ztui`). Each function is `pub const <SCREAMING_NAME>: FunctionDef<unsafe extern
+  "<abi>" fn(...) -> R> = FunctionDef{address: 0x..., function_type: PhantomData};`.
+- `address` is always the **raw Ghidra virtual address, untouched** - Zoo Tycoon's `.exe` has no ASLR and
+  always loads at its preferred base `0x00400000`, so a Ghidra VA already equals the runtime VA for *code*.
+  This is different from **data** addresses (globals/statics), which get resolved at runtime as
+  `get_module_base("zoo.exe") + RVA` (RVA = Ghidra address minus `0x400000`) - see `globals.rs`'s
+  `CachedGlobalInstance` entries for the pattern. Don't confuse the two: function-table entries in
+  `generated.rs` need no base-address math; ad-hoc global/struct-field addresses computed in `openzt/src` do.
+- Every entry carries a `#[cfg_attr(feature = "detour-validation", validate_detour("class/method"))]`
+  attribute. This is currently inert scaffolding - no `detour-validation` feature or `validate_detour` macro
+  exists in the repo - just copy the attribute verbatim on any new entry for consistency, don't try to wire it
+  up.
+- `FunctionDef::original()` returns the real vanilla function unconditionally (`retour::Function::from_ptr` on
+  the stored address) - it does **not** check whether that address is currently hooked. Calling `.original()`
+  on a function you have *not* detoured is always safe. Calling it *from inside that same function's own
+  detour* is not (see below).
+
+### Detouring a function (`#[detour_mod]` / `#[detour(NAME)]`)
+
+Provided by `openzt-detour-macro`. Shape (see `ztthoughtmgr.rs`'s `thought_save_detours` module or
+`ztmegatilemgr.rs`'s `megatilemgr_detours` module for full worked examples):
+
+```rust
+use openzt_detour::generated::<classname>::{SAVE, LOAD};
+
+#[detour_mod]
+mod detours {
+    use super::*;
+    #[detour(SAVE)]
+    unsafe extern "thiscall" fn save(this: *const u32, file: *const u32) -> bool {
+        unsafe { ref_from_memory::<MyMgr>(this) }.save(file)
+    }
+}
+
+pub fn init() {
+    if let Err(e) = unsafe { detours::init_detours() } {
+        error!("Failed to initialise <classname> detours: {e:?}");
+    }
+}
+```
+
+- `#[detour_mod]` generates one `static <NAME>_DETOUR: LazyLock<GenericDetour<...>> = ...` per `#[detour(NAME)]`
+  function in the block, plus an `init_detours()` that `.enable()`s each. The detour function's own
+  `extern "<abi>"` annotation is read directly by the macro and must match the `FunctionDef`'s ABI/signature
+  exactly - there's no separate thiscall-specific wrapper, just Rust's native `extern "thiscall"` support with
+  `this: *const u32` as the first parameter.
+- Use `NAME.original()(...)` to call a vanilla function's real body when you have **not** hooked that same
+  function (e.g. calling a different helper, or calling through from one class's detour into another
+  class's un-hooked method).
+- Use the macro-generated `<NAME>_DETOUR.call(...)` only when calling the real body **of the function your
+  current code is itself a detour for** (its address has been patched to jump into your detour, so
+  `.original()` there would recurse into yourself). See `resource_manager/hooks.rs`'s `CONSTRUCTOR` detour for
+  the pattern (run `CONSTRUCTOR_DETOUR.call(this_ptr)` first, then layer additional Rust logic on top).
+- A **partial-override** detour (replace behavior for one input/condition, delegate to the real function for
+  everything else) uses the same `<NAME>_DETOUR.call(...)` mechanism inside a `match`/`if` - see
+  `resource_manager/hooks.rs`'s `zoo_ui_general_get_info_image_name` for the shape. There's no dedicated
+  "partial override" macro - it's a plain conditional around the call-through.
+
+### File/module shape for a class reimplementation
+
+One file per class in `openzt/src/` (e.g. `ztthoughtmgr.rs`): module doc comment explaining the vanilla class
+and any allocator/memory-safety caveats -> `#[repr(C)]` struct(s) mirroring vanilla layout with a
+`size_of` assertion, **only if the reimplementation needs to read/write vanilla's own memory in place**
+(see "Two reimplementation styles" below) -> `impl` blocks with the real logic as plain Rust methods, kept
+separate from the detour glue -> one or more `#[detour_mod] mod ... { }` blocks (split into
+purpose-grouped submodules for a large class, e.g. `ztthoughtmgr.rs`'s `thought_accessor_detours`/
+`thought_mutator_detours`/`thought_save_detours`/`thought_dtor_detour`) -> a top-level `pub fn init()`
+aggregating each submodule's `init()` -> `#[cfg(feature = "reimplementation-tests")] pub(crate) mod
+live_support { ... }` with test-only helpers -> `#[cfg(test)] mod tests { ... }` for plain logic unit tests.
+
+Wire a new module into `lib.rs`: add `mod <name>;` near the other `mod zt*mgr;` declarations, and
+`<name>::init();` inside the `if cfg!(feature = "experimental") { ... }` block.
+
+### Two reimplementation styles - pick based on whether other vanilla code reads the class's raw memory
+
+1. **Vanilla-layout-compatible** (`ZTThoughtMgr`, `ZTMegatileMgr`): the global is a pointer to a
+   heap-allocated instance; a `#[repr(C)]` struct mirrors vanilla's fields exactly, and Rust methods read/write
+   that memory in place (sometimes alongside a side `HashMap` keyed by pointer for data that doesn't fit
+   vanilla's layout). Necessary when other, un-decompiled/un-detoured vanilla code might still read the
+   struct's raw fields directly (can't fully rule this out), or when the global is heap-allocated via a
+   constructor that can also be run against a fresh allocation for standalone side-by-side testing.
+2. **Fully independent Rust store** (no vanilla-layout struct at all): only viable when every vanilla code
+   path that reads/writes the class's fields has been enumerated (grep the whole decompile corpus for the
+   class name *and* the raw field addresses directly, not just method names - a caller can read a field
+   inline without going through any method call) and every one of them is being detoured/reimplemented too.
+   Vanilla's own copy of the data is then left completely alone (never read or written by Rust) and becomes
+   inert dead weight. This sidesteps the cross-allocator hazard below entirely, at the cost of losing the
+   ability to do standalone/side-by-side memory-diff testing if the class's constructor hardcodes a fixed
+   global address (can't be run against a second instance) - live tests then have to compare `.original()`
+   *behavior/return values* against the Rust store's outputs instead of diffing shared memory.
+
+### Cross-allocator memory safety (style 1 only)
+
+**Never free real vanilla-allocated output through Rust's allocator, or vice versa.** If a class manages its
+own heap objects reachable through a still-live, undetoured vanilla code path (e.g. a linked list node
+allocated through vanilla's own small-object freelist when reached via `.original()`, vs. a `Box` when built
+by test/reimplementation code), calling `Box::from_raw`/`drop` on a vanilla-allocated node - or letting
+vanilla's own free path touch a `Box`-allocated node - is genuine heap corruption, not just a leak. It can
+crash, but Windows' Fault Tolerant Heap may silently absorb a few occurrences (no dialog, empty `openzt.log`,
+looks like the game "just exited") - a reboot is sometimes needed to see a real crash again once FTH kicks in.
+Build a leak-only teardown path for the side that might hold vanilla-allocated nodes (free only what your own
+code definitely allocated, deliberately leak the rest) rather than reusing a normal Box-walking cleanup - see
+`ztthoughtmgr.rs`'s `live_support::destroy_standalone_mgr_leaking_nodes` for a worked example.
+
 ## Code Quality
 
 - Avoid obvious comments that restate code
