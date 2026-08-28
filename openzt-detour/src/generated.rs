@@ -5909,6 +5909,17 @@ pub mod ztguest {
     pub const DRAW_AIINFO: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32, i32, i32, i32)> = FunctionDef{address: 0x00619050, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztguest/do_happy_price_change"))]
     pub const DO_HAPPY_PRICE_CHANGE: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x00619245, function_type: PhantomData};
+    // Hand-added: no Windows decompile exists for these three (nor for their sole caller,
+    // doEnvironmentEffectCheck) - confirmed by direct disassembly of zoo.dll instead. See
+    // private/docs/vtables/ZTGuest.md's "Non-virtual confirmed methods" section for the evidence.
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztguest/f_crowd_density_megatile"))]
+    pub const F_CROWD_DENSITY_MEGATILE: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> i32> = FunctionDef{address: 0x0043b7e3, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztguest/f_esthetic_bonus_megatile"))]
+    pub const F_ESTHETIC_BONUS_MEGATILE: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> f32> = FunctionDef{address: 0x0043b6c0, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztguest/f_stinky_megatile"))]
+    pub const F_STINKY_MEGATILE: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> f32> = FunctionDef{address: 0x0043b84a, function_type: PhantomData};
+    /// `doEnvironmentEffectCheck` - the sole caller of the three above, docs-only (not detoured).
+    pub const DO_ENVIRONMENT_EFFECT_CHECK: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x0043abac, function_type: PhantomData};
 }
 
 // ZTGuestType class functions

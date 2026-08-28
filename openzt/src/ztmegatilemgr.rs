@@ -1,8 +1,10 @@
 //! Structs and methods for the vanilla `ZTMegatileMgr`/`ZTMegatile` classes: terrain "megatile" (5x5
-//! tile block) characteristic recalculation - guest density and per-`BFCategory` "esthetic" averages,
-//! consumed by `ZTGuest::fCrowdDensityMegatile`/`fEstheticBonusMegatile` (not detoured by this file;
-//! they read this memory raw, by pointer-chasing, so the struct layout below must be byte-exact rather
-//! than merely behaviorally equivalent).
+//! tile block) characteristic recalculation - guest density, a per-tile `stink` scalar, and per-
+//! `BFCategory` "esthetic" averages, consumed by `ZTGuest::fCrowdDensityMegatile`/`fStinkyMegatile`/
+//! `fEstheticBonusMegatile` (now detoured in `ztguest.rs` onto Rust reimplementations that call this
+//! file's own accessors - see that module's doc comment). The struct layout below must still stay
+//! byte-exact rather than merely behaviorally equivalent: those accessors still read vanilla's own
+//! live-owned memory directly, not a migrated Rust store (see `native-data-structures-plan.md`'s Module 2).
 //!
 //! Allocator strategy: **100% vanilla-owned, everywhere in this file.** This module never allocates a
 //! single byte of its own. The outer `vector<vector<ZTMegatile>>` grid and every embedded
@@ -84,7 +86,9 @@ impl MegatileRow {
 pub struct ZTMegatile {
     guest_count: i32,        // 0x0 - zeroed then incremented per resident guest in recalc
     category_map: MapHeader, // 0x4-0xf - std::map<int,float>, see MapHeader/TreeNode below
-    esthetic_bonus: f32,     // 0x10 - running per-category esthetic-bonus average
+    stink: f32,              // 0x10 - running per-tile stink accumulator (formerly mislabeled
+                              // `esthetic_bonus` - see ztmegatilemgr-review-findings.md finding 2; the
+                              // real esthetic-bonus data is `category_map`/`category_value()`)
 }
 
 const _: () = assert!(mem::size_of::<ZTMegatile>() == 0x14);
@@ -137,8 +141,8 @@ impl ZTMegatile {
         self.guest_count
     }
 
-    pub fn esthetic_bonus(&self) -> f32 {
-        self.esthetic_bonus
+    pub fn stink(&self) -> f32 {
+        self.stink
     }
 
     /// Read-only BST lower-bound walk over `category_map`, mirroring
@@ -250,7 +254,7 @@ impl ZTMegatileMgr {
     /// `ZTMegatileMgr_recalculateCharacteristics.c`. Two passes over the live map:
     ///
     /// 1. Reset every currently-allocated megatile: `guest_count = 0`, `category_map.clear()` (via
-    ///    [`category_map_clear`]), `esthetic_bonus = 0.0`.
+    ///    [`category_map_clear`]), `stink = 0.0`.
     /// 2. For every real map tile `(x, y)`, walk its guest-occupant list (an intrusive circular list
     ///    whose sentinel pointer lives at the tile's own `+0x0`, node shape `{next, prev, entity_ptr}`)
     ///    counting residents whose entity type passes the `ZTGuestType` check
@@ -259,8 +263,8 @@ impl ZTMegatileMgr {
     ///    entity pointers (`+0x4`/`+0x8`/`+0xc`/`+0x10`) whose type passes the `ZTSceneryType`-ish check
     ///    (`DAT_00638670`), accumulates that entity type's per-category `BFCategory::getValue`
     ///    (`bfcategory::GET_VALUE`) divided by the entity's own footprint divisor (`+0x150`) into the
-    ///    owning megatile's `category_map`, plus its `esthetic_bonus`-source field (`+0x11c`) into
-    ///    `esthetic_bonus` the same way.
+    ///    owning megatile's `category_map`, plus its `stink`-source field (`+0x11c`) into `stink` the
+    ///    same way.
     ///
     /// Only the not-found branch of the per-category accumulation calls through to vanilla (the
     /// find-or-insert helper, [`accumulate_category_value`]) - once a node exists, writing its `value`
@@ -272,7 +276,7 @@ impl ZTMegatileMgr {
                 let megatile = unsafe { &mut *row.start.add(i) };
                 megatile.guest_count = 0;
                 unsafe { category_map_clear(&mut megatile.category_map) };
-                megatile.esthetic_bonus = 0.0;
+                megatile.stink = 0.0;
             }
         }
 
@@ -323,7 +327,7 @@ impl ZTMegatileMgr {
                         let delta = raw_value as f32 / divisor;
                         unsafe { accumulate_category_value(&mut megatile.category_map, category_id, delta) };
                     }
-                    megatile.esthetic_bonus += get_from_memory::<i32>(entity_type_ptr + 0x11c) as f32 / divisor;
+                    megatile.stink += get_from_memory::<i32>(entity_type_ptr + 0x11c) as f32 / divisor;
                 }
             }
         }
@@ -394,7 +398,7 @@ impl ZTMegatileMgr {
                 // construct-from-value call. A `category_map.head: null` within that value isn't safe
                 // either - see [`empty_category_map_sentinel`]'s own doc comment. The fill value needs a
                 // real empty-tree sentinel for `head` (`parent: null`, `left`/`right` self-referential).
-                let fill = ZTMegatile { guest_count: 0, category_map: MapHeader { head: empty_category_map_sentinel(), size: 0, _reserved: 0 }, esthetic_bonus: 0.0 };
+                let fill = ZTMegatile { guest_count: 0, category_map: MapHeader { head: empty_category_map_sentinel(), size: 0, _reserved: 0 }, stink: 0.0 };
                 unsafe {
                     inner_vector_insert_n(row, (inner_target - current_inner) as u32, &fill);
                 }
@@ -641,8 +645,8 @@ pub(crate) mod live_support {
         mgr.tick_accumulator = tick_accumulator;
     }
 
-    /// A snapshot of every currently-allocated megatile's `guest_count`/`esthetic_bonus`, plus the
-    /// grid's own shape (columns, rows-per-column) - the diff mechanism `ZTMEGATILEMGR_RECALCULATE_CHARACTERISTICS`
+    /// A snapshot of every currently-allocated megatile's `guest_count`/`stink`, plus the grid's own
+    /// shape (columns, rows-per-column) - the diff mechanism `ZTMEGATILEMGR_RECALCULATE_CHARACTERISTICS`
     /// uses to compare the real vanilla call against the reimplementation, since `category_map`'s raw
     /// tree contents aren't directly comparable field-by-field without the same lower-bound walk
     /// `category_value` already performs (used instead - see `snapshot_categories`).
@@ -655,7 +659,7 @@ pub(crate) mod live_support {
         let columns = (0..mgr.megatile_columns())
             .map(|column| (0..mgr.megatile_rows_in_column(column)).map(|row| {
                 let mt = mgr.megatile(column, row).expect("row within bounds");
-                (mt.guest_count(), mt.esthetic_bonus())
+                (mt.guest_count(), mt.stink())
             }).collect())
             .collect();
         GridSnapshot { columns }
@@ -748,8 +752,8 @@ mod tests {
     /// short-lived unit tests).
     fn fixture_mgr() -> ZTMegatileMgr {
         let megatiles: &'static mut [ZTMegatile] = Box::leak(Box::new([
-            ZTMegatile { guest_count: 3, category_map: MapHeader { head: std::ptr::null_mut(), size: 0, _reserved: 0 }, esthetic_bonus: 1.5 },
-            ZTMegatile { guest_count: 7, category_map: MapHeader { head: std::ptr::null_mut(), size: 0, _reserved: 0 }, esthetic_bonus: 2.5 },
+            ZTMegatile { guest_count: 3, category_map: MapHeader { head: std::ptr::null_mut(), size: 0, _reserved: 0 }, stink: 1.5 },
+            ZTMegatile { guest_count: 7, category_map: MapHeader { head: std::ptr::null_mut(), size: 0, _reserved: 0 }, stink: 2.5 },
         ]));
         let start = megatiles.as_mut_ptr();
         let end = unsafe { start.add(megatiles.len()) };
@@ -776,7 +780,7 @@ mod tests {
 
     #[test]
     fn category_value_on_empty_map_is_none() {
-        let mt = ZTMegatile { guest_count: 0, category_map: MapHeader { head: std::ptr::null_mut(), size: 0, _reserved: 0 }, esthetic_bonus: 0.0 };
+        let mt = ZTMegatile { guest_count: 0, category_map: MapHeader { head: std::ptr::null_mut(), size: 0, _reserved: 0 }, stink: 0.0 };
         assert_eq!(mt.category_value(9503), None);
     }
 
@@ -790,7 +794,7 @@ mod tests {
         root.right = &mut right as *mut TreeNode;
         let mut header = TreeNode { _color_isnil: 0, parent: &mut root as *mut TreeNode, left: std::ptr::null_mut(), right: std::ptr::null_mut(), key: 0, value: 0.0 };
         let map = MapHeader { head: &mut header as *mut TreeNode, size: 3, _reserved: 0 };
-        let mt = ZTMegatile { guest_count: 0, category_map: map, esthetic_bonus: 0.0 };
+        let mt = ZTMegatile { guest_count: 0, category_map: map, stink: 0.0 };
 
         assert_eq!(mt.category_value(9503), Some(1.0));
         assert_eq!(mt.category_value(9504), Some(2.0));
