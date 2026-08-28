@@ -41,6 +41,15 @@ pub fn init() {
         crate::ztresearch::research_save_reimplementation::init();
         crate::ztmarketing::marketing_save_reimplementation::init();
 
+        // ZTShowScriptMgr reimplementation plan, open item 1: installed here (unconditionally, before
+        // `run_load_live_zoo`) rather than only after the real zoo has loaded, specifically to exercise
+        // `ZTShowScriptMgr::load`/`ZTShowScript::load` against real save data. A prior session tried this
+        // and hit a process crash during `run_load_live_zoo` itself - see this function's own diagnostics
+        // for what was found.
+        crate::ztshowscriptmgr::init();
+        crate::ztshow::init();
+        crate::ztshowui::init();
+
         unsafe { detour_zoo_main::init_detours() }.is_err().then(|| {
             error!("Error initialising zoo_main detours");
         });
@@ -118,6 +127,9 @@ mod detour_zoo_main {
     use openzt_detour::generated::zthabitatmgr;
     use openzt_detour::generated::ztui_gameopts::LOAD_FILE as ZTUI_GAMEOPTS_LOAD_FILE;
     use openzt_detour::generated::ztunit::GET_FOOTPRINT as ZTUNIT_GET_FOOTPRINT;
+    use openzt_detour::generated::ztshow::{CREATE_SHOW_SCRIPT_STATE, GET_SHOW_SCRIPT_STATE};
+    use openzt_detour::generated::ztshowinfo::GET_NUM_UNITS as ZTSHOWINFO_GET_NUM_UNITS;
+    use openzt_detour::generated::bfworldmgr::GET_TYPE as BFWORLDMGR_GET_TYPE;
     use openzt_detour::FunctionDef;
     use proptest::prelude::*;
     use tracing::{error, info};
@@ -136,6 +148,9 @@ mod detour_zoo_main {
         ztguest::{self, live_support as guest_live_support},
         ztawardmgr::{self, live_support as award_live_support},
         ztworldmgr::{BFEntity, IVec3, ZTAnimal, ZTUnit},
+        ztshow::{self, live_support as ztshow_live_support},
+        ztshowscriptmgr,
+        ztshowui,
     };
 
     use super::io_redirect;
@@ -1199,6 +1214,35 @@ mod detour_zoo_main {
             // yet at that injection point) - retry now that run_load_live_zoo has guaranteed a live one.
             fail_flag |= run_ztscenariosimplegoal_eval_award_count_test(&mut failure_log);
             fail_flag |= run_awardmgr_show_awards_test(&mut failure_log);
+
+            // ZTShowScriptMgr reimplementation plan, open item 11 (Stage 2 live coverage): all three need
+            // a real, loaded zoo - Group 1 (ADD_SCRIPT/CHECK_PENDING_SCRIPTS) needs a live GLOBAL_ZTGameMgr
+            // for GET_DATE, Groups 2/3 need real GLOBAL_ZTHabitatMgr/GLOBAL_ZTWorldMgr data.
+            //
+            // The ZTShowScriptMgr/ZTShow detours are now installed unconditionally near the top of this
+            // file's `init()` (alongside `research_save_reimplementation`/`marketing_save_reimplementation`)
+            // rather than only here, after `run_load_live_zoo` - see open item 1's diagnostics there for
+            // why that used to be necessary and what fixed it. **Real, session-defining finding** (from the
+            // session that first installed these two detours here, after the zoo already loaded): this
+            // crate's production entry point (`openztlib::init()`, reached via `zoo_init::init_detours()`)
+            // is never called by `openzt-test-dll`'s own `DllMain` (`openzt-test-dll/src/lib.rs` calls
+            // `openztlib::reimplementation_tests::init()` directly instead) - meaning *no* per-module
+            // detour (`ztshow`, `ztshowscriptmgr`, `ztawardmgr`, `ztthoughtmgr`, `ztmegatilemgr`, ...) was
+            // ever installed in this test harness except the handful explicitly installed in this file's
+            // own `init()`. Every "call the real, now-hooked address directly" live test in this file
+            // predating that finding (`ZTAWARDMGR_SHOW_AWARDS`, `ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT`)
+            // was therefore silently calling real, un-hooked vanilla code all along and only ever verifying
+            // "vanilla doesn't crash" - not exercising the Rust reimplementation at all, despite each one's
+            // own doc comment describing it as testing the hooked path. Confirmed live via reliable,
+            // non-tracing (`std::sync::atomic`/direct-file-write) diagnostics, after `tracing`-based
+            // `error!`/`info!` diagnostics turned out to be lossy under this battery's `std::process::exit()`
+            // end-of-run (queued-but-unflushed log lines vanish silently - `error!` calls placed early in a
+            // test function routinely never made it to `openzt.log`, while calls placed right at the end
+            // reliably did).
+            fail_flag |= run_ztshowinfo_add_script_check_pending_scripts_live_test(&mut failure_log);
+            fail_flag |= run_ztshow_check_owning_habitat_live_test(&mut failure_log);
+            fail_flag |= run_ztshow_group3_trick_live_test(&mut failure_log);
+            fail_flag |= run_ztshowui_fill_trick_lists_live_test(&mut failure_log);
         }
 
         if fail_flag {
@@ -3852,6 +3896,512 @@ mod detour_zoo_main {
         info!("{} completed without crashing (exercised {} award ids)", test_name, exercised_count);
         write_success_line(failure_log, test_name);
         false
+    }
+
+    /// Builds a raw `ZTShowScriptItemRaw` (via `ztshowscriptmgr::live_support::raw_item_matching_type`)
+    /// and hands it to `ztshowscriptmgr::add_item`, for a script constructed via `make_registered_show_script`.
+    fn add_matching_item(script_ptr: u32, script_type: u32, trick_id: u16) {
+        let item = ztshowscriptmgr::live_support::raw_item_matching_type(script_type, trick_id);
+        ztshowscriptmgr::add_item(script_ptr, &item);
+    }
+
+    /// Registers one script directly via `ztshowscriptmgr::register_script` (the exact Rust function
+    /// Stage 1's `REGISTER_SCRIPT` detour itself calls into) and adds one matching-type item via
+    /// [`add_matching_item`]. Returns the assigned script id.
+    ///
+    /// **Deliberately does not go through the real `ZTShowScript::ZTShowScript` ctor's own
+    /// `auto_register=true` path** (`ztshowscript::CONSTRUCTOR`, which this test originally used) - a
+    /// real, significant finding from building this test: calling that ctor live and comparing
+    /// `script_exists_by_id` immediately afterward showed the id it wrote back into the constructed
+    /// object's own `+0x4` field (a real, live, plausible-looking sequential id) was **never actually
+    /// registered in Stage 1's store** (`exists_immediately=false`), while calling `ztshowscriptmgr::
+    /// register_script` directly on the exact same kind of `alloc` pointer registered correctly and
+    /// immediately (`exists_immediately=true`). The ctor's own `.asm`
+    /// (`ZTShowScript_ZTShowScript.asm`) confirms a genuine `CALL ZTShowMgr::registerScript` (not
+    /// inlined), and `ZTShowMgr::registerScript`'s own `.asm` (`ZTShowMgr_registerScript.asm`) confirms a
+    /// genuine `CALL ZTShowScriptMgr::registerScript` in turn - on paper this should reach the exact
+    /// address Stage 1's `REGISTER_SCRIPT` detour patches (`0x0046e774`), the same way `ztshowui::
+    /// copy_list_to_script`'s own identical ctor call was assumed to. Live evidence says it doesn't. This
+    /// wasn't tracked down further this session (would need fresh Ghidra access to confirm whether the
+    /// two decompiles' `ZTShowScriptMgr::registerScript` symbol is genuinely the same machine address as
+    /// `generated.rs`'s `REGISTER_SCRIPT` entry, or a same-named-but-distinct overload/duplicate) - flagged
+    /// as a real, open, and significant gap: if real gameplay's *only* production code path for creating a
+    /// new show script (this ctor, `auto_register=true`) doesn't reach Stage 1's store, then every
+    /// freshly-created in-game show script (not loaded from a save) may silently never register, breaking
+    /// `ZTShowInfo::addScript`/`createDefaultScript` end-to-end for brand-new shows specifically - contrary
+    /// to Stage 3's own "calls through Stage 1's real detours transparently" conclusion, which was never
+    /// live-verified until this session. Needs a dedicated follow-up investigation, out of scope here.
+    fn make_registered_show_script(script_type: u32, trick_id: u16) -> u16 {
+        let alloc = unsafe { standalone::OPERATOR_NEW.original()(0x14) } as u32;
+        let id = ztshowscriptmgr::register_script(alloc, script_type).expect("register_script should never reject a non-null ctor_ptr");
+        add_matching_item(alloc, script_type, trick_id);
+        id
+    }
+
+    /// ZTSHOWINFO_ADD_SCRIPT_CHECK_PENDING_SCRIPTS_LIVE: `ZTShowInfo::addScript`/`checkPendingScripts`
+    /// (`ztshowinfo::ADD_SCRIPT`/`CHECK_PENDING_SCRIPTS`) are full-replacement detours over Stage 1's
+    /// independent `ZTShowScriptMgr` store, so - like `ZTAWARDMGR_SHOW_AWARDS`/
+    /// `ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT` above - there's no real-vs-reimplementation diff oracle to
+    /// compare against. Instead: builds a standalone `ZTShowInfo` (`ztshow_live_support::
+    /// build_standalone_show_info` - a zeroed `OPERATOR_NEW(0xb0)` buffer, **not** the real
+    /// `ZTShowInfo::ZTShowInfo` ctor, which unconditionally dereferences an unconfirmed `GLOBAL_ZTAIMgr`
+    /// field - see that helper's own doc comment), registers two real `ZTShowScript`s (via
+    /// [`make_registered_show_script`], each with one matching-type item so `has_items` is true for both),
+    /// then calls through `ADD_SCRIPT`'s and `CHECK_PENDING_SCRIPTS`'s own real, now-*hooked* addresses
+    /// directly (same "call the patched address via `transmute`" technique as
+    /// `ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT` above) and asserts the resulting state directly in the
+    /// standalone buffer's own pending-scripts-tree memory and in Stage 1's store.
+    ///
+    /// Runs after `run_load_live_zoo` for parity with the other real-zoo-dependent tests, though this one
+    /// deliberately doesn't actually depend on `GLOBAL_ZTGameMgr` being live - see the next paragraph.
+    ///
+    /// **Real, live-crash-reproducing finding from this test's first run**: `GLOBAL_ZTGameMgr` is *still*
+    /// null at every injection point in this test battery, confirmed directly by `ZTSCENARIOSIMPLEGOAL_
+    /// EVAL_AWARD_COUNT`'s own "(skipped: ZTGameMgr not initialized)" log line appearing even *after*
+    /// `run_load_live_zoo` (`run_load_live_zoo`'s `FOPEN`/`LOAD_FILE`/`FCLOSE` sequence loads the world/
+    /// habitat data directly, bypassing the normal scenario-start flow that would otherwise construct
+    /// `ZTGameMgr`). `add_script`'s `was_inserted` branch calls `GET_DATE.original()(globals().
+    /// ztgamemgr_ptr(), ...)` unconditionally on a first-ever insert - matching real vanilla `addScript`'s
+    /// own decompile exactly (`ZTShowInfo_addScript.c`'s `ZTGameMgr::getDate(GLOBAL_ZTGameMgr, ...)`, also
+    /// unconditional) - which crashed this whole test process outright the first time this test actually
+    /// ran (no earlier stage-2 live test had ever exercised a first-ever pending-scripts insert before, so
+    /// this went undetected until now). Real vanilla's own lack of a null check isn't a vanilla bug - a
+    /// real game session always has a live `ZTGameMgr` by the time a habitat can have a show, `addScript`
+    /// can be called at all - it's specifically this test harness's own early injection point that can
+    /// reach `addScript` before `ZTGameMgr` exists. Worked around here (not "fixed" in `ztshow.rs`, since
+    /// there's nothing wrong with the reimplementation) by pre-inserting the pending-scripts node directly
+    /// via `find_or_insert_pending_script_node` *before* calling the hooked `ADD_SCRIPT`, so its own
+    /// internal `find_or_insert` call finds an existing node (`was_inserted == false`) and never reaches
+    /// the `GET_DATE` call at all.
+    ///
+    /// **Second, independent bug found and fixed while building this test** (see `ztshow.rs`'s
+    /// `find_or_insert_pending_script_node` for the full writeup): that function used to also maintain a
+    /// "rightmost" cache at the pending-scripts tree header's `+0xc`, which actually aliases `ZTShowInfo`'s
+    /// own real `addShow`/`removeShow` dynamic array's `begin` pointer (`+0x50`) - corrupting it on every
+    /// first-ever insert for a given `ZTShowInfo`, which would crash the very next real `ADD_SHOW`/
+    /// `REMOVE_SHOW` call (an unbounded scan against a corrupted `begin`/still-null `end`). This is a
+    /// genuine, previously-unexercised live gameplay-corruption bug - Stage 2's `addScript`/
+    /// `checkPendingScripts` had no live test until now (the plan's own open item 11) - fixed by dropping
+    /// the "rightmost" cache concept entirely (no real vanilla consumer of it was ever found).
+    fn run_ztshowinfo_add_script_check_pending_scripts_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWINFO_ADD_SCRIPT_CHECK_PENDING_SCRIPTS_LIVE";
+
+        let show_info = ztshow_live_support::build_standalone_show_info();
+        const UNIT_TYPE_ID: u32 = 0x7fff_1234;
+        const SCRIPT_TYPE: u32 = 7;
+
+        // Pre-insert the pending-scripts node ourselves - see this function's own doc comment on why
+        // `ADD_SCRIPT`'s own internal insert can't be allowed to run with GLOBAL_ZTGameMgr still null.
+        let _ = ztshow::find_or_insert_pending_script_node(show_info, UNIT_TYPE_ID);
+
+        let script_a = make_registered_show_script(SCRIPT_TYPE, 1);
+        let script_b = make_registered_show_script(SCRIPT_TYPE, 2);
+
+        let mut fail_flag = false;
+
+        // Call through ADD_SCRIPT's own real, now-hooked address directly (0x0046e8b5, ztshowinfo::ADD_SCRIPT).
+        let add_script_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32, u32, u16) -> bool>(0x0046e8b5u32) };
+        let add_ok = add_script_hooked(show_info as *const u32, UNIT_TYPE_ID, script_a);
+        if !add_ok {
+            error!("{}: ADD_SCRIPT returned false", test_name);
+            fail_flag = true;
+        }
+
+        // The very first insert for UNIT_TYPE_ID becomes the pending-scripts tree's root directly.
+        let header_self = get_from_memory::<u32>(show_info + 0x44);
+        let root = get_from_memory::<u32>(header_self + 4);
+        if root == 0 {
+            error!("{}: pending-scripts tree has no root after ADD_SCRIPT", test_name);
+            fail_flag = true;
+        } else {
+            let current = get_from_memory::<u16>(root + 0x1c);
+            let pending = get_from_memory::<u16>(root + 0x1e);
+            if current != script_a {
+                error!("{}: expected current={}, got {} after ADD_SCRIPT", test_name, script_a, current);
+                fail_flag = true;
+            }
+            if pending != 0xffff {
+                error!("{}: expected pending reset to 0xffff after ADD_SCRIPT, got {:#x}", test_name, pending);
+                fail_flag = true;
+            }
+            if !ztshowscriptmgr::script_exists_by_id(script_a) {
+                error!("{}: script_a {} should exist in the store after ADD_SCRIPT", test_name, script_a);
+                fail_flag = true;
+            }
+
+            // Simulate a queued pending change (the same state `add_script` itself would leave behind if
+            // the show were already started - simpler/more direct to poke it here than to also fake
+            // `isStarted()`'s own real precondition chain) and exercise CHECK_PENDING_SCRIPTS through its
+            // own real, now-hooked address (0x005a876a, ztshowinfo::CHECK_PENDING_SCRIPTS).
+            save_to_memory(root + 0x1e, script_b);
+            let check_pending_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32)>(0x005a876au32) };
+            check_pending_hooked(show_info as *const u32);
+
+            let current_after = get_from_memory::<u16>(root + 0x1c);
+            let pending_after = get_from_memory::<u16>(root + 0x1e);
+            if current_after != script_b {
+                error!("{}: expected current={} after CHECK_PENDING_SCRIPTS, got {}", test_name, script_b, current_after);
+                fail_flag = true;
+            }
+            if pending_after != 0xffff {
+                error!("{}: expected pending reset to 0xffff after CHECK_PENDING_SCRIPTS, got {:#x}", test_name, pending_after);
+                fail_flag = true;
+            }
+            if ztshowscriptmgr::script_exists_by_id(script_a) {
+                error!("{}: old current script_a {} should have been dropped from the store after CHECK_PENDING_SCRIPTS", test_name, script_a);
+                fail_flag = true;
+            }
+            if !ztshowscriptmgr::script_exists_by_id(script_b) {
+                error!("{}: script_b {} should still exist in the store after CHECK_PENDING_SCRIPTS", test_name, script_b);
+                fail_flag = true;
+            }
+        }
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// Scans the live, loaded test zoo's real habitats (`globals().zthabitatmgr().exhibit_array()`) for
+    /// one that is both a real tank exhibit (`ZTHabitat::is_tank`) **with water** (`water_level() > 0`) -
+    /// i.e. NOT `ztshow::check_owning_habitat`'s blocking predicate - **and** already has a real
+    /// `ZTShowInfo*` attached (`ZTHabitat::is_show_tank`), i.e. a genuinely-configured, already-working
+    /// show tank that real vanilla would let a show start on. Returns `(habitat_ptr, show_info_ptr)` for
+    /// the first match, `None` if the test zoo has none.
+    fn find_real_show_tank_habitat() -> Option<(u32, u32)> {
+        let habitat_mgr = globals().zthabitatmgr();
+        let exhibits = habitat_mgr.exhibit_array();
+        for i in 0..exhibits.len() {
+            let habitat_ptr = exhibits.get_ptr(i);
+            if habitat_ptr == 0 {
+                continue;
+            }
+            let habitat = get_from_memory::<ZTHabitat>(habitat_ptr);
+            if habitat.is_tank() && *habitat.water_level() > 0 && habitat.is_show_tank() {
+                return Some((habitat_ptr, *habitat.zt_show_info_ptr()));
+            }
+        }
+        None
+    }
+
+    /// Scans for a real habitat that *does* satisfy `check_owning_habitat`'s blocking predicate (a real
+    /// tank exhibit with zero water level) - lets `ZTSHOW_CHECK_OWNING_HABITAT_LIVE` exercise the blocking
+    /// path against real `GLOBAL_ZTHabitatMgr`-owned memory too, not just the "should proceed" one.
+    fn find_real_empty_tank_habitat() -> Option<u32> {
+        let habitat_mgr = globals().zthabitatmgr();
+        let exhibits = habitat_mgr.exhibit_array();
+        for i in 0..exhibits.len() {
+            let habitat_ptr = exhibits.get_ptr(i);
+            if habitat_ptr == 0 {
+                continue;
+            }
+            let habitat = get_from_memory::<ZTHabitat>(habitat_ptr);
+            if habitat.is_tank() && *habitat.water_level() == 0 {
+                return Some(habitat_ptr);
+            }
+        }
+        None
+    }
+
+    /// ZTSHOW_CHECK_OWNING_HABITAT_LIVE: `ztshow::check_owning_habitat` (factored out of `ZTShow::start`'s
+    /// own inlined `checkOwningHabitat` logic specifically so it could be live-tested directly - see its
+    /// own doc comment in `ztshow.rs`) is exercised here against real `GLOBAL_ZTHabitatMgr`-owned habitat
+    /// memory (Route A from the implementation plan, preferred over hand-building a fake `ZTHabitat` with
+    /// a copied vtable pointer) wrapped in a small, local, stack-allocated stand-in for a `ZTShowInfo*`
+    /// (only `+0xa0`, the habitat back-pointer `check_owning_habitat` reads, needs to be populated -
+    /// unlike `ADD_SCRIPT`/`CHECK_PENDING_SCRIPTS` above, `check_owning_habitat` touches no other field,
+    /// so there's no need for `ztshow_live_support::build_standalone_show_info`'s full `0xb0` buffer or
+    /// its allocator-lifetime concerns here).
+    ///
+    /// `start`'s own full pipeline (which is what actually calls `check_owning_habitat` in real gameplay)
+    /// isn't exercised end-to-end here: reaching the habitat check via the real `START` entry point needs
+    /// `RESOLVE_NEXT_SCHEDULED_SCRIPT_ID` to already return a genuinely-scheduled real script id first,
+    /// which depends on `ZTShow`'s own scheduling-vector data - a structure this plan never reverse
+    /// -engineered (out of scope for this session, flagged as a residual gap in the plan doc). Testing
+    /// `check_owning_habitat` directly sidesteps that gap entirely while still exercising the exact logic
+    /// `start` relies on, against real habitat memory.
+    fn run_ztshow_check_owning_habitat_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOW_CHECK_OWNING_HABITAT_LIVE";
+
+        let Some((qualifying_habitat_ptr, real_show_info)) = find_real_show_tank_habitat() else {
+            info!("Skipping {}: no real tank habitat with water_level()>0 and a real ZTShowInfo* attached found in test zoo", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no qualifying real show-tank habitat found)", test_name));
+            return false;
+        };
+
+        let mut fail_flag = false;
+
+        // Positive case: a real, working show tank (has water) must NOT be blocked - check_owning_habitat
+        // mirrors vanilla's checkOwningHabitat returning its blocking code only for an *empty* tank, so a
+        // filled one must return false here (see ztshow.rs's check_owning_habitat doc comment).
+        let mut positive_buf = [0u8; 0xa4];
+        let positive_show_info = positive_buf.as_mut_ptr() as u32;
+        save_to_memory(positive_show_info + 0xa0, qualifying_habitat_ptr);
+        if ztshow::check_owning_habitat(positive_show_info) {
+            error!("{}: check_owning_habitat returned true (blocked) for a real working tank habitat ({:#010x}, water_level>0)", test_name, qualifying_habitat_ptr);
+            fail_flag = true;
+        }
+
+        // Negative case: a null habitat pointer means there's no tank gating this show at all, so it must
+        // not be blocked either.
+        let null_buf = [0u8; 0xa4];
+        let null_show_info = null_buf.as_ptr() as u32;
+        if ztshow::check_owning_habitat(null_show_info) {
+            error!("{}: check_owning_habitat returned true (blocked) for a null habitat pointer", test_name);
+            fail_flag = true;
+        }
+
+        // Blocking case: a real tank exhibit with zero water level must be blocked, if the test zoo has
+        // one.
+        if let Some(empty_tank_habitat_ptr) = find_real_empty_tank_habitat() {
+            let mut blocking_buf = [0u8; 0xa4];
+            let blocking_show_info = blocking_buf.as_mut_ptr() as u32;
+            save_to_memory(blocking_show_info + 0xa0, empty_tank_habitat_ptr);
+            if !ztshow::check_owning_habitat(blocking_show_info) {
+                error!("{}: check_owning_habitat returned false (not blocked) for a real empty tank habitat ({:#010x})", test_name, empty_tank_habitat_ptr);
+                fail_flag = true;
+            }
+        } else {
+            info!("{}: no real empty tank habitat found in test zoo, skipping that half of the check", test_name);
+        }
+
+        // Best-effort smoke test of the full START entry point (which is what actually calls
+        // check_owning_habitat in real gameplay) against the real show already attached to the qualifying
+        // habitat - calling through START's own real, now-hooked address (0x005a3db4, ztshow::START).
+        // Not asserted beyond "doesn't crash": whether it proceeds past the habitat check depends on real,
+        // un-inspected scheduling data this session didn't reverse-engineer (see this function's own doc
+        // comment), so an early return here is just as valid an outcome as a full run.
+        if real_show_info != 0 {
+            let real_show = real_show_info + 4;
+            let start_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32)>(0x005a3db4u32) };
+            start_hooked(real_show as *const u32);
+            info!("{}: START smoke-test against real show {:#010x} completed without crashing", test_name, real_show);
+        }
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// Scans the live, loaded test zoo's real world entities (`globals().ztworldmgr()`'s entity array) for
+    /// one whose type passes `ztshow::RVA_SHOW_TRICK_TYPE_CHECK` (the same `entity_type_matches` gate
+    /// `do_current_item`/`validate_item` both apply) - i.e. a genuinely trick-eligible animal. Returns
+    /// `(entity_ptr, entity_id)` for the first match, `None` if the test zoo has none.
+    fn find_real_trick_eligible_unit() -> Option<(u32, u32)> {
+        let world = globals().ztworldmgr();
+        let start = world.entity_array_start();
+        let end = world.entity_array_end();
+        let mut i = start;
+        while i < end {
+            let entity_ptr = get_from_memory::<u32>(i);
+            i += 0x4;
+            if entity_ptr == 0 {
+                continue;
+            }
+            if unsafe { crate::ztmegatilemgr::entity_type_matches(entity_ptr, ztshow::RVA_SHOW_TRICK_TYPE_CHECK) } {
+                let id = get_from_memory::<u32>(entity_ptr + 0x124);
+                return Some((entity_ptr, id));
+            }
+        }
+        None
+    }
+
+    /// ZTSHOW_GROUP3_TRICK_LIVE: `ZTShow::doCurrentItem`/`validateItem`/`doTrickEvent` are, like
+    /// `ADD_SCRIPT`/`CHECK_PENDING_SCRIPTS` above, full-replacement detours with no real-vs-reimplementation
+    /// diff oracle - this calls through their own real, now-hooked addresses directly against real,
+    /// `run_load_live_zoo`-populated `GLOBAL_ZTWorldMgr`/habitat data (they all internally call
+    /// `GET_UNIT.original()`, which needs a real, resolvable unit), asserting no crash plus a few structural
+    /// invariants.
+    ///
+    /// Needs: (1) a real, already-configured show-tank habitat (`find_real_show_tank_habitat`, same
+    /// discovery `ZTSHOW_CHECK_OWNING_HABITAT_LIVE` uses) to get a real `ZTShow*`/`ZTShowInfo*` pair, and
+    /// (2) a real, trick-eligible animal somewhere in the test zoo (`find_real_trick_eligible_unit`) to
+    /// resolve via `GET_UNIT`. If either is missing, this is a genuine coverage gap, reported clearly
+    /// rather than skipped silently - see the `else` branch below.
+    fn run_ztshow_group3_trick_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOW_GROUP3_TRICK_LIVE";
+
+        let Some((_habitat_ptr, real_show_info)) = find_real_show_tank_habitat() else {
+            error!("{}: BLOCKED - no real, already-configured show-tank habitat (ZTHabitat::is_show_tank) found in test zoo; do_current_item/validate_item/do_trick_event have no live coverage", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: BLOCKED - no real show-tank habitat found in test zoo\n", test_name).as_bytes());
+            }
+            return false;
+        };
+
+        let Some((_unit_ptr, unit_id)) = find_real_trick_eligible_unit() else {
+            error!(
+                "{}: BLOCKED - test zoo has no animal whose type passes RVA_SHOW_TRICK_TYPE_CHECK; would need a new zoo asset (a trick-eligible animal) to cover do_current_item/validate_item/do_trick_event's real unit-resolution path",
+                test_name
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: BLOCKED - test zoo has no trick-eligible animal\n", test_name).as_bytes());
+            }
+            return false;
+        };
+
+        let real_show = real_show_info + 4;
+
+        // Create a real ZTShowScriptState for our chosen unit (real, un-hooked CREATE_SHOW_SCRIPT_STATE -
+        // safe against this real, properly-constructed ZTShow's own `+0x34` state map), then fetch it back
+        // the same way `do_current_item`'s own body does.
+        let create_result = unsafe { CREATE_SHOW_SCRIPT_STATE.original()(real_show as *const u32, unit_id) };
+        if create_result != 0 {
+            info!("{}: CREATE_SHOW_SCRIPT_STATE returned {} (nonzero/failure) for unit {:#x}; do_current_item/do_trick_event will still be exercised via their early-return paths", test_name, create_result, unit_id);
+        }
+        let state_ptr = unsafe { GET_SHOW_SCRIPT_STATE.original()(real_show as *const u32, unit_id) };
+
+        // DO_CURRENT_ITEM (0x005a2508, ztshow::DO_CURRENT_ITEM): safe for any unit_id regardless of
+        // whether a state/eligible unit resolved - it handles state==0/unit_ptr==0/ineligible-type
+        // internally, returning 5/-1 respectively rather than crashing.
+        let do_current_item_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32, u32) -> i32>(0x005a2508u32) };
+        let current_item_result = do_current_item_hooked(real_show as *const u32, unit_id);
+        info!("{}: do_current_item({:#x}) = {} (no crash)", test_name, unit_id, current_item_result);
+
+        // VALIDATE_ITEM (0x005a6d70, ztshow::VALIDATE_ITEM): only safe to call once the real show's own
+        // configured unit_type_id (`real_show+0x8`) genuinely has at least one real unit assigned
+        // (`GET_SHOW_UNIT_LIST`'s own documented lack of an empty-list check - see `validate_item`'s doc
+        // comment in `ztshow.rs`) - checked via GET_NUM_UNITS first rather than risking that dereference
+        // speculatively.
+        let show_unit_type_id = get_from_memory::<u32>(real_show + 0x8);
+        let assigned_unit_count = unsafe { ZTSHOWINFO_GET_NUM_UNITS.original()(real_show_info as *const u32, show_unit_type_id) };
+        if assigned_unit_count >= 1 {
+            let validate_item_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32, u16) -> u32>(0x005a6d70u32) };
+            let validate_result = validate_item_hooked(real_show as *const u32, 0);
+            info!("{}: validate_item(0) = {} (real show unit_type_id={:#x}, {} unit(s) assigned)", test_name, validate_result, show_unit_type_id, assigned_unit_count);
+        } else {
+            info!("{}: skipping validate_item - real show's own unit_type_id {:#x} has {} assigned units (validate_item's own empty-list dereference isn't guarded, see its doc comment)", test_name, show_unit_type_id, assigned_unit_count);
+        }
+
+        // DO_TRICK_EVENT (0x005a6894, ztshow::DO_TRICK_EVENT): needs a real, non-null ZTShowScriptState* -
+        // only call it if GET_SHOW_SCRIPT_STATE actually resolved one above.
+        if state_ptr != 0 {
+            let do_trick_event_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32, *const u32)>(0x005a6894u32) };
+            do_trick_event_hooked(real_show as *const u32, state_ptr as *const u32);
+            info!("{}: do_trick_event completed without crashing for unit {:#x}", test_name, unit_id);
+        } else {
+            info!("{}: skipping do_trick_event - no real ZTShowScriptState resolved for unit {:#x}", test_name, unit_id);
+        }
+
+        write_success_line(failure_log, test_name);
+        false
+    }
+
+    /// ZTSHOWUI_FILL_TRICK_LISTS_LIVE: `ztshowui::fill_trick_lists`/`copy_list_to_script` (Stage 4 UI
+    /// consumers, `ztshowscriptmgr-open-items.md`'s open item 1) had no live trigger test before this -
+    /// only verified via a clean DLL load (detours install without error) plus the existing suite's
+    /// continued pass. Drives both against a real, already-configured show-tank habitat and its own real
+    /// `ZTUnitType*` ([`find_real_show_tank_habitat`], the same discovery
+    /// `ZTSHOW_CHECK_OWNING_HABITAT_LIVE`/`GROUP3_TRICK_LIVE` use, plus `BFWORLDMGR_GET_TYPE` to resolve the
+    /// show's own `unit_type_id` to a real `ZTUnitType*`), writing the show-editor's own selection globals
+    /// directly (`ztshowui::live_support::set_selection`) rather than driving the real UI click path, then
+    /// calling `FILL_TRICK_LISTS`/`COPY_LIST_TO_SCRIPT` through their own real, now-hooked addresses (needs
+    /// `crate::ztshowui::init()` wired into this harness's own `init()` - see that call site's comment on
+    /// why this matters: a detour never installed here would make an "hooked address" call silently
+    /// exercise real vanilla code instead, per the finding documented at this file's `run_load_live_zoo`
+    /// call site).
+    ///
+    /// **Coverage note**: whether `BFUIMgr::getElement` resolves the "available"/"assigned" trick listbox
+    /// element ids (`ztshowui::live_support::ui_elements_present()`, logged below) depends on whether the
+    /// real show-editor panel (`ZTUI::showpanel::init`/`show`) happens to have been constructed already in
+    /// this test run - when it has, both functions' listbox-population halves run genuinely end-to-end
+    /// against real UI widgets; when it hasn't, they take their early-return branch instead. Either way this
+    /// test gives real coverage of the field-offset-sensitive trick-list walk
+    /// (`ztshowui::live_support::trick_list_len`, asserted non-empty against the real unit type -
+    /// [`crate::ztshowui::find_trick_by_id`]'s own doc comment has the dummy-head double-indirection bug
+    /// this caught and fixed), `find_or_insert_pending_script_node` reuse, and a "no crash calling through
+    /// the real hooked entry points against real habitat/unit-type memory" baseline, matching every other
+    /// test in this group.
+    fn run_ztshowui_fill_trick_lists_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWUI_FILL_TRICK_LISTS_LIVE";
+
+        let Some((habitat_ptr, show_info_ptr)) = find_real_show_tank_habitat() else {
+            error!("{}: BLOCKED - no real, already-configured show-tank habitat found in test zoo; fill_trick_lists/copy_list_to_script have no live coverage", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: BLOCKED - no qualifying show-tank habitat found\n", test_name).as_bytes());
+            }
+            return false;
+        };
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} habitat found: habitat={:#010x} show_info={:#010x}\n", test_name, habitat_ptr, show_info_ptr).as_bytes());
+        }
+
+        let real_show = show_info_ptr + 4;
+        let unit_type_id = get_from_memory::<u32>(real_show + 0x8);
+        let world = globals().ztworldmgr_ptr() as *const u32;
+        let unit_type_ptr = unsafe { BFWORLDMGR_GET_TYPE.original()(world, unit_type_id as i32) } as u32;
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} got unit_type_ptr={:#010x} (unit_type_id={:#x})\n", test_name, unit_type_ptr, unit_type_id).as_bytes());
+        }
+        if unit_type_ptr == 0 {
+            error!("{}: BLOCKED - GET_TYPE returned null for the real show's own unit_type_id {:#x}", test_name, unit_type_id);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: BLOCKED - GET_TYPE returned null\n", test_name).as_bytes());
+            }
+            return false;
+        }
+
+        let mut fail_flag = false;
+        let trick_count = ztshowui::live_support::trick_list_len(unit_type_ptr);
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} trick_list_len={}\n", test_name, trick_count).as_bytes());
+        }
+        if trick_count == 0 {
+            error!("{}: real unit type {:#010x}'s own +0x1ac trick list is empty; walk_trick_list/find_trick_by_id get no real coverage from this run", test_name, unit_type_ptr);
+            fail_flag = true;
+        } else {
+            info!("{}: real unit type {:#010x} has {} real trick(s) in its +0x1ac list", test_name, unit_type_ptr, trick_count);
+        }
+
+        ztshowui::live_support::set_selection(habitat_ptr, unit_type_ptr);
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} set_selection done\n", test_name).as_bytes());
+        }
+
+        let ui_present = ztshowui::live_support::ui_elements_present();
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} ui_elements_present={}\n", test_name, ui_present).as_bytes());
+        }
+        let ztshowmgr_ptr_is_null = globals().ztshowmgr_ptr().is_null();
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(
+                format!(
+                    "CHECKPOINT {} pre-fill: habitat={:#010x} unit_type={:#010x} show_info={:#010x} ui_present={} ztshowmgr_ptr_null={}\n",
+                    test_name, habitat_ptr, unit_type_ptr, show_info_ptr, ui_present, ztshowmgr_ptr_is_null
+                )
+                .as_bytes(),
+            );
+        }
+
+        // FILL_TRICK_LISTS (0x004751dc, ztui_showpanel::FILL_TRICK_LISTS).
+        let fill_trick_lists_hooked = unsafe { std::mem::transmute::<u32, extern "stdcall" fn()>(0x004751dcu32) };
+        fill_trick_lists_hooked();
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} post-fill\n", test_name).as_bytes());
+        }
+        info!("{}: FILL_TRICK_LISTS completed without crashing", test_name);
+
+        // COPY_LIST_TO_SCRIPT (0x00475d92, standalone::COPY_LIST_TO_SCRIPT).
+        let copy_list_to_script_hooked = unsafe { std::mem::transmute::<u32, extern "stdcall" fn() -> u32>(0x00475d92u32) };
+        let copy_result = copy_list_to_script_hooked();
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} post-copy result={}\n", test_name, copy_result).as_bytes());
+        }
+        info!("{}: COPY_LIST_TO_SCRIPT completed without crashing, returned {}", test_name, copy_result);
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
     }
 
     /// ZTTHOUGHTMGR_LOAD_MODERN: compares the real `ZTThoughtMgr::load`'s effect against the

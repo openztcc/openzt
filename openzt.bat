@@ -20,6 +20,7 @@ IF "%~1"=="check" GOTO check
 IF "%~1"=="clippy" GOTO clippy
 IF "%~1"=="test" GOTO test
 IF "%~1"=="integration-tests" GOTO integration_tests
+IF "%~1"=="crash-capture" GOTO crash_capture
 IF "%~1"=="update" GOTO update
 IF "%~1"=="tree" GOTO tree
 
@@ -242,6 +243,89 @@ IF DEFINED WAIT_FLAG (
 GOTO :EOF
 
 REM ============================================================
+REM Crash Capture Function
+REM ============================================================
+REM Builds the test DLL (release), copies it in as res-openzttest.dll, then launches Zoo Tycoon
+REM directly under cdb non-interactively (-G, no initial breakpoint stop) so a crash that
+REM reproduces automatically (e.g. off the reimplementation-tests battery, no manual play needed)
+REM is caught, its register/stack state dumped, and the process quit - all without a debugger
+REM window to babysit. See openzt/plans/ztshowscriptmgr-open-items.md item 10 for the technique
+REM this automates.
+
+:crash_capture
+SHIFT
+SET CRASH_LOG=crash_capture_output.txt
+
+:crash_capture_args_loop
+IF "%~1"=="" GOTO run_crash_capture
+IF "%~1"=="--out" GOTO crash_capture_out_flag
+echo Error: Unknown flag "%~1" for crash-capture
+exit /b 1
+
+:crash_capture_out_flag
+SHIFT
+SET CRASH_LOG=%~1
+SHIFT
+GOTO crash_capture_args_loop
+
+:run_crash_capture
+echo Building openzttest.dll (release) for crash capture...
+cargo build --manifest-path openzt-test-dll/Cargo.toml --lib --target=i686-pc-windows-msvc --release
+
+IF !errorlevel! NEQ 0 (
+    echo.
+    echo Build failed
+    exit /b !errorlevel!
+)
+
+SET SOURCE_DLL=target\i686-pc-windows-msvc\release\openzttest.dll
+IF NOT EXIST "!SOURCE_DLL!" (
+    echo Error: Built DLL not found at !SOURCE_DLL!
+    exit /b 1
+)
+
+CALL :check_zoo_running
+IF !errorlevel! NEQ 0 exit /b !errorlevel!
+
+echo.
+echo Cleaning up old DLLs...
+del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzt.dll" 2>nul
+del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openztrpc.dll" 2>nul
+del "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzttest.dll" 2>nul
+
+echo Copying openzttest.dll to Zoo Tycoon directory...
+copy "!SOURCE_DLL!" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\res-openzttest.dll"
+
+IF !errorlevel! NEQ 0 (
+    echo.
+    echo Copy failed
+    exit /b !errorlevel!
+)
+
+SET CDB_EXE=
+IF EXIST "C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\cdb.exe" SET CDB_EXE=C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\cdb.exe
+IF NOT DEFINED CDB_EXE IF EXIST "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe" SET CDB_EXE=C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe
+IF NOT DEFINED CDB_EXE (
+    echo Error: cdb.exe not found under "C:\Program Files (x86)\Windows Kits\10\Debuggers".
+    echo Install the "Debugging Tools for Windows" component of the Windows SDK.
+    exit /b 1
+)
+
+echo.
+echo Launching Zoo Tycoon under cdb ^(non-interactive^) - runs to completion or crash, then quits...
+echo Output: !CRASH_LOG!
+"!CDB_EXE!" -G -c "g;kv;r;q" "C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe" > "!CRASH_LOG!" 2>&1
+
+echo.
+echo Done. Full output written to !CRASH_LOG!
+echo Tail:
+echo ------------------------------------------------------------
+powershell -Command "Get-Content -Path '!CRASH_LOG!' -Tail 20"
+echo ------------------------------------------------------------
+
+GOTO :EOF
+
+REM ============================================================
 REM Docs Function
 REM ============================================================
 
@@ -454,6 +538,7 @@ echo   check              Run cargo check on openzt crate (pass --test to check 
 echo   clippy             Run cargo clippy on openzt crate (pass --test to check openzt-test-dll instead)
 echo   test               Run cargo test on openzt crate
 echo   integration-tests  Run integration tests (builds release, launches game, displays results)
+echo   crash-capture      Build test DLL, launch game under cdb non-interactively, dump crash info (--out ^<file^>)
 echo   update             Run cargo update on the workspace (forwards extra args, e.g. -p ^<pkg^>)
 echo   tree               Run cargo tree on the workspace (forwards extra args, e.g. -i ^<pkg^>)
 echo   docs               Generate and open documentation
@@ -479,6 +564,8 @@ echo   openzt.bat clippy                    Run cargo clippy on openzt
 echo   openzt.bat test                      Run cargo test on openzt
 echo   openzt.bat test -- --nocapture        Run cargo test, forwarding extra args to cargo
 echo   openzt.bat integration-tests         Run integration tests (builds release, displays results)
+echo   openzt.bat crash-capture             Build test DLL, run under cdb, dump crash info
+echo   openzt.bat crash-capture --out x.txt Same, writing output to a custom file
 echo   openzt.bat docs                      Generate and open docs
 echo   openzt.bat console                   Open interactive Lua console
 echo   openzt.bat console --oneshot "help()"          Run single Lua command and exit

@@ -65,6 +65,12 @@ pub struct ZTMegatileMgr {
     _private: [u8; 0],
 }
 
+/// Opaque type for ZTShowMgr
+#[repr(C)]
+pub struct ZTShowMgr {
+    _private: [u8; 0],
+}
+
 /// Walks a pointer chain and returns the final address.
 ///
 /// # Arguments
@@ -102,12 +108,15 @@ unsafe fn resolve_chain(base: usize, offsets: &[usize]) -> Option<usize> {
 /// Cached global instance wrapper for stable singleton objects.
 ///
 /// This type is used for global C++ objects that are created once and live
-/// for the lifetime of the game (e.g., manager singletons). The resolved
-/// pointer is cached after the first access to avoid repeated chain resolution.
+/// for the lifetime of the game (e.g., manager singletons). Only a *successful*
+/// (non-null) resolution is cached, since these singletons don't exist yet at
+/// early injection points (e.g. before a scenario/save has finished loading) -
+/// latching a failed lookup would permanently strand every later caller with a
+/// stale null even once the real global becomes valid.
 pub struct CachedGlobalInstance<T> {
     base: usize,
     offsets: &'static [usize],
-    cache: OnceLock<usize>,
+    cache: std::sync::atomic::AtomicUsize,
     _marker: PhantomData<*mut T>,
 }
 
@@ -121,29 +130,33 @@ impl<T> CachedGlobalInstance<T> {
         Self {
             base,
             offsets,
-            cache: OnceLock::new(),
+            cache: std::sync::atomic::AtomicUsize::new(0),
             _marker: PhantomData,
         }
     }
 
     /// Returns a raw pointer to the instance, or null if resolution fails.
     ///
-    /// The first call resolves the pointer chain and caches the result.
-    /// Subsequent calls return the cached value.
+    /// A non-null resolution is cached (the chain is re-walked on every call
+    /// until the first success); a failed resolution is never cached, so a
+    /// singleton that doesn't exist yet is retried on the next call instead of
+    /// being stuck at null forever.
     pub unsafe fn get(&self) -> *mut T {
-        let addr = self.cache.get_or_init(|| {
-            unsafe { resolve_chain(self.base, self.offsets).unwrap_or(0) }
-        });
-        if *addr == 0 {
-            std::ptr::null_mut()
-        } else {
-            *addr as *mut T
+        use std::sync::atomic::Ordering;
+        let cached = self.cache.load(Ordering::Relaxed);
+        if cached != 0 {
+            return cached as *mut T;
         }
+        let addr = unsafe { resolve_chain(self.base, self.offsets).unwrap_or(0) };
+        if addr != 0 {
+            self.cache.store(addr, Ordering::Relaxed);
+        }
+        addr as *mut T
     }
 }
 
 // SAFETY: CachedGlobalInstance only contains plain integers (base address and offsets)
-// and a OnceLock which is thread-safe. It's safe to share across threads.
+// and an AtomicUsize, which is thread-safe. It's safe to share across threads.
 unsafe impl<T> Send for CachedGlobalInstance<T> {}
 unsafe impl<T> Sync for CachedGlobalInstance<T> {}
 
@@ -158,6 +171,7 @@ pub struct Globals {
     ztmarketingmgr: CachedGlobalInstance<ZTMarketingMgr>,
     ztthoughtmgr: CachedGlobalInstance<ZTThoughtMgr>,
     ztmegatilemgr: CachedGlobalInstance<ZTMegatileMgr>,
+    ztshowmgr: CachedGlobalInstance<ZTShowMgr>,
 }
 
 impl Globals {
@@ -286,6 +300,23 @@ impl Globals {
             self.ztmegatilemgr.get() as *mut crate::ztmegatilemgr::ZTMegatileMgr
         }
     }
+
+    /// Returns a shared reference to the ZTShowMgr (read-only). Note this is `ZTShowMgr` itself, not the
+    /// `ZTShowScriptMgr` embedded within it at `+0x34` (that data lives in `ztshowscriptmgr.rs`'s own
+    /// independent Rust store, not read through this accessor).
+    pub fn ztshowmgr(&self) -> &crate::ztshow::ZTShowMgr {
+        unsafe {
+            &*(self.ztshowmgr.get() as *const crate::ztshow::ZTShowMgr)
+        }
+    }
+
+    /// Returns a raw pointer to `ZTShowMgr`, possibly null (mirrors vanilla's own `GLOBAL_ZTShowMgr != 0`
+    /// guard before dereferencing it - see `ztshow::do_trick_event`'s threshold lookup).
+    pub fn ztshowmgr_ptr(&self) -> *const crate::ztshow::ZTShowMgr {
+        unsafe {
+            self.ztshowmgr.get() as *const crate::ztshow::ZTShowMgr
+        }
+    }
 }
 
 // SAFETY: Globals only contains CachedGlobalInstance values which are Send + Sync
@@ -340,6 +371,9 @@ fn ensure_globals() -> &'static Globals {
             // Ghidra (OOAnalyzer-assigned symbol `GLOBAL_ZTMegatileMgr`), in the same neighborhood as
             // ZTMarketingMgr/ZTResearchMgr/ZTThoughtMgr (0x639000/0x639010/0x639090).
             ztmegatilemgr: CachedGlobalInstance::new(base + 0x00239004, &[0]),
+            // GLOBAL_ZTShowMgr, Ghidra VA 0x00639008 -> RVA 0x00239008 (same neighborhood cluster as the
+            // managers above) - see ztshowscriptmgr-implementation-plan.md's "Composition" section.
+            ztshowmgr: CachedGlobalInstance::new(base + 0x00239008, &[0]),
         }
     })
 }

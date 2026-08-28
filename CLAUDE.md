@@ -61,6 +61,10 @@ OpenZT is a DLL injection framework for Zoo Tycoon (2001) written in Rust. It pr
 # Integration tests
 ./openzt.bat integration-tests               # Run all integration tests (builds release, displays results)
 
+# Crash capture (builds test DLL, launches game non-interactively under cdb, dumps register/stack state on crash)
+./openzt.bat crash-capture                   # Writes to crash_capture_output.txt
+./openzt.bat crash-capture --out <file>      # Writes to a custom file
+
 # Code quality checks
 ./openzt.bat check                           # Run cargo check on openzt
 ./openzt.bat clippy                          # Run cargo clippy on openzt

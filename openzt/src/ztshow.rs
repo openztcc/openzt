@@ -1,0 +1,939 @@
+//! Stage 2 (`ZTShow`/`ZTShowInfo` raw-access call sites) of the vanilla `ZTShowScriptMgr` reimplementation
+//! - see `openzt/plans/ztshowscriptmgr-implementation-plan.md`. Stage 1 (`ztshowscriptmgr.rs`) made
+//! `ZTShowScriptMgr`/`ZTShowScript`/`ZTShowScriptItem` an independent Rust store; this module ports the
+//! real vanilla functions that used to dereference those classes' raw memory directly (and would
+//! otherwise crash against Stage 1's synthetic handles/sentinels) onto that store's id-keyed accessors.
+//!
+//! `ZTShow`/`ZTShowInfo`/`ZTShowMgr` themselves stay real, un-virtualized vanilla memory - only the
+//! embedded show-script data moved into Rust. Field offsets below are confirmed directly from
+//! `.asm`-level reads (see each function's doc comment), not the (less reliable) decompiled `.c` alone,
+//! except where noted as semantics-unconfirmed-but-byte-faithful.
+//!
+//! Implemented so far: `ZTShowInfo::checkUnitType`, `ZTShow::doTrickEvent`, `ZTShow::doCurrentItem`,
+//! `ZTShow::validateItem`, `ZTShow::start` (plus `ZTShow::stop`'s 1-arg overload, an independently-broken
+//! consumer found while porting `start` - see that function's own doc comment),
+//! `ZTShowInfo::checkPendingScripts`. Only `ZTShowInfo::addScript` remains - see the plan doc's "Open
+//! items" for its current scoping blocker (a real tree-insert-with-rebalancing path, not just field reads).
+
+use openzt_detour::generated::{
+    bfworldmgr::{GET_TYPE, GET_UNIT},
+    ztgamemgr::GET_DATE,
+    ztshow::{
+        CALCULATE_PERCENT_ADJUSTMENT, CHECK_SCRIPT, CLEAR_SHOW_SCRIPT_STATES, CREATE_SHOW_SCRIPT_STATE, DO_CURRENT_ITEM,
+        DO_KEEPER_EVENT, DO_TRICK_EVENT, GATHER_UNITS, GET_SHOW_SCRIPT_STATE, REINIT, RESOLVE_NEXT_SCHEDULED_SCRIPT_ID, START,
+        STOP_0, VALIDATE, VALIDATE_ITEM,
+    },
+    ztshowinfo::{
+        ADD_SCRIPT, ADD_SHOW, CHECK_PENDING_SCRIPTS, CHECK_UNIT, CHECK_UNIT_TYPE, GET_NUM_UNITS, GET_SHOW_UNIT_LIST, IS_STARTED,
+        RECALCULATE_SCHEDULE, REMOVE_SHOW, REMOVE_UNIT, SEND_EVENT,
+    },
+    ztshowscriptstate::GET_NUM_ITEMS,
+    standalone::OPERATOR_NEW,
+    ztshowmgr::GET_SHOW_INFO,
+    zttankexhibit::ON_SHOW_STARTED,
+};
+use openzt_detour_macro::detour_mod;
+use tracing::error;
+
+use crate::{
+    globals::globals,
+    util::{get_from_memory, save_to_memory},
+    ztmegatilemgr::entity_type_matches,
+};
+
+/// Partial, `#[repr(C)]` mirror of vanilla `ZTShowMgr` (real size `0x44`, `ZTShowScriptMgr` embedded at
+/// `+0x34` - see the plan's "Composition" section) - only exposes the three `doTrickEvent` threshold
+/// fields Stage 2 currently needs. Not size-asserted since the rest of the struct is unmapped.
+#[repr(C)]
+pub struct ZTShowMgr {
+    _unmapped_0x0: [u8; 0x8],
+    /// `+0x8` - semantics unconfirmed (comparison order faithfully preserved from `ZTShow_doTrickEvent.asm`).
+    pub threshold_a: u32,
+    /// `+0xc` - semantics unconfirmed.
+    pub threshold_b: u32,
+    /// `+0x10` - semantics unconfirmed.
+    pub threshold_c: u32,
+}
+
+/// `DAT_006386b0`'s RVA - the same vtable-slot-`0x1c` "isKindOf"-style type-check argument used by
+/// `ztmegatilemgr::entity_type_matches`'s own callers, here gating `doCurrentItem`/`validateItem`'s
+/// trick-eligible-unit check. RVA = `0x006386b0 - 0x400000`.
+pub(crate) const RVA_SHOW_TRICK_TYPE_CHECK: u32 = 0x0023_86b0;
+
+/// Raw virtual dispatch through a `BFEntity`-ish object's own vtable at `slot_offset`, taking two `u16`
+/// args and returning `i32` - the shape both `ZTUnit`'s `+0x210` (`doCurrentItem`) and `+0x218`
+/// (`validateItem`) slots share. No named symbol exists for either slot; semantics unconfirmed beyond
+/// "trick availability/eligibility check", raw calling convention confirmed via `.asm` push-order reads.
+unsafe fn call_unit_vtable_u16_u16(unit_ptr: u32, slot_offset: u32, arg1: u16, arg2: u16) -> i32 {
+    let vtable = get_from_memory::<u32>(unit_ptr);
+    let target = get_from_memory::<u32>(vtable + slot_offset);
+    let f = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(u32, u16, u16) -> i32>(target) };
+    f(unit_ptr, arg1, arg2)
+}
+
+/// `ZTShowInfo::sendEvent`'s vtable-slot-0 target (`ztshowinfo::SEND_EVENT`, confirmed against
+/// `private/docs/vtables/ZTShowInfo.md`'s slot `+0x0` = `0x0059f013`, exactly `SEND_EVENT`'s own address).
+/// `doTrickEvent` dispatches through `ZTShow`'s `+0x10` `ZTShowInfo*` back-pointer's vtable slot 0 rather
+/// than calling `SEND_EVENT` by name, but they're the same function, so this calls it directly.
+unsafe fn send_event(show_info: u32, event_id: u16, unused: u32, category: u8, value: u32, value2: u16, flag: u16) {
+    unsafe { SEND_EVENT.original()(show_info as *const u32, event_id, unused, category, value, value2, flag) };
+}
+
+/// Reimplementation of `ZTShowInfo::checkUnitType`, per `ZTShowInfo_checkUnitType.c`/`.asm`. `this` is
+/// `ZTShowInfo*`; `+0x8` is its own assigned script id (u16).
+pub fn check_unit_type(this: u32, unit_type: u32) -> u32 {
+    let script_id = get_from_memory::<u16>(this + 0x8);
+    match crate::ztshowscriptmgr::script_type_by_id(script_id) {
+        Some(script_type) if script_type != unit_type => unit_type & 0xffff_ff00,
+        Some(_) => (unit_type & 0xffff_ff00) | 1,
+        None => 1,
+    }
+}
+
+/// Reimplementation of `ZTShow::doCurrentItem`, per `ZTShow_doCurrentItem.c`/`.asm`. `this` is `ZTShow*`;
+/// `+0x4` its assigned script id (u16), `+0x6` a secondary u16 field passed through to the unit's own
+/// trick-dispatch call (semantics unconfirmed - same raw field `ZTShow::start` also propagates onto units,
+/// per that function's own decompile).
+pub fn do_current_item(this: u32, unit_id: u32) -> i32 {
+    let state = unsafe { GET_SHOW_SCRIPT_STATE.original()(this as *const u32, unit_id) };
+    if state == 0 {
+        return 5;
+    }
+    if get_from_memory::<u8>(state + 0xe) != 0 {
+        return 0;
+    }
+    if get_from_memory::<u8>(state + 0x12) != 0 {
+        return 0;
+    }
+
+    let world = globals().ztworldmgr_ptr() as *const u32;
+    let unit_ptr = unsafe { GET_UNIT.original()(world, unit_id as i32) };
+    if unit_ptr == 0 {
+        return -1;
+    }
+    if !unsafe { entity_type_matches(unit_ptr, RVA_SHOW_TRICK_TYPE_CHECK) } {
+        return -1;
+    }
+
+    let script_id = get_from_memory::<u16>(this + 0x4);
+    let item_count = crate::ztshowscriptmgr::script_item_count_by_id(script_id);
+    let trick_index = get_from_memory::<u16>(state + 0xc);
+    if trick_index as usize >= item_count {
+        return -1;
+    }
+    if trick_index == 0xffff {
+        return 0;
+    }
+    let Some(item) = crate::ztshowscriptmgr::item_snapshot_by_id(script_id, trick_index) else {
+        return -1;
+    };
+
+    let secondary = get_from_memory::<u16>(this + 0x6);
+    let result = unsafe { call_unit_vtable_u16_u16(unit_ptr, 0x210, item.id, secondary) };
+    if result == 0 {
+        save_to_memory(state + 0x12, 1u8);
+    }
+    result
+}
+
+/// Reimplementation of `ZTShow::doTrickEvent`, per `ZTShow_doTrickEvent.c`/`.asm`. `this` is `ZTShow*`;
+/// `+0x4` script id, `+0x10` owning `ZTShowInfo*`, `+0x28`/`+0x2c`/`+0x30` trick-count/satisfaction/
+/// satisfaction-mirror accumulators (all confirmed directly from `.asm`, not just the decompiled `.c`).
+/// `state_ptr` is a real, vanilla-owned `ZTShowScriptState*` (never freed/allocated by this module - see
+/// the plan's "narrow vanilla-memory-compatible carve-out" decision); `+0xc` trick index, `+0xf`
+/// skip-scoring flag.
+///
+/// `FUN_005a698a` (called at the very end of the real function, in the tail shared by every path that
+/// doesn't `return` early) is a confirmed no-op (`{ return; }`) - omitted here rather than ported.
+pub fn do_trick_event(this: u32, state_ptr: u32) {
+    if state_ptr == 0 {
+        return;
+    }
+    let script_id = get_from_memory::<u16>(this + 0x4);
+    let trick_index = get_from_memory::<u16>(state_ptr + 0xc);
+    let Some(item) = crate::ztshowscriptmgr::item_snapshot_by_id(script_id, trick_index) else {
+        return;
+    };
+    if item.item_type == 3 {
+        return;
+    }
+
+    let satisfaction_sum = get_from_memory::<i32>(this + 0x2c);
+    save_to_memory(this + 0x2c, satisfaction_sum.wrapping_add(item.satisfaction as i32));
+
+    let show_info = get_from_memory::<u32>(this + 0x10);
+    let skip_scoring = get_from_memory::<u8>(state_ptr + 0xf) != 0;
+
+    if skip_scoring {
+        unsafe { send_event(show_info, 0x272a, 0, 0x57, 0, 0, 1) };
+    } else {
+        let count = get_from_memory::<i32>(this + 0x28);
+        save_to_memory(this + 0x28, count.wrapping_add(1));
+        let mirror = item.satisfaction_mirror as i32;
+        let mirror_sum = get_from_memory::<i32>(this + 0x30);
+        save_to_memory(this + 0x30, mirror_sum.wrapping_add(mirror));
+
+        let mgr_ptr = globals().ztshowmgr_ptr();
+        if !mgr_ptr.is_null() {
+            let mgr = unsafe { &*mgr_ptr };
+            if mirror <= mgr.threshold_a as i32 {
+                unsafe {
+                    send_event(show_info, 0x272a, 0, 0x57, mirror as u32, (mgr.threshold_a as i32 - mirror) as u16, 1);
+                    DO_KEEPER_EVENT.original()(this as *const u32, 0x271f, state_ptr as *const u32);
+                }
+                return;
+            }
+            if mirror < mgr.threshold_c as i32 {
+                unsafe {
+                    if mgr.threshold_b as i32 <= mirror {
+                        send_event(show_info, 0x272c, 0, 0x57, mirror as u32, (mirror - mgr.threshold_b as i32) as u16, 1);
+                    } else {
+                        send_event(show_info, 0x272b, 0, 0x57, mirror as u32, 0, 1);
+                    }
+                    send_event(show_info, 0x271f, 0, 0x4b, 0, trick_index as u16, 1);
+                }
+                return;
+            }
+            unsafe {
+                send_event(show_info, 0x272d, 0, 0x57, mirror as u32, (mirror - mgr.threshold_c as i32) as u16, 1);
+                DO_KEEPER_EVENT.original()(this as *const u32, 0x271f, state_ptr as *const u32);
+            }
+            return;
+        }
+        // GLOBAL_ZTShowMgr == null: vanilla's threshold block is skipped entirely (matches its own
+        // `if (GLOBAL_ZTShowMgr != 0) { ... }` guard with no else) and falls through to the shared tail.
+    }
+    unsafe { DO_KEEPER_EVENT.original()(this as *const u32, 0x271f, state_ptr as *const u32) };
+}
+
+/// Reimplementation of `ZTShowScriptState::getNumItems`, per `ZTShowScriptState_getNumItems.c`/`.asm`. A
+/// sixth real, un-reimplemented raw-dereferencing consumer of `ZTShowScriptMgr::getScript`'s return value,
+/// found by the same open-items audit as [`check_script`]/[`calculate_percent_adjustment`] - the most
+/// central of the three, called from `ZTShow::run` (twice) and both `ZTShowScriptState::setNextItem`
+/// overloads, so likely the first one hit in practice on a live show.
+///
+/// `this` is `ZTShowScriptState*` (the narrow vanilla-memory carve-out described in the module doc
+/// comment); `+0x4` is its own assigned script id (confirmed via `.asm`: `word ptr [this+0x4]`) - **not**
+/// `ZTShow`'s `+0x4` field despite the coincidental offset, a different struct entirely.
+pub fn get_num_items(this: u32) -> i32 {
+    let script_id = get_from_memory::<u16>(this + 0x4);
+    crate::ztshowscriptmgr::script_item_count_by_id(script_id) as i32
+}
+
+/// Reimplementation of `ZTShow::validateItem`, per `ZTShow_validateItem.c`/`.asm`. `this` is `ZTShow*`;
+/// `+0x4` script id (positional item index, matching [`crate::ztshowscriptmgr::item_snapshot_by_id`]'s own
+/// indexing), `+0x8` unit-type id (passed to `getShowUnitList`), `+0x10` owning `ZTShowInfo*`.
+///
+/// The real function's first-node lookup reads `ZTShowInfo::getShowUnitList`'s return value as the
+/// *address holding* the list's own sentinel pointer, then dereferences the sentinel once more to reach
+/// the first real node (same double-indirection pattern as `ztmegatilemgr::recalculate_characteristics`'s
+/// tile guest-list walk) - and does so **without an empty-list check**, so an empty unit list would read
+/// garbage from the sentinel node itself. Ported faithfully rather than "fixed": `validateItem` is only
+/// ever called once a show is already running with units assigned, so the list is expected non-empty in
+/// practice.
+///
+/// `FUN_005d923d` (the real fallback when the unit lookup/type-check fails) is a confirmed no-op - its
+/// return value feeds directly into vanilla's own return via a decompiler `extraout_EAX` (register value
+/// left over from the preceding failed call, not a value `FUN_005d923d` itself produces); this returns
+/// `0` for that path, matching the `unit_ptr == 0` case exactly and the type-check-`false` case in the
+/// overwhelmingly likely (bool-return-zero-extended) case - see this function's own inline comment.
+///
+/// The final `call_unit_vtable_u16_u16(unit_ptr, 0x218, ...)` dispatch (real, untouched `ZTAnimal::
+/// validateTrickType`, `0x005a6f96`) used to crash live (`mov ecx,[ebx+0x58]` with `ebx==1`,
+/// `openzt/plans/ztshowscriptmgr-open-items.md` item 12): its own real body calls `ZTUnit::getShowItem` ->
+/// `ZTUnitType::getShowItem` -> `ZTShowScript::getItemByTrickID`, directly dereferencing the returned
+/// `ZTShowScriptItem*` - a third raw-dereferencing consumer of Stage 1 data, same hazard class as
+/// `validate`/`stop_with_id`, just one level further down the real call graph than either. Fixed at the
+/// source (`ztshowscriptmgr::get_item_by_trick_id`) rather than here, since the raw dereference happens
+/// inside real vanilla code this module doesn't otherwise touch - see that function's doc comment.
+pub fn validate_item(this: u32, index: u16) -> i32 {
+    if index == 0xffff {
+        return 0;
+    }
+    let show_info = get_from_memory::<u32>(this + 0x10);
+    let unit_type_id = get_from_memory::<u32>(this + 0x8);
+    let list_ptr = unsafe { GET_SHOW_UNIT_LIST.original()(show_info as *const u32, unit_type_id) } as u32;
+    let sentinel = get_from_memory::<u32>(list_ptr);
+    let first_node = get_from_memory::<u32>(sentinel);
+    let unit_numeric_id = get_from_memory::<u32>(first_node + 0x8);
+
+    let world = globals().ztworldmgr_ptr() as *const u32;
+    let unit_ptr = unsafe { GET_UNIT.original()(world, unit_numeric_id as i32) };
+    if unit_ptr == 0 || !unsafe { entity_type_matches(unit_ptr, RVA_SHOW_TRICK_TYPE_CHECK) } {
+        // FUN_005d923d() - no-op, see doc comment.
+        return 0;
+    }
+
+    let script_id = get_from_memory::<u16>(this + 0x4);
+    let Some(item) = crate::ztshowscriptmgr::item_snapshot_by_id(script_id, index) else {
+        return -1;
+    };
+    let arg2 = get_from_memory::<u16>(show_info + 0x70);
+    unsafe { call_unit_vtable_u16_u16(unit_ptr, 0x218, item.id, arg2) }
+}
+
+/// Same mechanism as [`entity_type_matches`], for an *already-resolved* type pointer (e.g. `BFWorldMgr::
+/// getType`'s return) rather than a `BFEntity*` needing its own `+0x128` indirection first - `stop_with_id`/
+/// `start` both call `getType` directly and check its result's own vtable slot `0x1c`.
+unsafe fn type_check(type_ptr: u32, type_check_arg_rva: u32) -> bool {
+    let vtable = get_from_memory::<u32>(type_ptr);
+    let check_fn = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(u32, u32) -> bool>(get_from_memory::<u32>(vtable + 0x1c)) };
+    let arg = crate::globals::get_module_base("zoo.exe") as u32 + type_check_arg_rva;
+    check_fn(type_ptr, arg)
+}
+
+/// `DAT_00638690`'s RVA - the same "is this an animal-ish type" check `ztthoughtmgr::
+/// resolve_object_own_habitat_ptr` already uses, reused here for `stop_with_id`/`start`'s own type check
+/// (distinct from [`RVA_SHOW_TRICK_TYPE_CHECK`] - a different sentinel, confirmed via each's own `.asm`).
+const RVA_ANIMAL_TYPE_CHECK: u32 = 0x0023_8690;
+
+/// Raw no-arg virtual dispatch through an object's own vtable at `slot_offset`, returning `bool` - the
+/// shape both the habitat's `+0x20` slot (`start`'s owning-habitat check) and a unit's `+0x22c` slot
+/// (`start`'s per-unit show-state-needed check) share. No named symbol for either; raw calling convention
+/// confirmed via `.asm` push-order reads (no pushed args beyond `this`/`ECX`).
+unsafe fn call_entity_vtable_noargs(entity_ptr: u32, slot_offset: u32) -> bool {
+    let vtable = get_from_memory::<u32>(entity_ptr);
+    let target = get_from_memory::<u32>(vtable + slot_offset);
+    let f = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(u32) -> bool>(target) };
+    f(entity_ptr)
+}
+
+/// Same shape as [`call_entity_vtable_noargs`] but for a no-arg vtable slot returning a `u32` value
+/// rather than `bool` - `DAT_0063e450`'s (the show-editor's currently-selected `ZTUnitType*`) own
+/// vtable slot `0x20`, used by `showpanel_fillTrickLists`/`_copyListToScript` (`ztshowui.rs`) to resolve
+/// the selected species' numeric unit-type id. `pub(crate)` since `ztshowui.rs` needs it too.
+pub(crate) unsafe fn call_entity_vtable_u32_noargs(entity_ptr: u32, slot_offset: u32) -> u32 {
+    let vtable = get_from_memory::<u32>(entity_ptr);
+    let target = get_from_memory::<u32>(vtable + slot_offset);
+    let f = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(u32) -> u32>(target) };
+    f(entity_ptr)
+}
+
+/// Reimplementation of `ZTShow::stop`'s 1-arg overload (`ztshow::STOP_0`, per `ZTShow_stop_0.c`/`.asm`) -
+/// reassigns the show's script id, discovered as a **second, independent raw-dereferencing consumer of
+/// `ZTShowScriptMgr::getScript`'s return value** not on the plan's original "must reimplement" list (found
+/// while porting `start`, which calls this directly - see that function's own doc comment). `+0x4` current
+/// script id, `+0x8` script type, `+0xc` unconfirmed flag field (`0x2550` magic constant, faithfully
+/// ported), `+0x10` owning `ZTShowInfo*`.
+pub fn stop_with_id(this: u32, new_script_id: u16) {
+    let current_id = get_from_memory::<u16>(this + 0x4);
+    if current_id != new_script_id {
+        if current_id != 0 {
+            unsafe { REINIT.original()(this as *const u32) };
+        }
+        if let Some(script_type) = crate::ztshowscriptmgr::script_type_by_id(new_script_id) {
+            save_to_memory(this + 0x4, new_script_id);
+            save_to_memory(this + 0x8, script_type);
+            let world = globals().ztworldmgr_ptr() as *const u32;
+            let unit_type_ptr = unsafe { GET_TYPE.original()(world, script_type as i32) } as u32;
+            if unit_type_ptr != 0 && unsafe { type_check(unit_type_ptr, RVA_ANIMAL_TYPE_CHECK) } {
+                save_to_memory(this + 0xc, 0x2550u32);
+            }
+        }
+        let show_info = get_from_memory::<u32>(this + 0x10);
+        if show_info != 0 {
+            unsafe { RECALCULATE_SCHEDULE.original()(show_info as *const u32, 0) };
+        }
+    }
+}
+
+/// Inlined `checkOwningHabitat`. Returns **true when the show must be BLOCKED from starting** - i.e. it
+/// mirrors vanilla's `checkOwningHabitat` returning its nonzero "blocked" code (`10`), not a "safe to
+/// proceed" flag: the owning habitat exists, passes its own `+0x20` vtable check (real tank exhibit), and
+/// has zero water level (`zthabitatmgr::ZTHabitat::water_level`, `+0x188`) - i.e. a real show tank that is
+/// currently empty. Every other case (no owning habitat, vtable check fails, or the tank has water) means
+/// vanilla returns `0` and lets the show proceed, so this returns `false` there. Confirmed against the
+/// macOS `ZTShow::checkOwningHabitat`/`ZTShow::start` decompiles: `checkOwningHabitat() == 0` is vanilla's
+/// own "proceed" branch, so callers here must treat a `true` return as "stop", not "go" - see `start`'s
+/// call site. None of this is a separate named function on Windows, confirmed via `.asm`-level inlining
+/// directly into `start`'s own body. Factored out as its own function (rather than left inline) so it can
+/// be exercised directly against real `GLOBAL_ZTHabitatMgr`-owned habitat data in a live
+/// reimplementation-test without also needing `start`'s own earlier preconditions
+/// (`RESOLVE_NEXT_SCHEDULED_SCRIPT_ID` returning a real scheduled script, `GET_NUM_UNITS >= 1`)
+/// independently satisfied first - see `reimplementation_tests/mod.rs`'s `ZTSHOW_CHECK_OWNING_HABITAT_LIVE`
+/// test. `show_info` is a `ZTShowInfo*`.
+pub(crate) fn check_owning_habitat(show_info: u32) -> bool {
+    let habitat = get_from_memory::<u32>(show_info + 0xa0);
+    habitat != 0 && unsafe { call_entity_vtable_noargs(habitat, 0x20) } && get_from_memory::<u32>(habitat + 0x188) == 0
+}
+
+/// Reimplementation of `ZTShow::validate`, per `ZTShow_validate.c`. Vanilla's own body calls
+/// `ZTShowScriptMgr::getScript(id)` and then directly dereferences the returned `ZTShowScript*`'s raw
+/// `+0x10` field to walk its item list - exactly the "will misbehave if it ever dereferences a handle
+/// this module returns" hazard `ztshowscriptmgr.rs`'s own module doc comment warns about: `getScript` is
+/// Stage-1-detoured to return a non-dereferenceable synthetic handle (`SYNTHETIC_SCRIPT_HANDLE_BASE |
+/// id`), never a real pointer. `validate` was missed from the plan's "must reimplement" list even though
+/// `start` calls it directly - confirmed live: real gameplay reaches this path on essentially the first
+/// scheduled show attempting to start after a save loads, corrupting `ecx` with the synthetic handle and
+/// crashing on `mov edx, [ecx+0x10]` inside vanilla's own list-length loop. Ported onto the Stage 1
+/// store's safe id-keyed accessors (`get_script`/`size`/`get_item`/`remove_item`) and the already-ported
+/// [`validate_item`] instead - `ZTShowInfo::getShowUnitList`/`checkUnit` stay real vanilla calls, since
+/// `ZTShowInfo` itself is untouched by Stage 1. `this` is `ZTShow*`; `+0x4` script id, `+0x8` unit-type
+/// id, `+0x10` owning `ZTShowInfo*`. `check_units` is vanilla's own `param_1`.
+///
+/// The item-list loop's `iVar6`/`result` accumulator is ported literally rather than simplified: every
+/// vanilla assignment to it happens only inside the branch that immediately resets it back to `0` again
+/// (after an item fails validation and gets removed), so it always evaluates to `0` by the time the loop
+/// ends - but this mirrors the decompile exactly rather than relying on that provable-but-non-obvious
+/// reduction.
+pub fn validate(this: u32, check_units: bool) -> i32 {
+    if check_units {
+        let show_info = get_from_memory::<u32>(this + 0x10);
+        let unit_type_id = get_from_memory::<u32>(this + 0x8);
+        let list_ptr = unsafe { GET_SHOW_UNIT_LIST.original()(show_info as *const u32, unit_type_id) } as u32;
+        let sentinel = get_from_memory::<u32>(list_ptr);
+
+        let mut unit_count = 0;
+        let mut node = get_from_memory::<u32>(sentinel);
+        while node != sentinel {
+            unit_count += 1;
+            node = get_from_memory::<u32>(node);
+        }
+        if unit_count == 0 {
+            return 1;
+        }
+
+        node = get_from_memory::<u32>(sentinel);
+        while node != sentinel {
+            let unit_id = get_from_memory::<u32>(node + 0x8);
+            if unsafe { CHECK_UNIT.original()(show_info as *const u32, unit_id) } == 0 {
+                return 4;
+            }
+            node = get_from_memory::<u32>(node);
+        }
+    }
+
+    let script_id = get_from_memory::<u16>(this + 0x4);
+    let handle = crate::ztshowscriptmgr::get_script(script_id);
+    if handle != 0 {
+        let mut result = 0i32;
+        let mut count = crate::ztshowscriptmgr::size(handle);
+        let mut index: i32 = 0;
+        while index < count {
+            if crate::ztshowscriptmgr::get_item(handle, index as u16) != 0 {
+                result = validate_item(this, index as u16);
+                if result != 0 {
+                    crate::ztshowscriptmgr::remove_item(handle, index as u16);
+                    count = crate::ztshowscriptmgr::size(handle);
+                    index -= 1;
+                    result = 0;
+                }
+            }
+            index += 1;
+        }
+        if crate::ztshowscriptmgr::size(handle) != 0 {
+            return result;
+        }
+    }
+    6
+}
+
+/// Reimplementation of `ZTShow::checkScript`, per `ZTShow_checkScript.c`/`.asm`. A fourth real,
+/// un-reimplemented raw-dereferencing consumer of `ZTShowScriptMgr::getScript`'s return value, found by
+/// auditing the plan's "safe to leave untouched" consumer list (`openzt/plans/ztshowscriptmgr-open-items.md`
+/// item 1) - same hazard class as `validate`/`stop_with_id`/`ZTAnimal::validateTrickType`. Reachable from
+/// `ZTShow::run`/`update`/`aboutToStart` (all real, un-detoured, hit on every simulation tick of an active
+/// show once a script is assigned), so this was gameplay-reachable, not just theoretical.
+///
+/// The decompiled `.c`'s `_param_1`/`CONCAT22` local is a Ghidra artifact of the u16 stack parameter having
+/// an uninitialized-per-the-decompiler upper half; the `.asm` shows the real logic plainly: `id = param_1 if
+/// param_1 != 0, else this->+0x4` (the show's own currently-assigned script id, same field every other
+/// function in this module reads at that offset). Returns whether that script exists and has at least one
+/// item.
+pub fn check_script(this: u32, param_1: u16) -> bool {
+    let id = if param_1 != 0 { param_1 } else { get_from_memory::<u16>(this + 0x4) };
+    id != 0 && crate::ztshowscriptmgr::script_item_count_by_id(id) > 0
+}
+
+/// Reimplementation of `ZTShow::calculatePercentAdjustment`, per `ZTShow_calculatePercentAdjustment.asm`
+/// (the decompiled `.c`'s `(param_1->cls_0x6355b8).mbr_0x10` is a Ghidra misattribution of a global-vs-member
+/// access - the `.asm` shows it's plainly `this+0x28`, the same trick-count accumulator [`do_trick_event`]
+/// already reads/writes at that offset). A fifth real, un-reimplemented raw-dereferencing consumer found by
+/// the same open-items audit as [`check_script`] - reachable via `calculateRestBonus`/
+/// `calculateSatisfactionPercent`, both called from `ZTShow::sendShowEndedEvent` on every show start/stop
+/// cycle.
+///
+/// `this` is `ZTShow*`; `+0x4` script id, `+0x28` trick-count accumulator. Unlike [`do_trick_event`], the
+/// real function's `GLOBAL_ZTShowMgr` read here has **no null check** in the `.asm` (confirmed - no
+/// `TEST`/`JZ` on it before the `+0x20`/`+0x24` dereferences) - ported faithfully rather than defensively:
+/// a null `GLOBAL_ZTShowMgr` here would crash real vanilla too, so this doesn't add a guard vanilla itself
+/// doesn't have.
+pub fn calculate_percent_adjustment(this: u32) -> i32 {
+    let script_id = get_from_memory::<u16>(this + 0x4);
+    let item_count = crate::ztshowscriptmgr::script_item_count_by_id(script_id) as i32;
+    let threshold = get_from_memory::<i32>(this + 0x28);
+    if item_count > 0 && threshold <= item_count {
+        let mgr_ptr = globals().ztshowmgr_ptr() as u32;
+        let mgr_lower = get_from_memory::<i32>(mgr_ptr + 0x20);
+        let mgr_upper = get_from_memory::<i32>(mgr_ptr + 0x24);
+        if threshold > mgr_upper {
+            return threshold - mgr_upper;
+        }
+        if threshold < mgr_lower {
+            return mgr_lower - threshold;
+        }
+    }
+    0
+}
+
+/// Reimplementation of `ZTShow::start` - real body is `ztshow::START` (`0x005a3db4`, a thin wrapper) tail
+/// -calling into `ztshow::RESOLVE_NEXT_SCHEDULED_SCRIPT_ID`/`FUN_005a3de4`; see the `generated.rs` hand
+/// -added-entry comments and this module doc comment for how those addresses were resolved. Ported from
+/// `FUN_005a3de4`'s decompiled source (supplied directly, not a local decompile file), cross-checked
+/// against the macOS `ZTShow::start` decompile's matching call sequence.
+///
+/// Two pieces of the real function's success-path tail are deliberately **not** ported:
+/// - `(this->cls_0x6355b8+0xc)`/`ZTShow+0x24`'s write from `GLOBAL_ZTAIMgr->field_0xec` - `GLOBAL_ZTAIMgr`
+///   has no known RVA anywhere in this repo (only its vtable address), and this field isn't read by
+///   anything else in this module's scope - a real but low-stakes fidelity gap, not a correctness risk.
+/// - The "show has started" UI toast (`BFApp::buildString`/`BFUIMgr::displayMessage`) - its real body
+///   includes a small-object-freelist buffer teardown (`FUN_00402629`/`DAT_00638000`) whose exact
+///   semantics aren't independently confirmed; guessing wrong risks the cross-allocator heap corruption
+///   class CLAUDE.md warns about, for a purely cosmetic message. Skipped rather than risked.
+pub fn start(this: u32) {
+    let script_id = unsafe { RESOLVE_NEXT_SCHEDULED_SCRIPT_ID.original()(this as *const u32) as u16 };
+    let Some(script_type) = crate::ztshowscriptmgr::script_type_by_id(script_id) else { return };
+    if script_type == 0 {
+        return;
+    }
+
+    let show_info = get_from_memory::<u32>(this + 0x10);
+    let unit_count = unsafe { GET_NUM_UNITS.original()(show_info as *const u32, script_type) };
+    if unit_count < 1 {
+        return;
+    }
+
+    if check_owning_habitat(show_info) {
+        return;
+    }
+
+    // Inlined `setShowUnitTypeID` + the same animal-type flag check `stop_with_id` does independently
+    // (matches vanilla's own real redundancy - both `start` and `stop` compute it separately).
+    save_to_memory(this + 0x8, script_type);
+    let world = globals().ztworldmgr_ptr() as *const u32;
+    let unit_type_ptr = unsafe { GET_TYPE.original()(world, script_type as i32) } as u32;
+    if unit_type_ptr != 0 && unsafe { type_check(unit_type_ptr, RVA_ANIMAL_TYPE_CHECK) } {
+        save_to_memory(this + 0xc, 0x2550u32);
+    }
+
+    // "setShowScriptID" on Windows isn't a separate function either - it's achieved by calling `stop`
+    // with the new id, which reassigns `+0x4` as a side effect of its own reinit-and-reassign logic.
+    stop_with_id(this, script_id);
+
+    if validate(this, true) != 0 {
+        return;
+    }
+    unsafe { CLEAR_SHOW_SCRIPT_STATES.original()(this as *const u32) };
+
+    let unit_type_for_list = get_from_memory::<u32>(this + 0x8);
+    let list_ptr = unsafe { GET_SHOW_UNIT_LIST.original()(show_info as *const u32, unit_type_for_list) } as u32;
+    let sentinel = get_from_memory::<u32>(list_ptr);
+    let mut node = get_from_memory::<u32>(sentinel);
+    while node != sentinel {
+        let next_node = get_from_memory::<u32>(node);
+        let unit_id = get_from_memory::<u32>(node + 0x8);
+        let unit_ptr = globals().ztworldmgr().resolve_entity_by_id(unit_id) as u32;
+        let eligible = unit_ptr != 0 && unsafe { entity_type_matches(unit_ptr, RVA_SHOW_TRICK_TYPE_CHECK) };
+        if !eligible {
+            unsafe { REMOVE_UNIT.original()(show_info as *const u32, unit_type_for_list, &unit_id as *const u32 as *const i32) };
+        } else {
+            let assigned_show_id = get_from_memory::<u16>(unit_ptr + 0x254);
+            let owning_show_info = unsafe { GET_SHOW_INFO.original()(globals().ztshowmgr_ptr() as *const u32, assigned_show_id) };
+            let needs_state = (owning_show_info != 0 && unsafe { IS_STARTED.original()(owning_show_info as *const u32) } == 0)
+                || !unsafe { call_entity_vtable_noargs(unit_ptr, 0x22c) };
+            if needs_state {
+                let result = unsafe { CREATE_SHOW_SCRIPT_STATE.original()(this as *const u32, unit_id) };
+                if result != 0 {
+                    return;
+                }
+                let show_id = get_from_memory::<u16>(this + 0x6);
+                save_to_memory(unit_ptr + 0x254, show_id);
+            }
+        }
+        node = next_node;
+    }
+
+    let gather_result = unsafe { GATHER_UNITS.original()(this as *const u32) };
+    if gather_result == 0 {
+        save_to_memory(this + 0x1e, 0u8);
+        save_to_memory(this + 0x1f, 1u8);
+        save_to_memory(this + 0x20, 0u8);
+        // `+0x24` (GLOBAL_ZTAIMgr->field_0xec) intentionally skipped - see this function's doc comment.
+        let show_info = get_from_memory::<u32>(this + 0x10);
+        unsafe { send_event(show_info, 0x2713, 0, 0x57, 0, 0, 1) };
+        let habitat = get_from_memory::<u32>(show_info + 0xa0);
+        unsafe { ON_SHOW_STARTED.original()(habitat as *const u32) };
+        // "Show has started" UI toast intentionally skipped - see this function's doc comment.
+    }
+}
+
+/// Recursive in-order collection of every node in the pending-scripts `std::map<unitTypeID, {current:u16
+/// @+0x1c, pending:u16 @+0x1e}>` embedded in `ZTShowInfo+0x44` - real, untouched vanilla memory (never part
+/// of Stage 1's independent store), node shape `left+0x8/right+0xc/key+0x10` confirmed consistent across
+/// this function's, `addScript`'s, and `start`'s own decompiled descent code, child pointers null (`0`)
+/// terminated (confirmed via `addScript`'s own `while (fVar4 != 0.0)` descent guard). Same technique as
+/// `ztawardmgr::live_support::walk_tree` (already live-tested there) rather than reconstructing
+/// `check_pending_scripts`'s real successor-iterator algorithm, whose decompiled form has an edge-case
+/// check that couldn't be independently verified against a standard `_Tree::_Inc` reference - since this
+/// function only mutates each node's *value* fields (`+0x1c`/`+0x1e`), never the tree's own structural
+/// pointers, collecting every node upfront and processing them after is equivalent and sidesteps that risk
+/// entirely. A real red-black tree of unit types is never more than a few dozen nodes deep, so recursion
+/// depth is a non-concern (same reasoning `ztawardmgr.rs`'s own `walk_tree` already relies on).
+fn collect_pending_script_nodes(node: u32, out: &mut Vec<u32>) {
+    if node == 0 {
+        return;
+    }
+    collect_pending_script_nodes(get_from_memory::<u32>(node + 0x8), out);
+    out.push(node);
+    collect_pending_script_nodes(get_from_memory::<u32>(node + 0xc), out);
+}
+
+/// Reimplementation of `ZTShowInfo::checkPendingScripts`, per `ZTShowInfo_checkPendingScripts.c`/`.asm`.
+/// For every node whose `pending` field (`+0x1e`) isn't `0xffff` (no pending change): if `pending != current`
+/// (`+0x1c`), reassigns `current = pending`, drops the *old* current script from Stage 1's store (replacing
+/// the real body's direct `ZTShowScript::~ZTShowScript()` call - unsafe against Stage 1's synthetic handles,
+/// see the module doc comment), then calls the real vanilla `addShow`/`removeShow` depending on whether the
+/// new current script exists and has any items. Either way, `pending` is reset to `0xffff`.
+pub fn check_pending_scripts(show_info: u32) {
+    let header = get_from_memory::<u32>(show_info + 0x44);
+    let root = get_from_memory::<u32>(header + 4);
+    let mut nodes = Vec::new();
+    collect_pending_script_nodes(root, &mut nodes);
+
+    for node in nodes {
+        let pending_id = get_from_memory::<u16>(node + 0x1e);
+        if pending_id == 0xffff {
+            continue;
+        }
+        let unit_type_id = get_from_memory::<u32>(node + 0x10);
+        let current_id = get_from_memory::<u16>(node + 0x1c);
+        if current_id != pending_id {
+            save_to_memory(node + 0x1c, pending_id);
+            if crate::ztshowscriptmgr::script_exists_by_id(current_id) {
+                crate::ztshowscriptmgr::unregister_script_by_id(current_id);
+            }
+            let has_items =
+                crate::ztshowscriptmgr::script_exists_by_id(pending_id) && crate::ztshowscriptmgr::script_item_count_by_id(pending_id) > 0;
+            unsafe {
+                if has_items {
+                    ADD_SHOW.original()(show_info as *const u32, unit_type_id);
+                } else {
+                    REMOVE_SHOW.original()(show_info as *const u32, unit_type_id);
+                }
+            }
+        }
+        save_to_memory(node + 0x1e, 0xffffu16);
+    }
+}
+
+/// Node size for the pending-scripts map (`ZTShowInfo+0x44`), confirmed byte-exact via `ZTShowInfo::save`'s
+/// own per-node serialization (`ZTShowInfo_save.c` lines 109-120): tree-bookkeeping prefix `0x10` bytes
+/// (`+0x0` unknown/color, `+0x4` parent, `+0x8` left, `+0xc` right) + value fields `+0x10` key through
+/// `+0x44` (last field, 4 bytes) = `0x48` total. Every field `save`/`load` round-trip is listed in
+/// [`allocate_pending_script_node`]'s own comment; nothing beyond `+0x44` is ever read or written by
+/// `save`/`load` or any other consumer found this session, which is the strongest available evidence this
+/// is the complete struct (a save/load round-trip losing a real field would be an observable data-loss bug).
+const PENDING_SCRIPT_NODE_SIZE: u32 = 0x48;
+
+/// Allocates and zero-initializes a new pending-scripts map node via the real vanilla allocator
+/// (`standalone::OPERATOR_NEW`) - never `Box`, since this node lives in memory `getShowUnitList`/
+/// `getNumUnits`/`addUnitToList`/`removeUnit`/`incrementAttendance`/`incrementReceipts`/`enterNewMonth`
+/// (all real, un-reimplemented vanilla code, per the plan's "safe to leave untouched" list) read and write
+/// directly, and mixing allocators on either side of that boundary is exactly the heap-corruption class
+/// CLAUDE.md warns about.
+///
+/// Field-by-field defaults (all zeroed except where noted), confirmed via `ZTShowInfo_save.c`'s complete
+/// per-node write list plus each named accessor's own read/write (`+0x28`/`+0x2c`/`+0x30` receipts,
+/// `+0x34`/`+0x38`/`+0x3c` attendance, all `incrementAttendance`/`incrementReceipts`/`enterNewMonth`;
+/// `+0x40`/`+0x44` creation date, `addScript` itself, stamped by the caller only on a genuine first
+/// insertion, not here): `+0x0`/`+0x14` unknown/never read by anything found this session (zeroed, safe
+/// regardless of real meaning), `+0x20` unconfirmed flag byte, `+0x24` unconfirmed `u32` (both zeroed,
+/// matching every other never-independently-set field's natural zero-init default for a value-initialized
+/// aggregate). `+0x18` (the unit list header slot) is the one field that can't just be zeroed - see below.
+///
+/// `+0x18`'s target: `getNumUnits`/`getShowUnitList`/`removeUnit` all double-dereference it
+/// (`**(node+0x18)`) as an intrusive circular list's sentinel, node shape `{next:+0x0, prev:+0x4,
+/// payload:+0x8}` (confirmed via `removeUnit`'s own unlink code). A null `+0x18` would crash the first real
+/// vanilla caller that touches it - same class of hazard as `ztmegatilemgr::empty_category_map_sentinel`'s
+/// own precedent - so this allocates a second, real, self-referential sentinel node (`next`/`prev` both
+/// pointing at itself) and stores its address here, matching what a genuinely-empty intrusive list looks
+/// like everywhere else in this codebase.
+fn allocate_pending_script_node(unit_type_id: u32) -> u32 {
+    let node = unsafe { OPERATOR_NEW.original()(PENDING_SCRIPT_NODE_SIZE) } as u32;
+    unsafe { std::ptr::write_bytes(node as *mut u8, 0, PENDING_SCRIPT_NODE_SIZE as usize) };
+    save_to_memory(node + 0x10, unit_type_id);
+
+    let sentinel = unsafe { OPERATOR_NEW.original()(0xc) } as u32;
+    save_to_memory(sentinel, sentinel);
+    save_to_memory(sentinel + 4, sentinel);
+    save_to_memory(sentinel + 8, 0u32);
+    save_to_memory(node + 0x18, sentinel);
+
+    node
+}
+
+/// Finds or inserts a node for `unit_type_id` in the pending-scripts map (`ZTShowInfo+0x44`) - a plain,
+/// unbalanced BST insert rather than a real MSVC red-black insert. This is deliberate: every reader of this
+/// tree found this session (this function's own descent, `checkPendingScripts`, `getShowUnitList`,
+/// `getNumUnits`, `addUnitToList`, `removeUnit`) only ever relies on the BST key-ordering invariant
+/// (`left < key <= right`) for correctness, never on a color/balance bit - none was found being read
+/// anywhere. Replicating vanilla's real `AI_cls_0x404fd6::meth_0x5abe74` call would additionally require
+/// reverse-engineering three more unknown STL-glue helpers' calling conventions from raw `.asm`
+/// (`BFTile::cls_0x40143b`, `cls_0x484e11::cls_0x484e11`, `__vector_pod<>::__vector_pod<>?`) with real
+/// heap-corruption risk if any marshalling detail were wrong - an unbalanced insert sidesteps all of that
+/// while staying correct for every actual consumer.
+///
+/// Also maintains the header's own leftmost (`+0x8`) cache pointer (standard BST bookkeeping, unrelated to
+/// red-black balancing) - `enterNewMonth` (real vanilla, un-reimplemented, not in this module's scope)
+/// starts its own walk from `header+0x8`, so an insert that left it stale would make `enterNewMonth`
+/// silently skip freshly-added unit types.
+///
+/// **Bug found and fixed while adding this function's first live test coverage**: an earlier version of
+/// this function also maintained a "rightmost" cache at `header+0xc`, by analogy with the leftmost cache at
+/// `header+0x8` - but the `AI_cls_0x404fd6` tree header embedded at `ZTShowInfo+0x44` is only `0xc` bytes
+/// (`self`/`root`/`leftmost`, confirmed via `ZTShowInfo_ZTShowInfo.asm`: the constructor call
+/// `AI_cls_0x404fd6::cls_0x404fd6(ESI+0x44, ...)` is immediately followed by `MOV [ESI+0x50], 0` -  i.e.
+/// vanilla's own ctor treats `ZTShowInfo+0x50` as the *next*, separate field the instant the tree ctor
+/// returns), so `header+0xc` is `ZTShowInfo+0x50` - the real, live `addShow`/`removeShow` dynamic array's
+/// own `begin` pointer (`ZTShowInfo_addShow.c`/`_removeShow.c`), not part of the tree at all. No real
+/// vanilla reader of this tree (`ZTShowInfo::addScript`, `checkPendingScripts`, `AI_cls_0x404fd6::find`)
+/// was ever found reading a "rightmost" field either - only `header+0x8` (leftmost) is genuinely read
+/// (`checkPendingScripts`'s own traversal start). Writing to `header+0xc` therefore corrupted a real,
+/// separate `ZTShowInfo` field on every first-ever insert for a given `ZTShowInfo` (stomping its `addShow`
+/// array's `begin` pointer from `0`/null to a tree-node address), which made the very next real
+/// `addShow`/`removeShow` call walk that array using the tree node as a garbage `begin` pointer against a
+/// still-null `end` (`ZTShowInfo+0x54`) - an unbounded scan that reads until it hits unmapped memory and
+/// crashes. This is a genuine, previously-unexercised live gameplay-corruption bug (Stage 2's `addScript`/
+/// `checkPendingScripts` had no live test until now, per the plan's own open item 11) - fixed by dropping
+/// the "rightmost" cache concept entirely, not just working around it in the test.
+///
+/// Returns `(node_address, was_newly_inserted)` - callers that need to stamp creation-only data (the
+/// `+0x40`/`+0x44` date fields) check the second value, matching vanilla's own `pair<iterator,bool>`
+/// insert-return convention.
+pub(crate) fn find_or_insert_pending_script_node(show_info: u32, unit_type_id: u32) -> (u32, bool) {
+    let header = get_from_memory::<u32>(show_info + 0x44);
+    let root = get_from_memory::<u32>(header + 4);
+
+    if root == 0 {
+        let new_node = allocate_pending_script_node(unit_type_id);
+        save_to_memory(new_node + 4, header);
+        save_to_memory(header + 4, new_node);
+        save_to_memory(header + 8, new_node);
+        return (new_node, true);
+    }
+
+    let mut node = root;
+    let mut candidate = header;
+    let (parent, went_left) = loop {
+        let parent = node;
+        if get_from_memory::<u32>(node + 0x10) < unit_type_id {
+            let right = get_from_memory::<u32>(node + 0xc);
+            if right == 0 {
+                break (parent, false);
+            }
+            node = right;
+        } else {
+            candidate = node;
+            let left = get_from_memory::<u32>(node + 0x8);
+            if left == 0 {
+                break (parent, true);
+            }
+            node = left;
+        }
+    };
+
+    if candidate != header && get_from_memory::<u32>(candidate + 0x10) <= unit_type_id {
+        return (candidate, false);
+    }
+
+    let new_node = allocate_pending_script_node(unit_type_id);
+    save_to_memory(new_node + 4, parent);
+    if went_left {
+        save_to_memory(parent + 8, new_node);
+        if parent == get_from_memory::<u32>(header + 8) {
+            save_to_memory(header + 8, new_node);
+        }
+    } else {
+        save_to_memory(parent + 0xc, new_node);
+    }
+    (new_node, true)
+}
+
+/// Reimplementation of `ZTShowInfo::addScript`, per `ZTShowInfo_addScript.c`/`.asm`. Assigns `new_script_id`
+/// to `unit_type_id`'s pending-scripts map entry (creating it via [`find_or_insert_pending_script_node`] if
+/// this is the first script ever assigned to that unit type), applying it immediately to `current` if the
+/// show isn't currently started (dropping the *old* current script from Stage 1's store rather than calling
+/// the real, unsafe-against-synthetic-handles `ZTShowScript::~ZTShowScript()` directly - same fix pattern as
+/// `checkPendingScripts`), or leaving it queued in `pending` for `checkPendingScripts` to pick up later
+/// otherwise. Vanilla's real body redundantly re-finds the node by the same key up to three times (a
+/// natural consequence of repeated `map[key]`-style access in the original source, each independently
+/// resolving to the same node) - collapsed here into one `find_or_insert` call reused throughout, since
+/// nothing else mutates the tree's structure in between.
+///
+/// **Deliberately not ported**: the config-file-driven default-admission-cost block (`BFConfigFile`/
+/// `s_shows.cfg`/`meth_0x46ec56`, gated behind an unrelated global flag) - `meth_0x46ec56` has no
+/// decompile/address anywhere in this repo, and this only affects admission pricing, not show-script
+/// correctness. Same class of deliberate skip as `start`'s own UI-toast/`GLOBAL_ZTAIMgr` gaps.
+pub fn add_script(show_info: u32, unit_type_id: u32, new_script_id: u16) -> bool {
+    if new_script_id == 0 || new_script_id == 0xffff || unit_type_id == 0 {
+        return false;
+    }
+
+    let (node, was_inserted) = find_or_insert_pending_script_node(show_info, unit_type_id);
+    if was_inserted {
+        let mut date: i64 = 0;
+        unsafe { GET_DATE.original()(globals().ztgamemgr_ptr() as *const u32, &mut date as *const i64) };
+        save_to_memory(node + 0x40, date);
+    }
+
+    save_to_memory(node + 0x1e, new_script_id);
+
+    let started = unsafe { IS_STARTED.original()(show_info as *const u32) } != 0;
+    if !started {
+        let old_current = get_from_memory::<u16>(node + 0x1c);
+        save_to_memory(node + 0x1c, new_script_id);
+        save_to_memory(node + 0x1e, 0xffffu16);
+        if crate::ztshowscriptmgr::script_exists_by_id(old_current) {
+            crate::ztshowscriptmgr::unregister_script_by_id(old_current);
+        }
+    }
+
+    let current_id = get_from_memory::<u16>(node + 0x1c);
+    let has_items =
+        crate::ztshowscriptmgr::script_exists_by_id(current_id) && crate::ztshowscriptmgr::script_item_count_by_id(current_id) > 0;
+    unsafe {
+        if has_items {
+            ADD_SHOW.original()(show_info as *const u32, unit_type_id);
+        } else {
+            REMOVE_SHOW.original()(show_info as *const u32, unit_type_id);
+        }
+    }
+    true
+}
+
+#[detour_mod]
+mod detours {
+    use super::*;
+
+    #[detour(CHECK_UNIT_TYPE)]
+    unsafe extern "thiscall" fn check_unit_type_detour(this: *const u32, unit_type: u32) -> u32 {
+        check_unit_type(this as u32, unit_type)
+    }
+
+    #[detour(DO_CURRENT_ITEM)]
+    unsafe extern "thiscall" fn do_current_item_detour(this: *const u32, unit_id: u32) -> i32 {
+        do_current_item(this as u32, unit_id)
+    }
+
+    #[detour(DO_TRICK_EVENT)]
+    unsafe extern "thiscall" fn do_trick_event_detour(this: *const u32, state_ptr: *const u32) {
+        do_trick_event(this as u32, state_ptr as u32);
+    }
+
+    #[detour(VALIDATE_ITEM)]
+    unsafe extern "thiscall" fn validate_item_detour(this: *const u32, index: u16) -> u32 {
+        validate_item(this as u32, index) as u32
+    }
+
+    #[detour(VALIDATE)]
+    unsafe extern "thiscall" fn validate_detour(this: *const u32, check_units: bool) -> i32 {
+        validate(this as u32, check_units)
+    }
+
+    #[detour(STOP_0)]
+    unsafe extern "thiscall" fn stop_0_detour(this: *const u32, new_script_id: u32) {
+        stop_with_id(this as u32, new_script_id as u16);
+    }
+
+    #[detour(START)]
+    unsafe extern "thiscall" fn start_detour(this: *const u32) {
+        start(this as u32);
+    }
+
+    #[detour(CHECK_PENDING_SCRIPTS)]
+    unsafe extern "thiscall" fn check_pending_scripts_detour(this: *const u32) {
+        check_pending_scripts(this as u32);
+    }
+
+    #[detour(ADD_SCRIPT)]
+    unsafe extern "thiscall" fn add_script_detour(this: *const u32, unit_type_id: u32, new_script_id: u16) -> bool {
+        add_script(this as u32, unit_type_id, new_script_id)
+    }
+
+    #[detour(CHECK_SCRIPT)]
+    unsafe extern "thiscall" fn check_script_detour(this: *const u32, param_1: u16) -> u32 {
+        check_script(this as u32, param_1) as u32
+    }
+
+    #[detour(CALCULATE_PERCENT_ADJUSTMENT)]
+    unsafe extern "fastcall" fn calculate_percent_adjustment_detour(this: *const u32) -> i32 {
+        calculate_percent_adjustment(this as u32)
+    }
+
+    #[detour(GET_NUM_ITEMS)]
+    unsafe extern "thiscall" fn get_num_items_detour(this: *const u32) -> i32 {
+        get_num_items(this as u32)
+    }
+}
+
+pub fn init() {
+    if let Err(e) = unsafe { detours::init_detours() } {
+        error!("Failed to initialise ztshow detours: {e:?}");
+    }
+}
+
+#[cfg(feature = "reimplementation-tests")]
+pub(crate) mod live_support {
+    use super::*;
+
+    /// Allocates and zero-initializes a standalone, `0xb0`-byte `ZTShowInfo` buffer via the real vanilla
+    /// allocator (`standalone::OPERATOR_NEW`) - **without** running the real `ZTShowInfo::ZTShowInfo` ctor,
+    /// which unconditionally dereferences an unconfirmed `GLOBAL_ZTAIMgr` field (see `start`'s own doc
+    /// comment on why that field is skipped project-wide). Real size `0xb0`, confirmed via
+    /// `ZTHabitat_setIsShowExhibit.c`'s own `new(0xb0)`.
+    ///
+    /// The one piece of real-ctor state this buffer *does* need is the pending-scripts tree header at
+    /// `+0x44` (`AI_cls_0x404fd6`, read by `ZTShowInfo::addScript`/`checkPendingScripts`/
+    /// `find_or_insert_pending_script_node`): its own first field is a self-pointer sentinel (confirmed via
+    /// `AI_cls_0x404fd6::find`'s decompile treating a "not found" result as "equal to the value read from
+    /// `this`'s own first field" - the standard self-referencing-header pattern), so this writes
+    /// `*(show_info+0x44) = show_info+0x44` before returning; without it, `find`/`find_or_insert_pending_
+    /// script_node` would dereference a null header and crash on the very first call. Every other field
+    /// stays zeroed, matching what the real ctor's own explicit zero-writes to `+0x50..+0xa4` already
+    /// produce (see `ZTShowInfo_ZTShowInfo.c`) - the fields this buffer's zero-init does *not* match the
+    /// real ctor for are `+0x68` (real ctor sets `1`) and the `GLOBAL_ZTAIMgr`-derived `+0x6c`/`+0x70`
+    /// fields, none of which `add_script`/`check_pending_scripts`/`check_owning_habitat` (this buffer's
+    /// intended consumers) ever read.
+    ///
+    /// Deliberately never freed by a matching helper here: this is a one-shot smoke-test buffer (see
+    /// `reimplementation_tests/mod.rs`'s `ZTSHOWINFO_ADD_SCRIPT_CHECK_PENDING_SCRIPTS_LIVE` test), and real
+    /// vanilla `ADD_SHOW`/`REMOVE_SHOW` may link further real-allocator-owned memory into its
+    /// `+0x50`/`+0x54`/`+0x58` dynamic array by the time the test finishes - freeing only the outer buffer
+    /// while leaving that memory dangling would be a partial/incorrect teardown, so per CLAUDE.md's
+    /// leak-only-teardown precedent (`ztthoughtmgr.rs`'s `destroy_standalone_mgr_leaking_nodes`), this
+    /// buffer and anything real vanilla code links into it are just left allocated for the rest of the
+    /// (short, one-shot) test process's lifetime instead.
+    pub(crate) fn build_standalone_show_info() -> u32 {
+        let show_info = unsafe { OPERATOR_NEW.original()(0xb0) } as u32;
+        unsafe { std::ptr::write_bytes(show_info as *mut u8, 0, 0xb0) };
+        save_to_memory(show_info + 0x44, show_info + 0x44);
+        show_info
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Doesn't depend on `ztshowscriptmgr`'s shared process-global store (see that module's own
+    /// `TEST_LOCK` precedent for why cross-test interference is a real concern there) - exercises just
+    /// the "script id not found" path, which `check_unit_type` handles independently of any registration
+    /// state.
+    #[test]
+    fn check_unit_type_returns_true_with_low_byte_set_when_script_not_found() {
+        let mut fake_show_info = [0u8; 0x10];
+        fake_show_info[8..10].copy_from_slice(&0xfffeu16.to_le_bytes());
+        let this = fake_show_info.as_ptr() as u32;
+        assert_eq!(check_unit_type(this, 42) & 1, 1);
+    }
+}

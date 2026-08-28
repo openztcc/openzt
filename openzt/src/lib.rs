@@ -97,6 +97,19 @@ mod ztmegatilemgr;
 /// zoo-achievement awards and the award.cfg catalogue.
 mod ztawardmgr;
 
+/// ztshowscriptmgr module has structs and methods for the vanilla ZTShowScriptMgr/ZTShowScript/
+/// ZTShowScriptItem classes - Stage 1 (core data model) of the show-script reimplementation, see
+/// openzt/plans/ztshowscriptmgr-implementation-plan.md.
+mod ztshowscriptmgr;
+
+/// ztshow module - Stage 2 (ZTShow/ZTShowInfo raw-access call sites) of the show-script
+/// reimplementation, see openzt/plans/ztshowscriptmgr-implementation-plan.md.
+mod ztshow;
+
+/// ztshowui module - Stage 4 (UI consumers: showpanel_fillTrickLists/_copyListToScript) of the
+/// show-script reimplementation, see openzt/plans/ztshowscriptmgr-implementation-plan.md.
+mod ztshowui;
+
 /// ztguest module reimplements ZTGuest's three megatile-reading methods (fCrowdDensityMegatile/
 /// fEstheticBonusMegatile/fStinkyMegatile) - closes the last vanilla read path into ZTMegatileMgr's grid.
 mod ztguest;
@@ -216,6 +229,9 @@ mod zoo_init {
             ztthoughtmgr::init();
             ztmegatilemgr::init();
             ztawardmgr::init();
+            ztshowscriptmgr::init();
+            ztshow::init();
+            ztshowui::init();
             ztguest::init();
         }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }

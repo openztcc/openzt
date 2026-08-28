@@ -424,7 +424,7 @@ const RVA_SCENERY_TYPE_CHECK_ARG: u32 = 0x0023_8670;
 /// sites in the decompile are byte-for-byte identical apart from the type-check argument, and structurally
 /// identical to `ztthoughtmgr::resolve_object_own_habitat_ptr`'s own vtable-slot-`0x1c` call. `entity_ptr`
 /// is a raw `BFEntity*`; this resolves its `inner_class_ptr` (`+0x128`) itself before dispatching.
-unsafe fn entity_type_matches(entity_ptr: u32, type_check_arg_rva: u32) -> bool {
+pub(crate) unsafe fn entity_type_matches(entity_ptr: u32, type_check_arg_rva: u32) -> bool {
     let entity_type_ptr = get_from_memory::<u32>(entity_ptr + 0x128);
     if entity_type_ptr == 0 {
         return false;

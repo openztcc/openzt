@@ -38,6 +38,14 @@ impl ZTHabitatMgr {
 
     // }
 
+    /// The manager's own `exhibit_array` (every habitat in the loaded zoo) - exposed read-only so callers
+    /// outside this module (e.g. live reimplementation-tests that need to scan real habitats for one
+    /// matching some predicate, like a tank exhibit with `water_level() == 0`) can enumerate it via
+    /// `ZTArray`'s own public `len`/`get`/`get_ptr`.
+    pub fn exhibit_array(&self) -> &ZTArray<ZTHabitat> {
+        &self.exhibit_array
+    }
+
     pub fn get_habitat_by_tile(&self, tile: &BFTile) -> Option<ZTHabitat> {
         self.get_habitat(tile.pos.x, tile.pos.y)
     }
