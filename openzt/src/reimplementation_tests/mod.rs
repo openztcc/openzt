@@ -50,6 +50,17 @@ pub fn init() {
         crate::ztshow::init();
         crate::ztshowui::init();
 
+        // ztawardmgr's own-method detours (ADD_AWARD/GET_AWARD/SAVE/LOAD/START) are deliberately NOT
+        // installed here - ZTAWARDMGR_ADD_AWARD_SAVE_LOAD/START/GET_AWARD rely on `.original()` reaching
+        // real, un-hooked vanilla code for comparison against the Rust reimplementation, and `.original()`
+        // is a raw address cast with no trampoline (see openzt-detour/src/lib.rs's `original()`) -
+        // installing that submodule's detours would make `.original()` loop back into our own code on
+        // both sides of those diffs. Only the two override-style detours needed for a live diff of their
+        // own routing/dispatch logic are installed, each exposing a `call_real` trampoline wrapper so the
+        // corresponding test can still reach genuine vanilla behavior once hooked.
+        crate::ztawardmgr::eval_award_count_override::init();
+        crate::ztawardmgr::show_awards_detour::init();
+
         unsafe { detour_zoo_main::init_detours() }.is_err().then(|| {
             error!("Error initialising zoo_main detours");
         });
@@ -122,7 +133,7 @@ mod detour_zoo_main {
     use openzt_detour::generated::ztmegatilemgr as gen_ztmegatilemgr;
     use openzt_detour::generated::ztguest as gen_ztguest;
     use openzt_detour::generated::ztawardmgr as gen_ztawardmgr;
-    use openzt_detour::generated::ztscenariosimplegoal::EVAL as ZTSCENARIOSIMPLEGOAL_EVAL;
+    use openzt_detour::generated::uilistbox as gen_uilistbox;
     use openzt_detour::generated::bfuimgr::GET_ELEMENT_0 as BFUIMGR_GET_ELEMENT_0;
     use openzt_detour::generated::zthabitatmgr;
     use openzt_detour::generated::ztui_gameopts::LOAD_FILE as ZTUI_GAMEOPTS_LOAD_FILE;
@@ -1239,6 +1250,14 @@ mod detour_zoo_main {
             // end-of-run (queued-but-unflushed log lines vanish silently - `error!` calls placed early in a
             // test function routinely never made it to `openzt.log`, while calls placed right at the end
             // reliably did).
+            //
+            // Since fixed for these two specifically: `ztawardmgr::eval_award_count_override::init`/
+            // `ztawardmgr::show_awards_detour::init` are now installed in this file's own `init()` too
+            // (deliberately *not* the whole `ztawardmgr::init`, which would also hook `ADD_AWARD`/
+            // `GET_AWARD`/`SAVE`/`LOAD`/`START` and break the three other award tests' use of
+            // `.original()` for real-vanilla comparison), and both tests now compare against real vanilla
+            // via a `retour` trampoline (`call_real`) instead of `.original()`, which can't reach real
+            // vanilla once a function is hooked in-process (see either `call_real`'s own doc comment).
             fail_flag |= run_ztshowinfo_add_script_check_pending_scripts_live_test(&mut failure_log);
             fail_flag |= run_ztshow_check_owning_habitat_live_test(&mut failure_log);
             fail_flag |= run_ztshow_group3_trick_live_test(&mut failure_log);
@@ -3783,20 +3802,23 @@ mod detour_zoo_main {
         fail_flag
     }
 
-    /// ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT: drives `ZTScenarioSimpleGoal::eval`'s installed override
-    /// by calling through its real, now-patched address directly (`ztawardmgr::init` has already
-    /// installed the detour by this point in the battery, and the game's `.exe` has no ASLR, so the raw
-    /// Ghidra VA is safe to call via a plain `transmute` - same pattern `ztthoughtmgr.rs`'s
+    /// ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT: drives `ZTScenarioSimpleGoal::eval`'s installed override by
+    /// calling through its real, now-patched address directly (`ztawardmgr::eval_award_count_override::
+    /// init` - installed specifically, not the whole `ztawardmgr::init` - has already installed the
+    /// detour by this point in the battery, and the game's `.exe` has no ASLR, so the raw Ghidra VA is
+    /// safe to call via a plain `transmute` - same pattern `ztthoughtmgr.rs`'s
     /// `resolve_object_own_habitat_ptr` uses for a vtable slot). Builds a fully synthetic, zeroed,
     /// leaked buffer standing in for a `ZTScenarioSimpleGoal*` (safe: every case exercised here only
     /// touches `+0xc`/`+0x10`/`+0x1c` on `this`), seeds a known, identical, non-zero award count on both
     /// representations (the real vector via `ADD_AWARD.original()`, the Rust store via
-    /// `ztawardmgr::add_award`) so a mismatch would be visible, then compares the real, un-hooked
-    /// `EVAL.original()` against a direct call through the hooked address for: the gate-passing case at
-    /// the exact threshold boundary (both should equal the seeded count, since both representations are
-    /// in sync), the gate-failing case just past the boundary, and two unrelated submetric values under
-    /// the same goal kind - the override must fall through to identical vanilla behavior for all three of
-    /// those.
+    /// `ztawardmgr::add_award`) so a mismatch would be visible, then compares real vanilla behavior
+    /// (`ztawardmgr::eval_award_count_override::call_real`, the `retour` trampoline - **not**
+    /// `EVAL.original()`, which is a raw address cast with no trampoline and would now just loop back into
+    /// this same detour once it's hooked, see that helper's own doc comment) against a direct call
+    /// through the hooked address for: the gate-passing case at the exact threshold boundary (both should
+    /// equal the seeded count, since both representations are in sync), the gate-failing case just past
+    /// the boundary, and two unrelated submetric values under the same goal kind - the override must fall
+    /// through to identical vanilla behavior for all three of those.
     fn run_ztscenariosimplegoal_eval_award_count_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT";
         let game_mgr_ptr = globals().ztgamemgr_ptr();
@@ -3833,7 +3855,7 @@ mod detour_zoo_main {
             save_to_memory::<i32>(goal_ptr as u32 + 0x10, submetric);
             save_to_memory::<i32>(goal_ptr as u32 + 0x1c, threshold);
 
-            let expected = unsafe { ZTSCENARIOSIMPLEGOAL_EVAL.original()(goal_ptr) };
+            let expected = ztawardmgr::eval_award_count_override::call_real(goal_ptr);
             let hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32) -> i32>(0x0041d665u32) };
             let actual = hooked(goal_ptr);
 
@@ -3855,15 +3877,49 @@ mod detour_zoo_main {
         fail_flag
     }
 
-    /// ZTAWARDMGR_SHOW_AWARDS: smoke-tests the reimplemented `_showAwards` (installed as a
-    /// full-replacement detour, not a partial override) by calling through its real, now-patched address
-    /// after seeding both representations with the same real catalogue award ids (from
-    /// `ZTAWARDMGR_START`, which has already run earlier in this battery). Runs after `run_load_live_zoo`
-    /// since it needs a live `BFUIMgr` element `0x101c` to exist. Confirms the call resolves the list
-    /// element and completes without crashing; per `ztawardmgr.rs`'s `show_awards_detour` doc comment,
-    /// the icon-buffer/color-argument shape and the `load_string_by_id`-vs-`buildString` text
-    /// equivalence are flagged as open items needing separate manual live verification, not structural
-    /// comparison here.
+    /// Counts `UIListBox` items by walking `GET_ITEM(index)` until it returns `0` past the end - the same
+    /// bounds-check-confirmed technique `ztshowui.rs`'s `copy_list_to_script` already relies on (see that
+    /// call site's own doc comment for the `.asm` cross-check), so no separate item-count bookkeeping
+    /// needs to be replicated here.
+    fn listbox_item_count(listbox: *const u32) -> i32 {
+        let mut index = 0i32;
+        loop {
+            if unsafe { gen_uilistbox::GET_ITEM.original()(listbox, index) } == 0 {
+                return index;
+            }
+            index += 1;
+            if index > 10_000 {
+                return index;
+            }
+        }
+    }
+
+    /// ZTAWARDMGR_SHOW_AWARDS: real diff-oracle comparison of the reimplemented `_showAwards` detour
+    /// against real vanilla. Seeds both the real singleton and the Rust store with the same two catalogue
+    /// award ids (from `ZTAWARDMGR_START`, which has already run earlier in this battery), clears the
+    /// listbox and populates it via real vanilla (`ztawardmgr::show_awards_detour::call_real`'s `retour`
+    /// trampoline - **not** `SHOW_AWARDS.original()`, which is a raw address cast that would now just loop
+    /// back into this same detour once it's hooked), counts items via [`listbox_item_count`], then repeats
+    /// against the hooked address (our detour, driven by the Rust store) and compares counts. Runs after
+    /// `run_load_live_zoo` since it needs a live `BFUIMgr` element `0x101c` to exist.
+    ///
+    /// Only item *counts* are compared, not per-item content - per `ztawardmgr.rs`'s `show_awards_detour`
+    /// doc comment, the icon-buffer/color-argument shape and the `load_string_by_id`-vs-`buildString` text
+    /// equivalence remain open items needing separate manual live verification, since `UIListBoxItem`'s
+    /// internal field layout for those isn't decompile-confirmed. A count mismatch still catches real bugs
+    /// (wrong catalogue filtering, an id silently dropped, an off-by-one in the population loop).
+    ///
+    /// **Resets both sides, then re-runs `ztawardmgr::start()`, in that order** - not the reverse.
+    /// `ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT` runs immediately before this test (in this same
+    /// post-`run_load_live_zoo` battery) and its own `reset_awardmgr_both_sides()` call clears the
+    /// Rust-side catalogue too (`reset_reimplemented_store` clears both `earned_ids` and `awards`), not
+    /// just earned-ids - real vanilla's own catalogue tree is untouched by that reset (`ZTAwardMgr::load`
+    /// only resets the earned-ids vector), so only the Rust side needs repopulating. **Confirmed live,
+    /// twice**: populating the catalogue *before* this function's own `reset_awardmgr_both_sides()` call
+    /// left `reimplemented_award_triples()` empty again immediately afterward (the reset doesn't
+    /// distinguish "just populated" from stale) - `real_count=2, reimpl_count=0` on the first live run of
+    /// this rewritten test, a genuine catch by the new diff oracle, though of a test-harness ordering bug
+    /// rather than the detour itself. Resetting first, then calling `start()`, avoids that.
     fn run_awardmgr_show_awards_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZTAWARDMGR_SHOW_AWARDS";
 
@@ -3875,6 +3931,9 @@ mod detour_zoo_main {
             return false;
         }
 
+        let real_ptr = award_live_support::real_ptr();
+        reset_awardmgr_both_sides();
+        ztawardmgr::start();
         let catalogue = award_live_support::reimplemented_award_triples();
         if catalogue.is_empty() {
             info!("Skipping {}: no award catalogue entries available (ZTAWARDMGR_START found none)", test_name);
@@ -3882,20 +3941,33 @@ mod detour_zoo_main {
             return false;
         }
 
-        let real_ptr = award_live_support::real_ptr();
-        reset_awardmgr_both_sides();
-        let exercised_count = catalogue.len().min(2);
         for &(id, _, _) in catalogue.iter().take(2) {
             unsafe { gen_ztawardmgr::ADD_AWARD.original()(real_ptr, id) };
             ztawardmgr::add_award(id);
         }
 
+        unsafe { gen_uilistbox::CLEAR.original()(element) };
+        ztawardmgr::show_awards_detour::call_real();
+        let real_count = listbox_item_count(element);
+
+        unsafe { gen_uilistbox::CLEAR.original()(element) };
         let hooked = unsafe { std::mem::transmute::<u32, extern "stdcall" fn()>(0x0053167fu32) };
         hooked();
+        let reimpl_count = listbox_item_count(element);
 
-        info!("{} completed without crashing (exercised {} award ids)", test_name, exercised_count);
-        write_success_line(failure_log, test_name);
-        false
+        if real_count == reimpl_count {
+            info!("{} passed (real_count={}, reimpl_count={})", test_name, real_count, reimpl_count);
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            error!("{} mismatch: real_count={}, reimpl_count={}", test_name, real_count, reimpl_count);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!("Test Failed {}: real_count={}, reimpl_count={}\n", test_name, real_count, reimpl_count).as_bytes(),
+                );
+            }
+            true
+        }
     }
 
     /// Builds a raw `ZTShowScriptItemRaw` (via `ztshowscriptmgr::live_support::raw_item_matching_type`)
@@ -3940,9 +4012,10 @@ mod detour_zoo_main {
 
     /// ZTSHOWINFO_ADD_SCRIPT_CHECK_PENDING_SCRIPTS_LIVE: `ZTShowInfo::addScript`/`checkPendingScripts`
     /// (`ztshowinfo::ADD_SCRIPT`/`CHECK_PENDING_SCRIPTS`) are full-replacement detours over Stage 1's
-    /// independent `ZTShowScriptMgr` store, so - like `ZTAWARDMGR_SHOW_AWARDS`/
-    /// `ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT` above - there's no real-vs-reimplementation diff oracle to
-    /// compare against. Instead: builds a standalone `ZTShowInfo` (`ztshow_live_support::
+    /// independent `ZTShowScriptMgr` store, so - unlike `ZTAWARDMGR_SHOW_AWARDS`/
+    /// `ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT` above, which each still have a real vanilla trampoline to
+    /// diff against - there's no real-vs-reimplementation diff oracle to compare against here at all (no
+    /// vanilla-layout struct backs Stage 1's store). Instead: builds a standalone `ZTShowInfo` (`ztshow_live_support::
     /// build_standalone_show_info` - a zeroed `OPERATOR_NEW(0xb0)` buffer, **not** the real
     /// `ZTShowInfo::ZTShowInfo` ctor, which unconditionally dereferences an unconfirmed `GLOBAL_ZTAIMgr`
     /// field - see that helper's own doc comment), registers two real `ZTShowScript`s (via
