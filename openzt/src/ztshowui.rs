@@ -403,7 +403,8 @@ fn validate_trick(show_info: u32, real_item_ptr: u32) -> bool {
 /// Reimplementation of `_copyListToScript` (real name `copyListToScript`, the show-editor's "apply"
 /// handler), per `_copyListToScript.c`/`.asm`. Resolves (or constructs, via the real, un-detoured
 /// `ZTShowScript::ZTShowScript` ctor - which itself calls through to Stage 1's real `REGISTER_SCRIPT`
-/// detour, see `ztshowscriptmgr.rs`'s own doc comment on why that's safe) the unit type's *pending*
+/// detour, see `ztshowscriptmgr.rs`'s own doc comment on why that's safe, confirmed live by
+/// `reimplementation_tests`'s `ZTSHOWSCRIPT_CTOR_REGISTRATION_LIVE` test) the unit type's *pending*
 /// script id, clears it (`crate::ztshowscriptmgr::clear_all`, not the detoured FFI path - this module
 /// already has the resolved store id/handle in hand), then walks the "assigned tricks" UI listbox
 /// (`0x2b6b`, via the real `UIListBox::getItem`, looping until it returns `0` - confirmed via the mac

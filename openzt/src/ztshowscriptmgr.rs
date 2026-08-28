@@ -34,6 +34,7 @@
 //! else in Stage 1's scope calls those directly (config-file item construction is Stage 3).
 
 use std::{
+    cell::{Cell, RefCell},
     collections::{BTreeMap, HashMap},
     sync::{LazyLock, Mutex},
 };
@@ -236,6 +237,55 @@ struct ShowScriptMgrState {
 
 static STATE: LazyLock<Mutex<ShowScriptMgrState>> = LazyLock::new(|| Mutex::new(ShowScriptMgrState::default()));
 
+/// Serializes plain `#[cfg(test)]` unit tests (in this file and in `ztshow.rs`) that touch the shared
+/// process-global [`STATE`], avoiding cross-test interference under `cargo test`'s default parallel
+/// execution. Distinct from [`live_support::reset_state`] (only compiled under `reimplementation-tests`,
+/// used by the live harness against the real, running process) - plain unit tests need their own path.
+#[cfg(test)]
+pub(crate) static SHOW_SCRIPT_STORE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// Resets [`STATE`] to empty - test-only, shared by this file's and `ztshow.rs`'s `#[cfg(test)]` tests.
+#[cfg(test)]
+pub(crate) fn reset_store_for_test() {
+    let mut state = STATE.lock().unwrap();
+    state.scripts.clear();
+    state.aliases.clear();
+    state.next_id_counter = 0;
+}
+
+/// Builds a matching-type-only [`ZTShowScriptItemRaw`] for plain `#[cfg(test)]` unit tests elsewhere in
+/// the crate (e.g. `ztshow.rs`'s `check_script` test) - shares the module's own `#[cfg(test)]` `raw_item`
+/// helper's field defaults. Distinct from `live_support::raw_item_matching_type`, which is gated behind
+/// the `reimplementation-tests` feature (not enabled for a plain `cargo test`/`./openzt.bat test` run).
+#[cfg(test)]
+pub(crate) fn test_item(item_type: u32, trick_id: u16) -> ZTShowScriptItemRaw {
+    let empty = ZTBufferString::from_raw_parts(0, 0, 0);
+    ZTShowScriptItemRaw {
+        _vtable: 0,
+        default_available: 0,
+        visible: 1,
+        id: trick_id,
+        item_type,
+        sentinel: 0xffff_ffff,
+        name: empty.clone(),
+        anim: empty.clone(),
+        keeper_pre_trick: empty.clone(),
+        keeper_post_trick: empty.clone(),
+        building: 0,
+        complexity: 1,
+        return_to_keeper: 0,
+        _pad: [0; 3],
+        satisfaction: 1,
+        satisfaction_delta: 1,
+        satisfaction_mirror: 1,
+        minimum_depth: 1,
+        normal_help_id: 0,
+        grayed_help_id: 0,
+        normal_icon: empty.clone(),
+        grayed_icon: empty,
+    }
+}
+
 /// Reimplementation of the mac-decompiled `makeID()`: `sVar1 = *counter; *counter = sVar1+1; return
 /// (u16)(sVar1+1) % 0xffff;` - a wrapping counter, modulo `0xffff` (**not** `0x10000` - implemented
 /// exactly, not "fixed").
@@ -315,6 +365,47 @@ pub fn clear_all(this_ptr: u32) {
     }
 }
 
+/// Fixed-size, per-thread ring buffer of leaked [`ZTShowScriptItemRaw`] slots, reused round-robin instead
+/// of leaking a fresh allocation on every call - see [`get_item`]/[`get_item_by_trick_id`]'s own doc
+/// comments for why a real, dereferenceable pointer is required at all (a non-dereferenceable sentinel
+/// isn't safe here). Bounds the leak at [`ITEM_BUFFER_POOL_SIZE`] allocations per thread instead of
+/// unbounded growth over a long play session, without needing an airtight proof that no real consumer
+/// ever holds a returned pointer across more than [`ITEM_BUFFER_POOL_SIZE`] subsequent calls on the same
+/// thread - a handful of slots tolerates limited reentrancy safely even if such a case is later found.
+/// [`get_item`] and [`get_item_by_trick_id`] each get their own pool (see their `thread_local!` decls
+/// below): their real consumer call graphs are separate, and sharing one pool between them would need a
+/// stronger reentrancy proof than currently exists.
+const ITEM_BUFFER_POOL_SIZE: usize = 4;
+
+struct ItemBufferPool {
+    slots: RefCell<Vec<*mut ZTShowScriptItemRaw>>,
+    cursor: Cell<usize>,
+}
+
+impl ItemBufferPool {
+    const fn new() -> Self {
+        ItemBufferPool { slots: RefCell::new(Vec::new()), cursor: Cell::new(0) }
+    }
+
+    /// Writes `item` into the next slot (allocating all [`ITEM_BUFFER_POOL_SIZE`] slots up front on first
+    /// use), advances the round-robin cursor, and returns the slot's address as a `u32` for FFI return.
+    fn write(&self, item: &ShowScriptItem) -> u32 {
+        let mut slots = self.slots.borrow_mut();
+        if slots.is_empty() {
+            slots.extend((0..ITEM_BUFFER_POOL_SIZE).map(|_| Box::leak(Box::new(ZTShowScriptItemRaw::from_owned(item))) as *mut ZTShowScriptItemRaw));
+        }
+        let i = self.cursor.get();
+        self.cursor.set((i + 1) % ITEM_BUFFER_POOL_SIZE);
+        unsafe { *slots[i] = ZTShowScriptItemRaw::from_owned(item) };
+        slots[i] as u32
+    }
+}
+
+thread_local! {
+    static GET_ITEM_POOL: ItemBufferPool = const { ItemBufferPool::new() };
+    static GET_ITEM_BY_TRICK_ID_POOL: ItemBufferPool = const { ItemBufferPool::new() };
+}
+
 /// Reimplementation of `ZTShowScript::getItem` (positional, **not** id-keyed - confirmed via
 /// `ZTShowScript_getItem.c`: it walks `param_1` nodes from the list head).
 ///
@@ -325,16 +416,17 @@ pub fn clear_all(this_ptr: u32) {
 /// nonzero result, dereferences the returned pointer's `+0x28`/`+0x34` string fields via
 /// `BFConfigFile::getString` - the exact same "real vanilla code raw-dereferences a Stage 1 lookup's
 /// return value" hazard class as [`get_item_by_trick_id`] (see that function's own doc comment for the
-/// two earlier, independently-discovered instances). Fixed the same way: builds and leaks a real
-/// [`ZTShowScriptItemRaw`] instead of a `0`/`1` sentinel. Every existing detoured caller of this function
-/// already only checked the result for zero/nonzero, so returning a real pointer instead is
-/// backward-compatible for them.
+/// two earlier, independently-discovered instances). Fixed the same way: builds a real
+/// [`ZTShowScriptItemRaw`] instead of a `0`/`1` sentinel, written into [`GET_ITEM_POOL`]'s next slot
+/// (bounded, not a per-call leak - see [`ItemBufferPool`]'s own doc comment). Every existing detoured
+/// caller of this function already only checked the result for zero/nonzero, so returning a real pointer
+/// instead is backward-compatible for them.
 pub fn get_item(this_ptr: u32, index: u16) -> u32 {
     let state = STATE.lock().unwrap();
     let Some(item) = resolve(&state, this_ptr).and_then(|id| state.scripts.get(&id)).and_then(|s| s.items.get(index as usize)) else {
         return 0;
     };
-    Box::leak(Box::new(ZTShowScriptItemRaw::from_owned(item))) as *mut ZTShowScriptItemRaw as u32
+    GET_ITEM_POOL.with(|pool| pool.write(item))
 }
 
 /// Reimplementation of `ZTShowScript::getItemByTrickID` - confirmed via `ZTShowScript_getItemByTrickID.c`
@@ -348,19 +440,20 @@ pub fn get_item(this_ptr: u32, index: u16) -> u32 {
 /// Confirmed live: the previous found/not-found sentinel (`1`) was misread as a pointer, crashing on
 /// `mov ecx,[ebx+0x58]` with `ebx==1` (`openzt/plans/ztshowscriptmgr-open-items.md` item 12) - a third,
 /// independently-discovered raw-dereferencing consumer of Stage 1 data, same hazard class as `validate`/
-/// `stop_with_id`. Builds and leaks a real [`ZTShowScriptItemRaw`] (the same byte-exact struct [`add_item`]
+/// `stop_with_id`. Builds a real [`ZTShowScriptItemRaw`] (the same byte-exact struct [`add_item`]
 /// already validates against vanilla's real by-value ABI) populated from the Rust store's own item copy -
-/// see [`ZTShowScriptItemRaw::from_owned`] for what's left unpopulated and why that's safe here. Leaked,
-/// not freed: mirrors a real vanilla lookup (never an ownership transfer - the real function doesn't free
-/// its result either), a small, infrequent, intentional leak rather than the cross-allocator free hazard
-/// CLAUDE.md warns about.
+/// see [`ZTShowScriptItemRaw::from_owned`] for what's left unpopulated and why that's safe here. Written
+/// into [`GET_ITEM_BY_TRICK_ID_POOL`]'s next slot rather than freed: mirrors a real vanilla lookup (never
+/// an ownership transfer - the real function doesn't free its result either), bounded to
+/// [`ITEM_BUFFER_POOL_SIZE`] live slots per thread rather than the cross-allocator free hazard CLAUDE.md
+/// warns about, or an unbounded per-call leak.
 pub fn get_item_by_trick_id(this_ptr: u32, trick_id: u16) -> u32 {
     let state = STATE.lock().unwrap();
     let Some(item) = resolve(&state, this_ptr).and_then(|id| state.scripts.get(&id)).and_then(|s| s.items.iter().find(|it| it.id == trick_id))
     else {
         return 0;
     };
-    Box::leak(Box::new(ZTShowScriptItemRaw::from_owned(item))) as *mut ZTShowScriptItemRaw as u32
+    GET_ITEM_BY_TRICK_ID_POOL.with(|pool| pool.write(item))
 }
 
 /// Reimplementation of `ZTShowScript::removeItem` (positional, matching [`get_item`]).
@@ -821,6 +914,12 @@ pub(crate) mod live_support {
         STATE.lock().unwrap().scripts.len()
     }
 
+    /// Reads the `makeID()` counter directly - for `ZTSHOWSCRIPTMGR_LOAD_VERSION_GATES_LIVE`'s own
+    /// assertions on whether [`super::load_mgr`]'s `version > 0x60` counter-restore gate fired.
+    pub(crate) fn next_id_counter() -> u16 {
+        STATE.lock().unwrap().next_id_counter
+    }
+
     /// Builds a [`ZTShowScriptItemRaw`] with `item_type`/`id` set and every other field a plain, inert
     /// default (empty strings via `ZTBufferString::from_raw_parts(0, 0, 0)`, matching this module's own
     /// `#[cfg(test)]` `raw_item` helper) - for live reimplementation-tests elsewhere in the crate (e.g.
@@ -854,6 +953,17 @@ pub(crate) mod live_support {
             grayed_icon: ZTBufferString::from_raw_parts(0, 0, 0),
         }
     }
+
+    /// Same shape as [`raw_item_matching_type`], but with explicit `satisfaction`/`satisfaction_mirror`
+    /// values instead of both hardcoded to `1` - for `ZTSHOW_GROUP3_TRICK_LIVE`'s `do_trick_event`
+    /// threshold-branch coverage, which needs to place a real item's `satisfaction_mirror` on either side
+    /// of `ZTShowMgr`'s own real, live `threshold_a`/`threshold_b`/`threshold_c` fields.
+    pub(crate) fn raw_item_with_mirror(item_type: u32, trick_id: u16, satisfaction: u32, satisfaction_mirror: u32) -> ZTShowScriptItemRaw {
+        let mut item = raw_item_matching_type(item_type, trick_id);
+        item.satisfaction = satisfaction;
+        item.satisfaction_mirror = satisfaction_mirror;
+        item
+    }
 }
 
 #[cfg(test)]
@@ -871,8 +981,8 @@ mod tests {
 
     #[test]
     fn register_get_unregister_roundtrip() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        reset_for_test();
+        let _guard = SHOW_SCRIPT_STORE_TEST_LOCK.lock().unwrap();
+        reset_store_for_test();
         let id = register_script(0x1000, 42).unwrap();
         let handle = get_script(id);
         assert_ne!(handle, 0);
@@ -885,15 +995,15 @@ mod tests {
 
     #[test]
     fn register_script_rejects_null() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        reset_for_test();
+        let _guard = SHOW_SCRIPT_STORE_TEST_LOCK.lock().unwrap();
+        reset_store_for_test();
         assert_eq!(register_script(0, 1), None);
     }
 
     #[test]
     fn add_item_only_inserts_matching_type() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        reset_for_test();
+        let _guard = SHOW_SCRIPT_STORE_TEST_LOCK.lock().unwrap();
+        reset_store_for_test();
         let id = register_script(0x2000, 7).unwrap();
         let matching = raw_item(7, 5);
         let mismatched = raw_item(9, 6);
@@ -916,8 +1026,8 @@ mod tests {
 
     #[test]
     fn remove_and_clear_items() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        reset_for_test();
+        let _guard = SHOW_SCRIPT_STORE_TEST_LOCK.lock().unwrap();
+        reset_store_for_test();
         register_script(0x3000, 1).unwrap();
         add_item(0x3000, &raw_item(1, 1));
         add_item(0x3000, &raw_item(1, 2));
@@ -989,13 +1099,13 @@ mod tests {
         }
     }
 
-    // Tests share the single process-global STATE, so serialize them to avoid cross-test interference.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn reset_for_test() {
-        let mut state = STATE.lock().unwrap();
-        state.scripts.clear();
-        state.aliases.clear();
-        state.next_id_counter = 0;
+    #[test]
+    fn encode_item_truncates_overlong_strings_at_string_length_cap() {
+        let mut item = ShowScriptItem::default();
+        item.name = "x".repeat(STRING_LENGTH_CAP as usize + 50);
+        let bytes = encode_item(&item);
+        let name_len = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as usize;
+        assert_eq!(name_len, (STRING_LENGTH_CAP - 1) as usize, "encoded length prefix should be truncated to STRING_LENGTH_CAP - 1");
+        assert_eq!(&bytes[16..16 + name_len], "x".repeat(name_len).as_bytes());
     }
 }

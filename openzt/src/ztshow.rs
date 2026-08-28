@@ -315,6 +315,16 @@ pub(crate) unsafe fn call_entity_vtable_u32_noargs(entity_ptr: u32, slot_offset:
 /// while porting `start`, which calls this directly - see that function's own doc comment). `+0x4` current
 /// script id, `+0x8` script type, `+0xc` unconfirmed flag field (`0x2550` magic constant, faithfully
 /// ported), `+0x10` owning `ZTShowInfo*`.
+///
+/// `ZTShow::stop`'s **0-arg** overload (`ztshow::STOP_1`, `0x005a85e9`) is a distinct, separate real
+/// function - not a wrapper around this one - and is deliberately left un-detoured. Audited safe via
+/// `private/resources/decompiles/ZTShow_stop_1.c`: its body only ever touches habitat/UI-toast state (the
+/// owning habitat's gate, a `BFApp::buildString`/`BFUIMgr::displayMessage` "show stopped" toast - the same
+/// class of small-object-freelist buffer teardown `start`'s own doc comment already declined to risk
+/// reimplementing) before calling `sendShowEndedEvent`/`reinit`/`ZTShowInfo::checkPendingScripts` - the two
+/// show-script-adjacent calls in that tail (`sendShowEndedEvent` -> [`calculate_percent_adjustment`],
+/// `checkPendingScripts` -> [`check_pending_scripts`]) already route through this module's own
+/// reimplementations, so this function never itself raw-dereferences Stage 1 data.
 pub fn stop_with_id(this: u32, new_script_id: u16) {
     let current_id = get_from_memory::<u16>(this + 0x4);
     if current_id != new_script_id {
@@ -371,11 +381,11 @@ pub(crate) fn check_owning_habitat(show_info: u32) -> bool {
 /// `ZTShowInfo` itself is untouched by Stage 1. `this` is `ZTShow*`; `+0x4` script id, `+0x8` unit-type
 /// id, `+0x10` owning `ZTShowInfo*`. `check_units` is vanilla's own `param_1`.
 ///
-/// The item-list loop's `iVar6`/`result` accumulator is ported literally rather than simplified: every
-/// vanilla assignment to it happens only inside the branch that immediately resets it back to `0` again
-/// (after an item fails validation and gets removed), so it always evaluates to `0` by the time the loop
-/// ends - but this mirrors the decompile exactly rather than relying on that provable-but-non-obvious
-/// reduction.
+/// The item-list loop's own decision logic (which position to re-check/remove) is factored out into
+/// [`run_validate_loop`], pure control flow with no memory access, so it can be unit-tested directly with
+/// synthetic closures - see that function's own doc comment for why it always returns `0` (the real
+/// `iVar6`/`result` accumulator this was ported from provably always ends up `0` by the time the loop
+/// exits, a non-obvious reduction from vanilla's own decompile).
 pub fn validate(this: u32, check_units: bool) -> i32 {
     if check_units {
         let show_info = get_from_memory::<u32>(this + 0x10);
@@ -406,26 +416,50 @@ pub fn validate(this: u32, check_units: bool) -> i32 {
     let script_id = get_from_memory::<u16>(this + 0x4);
     let handle = crate::ztshowscriptmgr::get_script(script_id);
     if handle != 0 {
-        let mut result = 0i32;
-        let mut count = crate::ztshowscriptmgr::size(handle);
-        let mut index: i32 = 0;
-        while index < count {
-            if crate::ztshowscriptmgr::get_item(handle, index as u16) != 0 {
-                result = validate_item(this, index as u16);
-                if result != 0 {
-                    crate::ztshowscriptmgr::remove_item(handle, index as u16);
-                    count = crate::ztshowscriptmgr::size(handle);
-                    index -= 1;
-                    result = 0;
-                }
-            }
-            index += 1;
-        }
+        let count = crate::ztshowscriptmgr::size(handle);
+        let result = run_validate_loop(
+            count,
+            |index| validate_item(this, index),
+            |index| {
+                crate::ztshowscriptmgr::remove_item(handle, index);
+            },
+        );
         if crate::ztshowscriptmgr::size(handle) != 0 {
             return result;
         }
     }
     6
+}
+
+/// Pure control-flow half of [`validate`]'s item-validation loop: for each position `0..item_count`,
+/// calls `is_valid(index)` (matching [`validate_item`]'s own return convention - `0` means valid); a
+/// nonzero result removes that position via `remove` and re-visits the same position (the next item
+/// shifts down into it), same as vanilla's own `index -= 1` immediately before the loop's `index += 1`.
+///
+/// Always returns `0`: every vanilla write to the real `iVar6`/`result` accumulator this loop was
+/// originally ported from happens only in the branch that immediately resets it back to `0` again (see
+/// [`validate`]'s own doc comment on this) - by the time the loop exits, the last value written is always
+/// `0`, whether from the reset itself or from a final valid item's own `0` result. Kept as an explicit
+/// function call (not inlined as a bare `0` in [`validate`]) to keep this reduction visibly tied to the
+/// reasoning above rather than silently hardcoded.
+///
+/// Doesn't reproduce vanilla's own `ZTShowScript::getItem(handle, index) != 0` existence check before each
+/// `is_valid` call: the loop's own invariant (`index < count`, where `count` only ever decreases in
+/// lockstep with an actual removal) guarantees an item always exists at `index` against Stage 1's own
+/// internally-consistent store, so that check can never actually be false here - dropped as dead weight
+/// rather than ported literally.
+fn run_validate_loop(item_count: i32, mut is_valid: impl FnMut(u16) -> i32, mut remove: impl FnMut(u16)) -> i32 {
+    let mut count = item_count;
+    let mut index: i32 = 0;
+    while index < count {
+        if is_valid(index as u16) != 0 {
+            remove(index as u16);
+            count -= 1;
+            index -= 1;
+        }
+        index += 1;
+    }
+    0
 }
 
 /// Reimplementation of `ZTShow::checkScript`, per `ZTShow_checkScript.c`/`.asm`. A fourth real,
@@ -710,16 +744,31 @@ fn allocate_pending_script_node(unit_type_id: u32) -> u32 {
 /// Returns `(node_address, was_newly_inserted)` - callers that need to stamp creation-only data (the
 /// `+0x40`/`+0x44` date fields) check the second value, matching vanilla's own `pair<iterator,bool>`
 /// insert-return convention.
-pub(crate) fn find_or_insert_pending_script_node(show_info: u32, unit_type_id: u32) -> (u32, bool) {
-    let header = get_from_memory::<u32>(show_info + 0x44);
-    let root = get_from_memory::<u32>(header + 4);
+/// Decision made by [`plan_pending_node_insert`] for a given `(header, unit_type_id)` pair - see that
+/// function's own doc comment.
+#[derive(Debug, PartialEq, Eq)]
+enum PendingNodeInsertPlan {
+    /// An existing node with a matching key was found - its address.
+    Found(u32),
+    /// The tree is empty; a freshly-allocated node becomes the root.
+    NewRoot,
+    /// Insert as `parent`'s left child; `parent_is_leftmost` says whether `parent` is currently the
+    /// header's own leftmost-cache pointer (`+0x8`), which the new node would then replace.
+    InsertLeft { parent: u32, parent_is_leftmost: bool },
+    /// Insert as `parent`'s right child (never affects the leftmost cache).
+    InsertRight { parent: u32 },
+}
 
+/// Pure decision half of [`find_or_insert_pending_script_node`]'s BST walk - reproduces the exact same
+/// comparisons and candidate-tracking as that function's own body (`ztshow.rs`'s own history has one real
+/// bug already found in this exact walk, see [`find_or_insert_pending_script_node`]'s doc comment), just
+/// returning a description of what to do instead of allocating/mutating anything. [`get_from_memory`] is a
+/// plain, FFI-free `ptr::read`, so this works identically against real game memory or a plain
+/// Rust-allocated test arena - see this module's `#[cfg(test)]` `pending_node_plan_tests` below.
+fn plan_pending_node_insert(header: u32, unit_type_id: u32) -> PendingNodeInsertPlan {
+    let root = get_from_memory::<u32>(header + 4);
     if root == 0 {
-        let new_node = allocate_pending_script_node(unit_type_id);
-        save_to_memory(new_node + 4, header);
-        save_to_memory(header + 4, new_node);
-        save_to_memory(header + 8, new_node);
-        return (new_node, true);
+        return PendingNodeInsertPlan::NewRoot;
     }
 
     let mut node = root;
@@ -743,20 +792,44 @@ pub(crate) fn find_or_insert_pending_script_node(show_info: u32, unit_type_id: u
     };
 
     if candidate != header && get_from_memory::<u32>(candidate + 0x10) <= unit_type_id {
-        return (candidate, false);
+        return PendingNodeInsertPlan::Found(candidate);
     }
 
-    let new_node = allocate_pending_script_node(unit_type_id);
-    save_to_memory(new_node + 4, parent);
     if went_left {
-        save_to_memory(parent + 8, new_node);
-        if parent == get_from_memory::<u32>(header + 8) {
-            save_to_memory(header + 8, new_node);
-        }
+        let leftmost = get_from_memory::<u32>(header + 8);
+        PendingNodeInsertPlan::InsertLeft { parent, parent_is_leftmost: parent == leftmost }
     } else {
-        save_to_memory(parent + 0xc, new_node);
+        PendingNodeInsertPlan::InsertRight { parent }
     }
-    (new_node, true)
+}
+
+pub(crate) fn find_or_insert_pending_script_node(show_info: u32, unit_type_id: u32) -> (u32, bool) {
+    let header = get_from_memory::<u32>(show_info + 0x44);
+    match plan_pending_node_insert(header, unit_type_id) {
+        PendingNodeInsertPlan::Found(node) => (node, false),
+        PendingNodeInsertPlan::NewRoot => {
+            let new_node = allocate_pending_script_node(unit_type_id);
+            save_to_memory(new_node + 4, header);
+            save_to_memory(header + 4, new_node);
+            save_to_memory(header + 8, new_node);
+            (new_node, true)
+        }
+        PendingNodeInsertPlan::InsertLeft { parent, parent_is_leftmost } => {
+            let new_node = allocate_pending_script_node(unit_type_id);
+            save_to_memory(new_node + 4, parent);
+            save_to_memory(parent + 8, new_node);
+            if parent_is_leftmost {
+                save_to_memory(header + 8, new_node);
+            }
+            (new_node, true)
+        }
+        PendingNodeInsertPlan::InsertRight { parent } => {
+            let new_node = allocate_pending_script_node(unit_type_id);
+            save_to_memory(new_node + 4, parent);
+            save_to_memory(parent + 0xc, new_node);
+            (new_node, true)
+        }
+    }
 }
 
 /// Reimplementation of `ZTShowInfo::addScript`, per `ZTShowInfo_addScript.c`/`.asm`. Assigns `new_script_id`
@@ -919,6 +992,18 @@ pub(crate) mod live_support {
         save_to_memory(show_info + 0x44, show_info + 0x44);
         show_info
     }
+
+    /// Thin wrapper around the module's own private [`super::collect_pending_script_nodes`] (already
+    /// visible here via `use super::*` - no visibility change needed on the original) - an in-order walk
+    /// of `show_info`'s own pending-scripts tree (`+0x44`), for
+    /// `ZTSHOWINFO_PENDING_SCRIPT_TREE_STRESS_LIVE`'s own final ascending-key-order assertion.
+    pub(crate) fn collect_pending_script_nodes(show_info: u32) -> Vec<u32> {
+        let header = get_from_memory::<u32>(show_info + 0x44);
+        let root = get_from_memory::<u32>(header + 4);
+        let mut nodes = Vec::new();
+        super::collect_pending_script_nodes(root, &mut nodes);
+        nodes
+    }
 }
 
 #[cfg(test)]
@@ -935,5 +1020,167 @@ mod tests {
         fake_show_info[8..10].copy_from_slice(&0xfffeu16.to_le_bytes());
         let this = fake_show_info.as_ptr() as u32;
         assert_eq!(check_unit_type(this, 42) & 1, 1);
+    }
+
+    /// Uses the shared `ztshowscriptmgr` store, so needs its `SHOW_SCRIPT_STORE_TEST_LOCK`/
+    /// `reset_store_for_test` precedent to avoid cross-test interference under `cargo test`'s default
+    /// parallel execution (see that module's own doc comments on both).
+    #[test]
+    fn check_script_falls_back_to_own_field_and_rejects_missing_id() {
+        let _guard = crate::ztshowscriptmgr::SHOW_SCRIPT_STORE_TEST_LOCK.lock().unwrap();
+        crate::ztshowscriptmgr::reset_store_for_test();
+        const CTOR_PTR: u32 = 0x9000;
+        let id = crate::ztshowscriptmgr::register_script(CTOR_PTR, 1).unwrap();
+        crate::ztshowscriptmgr::add_item(CTOR_PTR, &crate::ztshowscriptmgr::test_item(1, 5));
+
+        let mut fake_show = [0u8; 0x8];
+        fake_show[4..6].copy_from_slice(&id.to_le_bytes());
+        let this = fake_show.as_ptr() as u32;
+
+        assert!(check_script(this, 0), "param_1==0 should fall back to this+0x4's own script id");
+        assert!(!check_script(this, 0xffff), "a non-existent script id should return false");
+    }
+
+    /// Synthetic closures over a shared, shrinking `Vec<i32>` "item id" list, modeling
+    /// [`validate`]'s own positional index semantics: `remove` actually removes the entry at that
+    /// position, shifting later items down - the same shape [`crate::ztshowscriptmgr::remove_item`]'s real
+    /// `Vec::remove` produces. Marks the items originally at positions 1 and 3 (ids 11, 13, both odd)
+    /// invalid; every other id is even.
+    #[test]
+    fn run_validate_loop_removes_invalid_items_and_revisits_shifted_position() {
+        let items = std::cell::RefCell::new(vec![10, 11, 12, 13, 14]);
+        let removed = std::cell::RefCell::new(Vec::new());
+        let count = items.borrow().len() as i32;
+
+        let result = run_validate_loop(
+            count,
+            |index| if items.borrow()[index as usize] % 2 != 0 { 1 } else { 0 },
+            |index| {
+                let id = items.borrow_mut().remove(index as usize);
+                removed.borrow_mut().push(id);
+            },
+        );
+
+        assert_eq!(result, 0);
+        assert_eq!(*removed.borrow(), vec![11, 13]);
+        assert_eq!(*items.borrow(), vec![10, 12, 14]);
+    }
+}
+
+#[cfg(test)]
+mod pending_node_plan_tests {
+    use super::*;
+
+    /// Fixed stand-in for one pending-scripts tree node, laid out at the same `+0x8`/`+0xc`/`+0x10`
+    /// (left/right/key) offsets [`plan_pending_node_insert`] reads - real node fields beyond that (up to
+    /// the real `0x48`-byte size) are irrelevant to the pure decision logic under test, so this is
+    /// intentionally smaller.
+    #[repr(C)]
+    struct FakeNode {
+        _unused: [u8; 8],
+        left: u32,
+        right: u32,
+        key: u32,
+    }
+
+    /// Owns a header buffer plus every node handed to [`Self::push_node`], keeping them alive (and their
+    /// addresses stable) for the duration of a test - `get_from_memory`/`save_to_memory` are plain
+    /// `ptr::read`/`ptr::write`, so real heap addresses of these Rust allocations work exactly like real
+    /// game memory addresses would.
+    struct Arena {
+        header: Box<[u8; 0xc]>,
+        nodes: Vec<Box<FakeNode>>,
+    }
+
+    impl Arena {
+        fn new() -> Self {
+            Arena { header: Box::new([0u8; 0xc]), nodes: Vec::new() }
+        }
+
+        fn header_addr(&self) -> u32 {
+            self.header.as_ptr() as u32
+        }
+
+        fn push_node(&mut self, key: u32, left: u32, right: u32) -> u32 {
+            let node = Box::new(FakeNode { _unused: [0; 8], left, right, key });
+            let addr = node.as_ref() as *const FakeNode as u32;
+            self.nodes.push(node);
+            addr
+        }
+
+        fn set_root(&mut self, root: u32) {
+            save_to_memory(self.header_addr() + 4, root);
+        }
+
+        fn set_leftmost(&mut self, leftmost: u32) {
+            save_to_memory(self.header_addr() + 8, leftmost);
+        }
+    }
+
+    #[test]
+    fn empty_tree_plans_new_root() {
+        let arena = Arena::new();
+        assert_eq!(plan_pending_node_insert(arena.header_addr(), 5), PendingNodeInsertPlan::NewRoot);
+    }
+
+    #[test]
+    fn single_node_smaller_key_plans_insert_right() {
+        let mut arena = Arena::new();
+        let root = arena.push_node(5, 0, 0);
+        arena.set_root(root);
+        arena.set_leftmost(root);
+        assert_eq!(plan_pending_node_insert(arena.header_addr(), 10), PendingNodeInsertPlan::InsertRight { parent: root });
+    }
+
+    #[test]
+    fn single_node_larger_key_plans_insert_left_as_new_leftmost() {
+        let mut arena = Arena::new();
+        let root = arena.push_node(10, 0, 0);
+        arena.set_root(root);
+        arena.set_leftmost(root);
+        assert_eq!(
+            plan_pending_node_insert(arena.header_addr(), 5),
+            PendingNodeInsertPlan::InsertLeft { parent: root, parent_is_leftmost: true }
+        );
+    }
+
+    #[test]
+    fn exact_key_match_is_found() {
+        let mut arena = Arena::new();
+        let root = arena.push_node(10, 0, 0);
+        arena.set_root(root);
+        arena.set_leftmost(root);
+        assert_eq!(plan_pending_node_insert(arena.header_addr(), 10), PendingNodeInsertPlan::Found(root));
+    }
+
+    #[test]
+    fn insert_left_when_parent_is_not_the_current_leftmost() {
+        // root(10) with a right child (15); leftmost is root itself (no left child exists yet).
+        // Searching for 12 descends right into 15, then left off 15 (15 has no left child) -> InsertLeft
+        // with parent=15, which is NOT the header's leftmost (root, key 10).
+        let mut arena = Arena::new();
+        let root = arena.push_node(10, 0, 0);
+        let right_child = arena.push_node(15, 0, 0);
+        save_to_memory(root + 0xc, right_child);
+        arena.set_root(root);
+        arena.set_leftmost(root);
+        assert_eq!(
+            plan_pending_node_insert(arena.header_addr(), 12),
+            PendingNodeInsertPlan::InsertLeft { parent: right_child, parent_is_leftmost: false }
+        );
+    }
+
+    #[test]
+    fn insert_right_after_descending_left_then_right() {
+        // root(10) with a left child (3), which is also the leftmost. Searching for 7 descends left into
+        // 3 (candidate=root, since 10>=7), then right off 3 (3<7, no right child) -> InsertRight with
+        // parent=3.
+        let mut arena = Arena::new();
+        let root = arena.push_node(10, 0, 0);
+        let left_child = arena.push_node(3, 0, 0);
+        save_to_memory(root + 8, left_child);
+        arena.set_root(root);
+        arena.set_leftmost(left_child);
+        assert_eq!(plan_pending_node_insert(arena.header_addr(), 7), PendingNodeInsertPlan::InsertRight { parent: left_child });
     }
 }

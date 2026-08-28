@@ -139,6 +139,7 @@ mod detour_zoo_main {
     use openzt_detour::generated::ztui_gameopts::LOAD_FILE as ZTUI_GAMEOPTS_LOAD_FILE;
     use openzt_detour::generated::ztunit::GET_FOOTPRINT as ZTUNIT_GET_FOOTPRINT;
     use openzt_detour::generated::ztshow::{CREATE_SHOW_SCRIPT_STATE, GET_SHOW_SCRIPT_STATE};
+    use openzt_detour::generated::ztshowscript::CONSTRUCTOR as ZTSHOWSCRIPT_CONSTRUCTOR;
     use openzt_detour::generated::ztshowinfo::GET_NUM_UNITS as ZTSHOWINFO_GET_NUM_UNITS;
     use openzt_detour::generated::bfworldmgr::GET_TYPE as BFWORLDMGR_GET_TYPE;
     use openzt_detour::FunctionDef;
@@ -663,6 +664,11 @@ mod detour_zoo_main {
         fail_flag |= run_awardmgr_start_test(&mut failure_log);
         fail_flag |= run_awardmgr_get_award_test(&mut failure_log);
         fail_flag |= run_ztscenariosimplegoal_eval_award_count_test(&mut failure_log);
+
+        // ZTShowScriptMgr save/load wire format - independent of any live zoo/manager state, so these
+        // run from the early battery alongside the award tests above.
+        fail_flag |= run_ztshowscriptmgr_save_load_roundtrip_live_test(&mut failure_log);
+        fail_flag |= run_ztshowscriptmgr_load_version_gates_live_test(&mut failure_log);
 
         // ZTRESEARCHMGR_SAVE: compares the real ZTResearchMgr::save's captured output against
         // research_save_reimplementation::serialize(&snapshot_mgr(mgr)) for generated synthetic trees.
@@ -1259,9 +1265,11 @@ mod detour_zoo_main {
             // via a `retour` trampoline (`call_real`) instead of `.original()`, which can't reach real
             // vanilla once a function is hooked in-process (see either `call_real`'s own doc comment).
             fail_flag |= run_ztshowinfo_add_script_check_pending_scripts_live_test(&mut failure_log);
+            fail_flag |= run_ztshowinfo_pending_script_tree_stress_live_test(&mut failure_log);
             fail_flag |= run_ztshow_check_owning_habitat_live_test(&mut failure_log);
             fail_flag |= run_ztshow_group3_trick_live_test(&mut failure_log);
             fail_flag |= run_ztshowui_fill_trick_lists_live_test(&mut failure_log);
+            fail_flag |= run_ztshowscript_ctor_registration_live_test(&mut failure_log);
         }
 
         if fail_flag {
@@ -3982,32 +3990,249 @@ mod detour_zoo_main {
     /// [`add_matching_item`]. Returns the assigned script id.
     ///
     /// **Deliberately does not go through the real `ZTShowScript::ZTShowScript` ctor's own
-    /// `auto_register=true` path** (`ztshowscript::CONSTRUCTOR`, which this test originally used) - a
-    /// real, significant finding from building this test: calling that ctor live and comparing
-    /// `script_exists_by_id` immediately afterward showed the id it wrote back into the constructed
-    /// object's own `+0x4` field (a real, live, plausible-looking sequential id) was **never actually
-    /// registered in Stage 1's store** (`exists_immediately=false`), while calling `ztshowscriptmgr::
-    /// register_script` directly on the exact same kind of `alloc` pointer registered correctly and
-    /// immediately (`exists_immediately=true`). The ctor's own `.asm`
-    /// (`ZTShowScript_ZTShowScript.asm`) confirms a genuine `CALL ZTShowMgr::registerScript` (not
-    /// inlined), and `ZTShowMgr::registerScript`'s own `.asm` (`ZTShowMgr_registerScript.asm`) confirms a
-    /// genuine `CALL ZTShowScriptMgr::registerScript` in turn - on paper this should reach the exact
-    /// address Stage 1's `REGISTER_SCRIPT` detour patches (`0x0046e774`), the same way `ztshowui::
-    /// copy_list_to_script`'s own identical ctor call was assumed to. Live evidence says it doesn't. This
-    /// wasn't tracked down further this session (would need fresh Ghidra access to confirm whether the
-    /// two decompiles' `ZTShowScriptMgr::registerScript` symbol is genuinely the same machine address as
-    /// `generated.rs`'s `REGISTER_SCRIPT` entry, or a same-named-but-distinct overload/duplicate) - flagged
-    /// as a real, open, and significant gap: if real gameplay's *only* production code path for creating a
-    /// new show script (this ctor, `auto_register=true`) doesn't reach Stage 1's store, then every
-    /// freshly-created in-game show script (not loaded from a save) may silently never register, breaking
-    /// `ZTShowInfo::addScript`/`createDefaultScript` end-to-end for brand-new shows specifically - contrary
-    /// to Stage 3's own "calls through Stage 1's real detours transparently" conclusion, which was never
-    /// live-verified until this session. Needs a dedicated follow-up investigation, out of scope here.
+    /// `auto_register=true` path** (`ztshowscript::CONSTRUCTOR`) - not because that path is broken, but
+    /// because `register_script` directly is simpler for a helper called dozens of times across this
+    /// file's test battery. An earlier session found that calling the ctor live at *this* injection point
+    /// (before `run_load_live_zoo`) left the id it wrote back at `+0x4` unregistered in Stage 1's store,
+    /// and flagged it as an open, possibly-significant reimplementation gap. `ZTSHOWSCRIPT_CTOR_
+    /// REGISTRATION_LIVE` (this file, runs after `run_load_live_zoo`) resolved that: with a live
+    /// `GLOBAL_ZTShowMgr` (confirmed via `globals().ztshowmgr_ptr()`), the real ctor's `auto_register=true`
+    /// path registers correctly - the earlier finding was this harness's own early-injection-point timing,
+    /// per `ZTShowScript_ZTShowScript.c:25`'s `GLOBAL_ZTShowMgr != 0` guard, the same class of gap already
+    /// documented here for `GLOBAL_ZTGameMgr`. `ztshowui::copy_list_to_script`'s own identical ctor call
+    /// (the one real, confirmed production consumer of this exact path) is therefore genuinely safe, not
+    /// just assumed so - see that function's own doc comment for the pointer to this confirmation.
     fn make_registered_show_script(script_type: u32, trick_id: u16) -> u16 {
         let alloc = unsafe { standalone::OPERATOR_NEW.original()(0x14) } as u32;
         let id = ztshowscriptmgr::register_script(alloc, script_type).expect("register_script should never reject a non-null ctor_ptr");
         add_matching_item(alloc, script_type, trick_id);
         id
+    }
+
+    /// ZTSHOWSCRIPTMGR_SAVE_LOAD_ROUNDTRIP_LIVE: `ZTShowScriptMgr::save`/`load` (Stage 1's `SAVE`/`LOAD`
+    /// detours, `ztshowscriptmgr::save_mgr`/`load_mgr`) are, like `ADD_SCRIPT`/`CHECK_PENDING_SCRIPTS`
+    /// above, full-replacement detours over an independent Rust store with no vanilla-layout struct to
+    /// diff against - but unlike those, `load_mgr`'s own *read* side (`read_item`/`read_script`) had zero
+    /// coverage before this: the existing `#[cfg(test)]` tests in `ztshowscriptmgr.rs` only pin
+    /// `encode_item`/`encode_mgr`'s byte offsets on the write side. Registers two scripts (one with two
+    /// items, one with one) via `make_registered_show_script`/`add_matching_item`, calls `SAVE`'s own
+    /// real, now-hooked address (`0x00479f44`) with `io_redirect` capturing the write, resets the store,
+    /// replays the captured bytes through `LOAD`'s own real, now-hooked address (`0x004c6ebd`), and
+    /// asserts every script/item field round-tripped. Uses a fixed literal version (`0x100`) comfortably
+    /// above all three save-format gates (`read_item`/`read_script` gate at `0x58`/`0x66`, the counter
+    /// restore gates at `0x60`) - no "current save version" constant exists elsewhere in this codebase to
+    /// reuse.
+    fn run_ztshowscriptmgr_save_load_roundtrip_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWSCRIPTMGR_SAVE_LOAD_ROUNDTRIP_LIVE";
+        const CURRENT_VERSION: u32 = 0x100;
+
+        ztshowscriptmgr::live_support::reset_state();
+        const SCRIPT_TYPE_A: u32 = 11;
+        const SCRIPT_TYPE_B: u32 = 22;
+        let script_a = make_registered_show_script(SCRIPT_TYPE_A, 101);
+        add_matching_item(ztshowscriptmgr::get_script(script_a), SCRIPT_TYPE_A, 102);
+        let script_b = make_registered_show_script(SCRIPT_TYPE_B, 201);
+
+        let mut fail_flag = false;
+        let dummy_file: u32 = 0;
+
+        let save_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32, *const i8) -> u32>(0x00479f44u32) };
+        io_redirect::begin_capture();
+        save_hooked(&dummy_file as *const u32, &dummy_file as *const u32 as *const i8);
+        let captured_bytes = io_redirect::end_capture();
+
+        ztshowscriptmgr::live_support::reset_state();
+
+        let load_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32, *const u32, u32) -> u32>(0x004c6ebdu32) };
+        io_redirect::begin_replay(captured_bytes);
+        let load_ok = (load_hooked(&dummy_file as *const u32, &dummy_file as *const u32, CURRENT_VERSION) & 0xff) != 0;
+        io_redirect::end_replay();
+
+        if !load_ok {
+            error!("{}: LOAD returned failure", test_name);
+            fail_flag = true;
+        }
+        if !ztshowscriptmgr::script_exists_by_id(script_a) || !ztshowscriptmgr::script_exists_by_id(script_b) {
+            error!("{}: one or both scripts missing after round-trip (a={}, b={})", test_name, script_a, script_b);
+            fail_flag = true;
+        }
+        if ztshowscriptmgr::script_type_by_id(script_a) != Some(SCRIPT_TYPE_A) {
+            error!("{}: script_a type mismatch after round-trip", test_name);
+            fail_flag = true;
+        }
+        if ztshowscriptmgr::script_type_by_id(script_b) != Some(SCRIPT_TYPE_B) {
+            error!("{}: script_b type mismatch after round-trip", test_name);
+            fail_flag = true;
+        }
+        if ztshowscriptmgr::script_item_count_by_id(script_a) != 2 {
+            error!("{}: script_a item count mismatch: expected 2, got {}", test_name, ztshowscriptmgr::script_item_count_by_id(script_a));
+            fail_flag = true;
+        }
+        if ztshowscriptmgr::script_item_count_by_id(script_b) != 1 {
+            error!("{}: script_b item count mismatch: expected 1, got {}", test_name, ztshowscriptmgr::script_item_count_by_id(script_b));
+            fail_flag = true;
+        }
+        match ztshowscriptmgr::item_full_by_id(script_a, 0) {
+            Some(item) if item.id == 101 && item.item_type == SCRIPT_TYPE_A => {}
+            other => {
+                error!("{}: script_a item 0 mismatch after round-trip: {:?}", test_name, other);
+                fail_flag = true;
+            }
+        }
+        match ztshowscriptmgr::item_full_by_id(script_a, 1) {
+            Some(item) if item.id == 102 && item.item_type == SCRIPT_TYPE_A => {}
+            other => {
+                error!("{}: script_a item 1 mismatch after round-trip: {:?}", test_name, other);
+                fail_flag = true;
+            }
+        }
+        match ztshowscriptmgr::item_full_by_id(script_b, 0) {
+            Some(item) if item.id == 201 && item.item_type == SCRIPT_TYPE_B => {}
+            other => {
+                error!("{}: script_b item 0 mismatch after round-trip: {:?}", test_name, other);
+                fail_flag = true;
+            }
+        }
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTSHOWSCRIPTMGR_LOAD_VERSION_GATES_LIVE: `ztshowscriptmgr::load_mgr` is already `pub fn`, so unlike
+    /// the round-trip test above, this hand-builds byte buffers directly and calls it directly - no need
+    /// to go through the hooked address (real `SAVE` always writes the current format, so it can never
+    /// naturally produce an old-version stream). Exercises the format's version gates directly:
+    /// - `version <= 0x58`: the store is cleared but the stream is never read at all (empty buffer,
+    ///   `load_mgr` still returns `true`).
+    /// - `0x58 < version <= 0x66`: an item's base fields are read but `normalHelpID`/`grayedHelpID`/icon
+    ///   strings are left at [`crate::ztshowscriptmgr::ShowScriptItem::default`]'s values (that half of
+    ///   the buffer is never written/read).
+    /// - `version > 0x60` (independent of the `0x66` gate above): the trailing `makeID` counter is read
+    ///   and restored - checked via `ztshowscriptmgr::live_support::next_id_counter`; a version at/under
+    ///   the gate with no trailing bytes still succeeds (never attempts the read), while a version over
+    ///   the gate with the trailing bytes missing is a genuine short read and `load_mgr` returns `false`.
+    /// - A string length prefix `>= STRING_LENGTH_CAP` makes `load_mgr` return `false` immediately (the
+    ///   same guard `read_string` applies to every string field).
+    fn run_ztshowscriptmgr_load_version_gates_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWSCRIPTMGR_LOAD_VERSION_GATES_LIVE";
+        let mut fail_flag = false;
+        let dummy_file: u32 = 0;
+        let file_ptr = &dummy_file as *const u32;
+
+        macro_rules! check {
+            ($cond:expr, $msg:expr) => {
+                if !($cond) {
+                    error!("{}: {}", test_name, $msg);
+                    fail_flag = true;
+                }
+            };
+        }
+
+        // version <= 0x58: store cleared, stream never read, still reports success.
+        ztshowscriptmgr::live_support::reset_state();
+        let _ = make_registered_show_script(1, 1);
+        io_redirect::begin_replay(Vec::new());
+        let ok = ztshowscriptmgr::load_mgr(file_ptr, 0x58);
+        io_redirect::end_replay();
+        check!(ok, "version<=0x58 should return true");
+        check!(ztshowscriptmgr::live_support::registered_script_count() == 0, "version<=0x58 should clear the store");
+
+        // 0x58 < version <= 0x66: base fields read, extended fields stay default. Also stays <= 0x60, so
+        // no trailing counter bytes are needed/read.
+        ztshowscriptmgr::live_support::reset_state();
+        {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&1u32.to_le_bytes()); // script count
+            buf.extend_from_slice(&55u16.to_le_bytes()); // script id
+            buf.extend_from_slice(&0xffff_ffffu32.to_le_bytes()); // sentinel
+            buf.extend_from_slice(&9u32.to_le_bytes()); // script_type
+            buf.extend_from_slice(&1u32.to_le_bytes()); // item count
+            buf.push(1); // default_available
+            buf.push(1); // visible
+            buf.extend_from_slice(&77u16.to_le_bytes()); // id
+            buf.extend_from_slice(&9u32.to_le_bytes()); // item_type
+            buf.extend_from_slice(&0xffff_ffffu32.to_le_bytes()); // sentinel
+            for _ in 0..4 {
+                buf.extend_from_slice(&0u32.to_le_bytes()); // name/anim/keeperPreTrick/keeperPostTrick, all empty
+            }
+            buf.extend_from_slice(&5u32.to_le_bytes()); // building
+            buf.extend_from_slice(&3u32.to_le_bytes()); // complexity
+            buf.push(0); // return_to_keeper
+            buf.extend_from_slice(&10u32.to_le_bytes()); // satisfaction
+            buf.extend_from_slice(&11u32.to_le_bytes()); // satisfaction_delta
+            buf.extend_from_slice(&12u32.to_le_bytes()); // satisfaction_mirror
+            buf.extend_from_slice(&13u32.to_le_bytes()); // minimum_depth
+            io_redirect::begin_replay(buf);
+            let ok = ztshowscriptmgr::load_mgr(file_ptr, 0x60);
+            io_redirect::end_replay();
+            check!(ok, "0x58<version<=0x66 should return true");
+            match ztshowscriptmgr::item_full_by_id(55, 0) {
+                Some(item) => {
+                    check!(item.building == 5 && item.satisfaction == 10, "base fields should have been read");
+                    check!(
+                        item.normal_help_id == 0 && item.grayed_help_id == 0 && item.normal_icon.is_empty() && item.grayed_icon.is_empty(),
+                        "extended fields should stay at their default for version<=0x66"
+                    );
+                }
+                None => check!(false, "expected script 55 item 0 to exist after load"),
+            }
+        }
+
+        // version > 0x60 with the trailing counter present: counter restored.
+        ztshowscriptmgr::live_support::reset_state();
+        {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&0u32.to_le_bytes()); // 0 scripts
+            buf.extend_from_slice(&0x1234u16.to_le_bytes()); // makeID counter
+            io_redirect::begin_replay(buf);
+            let ok = ztshowscriptmgr::load_mgr(file_ptr, 0x70);
+            io_redirect::end_replay();
+            check!(ok, "version>0x60 with a trailing counter should return true");
+            check!(ztshowscriptmgr::live_support::next_id_counter() == 0x1234, "counter should have been restored for version>0x60");
+        }
+
+        // version > 0x60 with the trailing counter bytes missing: a genuine short read, load_mgr fails.
+        ztshowscriptmgr::live_support::reset_state();
+        {
+            let buf = 0u32.to_le_bytes().to_vec(); // 0 scripts, no counter bytes follow
+            io_redirect::begin_replay(buf);
+            let ok = ztshowscriptmgr::load_mgr(file_ptr, 0x70);
+            io_redirect::end_replay();
+            check!(!ok, "version>0x60 missing its trailing counter bytes should return false");
+        }
+
+        // A string length prefix >= STRING_LENGTH_CAP fails immediately - no script/item header even
+        // needed after it, `read_string` returns `None` before attempting to read the (absent) bytes.
+        ztshowscriptmgr::live_support::reset_state();
+        {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&1u32.to_le_bytes()); // script count
+            buf.extend_from_slice(&1u16.to_le_bytes()); // script id
+            buf.extend_from_slice(&0xffff_ffffu32.to_le_bytes()); // sentinel
+            buf.extend_from_slice(&1u32.to_le_bytes()); // script_type
+            buf.extend_from_slice(&1u32.to_le_bytes()); // item count
+            buf.push(0); // default_available
+            buf.push(1); // visible
+            buf.extend_from_slice(&1u16.to_le_bytes()); // id
+            buf.extend_from_slice(&1u32.to_le_bytes()); // item_type
+            buf.extend_from_slice(&0xffff_ffffu32.to_le_bytes()); // sentinel
+            buf.extend_from_slice(&0x1000u32.to_le_bytes()); // name length prefix == STRING_LENGTH_CAP
+            io_redirect::begin_replay(buf);
+            let ok = ztshowscriptmgr::load_mgr(file_ptr, 0x70);
+            io_redirect::end_replay();
+            check!(!ok, "a string length prefix >= STRING_LENGTH_CAP should return false");
+        }
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
     }
 
     /// ZTSHOWINFO_ADD_SCRIPT_CHECK_PENDING_SCRIPTS_LIVE: `ZTShowInfo::addScript`/`checkPendingScripts`
@@ -4128,6 +4353,102 @@ mod detour_zoo_main {
                 error!("{}: script_b {} should still exist in the store after CHECK_PENDING_SCRIPTS", test_name, script_b);
                 fail_flag = true;
             }
+        }
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTSHOWINFO_PENDING_SCRIPT_TREE_STRESS_LIVE: stress-tests `find_or_insert_pending_script_node`'s BST
+    /// insert logic (`ztshow.rs` - the exact function `ztshowscriptmgr-open-items.md`'s bug 1, the phantom
+    /// "rightmost" cache corruption, was found and fixed in) against a real, standalone `ZTShowInfo`
+    /// (`ztshow_live_support::build_standalone_show_info`). Generates a fixed-seed-shuffled sequence of
+    /// distinct `unit_type_id`s (a trivial inline xorshift32, no new crate dependency), inserts each in
+    /// turn, and after every insert asserts the header's `leftmost` cache (`+0x8`) matches the running
+    /// minimum key inserted so far - the exact invariant bug 1 violated. Finishes by re-inserting every id
+    /// a second time (asserting `was_inserted == false` and the same node address each time) and a full
+    /// in-order walk (`ztshow_live_support::collect_pending_script_nodes`) asserting strictly ascending key
+    /// order.
+    fn run_ztshowinfo_pending_script_tree_stress_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWINFO_PENDING_SCRIPT_TREE_STRESS_LIVE";
+        let show_info = ztshow_live_support::build_standalone_show_info();
+
+        // Trivial fixed-seed xorshift32 - deterministic across runs, no new crate dependency.
+        let mut state: u32 = 0x9e3779b9;
+        let mut next_rand = move || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state
+        };
+
+        const COUNT: usize = 256;
+        // Distinct unit_type_ids in a small range, Fisher-Yates shuffled via the xorshift generator above.
+        let mut ids: Vec<u32> = (1..=COUNT as u32).collect();
+        for i in (1..ids.len()).rev() {
+            let j = (next_rand() as usize) % (i + 1);
+            ids.swap(i, j);
+        }
+
+        let mut fail_flag = false;
+        let mut min_seen: Option<u32> = None;
+        let mut node_by_id: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+
+        for &id in &ids {
+            let (node, was_inserted) = ztshow::find_or_insert_pending_script_node(show_info, id);
+            if !was_inserted {
+                error!("{}: first insert of id {} unexpectedly reported was_inserted=false", test_name, id);
+                fail_flag = true;
+            }
+            node_by_id.insert(id, node);
+            min_seen = Some(min_seen.map_or(id, |m| m.min(id)));
+
+            let header = get_from_memory::<u32>(show_info + 0x44);
+            let leftmost = get_from_memory::<u32>(header + 8);
+            let leftmost_key = get_from_memory::<u32>(leftmost + 0x10);
+            if leftmost_key != min_seen.unwrap() {
+                error!(
+                    "{}: after inserting id {}, leftmost cache key is {} but running minimum is {}",
+                    test_name, id, leftmost_key, min_seen.unwrap()
+                );
+                fail_flag = true;
+            }
+        }
+
+        // Re-inserting every id should now be a no-op find, returning the same node and was_inserted=false.
+        for &id in &ids {
+            let (node, was_inserted) = ztshow::find_or_insert_pending_script_node(show_info, id);
+            if was_inserted {
+                error!("{}: re-inserting already-seen id {} reported was_inserted=true", test_name, id);
+                fail_flag = true;
+            }
+            let expected = node_by_id.get(&id).copied().unwrap_or(0);
+            if node != expected {
+                error!("{}: re-inserting id {} returned a different node address ({:#010x} vs {:#010x})", test_name, id, node, expected);
+                fail_flag = true;
+            }
+        }
+
+        let in_order = ztshow_live_support::collect_pending_script_nodes(show_info);
+        if in_order.len() != COUNT {
+            error!("{}: in-order walk found {} nodes, expected {}", test_name, in_order.len(), COUNT);
+            fail_flag = true;
+        }
+        let mut prev_key: Option<u32> = None;
+        for &node in &in_order {
+            let key = get_from_memory::<u32>(node + 0x10);
+            if let Some(prev) = prev_key {
+                if key <= prev {
+                    error!("{}: in-order walk not strictly ascending: {} then {}", test_name, prev, key);
+                    fail_flag = true;
+                    break;
+                }
+            }
+            prev_key = Some(key);
         }
 
         if !fail_flag {
@@ -4320,6 +4641,7 @@ mod detour_zoo_main {
         };
 
         let real_show = real_show_info + 4;
+        let mut fail_flag = false;
 
         // Create a real ZTShowScriptState for our chosen unit (real, un-hooked CREATE_SHOW_SCRIPT_STATE -
         // safe against this real, properly-constructed ZTShow's own `+0x34` state map), then fetch it back
@@ -4353,17 +4675,132 @@ mod detour_zoo_main {
         }
 
         // DO_TRICK_EVENT (0x005a6894, ztshow::DO_TRICK_EVENT): needs a real, non-null ZTShowScriptState* -
-        // only call it if GET_SHOW_SCRIPT_STATE actually resolved one above.
+        // only call it if GET_SHOW_SCRIPT_STATE actually resolved one above. Registers a fresh synthetic
+        // script/item per case, points the real ZTShow at it (snapshotting/restoring `real_show+0x4` and
+        // `state_ptr+0xc`/`+0xf` around each call so this doesn't permanently disturb the real, live
+        // objects other tests later in this chain still use), and asserts the `+0x28`/`+0x2c`/`+0x30`
+        // accumulator deltas match `do_trick_event`'s own accounting - see this function's own inline
+        // comments for why the three threshold branches (low/mid/high relative to `ZTShowMgr`'s real
+        // `threshold_a`/`threshold_b`/`threshold_c`) aren't distinguishable via those three fields alone
+        // (the threshold dispatch only changes which `SEND_EVENT`/`DO_KEEPER_EVENT` calls fire, not the
+        // accumulator writes, which all happen unconditionally before the dispatch) - exercising each is
+        // still valuable as real-call-path coverage/crash safety, just not as a three-way accumulator diff.
         if state_ptr != 0 {
             let do_trick_event_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32, *const u32)>(0x005a6894u32) };
-            do_trick_event_hooked(real_show as *const u32, state_ptr as *const u32);
-            info!("{}: do_trick_event completed without crashing for unit {:#x}", test_name, unit_id);
+
+            let original_script_id = get_from_memory::<u16>(real_show + 0x4);
+            let original_trick_index = get_from_memory::<u16>(state_ptr + 0xc);
+            let original_skip_scoring = get_from_memory::<u8>(state_ptr + 0xf);
+
+            let mgr_ptr = globals().ztshowmgr_ptr();
+            let mirror_cases: Vec<(&str, u32)> = if mgr_ptr.is_null() {
+                info!(
+                    "{}: GLOBAL_ZTShowMgr not initialized at this injection point - threshold-branch coverage skipped, only the skip_scoring/item_type==3 cases below run (same class of gap as ZTSHOWSCRIPT_CTOR_REGISTRATION_LIVE's own null check)",
+                    test_name
+                );
+                Vec::new()
+            } else {
+                let mgr = unsafe { &*mgr_ptr };
+                vec![
+                    ("low (<=threshold_a)", mgr.threshold_a),
+                    ("mid (between threshold_b and threshold_c)", mgr.threshold_b.wrapping_add(mgr.threshold_c) / 2),
+                    ("high (>=threshold_c)", mgr.threshold_c),
+                ]
+            };
+
+            // One case per real threshold branch, plus skip_scoring and the item_type==3 short-circuit.
+            struct Case {
+                label: String,
+                item_type: u32,
+                satisfaction: u32,
+                satisfaction_mirror: u32,
+                skip_scoring: bool,
+            }
+            let mut cases: Vec<Case> = mirror_cases
+                .into_iter()
+                .map(|(label, mirror)| Case { label: label.to_string(), item_type: 1, satisfaction: 7, satisfaction_mirror: mirror, skip_scoring: false })
+                .collect();
+            cases.push(Case { label: "skip_scoring".to_string(), item_type: 1, satisfaction: 7, satisfaction_mirror: 7, skip_scoring: true });
+            cases.push(Case {
+                label: "item_type==3 short-circuit".to_string(),
+                item_type: 3,
+                satisfaction: 7,
+                satisfaction_mirror: 7,
+                skip_scoring: false,
+            });
+
+            for (case_index, case) in cases.iter().enumerate() {
+                // `add_item` only inserts when the item's own `item_type` matches the script's - register
+                // each script with `case.item_type` itself as its type (rather than a fixed `SCRIPT_TYPE`)
+                // so every case's item actually gets inserted, including the `item_type==3` short-circuit
+                // case, which needs a genuine hit against `item_snapshot_by_id` to reach `do_trick_event`'s
+                // own `item.item_type == 3` check at all.
+                let script_id = ztshowscriptmgr::register_script(0x8000_0000 | case_index as u32, case.item_type)
+                    .expect("register_script should never reject a non-null ctor_ptr");
+                let item = ztshowscriptmgr::live_support::raw_item_with_mirror(case.item_type, 1, case.satisfaction, case.satisfaction_mirror);
+                ztshowscriptmgr::add_item(0x8000_0000 | case_index as u32, &item);
+
+                save_to_memory(real_show + 0x4, script_id);
+                save_to_memory(state_ptr + 0xc, 0u16); // trick_index 0, our only item
+                save_to_memory(state_ptr + 0xf, case.skip_scoring as u8);
+
+                let count_before = get_from_memory::<i32>(real_show + 0x28);
+                let sum_before = get_from_memory::<i32>(real_show + 0x2c);
+                let mirror_sum_before = get_from_memory::<i32>(real_show + 0x30);
+
+                do_trick_event_hooked(real_show as *const u32, state_ptr as *const u32);
+
+                let count_after = get_from_memory::<i32>(real_show + 0x28);
+                let sum_after = get_from_memory::<i32>(real_show + 0x2c);
+                let mirror_sum_after = get_from_memory::<i32>(real_show + 0x30);
+
+                // Restore before asserting, so a failure doesn't also leave the real objects corrupted for
+                // later tests.
+                save_to_memory(real_show + 0x4, original_script_id);
+                save_to_memory(state_ptr + 0xc, original_trick_index);
+                save_to_memory(state_ptr + 0xf, original_skip_scoring);
+
+                if case.item_type == 3 {
+                    if sum_after != sum_before || count_after != count_before || mirror_sum_after != mirror_sum_before {
+                        error!("{}: case '{}' (item_type==3) should leave all three accumulators unchanged, got count {}->{}, sum {}->{}, mirror_sum {}->{}",
+                            test_name, case.label, count_before, count_after, sum_before, sum_after, mirror_sum_before, mirror_sum_after);
+                        fail_flag = true;
+                    }
+                    continue;
+                }
+                if sum_after != sum_before.wrapping_add(case.satisfaction as i32) {
+                    error!("{}: case '{}' expected sum {} -> {}, got {}", test_name, case.label, sum_before, sum_before.wrapping_add(case.satisfaction as i32), sum_after);
+                    fail_flag = true;
+                }
+                if case.skip_scoring {
+                    if count_after != count_before || mirror_sum_after != mirror_sum_before {
+                        error!("{}: case '{}' (skip_scoring) should leave count/mirror_sum unchanged, got count {}->{}, mirror_sum {}->{}",
+                            test_name, case.label, count_before, count_after, mirror_sum_before, mirror_sum_after);
+                        fail_flag = true;
+                    }
+                } else {
+                    // count/mirror_sum are written unconditionally before the threshold dispatch (which
+                    // itself only changes which SEND_EVENT/DO_KEEPER_EVENT calls fire, not these two
+                    // fields), so the same expectation holds whether or not GLOBAL_ZTShowMgr is live.
+                    let expected_mirror_sum = mirror_sum_before.wrapping_add(case.satisfaction_mirror as i32);
+                    if count_after != count_before + 1 || mirror_sum_after != expected_mirror_sum {
+                        error!("{}: case '{}' expected count {} -> {}, mirror_sum {} -> {}, got count={}, mirror_sum={}",
+                            test_name, case.label, count_before, count_before + 1, mirror_sum_before, expected_mirror_sum, count_after, mirror_sum_after);
+                        fail_flag = true;
+                    }
+                }
+                info!("{}: case '{}' completed without crashing (mirror={})", test_name, case.label, case.satisfaction_mirror);
+            }
         } else {
             info!("{}: skipping do_trick_event - no real ZTShowScriptState resolved for unit {:#x}", test_name, unit_id);
         }
 
-        write_success_line(failure_log, test_name);
-        false
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
     }
 
     /// ZTSHOWUI_FILL_TRICK_LISTS_LIVE: `ztshowui::fill_trick_lists`/`copy_list_to_script` (Stage 4 UI
@@ -4468,6 +4905,60 @@ mod detour_zoo_main {
             let _ = log_file.write_all(format!("CHECKPOINT {} post-copy result={}\n", test_name, copy_result).as_bytes());
         }
         info!("{}: COPY_LIST_TO_SCRIPT completed without crashing, returned {}", test_name, copy_result);
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTSHOWSCRIPT_CTOR_REGISTRATION_LIVE: resolves the open question `make_registered_show_script`'s
+    /// own doc comment flags - whether the real `ZTShowScript::ZTShowScript` ctor's `auto_register=true`
+    /// path (`ztshowscript::CONSTRUCTOR`, `0x0059f837`, intentionally left un-detoured per
+    /// `ztshowscriptmgr.rs`'s module doc comment) actually reaches Stage 1's `REGISTER_SCRIPT` detour
+    /// (`0x0046e774`) and registers into the store, or whether the earlier "doesn't register" finding was
+    /// a harness-timing artifact of `GLOBAL_ZTShowMgr` not yet being resolved this early. Root cause per
+    /// `private/resources/decompiles/ZTShowScript_ZTShowScript.c:25`: the real ctor only calls
+    /// `ZTShowMgr::registerScript` when `GLOBAL_ZTShowMgr != 0` (`globals().ztshowmgr_ptr()`) - the same
+    /// class of "global not yet resolved at this early test-injection point" issue this file already
+    /// documents for `GLOBAL_ZTGameMgr` (see `run_ztscenariosimplegoal_eval_award_count_test`).
+    ///
+    /// Skips gracefully (not a failure) if `GLOBAL_ZTShowMgr` is still null here, matching that same
+    /// convention. Otherwise allocates a real `0x14`-byte object (matching `ztshowui::
+    /// copy_list_to_script`'s own identical allocation) and calls the real, un-detoured ctor directly via
+    /// `.original()` with `auto_register=true`, then asserts the id it writes back at `ctor_ptr+0x4` is
+    /// genuinely present in Stage 1's store.
+    fn run_ztshowscript_ctor_registration_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWSCRIPT_CTOR_REGISTRATION_LIVE";
+
+        if globals().ztshowmgr_ptr().is_null() {
+            info!("Skipping {}: GLOBAL_ZTShowMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTShowMgr not initialized)", test_name));
+            return false;
+        }
+
+        const SCRIPT_TYPE: u32 = 0x7ace;
+        let alloc = unsafe { standalone::OPERATOR_NEW.original()(0x14) } as u32;
+        let ctor_ptr = unsafe { ZTSHOWSCRIPT_CONSTRUCTOR.original()(alloc as *const u32, SCRIPT_TYPE, true) } as u32;
+
+        let mut fail_flag = false;
+        if ctor_ptr == 0 {
+            error!("{}: CONSTRUCTOR returned null", test_name);
+            fail_flag = true;
+        } else {
+            let assigned_id = get_from_memory::<u16>(ctor_ptr + 0x4);
+            if !ztshowscriptmgr::script_exists_by_id(assigned_id) {
+                error!(
+                    "{}: ctor's auto_register=true path did NOT register id {} (ctor_ptr={:#010x}) into Stage 1's store - GLOBAL_ZTShowMgr was live, so this is a genuine reimplementation gap",
+                    test_name, assigned_id, ctor_ptr
+                );
+                fail_flag = true;
+            } else {
+                info!("{}: ctor's auto_register=true path correctly registered id {} into Stage 1's store", test_name, assigned_id);
+            }
+        }
 
         if !fail_flag {
             write_success_line(failure_log, test_name);
