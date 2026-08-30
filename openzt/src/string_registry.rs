@@ -10,7 +10,7 @@ use crate::lua_fn;
 
 const STRING_REGISTRY_ID_OFFSET: u32 = 100_000;
 
-const GLOBAL_BFAPP: u32 = 0x00638148;
+pub(crate) const GLOBAL_BFAPP: u32 = 0x00638148;
 
 static STRING_REGISTRY: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static LANGUAGE_STRINGS: LazyLock<Mutex<Vec<Option<String>>>> = LazyLock::new(|| Mutex::new(Vec::new()));

@@ -42,7 +42,8 @@
       "Bash(head:*)",
       "Bash(jq:*)",
       "Bash(openzt:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(\"C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x86\\cdb.exe\":*)"
     ],
     "deny": [],
     "ask": []

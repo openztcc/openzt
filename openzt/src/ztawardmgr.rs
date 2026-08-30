@@ -342,7 +342,7 @@ mod award_mgr_detours {
 /// large, mostly-unrelated switch is left as vanilla via `EVAL_DETOUR.call(this)` - see
 /// `resource_manager/hooks.rs`'s `zoo_ui_general_get_info_image_name` for the same
 /// match-one-condition/call-through-otherwise shape.
-mod eval_award_count_override {
+pub(crate) mod eval_award_count_override {
     use openzt_detour::generated::ztscenariosimplegoal::EVAL;
     use openzt_detour_macro::detour_mod;
     use tracing::error;
@@ -365,6 +365,16 @@ mod eval_award_count_override {
             }
             unsafe { EVAL_DETOUR.call(this) }
         }
+
+        /// Exposes the real vanilla trampoline for the live comparison test. `EVAL.original()` can't be
+        /// used for this once this module's own detour has patched `EVAL`'s address - `FunctionDef::
+        /// original()` is a raw address cast with no saved trampoline (see `openzt-detour/src/lib.rs`), so
+        /// once hooked it silently starts re-entering this same detour instead of reaching real vanilla.
+        /// `EVAL_DETOUR.call(this)` (the `retour` trampoline this macro generates) is the only way back to
+        /// real vanilla behavior after that point.
+        pub(super) fn call_real(this: *const u32) -> i32 {
+            unsafe { EVAL_DETOUR.call(this) }
+        }
     }
 
     pub fn init() {
@@ -372,12 +382,17 @@ mod eval_award_count_override {
             error!("Failed to initialise ztscenariosimplegoal eval award-count override detour: {e:?}");
         }
     }
+
+    #[cfg(feature = "reimplementation-tests")]
+    pub(crate) fn call_real(this: *const u32) -> i32 {
+        detours::call_real(this)
+    }
 }
 
 /// Reimplementation of the free function `_showAwards`, which iterates `ZTAwardMgr`'s earned-id vector
 /// directly (bypassing any method call) to populate a `UIListBox`. `GLOBAL_BFUIMgr`'s RVA (`0x0023_8de0`)
 /// is the same one `ztthoughtmgr.rs`'s `thought_ui_detours::global_bfuimgr` already uses.
-mod show_awards_detour {
+pub(crate) mod show_awards_detour {
     use openzt_detour::generated::{
         bfuimgr::GET_ELEMENT_0,
         standalone::SHOW_AWARDS,
@@ -450,12 +465,24 @@ mod show_awards_detour {
                 add_award_to_list_box(element, &text, award.icon(), award.tooltip_id());
             }
         }
+
+        /// Exposes the real vanilla trampoline for the live comparison test - see
+        /// `eval_award_count_override::detours::call_real`'s doc comment for why `SHOW_AWARDS.original()`
+        /// can't be used for this once this detour has patched the address.
+        pub(super) fn call_real() {
+            unsafe { SHOW_AWARDS_DETOUR.call() }
+        }
     }
 
     pub fn init() {
         if let Err(e) = unsafe { detours::init_detours() } {
             error!("Failed to initialise ztawardmgr show_awards detour: {e:?}");
         }
+    }
+
+    #[cfg(feature = "reimplementation-tests")]
+    pub(crate) fn call_real() {
+        detours::call_real()
     }
 }
 
