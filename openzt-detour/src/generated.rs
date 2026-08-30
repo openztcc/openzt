@@ -8550,6 +8550,19 @@ pub mod ztui_showpanel {
     pub const SELECT_SHOW_TAB: FunctionDef<unsafe extern "cdecl" fn(i32)> = FunctionDef{address: 0x00474646, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztui_showpanel/show_1"))]
     pub const SHOW_1: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x00474684, function_type: PhantomData};
+    // Hand-added: no Windows decompile exists for this function (`FUN_00474826`, referenced only from
+    // `showpanel_fillTrickLists.asm`'s and `_copyListToScript.asm`'s own call sites - both `PUSH <arg>;
+    // CALL FUN_00474826; ADD ESP,0x4`, cdecl, return value never read by either caller afterward).
+    // Identified as `ZTUI::showpanel::recalcShowStats(ZTShowScript*)` via the macOS decompile
+    // (`_ZTUI__showpanel__recalcShowStats.c`): it computes and displays the "Happiness Bonus" number/
+    // smiley shown next to the show-editor's "Tricks in Show" header (string id 11121), by summing the
+    // relevant script's tricks' satisfaction values (with a repeat-trick diminishing-returns rule keyed by
+    // trick id). `0` means "recompute from the current assigned-tricks listbox" (`fillTrickLists`' call
+    // site, always reached at the end of every code path past the species/habitat-selected check);
+    // a non-null `ZTShowScript*`/handle means "read directly from that script" (`copyListToScript`'s call
+    // site, passed its own freshly-rebuilt script, right after the addItem loop and before addScript).
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztui_showpanel/recalc_show_stats"))]
+    pub const RECALC_SHOW_STATS: FunctionDef<unsafe extern "cdecl" fn(u32)> = FunctionDef{address: 0x00474826, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztui_showpanel/set_species"))]
     pub const SET_SPECIES: FunctionDef<unsafe extern "cdecl" fn(i32)> = FunctionDef{address: 0x00474ced, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztui_showpanel/fill_trick_lists"))]

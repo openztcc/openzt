@@ -5,6 +5,15 @@
 //! UI panel's `showpanel_fillTrickLists` (populates the "available"/"assigned" trick list boxes) and
 //! `_copyListToScript` (the "apply UI selection back to the script" reconciliation handler it calls).
 //!
+//! Both ported functions also call through to `ZTUI::showpanel::recalcShowStats` (`FUN_00474826` in the
+//! Windows decompiles - unnamed there, identified via the macOS decompile and hand-added to
+//! `generated.rs` as `ztui_showpanel::RECALC_SHOW_STATS`; see that entry's own comment and
+//! [`recalc_show_stats`]'s doc comment), which computes and displays the "Happiness Bonus" number/smiley
+//! next to the show-editor's "Tricks in Show" header. An earlier version of this module treated that call
+//! as safe to drop entirely (deemed "purely cosmetic-looking"); it is not - since this module's Rust
+//! reimplementations replace the *entire* body of the vanilla functions that used to call it, dropping the
+//! call meant that display stopped updating altogether (observed live as a stuck `0`).
+//!
 //! `showpanel_updateAvailableTrickList` (the plan's 3rd originally-flagged UI consumer) needed **no**
 //! port and is **not** detoured here: confirmed via a full re-read of its decompile
 //! (`private/resources/decompiles/showpanel_updateAvailableTrickList.c`) that every raw dereference it
@@ -47,14 +56,6 @@
 //!
 //! ## Deliberately not ported
 //!
-//! - **`FUN_00474826`** (called by both functions - always with a literal `0` in `fillTrickLists`, but
-//!   with the resolved script pointer/handle in `_copyListToScript`) has no decompile anywhere in this
-//!   repo and no confirmed address. Its `fillTrickLists` call site is safe to skip outright (always
-//!   passed a constant `0`, so whatever it does has no observable dependency on anything this module
-//!   touches). Its `_copyListToScript` call site is riskier to guess at - the argument can be one of
-//!   this store's non-dereferenceable synthetic handles (see `ztshowscriptmgr.rs`'s module doc comment)
-//!   - so it is skipped there too rather than risk dereferencing a handle inside an unknown function
-//!   body. Purely cosmetic-looking (a "list changed, please refresh" notification) either way.
 //! - **`_copyListToScript`'s listbox-not-found teardown branch** (`if (pUStack_c == 0) { if (pZVar11 !=
 //!   0) { ZTShowScript::~ZTShowScript(pZVar11); FUN_00402629(pZVar11); } }`) - reached only if the
 //!   "assigned tricks" UI element (`0x2b6b`) doesn't exist, which cannot happen while the show-editor
@@ -85,7 +86,7 @@ use openzt_detour::generated::{
     ztshowinfo::{CREATE_DEFAULT_SCRIPT, VALIDATE_TRICK},
     ztshowmgr::GET_SHOW_INFO,
     ztshowscript::CONSTRUCTOR as ZTSHOW_SCRIPT_CONSTRUCTOR,
-    ztui_showpanel::FILL_TRICK_LISTS,
+    ztui_showpanel::{FILL_TRICK_LISTS, RECALC_SHOW_STATS},
 };
 use openzt_detour_macro::detour_mod;
 use tracing::error;
@@ -261,6 +262,20 @@ fn add_available_trick(list_element: u32, item_ptr: u32, valid: bool) {
     }
 }
 
+/// Calls the real, un-detoured `ZTUI::showpanel::recalcShowStats` (`ztui_showpanel::RECALC_SHOW_STATS`,
+/// hand-added to `generated.rs` - see that entry's own comment). Computes and displays the "Happiness
+/// Bonus" number/smiley shown next to the show-editor's "Tricks in Show" header. This module's Rust
+/// reimplementations of [`fill_trick_lists`]/[`copy_list_to_script`] replaced the *entire* body of the
+/// vanilla functions that used to call this at specific points in their control flow - without explicitly
+/// replicating those calls, the real vanilla body that computes that display never runs anymore, leaving
+/// the happiness-bonus display stuck at whatever it last showed (observed live as a stuck `0`). Safe to
+/// call with either `0` (real vanilla memory: the current "assigned tricks" listbox) or a real/synthetic
+/// `ZTShowScript` identity, since the real function only ever reaches show-script data through
+/// `ZTShowScript::size`/`getItem`, both already Stage-1-detoured onto this crate's own store.
+fn recalc_show_stats(script_handle: u32) {
+    unsafe { RECALC_SHOW_STATS.original()(script_handle) };
+}
+
 /// Reimplementation of `ZTUI::showpanel::fillTrickLists`, per `showpanel_fillTrickLists.c`/`.asm`. Two
 /// halves:
 ///
@@ -304,10 +319,12 @@ pub fn fill_trick_lists() {
 
     let assigned_list = unsafe { GET_ELEMENT_0.original()(global_bfuimgr(), ASSIGNED_TRICKS_LIST_ELEMENT_ID) } as u32;
     if assigned_list == 0 {
+        recalc_show_stats(0);
         return;
     }
     unsafe { CLEAR.original()(assigned_list as *const u32) };
     if available_ids.is_empty() {
+        recalc_show_stats(0);
         return;
     }
 
@@ -323,6 +340,7 @@ pub fn fill_trick_lists() {
         if flag != 0 {
             let new_script_ptr = unsafe { CREATE_DEFAULT_SCRIPT.original()(show_info as *const u32, unit_type_id as i32) } as u32;
             if new_script_ptr == 0 {
+                recalc_show_stats(0);
                 return;
             }
             let new_id = get_from_memory::<u16>(new_script_ptr + 0x4);
@@ -338,6 +356,7 @@ pub fn fill_trick_lists() {
     }
 
     if !script_exists {
+        recalc_show_stats(0);
         return;
     }
 
@@ -360,6 +379,7 @@ pub fn fill_trick_lists() {
         save_to_memory(dat(MISMATCH_FLAG_RVA), 1u8);
         copy_list_to_script();
     }
+    recalc_show_stats(0);
 }
 
 /// Adds one *store-owned* item (from the currently-assigned script, not real memory - see
@@ -476,6 +496,7 @@ pub fn copy_list_to_script() -> u32 {
         }
     }
 
+    recalc_show_stats(script_handle);
     crate::ztshow::add_script(show_info, unit_type_id, script_id);
     (crate::ztshowscriptmgr::script_item_count_by_id(script_id) > 0) as u32
 }
