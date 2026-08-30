@@ -34,6 +34,7 @@ use openzt_detour::generated::{
 };
 use openzt_detour_macro::detour_mod;
 use tracing::error;
+use windows::Win32::Foundation::FILETIME;
 
 use crate::{
     globals::globals,
@@ -854,9 +855,10 @@ pub fn add_script(show_info: u32, unit_type_id: u32, new_script_id: u16) -> bool
 
     let (node, was_inserted) = find_or_insert_pending_script_node(show_info, unit_type_id);
     if was_inserted {
-        let mut date: i64 = 0;
-        unsafe { GET_DATE.original()(globals().ztgamemgr_ptr() as *const u32, &mut date as *const i64) };
-        save_to_memory(node + 0x40, date);
+        let mut date = FILETIME::default();
+        unsafe { GET_DATE.original()(globals().ztgamemgr_ptr() as *const u32, &mut date as *const FILETIME) };
+        let date_ticks = ((date.dwHighDateTime as u64) << 32) | date.dwLowDateTime as u64;
+        save_to_memory(node + 0x40, date_ticks as i64);
     }
 
     save_to_memory(node + 0x1e, new_script_id);

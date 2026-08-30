@@ -11,6 +11,15 @@ use crate::FunctionDef;
 #[cfg(feature = "detour-validation")]
 use openzt_detour_macro::validate_detour;
 
+// Concrete Windows API struct types, used (sparingly - see each FunctionDef's own doc comment) where a
+// real function's signature takes or returns one of these by pointer or by value, instead of manually
+// flattening it into raw dwords. `windows::Win32::Foundation::FILETIME` is `#[repr(C)]` with the same
+// two-`u32` layout as the real struct, so this is byte-for-byte ABI-identical to hand-flattening -
+// prefer it over raw `u32`/`u64`/pointer flattening for any newly-added entry that involves a known
+// Windows struct, to avoid the class of by-value-struct signature bugs documented on `TIME_AGO`/
+// `HOURS_AGO` below.
+use windows::Win32::Foundation::FILETIME;
+
 // AI_cls_0x404fd6 class functions
 pub mod ai_cls_0x404fd6 {
     use super::*;
@@ -3467,6 +3476,15 @@ pub mod ztaimgr {
     pub const F_DIE: FunctionDef<unsafe extern "stdcall" fn(*const i32, *const u8) -> u32> = FunctionDef{address: 0x0060cbc8, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztaimgr/f_return_to_building_f"))]
     pub const F_RETURN_TO_BUILDING_F: FunctionDef<unsafe extern "stdcall" fn(i32, *const i32)> = FunctionDef{address: 0x0060cc66, function_type: PhantomData};
+    // Hand-added: no Windows decompile exists as a standalone function body - only reached through
+    // GLOBAL_ZTAIMgr's own vtable slot +0x4 (inherited unchanged from BFAIMgr, see
+    // private/docs/vtables/BFAIMgr.md's "+0x4" row). Two call sites confirm the thiscall/1-arg shape via
+    // their .asm (ZTGameMgr_setNewGameDefaults.asm:32-35, _setCursorQuality.asm): `MOV ECX, GLOBAL_ZTAIMgr`
+    // then a single `PUSH EAX` (always 0 at both call sites) before `CALL [EDX+0x4]` - no independently
+    // decompiled body/name, so kept as OOAnalyzer's own raw `virt_meth_0x58f269` label rather than guessing
+    // a semantic name.
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztaimgr/virt_meth_0x58f269"))]
+    pub const VIRT_METH_0X58F269: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32)> = FunctionDef{address: 0x0058f269, function_type: PhantomData};
 }
 
 // ZTAdvTerrainMgr class functions
@@ -4428,7 +4446,7 @@ pub mod ztgamemgr {
     use super::*;
 
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/get_date"))]
-    pub const GET_DATE: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i64) -> *const i64> = FunctionDef{address: 0x0040e7e0, function_type: PhantomData};
+    pub const GET_DATE: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const FILETIME) -> *const FILETIME> = FunctionDef{address: 0x0040e7e0, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/add_cash"))]
     pub const ADD_CASH: FunctionDef<unsafe extern "thiscall" fn(*const u32, f32)> = FunctionDef{address: 0x0040f018, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/is_real_world_date"))]
@@ -4437,10 +4455,34 @@ pub mod ztgamemgr {
     pub const UPDATE: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32)> = FunctionDef{address: 0x0041a154, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/subtract_cash"))]
     pub const SUBTRACT_CASH: FunctionDef<unsafe extern "thiscall" fn(*const u32, f32, bool)> = FunctionDef{address: 0x0041ef68, function_type: PhantomData};
+    // Hand-corrected (not hand-added): the auto-generated return type below was `*const u64` (a
+    // 32-bit pointer, occupying only EAX under Rust's extern "thiscall"/"cdecl" ABI), but the real
+    // `ZTGameMgr::hoursAgo` returns its `unsigned long long` result the standard MSVC/x86 way for an
+    // 8-byte integer - across the EDX:EAX register pair, with no out-pointer at all (confirmed via
+    // `ZTGameMgr_hoursAgo.asm`: the result falls straight out of `_aulldiv`'s own EDX:EAX return with
+    // no further memory write before `RET 0x8`). Declaring the return type as `*const u64` would
+    // silently drop the high dword (EDX) that a real 64-bit return needs; `u64` makes Rust emit the
+    // correct EDX:EAX-pair codegen matching the real ABI. Needs the same correction upstream in the
+    // Ghidra analysis pass, or a regeneration will silently reintroduce this bug.
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/hours_ago"))]
-    pub const HOURS_AGO: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32, i32) -> *const u64> = FunctionDef{address: 0x0041f075, function_type: PhantomData};
+    pub const HOURS_AGO: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32, i32) -> u64> = FunctionDef{address: 0x0041f075, function_type: PhantomData};
+    // Hand-corrected (not hand-added): the auto-generated signature below was missing a stack param.
+    // `ZTGameMgr::timeAgo` takes a `FILETIME` (`_ULARGE_INTEGER`) *by value* as its second real
+    // parameter, which is 2 stack dwords, not 1 - confirmed independently by the Windows `.asm`
+    // (`ZTGameMgr_timeAgo.asm`: `RET 0xc`, i.e. 3 stack dwords popped beyond the implicit `this` in
+    // ECX - out-pointer, param2-low, param2-high) and the macOS decompile (`ZTGameMgr::timeAgo`'s own
+    // 4-param signature: out-pointer, this, and 2 more dwords for the by-value value) - Ghidra's own
+    // Windows decompile (`ZTGameMgr_timeAgo.c`) already modeled this correctly as `FILETIME param_2`;
+    // only this file's extraction of that signature was wrong. The original (buggy) auto-generated
+    // line was `pub const TIME_AGO: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32,
+    // u32) -> *const f32>` - only 2 stack params (the by-value `FILETIME` flattened to a single `u32`
+    // instead of two), which would pop the wrong number of bytes (`ret 8` instead of `ret 0xc`) for any
+    // real caller (`ZTHabitat::getPopularity`, `ZTGoalGawk::leftVA` both call this live). Uses the
+    // concrete `windows::Win32::Foundation::FILETIME` type (by value) rather than two flattened `u32`s,
+    // both to read closer to the real signature and to avoid this exact class of flattening bug
+    // recurring - see this file's own top-of-file doc comment on the `FILETIME` import.
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/time_ago"))]
-    pub const TIME_AGO: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32, u32) -> *const f32> = FunctionDef{address: 0x0042620a, function_type: PhantomData};
+    pub const TIME_AGO: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const FILETIME, FILETIME) -> *const FILETIME> = FunctionDef{address: 0x0042620a, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/update_sim"))]
     pub const UPDATE_SIM: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32)> = FunctionDef{address: 0x00435055, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/save"))]
