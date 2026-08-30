@@ -157,6 +157,7 @@ mod detour_zoo_main {
         ztresearch::{predict_branch_progress, predict_update, ZTResearchBranch, ZTResearchEffectKind, ZTResearchMgr},
         ztthoughtmgr::{live_support as thought_live_support, ZTThought, ZTThoughtMgr},
         ztmegatilemgr::live_support as megatile_live_support,
+        ztgamemgr::{self, live_support as gamemgr_live_support},
         ztguest::{self, live_support as guest_live_support},
         ztawardmgr::{self, live_support as award_live_support},
         ztworldmgr::{BFEntity, IVec3, ZTAnimal, ZTUnit},
@@ -1213,6 +1214,7 @@ mod detour_zoo_main {
         fail_flag |= run_thoughtmgr_add_thought_animal_override_test(&mut failure_log);
         fail_flag |= run_thoughtmgr_populate_thoughts_test(&mut failure_log);
         fail_flag |= run_thought_get_string_test(&mut failure_log);
+        fail_flag |= run_gamemgr_standalone_roundtrip_test(&mut failure_log);
 
         // Loads a real save file directly, so GLOBAL_ZTWorldMgr/GLOBAL_ZTHabitatMgr go from
         // empty/synthetic to real, populated state. Everything below this line runs against that real
@@ -1279,6 +1281,43 @@ mod detour_zoo_main {
             std::process::exit(1);
         }
         std::process::exit(0);
+    }
+
+    /// `ZTGAMEMGR_STANDALONE_ROUNDTRIP` - `ztgamemgr-implementation-plan.md` Stage 0: builds one
+    /// standalone `ZTGameMgr` via the real vanilla free-function constructor
+    /// (`ztgamemgr::live_support::build_standalone_mgr`, wrapping `standalone::CREATE_ZTGAME_MGR`),
+    /// confirms it's non-null, dumps its raw bytes and logs which offsets are non-zero (resolves the
+    /// "does `operator_new` zero the block" caveat empirically - `_CreateZTGameMgr.c` explicitly zeroes
+    /// `started`/`soundscape_ptr`/`menu_music_handler_ptr` but says nothing about the rest), then
+    /// immediately destroys it. No comparison logic yet - this only proves the construct/destroy harness
+    /// itself is safe before Stage 1's `SET_NEW_GAME_DEFAULTS` test builds on it. Doesn't need a live
+    /// zoo (`GLOBAL_ZTWorldMgr`/`GLOBAL_ZTGameMgr`), so it runs alongside the other standalone-only tests
+    /// above, before `run_load_live_zoo`.
+    fn run_gamemgr_standalone_roundtrip_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_STANDALONE_ROUNDTRIP";
+        let ptr = gamemgr_live_support::build_standalone_mgr();
+        if ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ztgamemgr::ZTGameMgr>();
+        let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, struct_size) };
+        let non_zero_offsets: Vec<usize> = bytes.iter().enumerate().filter(|(_, b)| **b != 0).map(|(offset, _)| offset).collect();
+        info!(
+            "{}: freshly-constructed standalone ZTGameMgr has {} non-zero bytes out of {}; offsets: {:?}",
+            test_name,
+            non_zero_offsets.len(),
+            struct_size,
+            non_zero_offsets
+        );
+
+        gamemgr_live_support::destroy_standalone_mgr(ptr);
+        write_success_line(failure_log, test_name);
+        false
     }
 
     /// Default path for `run_load_live_zoo`'s save file - a real save (not embedded/synthetic) placed
