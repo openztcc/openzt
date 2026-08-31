@@ -151,6 +151,7 @@ mod detour_zoo_main {
         SAVE as ZTGAMEMGR_SAVE, SET_NEW_GAME_DEFAULTS as ZTGAMEMGR_SET_NEW_GAME_DEFAULTS, SUBTRACT_CASH as ZTGAMEMGR_SUBTRACT_CASH,
         TIME_AGO as ZTGAMEMGR_TIME_AGO, UPDATE as ZTGAMEMGR_UPDATE, UPDATE_SIM as ZTGAMEMGR_UPDATE_SIM,
     };
+    use openzt_detour::generated::ztgamemgr_menumusichandler::MENU_MUSIC_HANDLER_1 as MENUMUSICHANDLER_CONSTRUCTOR;
     use openzt_detour::FunctionDef;
     use proptest::prelude::*;
     use tracing::{error, info};
@@ -168,6 +169,7 @@ mod detour_zoo_main {
         ztthoughtmgr::{live_support as thought_live_support, ZTThought, ZTThoughtMgr},
         ztmegatilemgr::live_support as megatile_live_support,
         ztgamemgr::{self, live_support as gamemgr_live_support},
+        ztgamemgr_menumusichandler::{self, live_support as menumusichandler_live_support},
         ztguest::{self, live_support as guest_live_support},
         ztawardmgr::{self, live_support as award_live_support},
         ztworldmgr::{BFEntity, IVec3, ZTAnimal, ZTUnit},
@@ -1225,6 +1227,7 @@ mod detour_zoo_main {
         fail_flag |= run_thoughtmgr_populate_thoughts_test(&mut failure_log);
         fail_flag |= run_thought_get_string_test(&mut failure_log);
         fail_flag |= run_gamemgr_standalone_roundtrip_test(&mut failure_log);
+        fail_flag |= run_menumusichandler_standalone_roundtrip_test(&mut failure_log);
         fail_flag |= run_gamemgr_set_new_game_defaults_test(&mut failure_log);
         fail_flag |= run_gamemgr_save_load_test(&mut failure_log);
         fail_flag |= run_gamemgr_update_sim_test(&mut failure_log);
@@ -1342,6 +1345,65 @@ mod detour_zoo_main {
         gamemgr_live_support::destroy_standalone_mgr(ptr);
         write_success_line(failure_log, test_name);
         false
+    }
+
+    /// `MENUMUSICHANDLER_STANDALONE_ROUNDTRIP` - `menumusichandler-implementation-plan.md` Stage 1: builds
+    /// two fresh `0x14`-byte standalone `MenuMusicHandler` blocks, runs the real vanilla constructor
+    /// (`MENUMUSICHANDLER_CONSTRUCTOR.original()`) on one and the Rust reimplementation
+    /// (`MenuMusicHandler::construct`) directly on the other, then byte-diffs the full struct. Both sides
+    /// call through to the same real `BFIniFile::read("UI", "noMenuMusic", 0)`, so `ini_menu_music_disabled`
+    /// should come out identical too - no exclusions needed for the fields the constructor actually
+    /// touches. Both blocks are pre-zeroed before either constructor runs: neither the real constructor
+    /// nor `MenuMusicHandler::construct` writes the `_pad1`/`_pad2` bytes (confirmed by the first live run
+    /// of this test, which saw real-side offsets `5..8` come back as raw `operator_new` heap leftovers,
+    /// `[175, 235, 3]`, against the Rust side's zeroed padding) - same "operator_new doesn't zero memory"
+    /// caveat `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS` documents.
+    fn run_menumusichandler_standalone_roundtrip_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "MENUMUSICHANDLER_STANDALONE_ROUNDTRIP";
+
+        let real_ptr = menumusichandler_live_support::allocate_uninitialized();
+        let reimpl_ptr = menumusichandler_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(reimpl_ptr);
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ztgamemgr_menumusichandler::MenuMusicHandler>();
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+
+            MENUMUSICHANDLER_CONSTRUCTOR.original()(real_ptr as *const u32);
+            (*reimpl_ptr).construct();
+        }
+
+        let real_bytes = unsafe { std::slice::from_raw_parts(real_ptr as *const u8, struct_size) };
+        let reimpl_bytes = unsafe { std::slice::from_raw_parts(reimpl_ptr as *const u8, struct_size) };
+        let mismatches: Vec<(usize, u8, u8)> =
+            (0..struct_size).filter_map(|i| if real_bytes[i] != reimpl_bytes[i] { Some((i, real_bytes[i], reimpl_bytes[i])) } else { None }).collect();
+
+        let failed = !mismatches.is_empty();
+        if failed {
+            error!("{}: byte mismatch(es) (offset, real, reimpl): {:?}", test_name, mismatches);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: byte mismatch(es) (offset, real, reimpl): {:?}\n", test_name, mismatches).as_bytes());
+            }
+        } else {
+            write_success_line(failure_log, test_name);
+        }
+
+        menumusichandler_live_support::destroy_standalone(real_ptr);
+        menumusichandler_live_support::destroy_standalone(reimpl_ptr);
+        failed
     }
 
     /// `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS` - `ztgamemgr-implementation-plan.md` Stage 1: builds two
