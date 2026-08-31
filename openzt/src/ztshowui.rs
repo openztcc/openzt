@@ -273,7 +273,7 @@ fn add_available_trick(list_element: u32, item_ptr: u32, valid: bool) {
 /// `ZTShowScript` identity, since the real function only ever reaches show-script data through
 /// `ZTShowScript::size`/`getItem`, both already Stage-1-detoured onto this crate's own store.
 fn recalc_show_stats(script_handle: u32) {
-    unsafe { RECALC_SHOW_STATS.original()(script_handle) };
+    unsafe { RECALC_SHOW_STATS.original()(script_handle as *const u32) };
 }
 
 /// Reimplementation of `ZTUI::showpanel::fillTrickLists`, per `showpanel_fillTrickLists.c`/`.asm`. Two

@@ -138,16 +138,18 @@ mod detour_zoo_main {
     use openzt_detour::generated::zthabitatmgr;
     use openzt_detour::generated::ztui_gameopts::LOAD_FILE as ZTUI_GAMEOPTS_LOAD_FILE;
     use openzt_detour::generated::ztunit::GET_FOOTPRINT as ZTUNIT_GET_FOOTPRINT;
-    use openzt_detour::generated::ztshow::{CREATE_SHOW_SCRIPT_STATE, GET_SHOW_SCRIPT_STATE};
+    use openzt_detour::generated::ztshow::GET_SHOW_SCRIPT_STATE;
+    use openzt_detour::generated::ztshowscriptstate::CONSTRUCTOR as CREATE_SHOW_SCRIPT_STATE;
     use openzt_detour::generated::ztshowscript::CONSTRUCTOR as ZTSHOWSCRIPT_CONSTRUCTOR;
     use openzt_detour::generated::ztshowinfo::GET_NUM_UNITS as ZTSHOWINFO_GET_NUM_UNITS;
     use openzt_detour::generated::bfconfigfile::{CONSTRUCTOR_0 as BFCONFIGFILE_CONSTRUCTOR_0, RELEASE as BFCONFIGFILE_RELEASE};
     use openzt_detour::generated::bfworldmgr::GET_TYPE as BFWORLDMGR_GET_TYPE;
     use openzt_detour::generated::ztgamemgr::{
-        ADD_CASH as ZTGAMEMGR_ADD_CASH, GET_DATE as ZTGAMEMGR_GET_DATE, HOURS_AGO as ZTGAMEMGR_HOURS_AGO, IS_GAME_DATE as ZTGAMEMGR_IS_GAME_DATE,
-        IS_REAL_WORLD_DATE as ZTGAMEMGR_IS_REAL_WORLD_DATE, LOAD as ZTGAMEMGR_LOAD, SAVE as ZTGAMEMGR_SAVE,
-        SET_NEW_GAME_DEFAULTS as ZTGAMEMGR_SET_NEW_GAME_DEFAULTS, SUBTRACT_CASH as ZTGAMEMGR_SUBTRACT_CASH, TIME_AGO as ZTGAMEMGR_TIME_AGO,
-        UPDATE as ZTGAMEMGR_UPDATE, UPDATE_SIM as ZTGAMEMGR_UPDATE_SIM,
+        ADD_CASH as ZTGAMEMGR_ADD_CASH, ANIMAL_TIME_AGO as ZTGAMEMGR_ANIMAL_TIME_AGO, GET_DATE as ZTGAMEMGR_GET_DATE,
+        HOURS_AGO as ZTGAMEMGR_HOURS_AGO, IS_GAME_DATE as ZTGAMEMGR_IS_GAME_DATE, IS_REAL_WORLD_DATE as ZTGAMEMGR_IS_REAL_WORLD_DATE,
+        LOAD as ZTGAMEMGR_LOAD, OVERRIDE_NEW_GAME_DEFAULTS as ZTGAMEMGR_OVERRIDE_NEW_GAME_DEFAULTS, PEOPLE_TIME_AGO as ZTGAMEMGR_PEOPLE_TIME_AGO,
+        SAVE as ZTGAMEMGR_SAVE, SET_NEW_GAME_DEFAULTS as ZTGAMEMGR_SET_NEW_GAME_DEFAULTS, SUBTRACT_CASH as ZTGAMEMGR_SUBTRACT_CASH,
+        TIME_AGO as ZTGAMEMGR_TIME_AGO, UPDATE as ZTGAMEMGR_UPDATE, UPDATE_SIM as ZTGAMEMGR_UPDATE_SIM,
     };
     use openzt_detour::FunctionDef;
     use proptest::prelude::*;
@@ -1286,6 +1288,16 @@ mod detour_zoo_main {
             fail_flag |= run_ztshow_group3_trick_live_test(&mut failure_log);
             fail_flag |= run_ztshowui_fill_trick_lists_live_test(&mut failure_log);
             fail_flag |= run_ztshowscript_ctor_registration_live_test(&mut failure_log);
+
+            // Run last (see this test's own doc comment): a one-shot wiring smoke test for
+            // set_new_game_defaults's is_new_game=true branch, which calls through GLOBAL_ZTAIMgr's real
+            // vtable slot and so may have real side effects on live AI state.
+            fail_flag |= run_gamemgr_set_new_game_defaults_is_new_game_smoke_test(&mut failure_log);
+
+            // Run last (see this test's own doc comment): a one-shot wiring smoke test for start()/stop(),
+            // which read the live GLOBAL_ZTScenarioMgr/GLOBAL_ZTApp singletons and call through to real
+            // vanilla ZTSoundscape/unpauseGame.
+            fail_flag |= run_gamemgr_start_stop_smoke_test(&mut failure_log);
         }
 
         if fail_flag {
@@ -1614,7 +1626,18 @@ mod detour_zoo_main {
     /// reset the two sides would race each other into (and out of) the `ZTUI::main::set*`-refresh branch
     /// depending purely on call order. Per the implementation plan's own caution, this branch is never
     /// exercised here: calling those UI-refresh functions against a standalone, non-globally-registered
-    /// `ZTGameMgr` risks corrupting real, unrelated live UI state.
+    /// `ZTGameMgr` risks corrupting real, unrelated live UI state (the rating-formula arithmetic that
+    /// branch also gates is covered separately, live-independent, by `ztgamemgr.rs`'s own
+    /// `rating_from_metric` unit tests).
+    ///
+    /// Two more branches also get zero live exercise here, worth calling out explicitly rather than
+    /// leaving implicit: `soundscape_ptr`/`menu_music_handler_ptr` (the latter via [`Self::update`] below,
+    /// not `update_sim` itself) stay null on every standalone instance this battery ever builds - nothing
+    /// in the Stage-1 `set_new_game_defaults` seeding path or anywhere else in scope ever sets either
+    /// field (only the out-of-scope `start()` does, per `ztgamemgr.rs`'s Stage-5 doc comment) - so their
+    /// `ZTSoundscape::update`/`MenuMusicHandler::update` call-through branches never run, live or
+    /// otherwise. Acceptable since both delegate entirely to still-out-of-scope classes with no logic of
+    /// `ZTGameMgr`'s own to verify, but genuinely untested rather than intentionally skipped.
     fn run_gamemgr_update_sim_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZTGAMEMGR_UPDATE_SIM";
 
@@ -1739,21 +1762,27 @@ mod detour_zoo_main {
         fail_flag
     }
 
-    /// `ZTGAMEMGR_FINANCE_DATE_HELPERS` - `ztgamemgr-implementation-plan.md` Stage 4: builds two
-    /// Stage-1-seeded standalone `ZTGameMgr` instances, then proptests `addCash`/`subtractCash`/
-    /// `getDate`/`isGameDate`/`isRealWorldDate`/`timeAgo`/`hoursAgo` real `.original()` vs the
-    /// reimplemented methods.
+    /// `ZTGAMEMGR_FINANCE_DATE_HELPERS` - `ztgamemgr-implementation-plan.md` Stage 4 (+ Stage 7's
+    /// follow-up methods): builds two Stage-1-seeded standalone `ZTGameMgr` instances, then proptests
+    /// `addCash`/`subtractCash`/`getDate`/`isGameDate`/`isRealWorldDate`/`timeAgo`/`hoursAgo`/
+    /// `animalTimeAgo`/`peopleTimeAgo`/`overrideNewGameDefaults` real `.original()` vs the reimplemented
+    /// methods. `removedZooDoo` itself is not ported/detoured - see `ztgamemgr.rs`'s Stage-5 doc comment
+    /// for why - so there's no test for it here.
     ///
     /// `addCash`/`subtractCash` mutate `cash`, so both sides are reseeded to the same generated `cash`
     /// value (`set_cash`) before each call and compared via `normalize_cash_bits` (NaN-safe, see that
-    /// helper's own doc comment). The date-family helpers (`getDate`/`isGameDate`/`timeAgo`/`hoursAgo`)
-    /// don't mutate `this`, so both sides are seeded with the same generated `date` bytes
-    /// (`set_date_bytes`) and compared purely on return value - `isGameDate`'s real return has garbage
-    /// upper bits (see `ZTGameMgr::is_game_date`'s own doc comment), so only the low byte is compared.
-    /// `isRealWorldDate` takes no `this`/seeded state at all (calls `GetSystemTime` directly on both
-    /// sides, independently, microseconds apart) - comparing real vs reimpl booleans here only risks a
-    /// spurious mismatch in the astronomically unlikely case a call lands exactly on a day/month
-    /// rollover between the two calls.
+    /// helper's own doc comment). The date-family helpers (`getDate`/`isGameDate`/`timeAgo`/`hoursAgo`/
+    /// `animalTimeAgo`/`peopleTimeAgo`) don't mutate `this`, so both sides are seeded with the same
+    /// generated `date` bytes (`set_date_bytes`) and compared purely on return value - `isGameDate`'s real
+    /// return has garbage upper bits (see `ZTGameMgr::is_game_date`'s own doc comment), so only the low
+    /// byte is compared; `animalTimeAgo`/`peopleTimeAgo` similarly only compare the low dword/byte (see
+    /// their own doc comments for why the rest is undefined leftover). `isRealWorldDate` takes no
+    /// `this`/seeded state at all (calls `GetSystemTime` directly on both sides, independently,
+    /// microseconds apart) - comparing real vs reimpl booleans here only risks a spurious mismatch in the
+    /// astronomically unlikely case a call lands exactly on a day/month rollover between the two calls.
+    /// `overrideNewGameDefaults` mutates the embedded `ZooStatus` via the same real vanilla function on
+    /// both sides, so the whole `0x10..0x1160` region is byte-diffed afterward rather than compared
+    /// field-by-field.
     ///
     /// Calls the real `TIME_AGO.original()`/`HOURS_AGO.original()` using the hand-corrected signatures
     /// now in `generated.rs` (see those `FunctionDef`s' own doc comments) - calling either with the
@@ -1792,6 +1821,13 @@ mod detour_zoo_main {
             (*reimpl_ptr).set_new_game_defaults(config_ptr, false);
         }
         unsafe { BFCONFIGFILE_RELEASE.original()(config_ptr) };
+
+        // Dedicated, kept-alive config for the overrideNewGameDefaults comparison below - the one above
+        // is released immediately after seeding set_new_game_defaults, matching the rest of this test's
+        // existing pattern.
+        let mut override_config = std::mem::MaybeUninit::<crate::bfconfigfile::BFConfigFile>::uninit();
+        let override_config_ptr = override_config.as_mut_ptr() as *const u32;
+        unsafe { BFCONFIGFILE_CONSTRUCTOR_0.original()(override_config_ptr, &kind_tag_byte as *const u8) };
 
         let runner_config = ProptestConfig {
             failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
@@ -1896,6 +1932,38 @@ mod detour_zoo_main {
                 let reimpl_hours_ago = unsafe { (*reimpl_ptr).hours_ago(reference) };
                 prop_assert_eq!(real_hours_ago, reimpl_hours_ago, "hoursAgo mismatch for reference={}", reference);
 
+                // animalTimeAgo/peopleTimeAgo: same seeded date/reference as timeAgo/hoursAgo above - only
+                // the low dword of the real register-pair return is meaningful (see each method's own doc
+                // comment), so only that half is compared.
+                let real_animal_time_ago = unsafe { ZTGAMEMGR_ANIMAL_TIME_AGO.original()(real_ptr as *const u32, reference_low, reference_high as i32) };
+                let reimpl_animal_time_ago = unsafe { (*reimpl_ptr).animal_time_ago(reference) };
+                prop_assert_eq!(
+                    real_animal_time_ago as u32,
+                    reimpl_animal_time_ago,
+                    "animalTimeAgo mismatch for reference={}",
+                    reference
+                );
+
+                let real_people_time_ago = unsafe { ZTGAMEMGR_PEOPLE_TIME_AGO.original()(real_ptr as *const u32, reference_low, reference_high as i32) };
+                let reimpl_people_time_ago = unsafe { (*reimpl_ptr).people_time_ago(reference) };
+                prop_assert_eq!(
+                    real_people_time_ago as u8 as u32,
+                    reimpl_people_time_ago,
+                    "peopleTimeAgo mismatch for reference={}",
+                    reference
+                );
+                // overrideNewGameDefaults: the same real ZooStatus::override runs against both sides'
+                // embedded ZooStatus with the same config, so the whole embedded region (0x10..0x1160)
+                // should stay byte-identical afterward - nothing else in this test's proptest body touches
+                // that region.
+                unsafe {
+                    ZTGAMEMGR_OVERRIDE_NEW_GAME_DEFAULTS.original()(real_ptr as *const u32, override_config_ptr);
+                    (*reimpl_ptr).override_new_game_defaults(override_config_ptr);
+                }
+                let real_zoostatus_bytes = unsafe { std::slice::from_raw_parts((real_ptr as *const u8).add(0x10), 0x1150) };
+                let reimpl_zoostatus_bytes = unsafe { std::slice::from_raw_parts((reimpl_ptr as *const u8).add(0x10), 0x1150) };
+                prop_assert_eq!(real_zoostatus_bytes, reimpl_zoostatus_bytes, "overrideNewGameDefaults: embedded ZooStatus diverged");
+
                 // isRealWorldDate: no seeded state - both sides call GetSystemTime independently.
                 let real_is_real_world = unsafe { ZTGAMEMGR_IS_REAL_WORLD_DATE.original()(game_day as i32, game_month) };
                 let reimpl_is_real_world = ztgamemgr::ZTGameMgr::is_real_world_date(game_day, game_month);
@@ -1925,12 +1993,156 @@ mod detour_zoo_main {
             }
         }
 
+        unsafe { BFCONFIGFILE_RELEASE.original()(override_config_ptr) };
+
         if !fail_flag {
             write_success_line(failure_log, test_name);
         }
 
         gamemgr_live_support::destroy_standalone_mgr(real_ptr);
         gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+        fail_flag
+    }
+
+    /// `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS_IS_NEW_GAME_SMOKE` - one-shot wiring check for
+    /// `set_new_game_defaults`'s `is_new_game=true` branch, which `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS` above
+    /// deliberately never exercises (that test pins `is_new_game=false` on both sides - see its own doc
+    /// comment for why: the `true` branch calls through `GLOBAL_ZTAIMgr`'s real vtable slot, the live,
+    /// shared AI manager singleton, so exercising it is a real side effect on live game state, not
+    /// something a synthetic standalone instance can safely absorb before a zoo has even loaded). Deferred
+    /// to here, after `run_load_live_zoo`, for the same reason `removedZooDoo`'s own smoke test had to move
+    /// (see `ztgamemgr.rs`'s Stage-5 doc comment / this file's git history): a global pointer being
+    /// non-null (`GLOBAL_ZTAIMgr` is set well before this point) is not the same guarantee as the global's
+    /// *internal* state being genuinely constructed, and calling into a still-uninitialized manager's real
+    /// vtable slot pre-zoo-load is exactly the class of bug that crashed `getBuildingList` there. Once a
+    /// real zoo is loaded, calling this is no different from what real "start new game" gameplay already
+    /// does.
+    ///
+    /// Not a byte-diff: both sides call through to the *same* live `GLOBAL_ZTAIMgr` singleton, so a memory
+    /// comparison between the two standalone instances wouldn't reflect anything meaningful about either
+    /// side's own logic. This only confirms the call wiring (`this`/args passed into
+    /// `BFAIMGR_LOAD_DATA.original()`) doesn't crash on either side - a wrong-`this`/wrong-arg bug there is
+    /// exactly what the pinned-`false` Stage 1 test structurally cannot see. Run last in this file's
+    /// battery (see `run_all_tests`), since `BFAIMgr::loadData` may have real side effects on live AI state
+    /// that earlier tests shouldn't have to account for.
+    fn run_gamemgr_set_new_game_defaults_is_new_game_smoke_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_SET_NEW_GAME_DEFAULTS_IS_NEW_GAME_SMOKE";
+
+        let real_ptr = gamemgr_live_support::build_standalone_mgr();
+        let reimpl_ptr = gamemgr_live_support::build_standalone_mgr();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ztgamemgr::ZTGameMgr>();
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+        }
+
+        let mut config = std::mem::MaybeUninit::<crate::bfconfigfile::BFConfigFile>::uninit();
+        let config_ptr = config.as_mut_ptr() as *const u32;
+        let kind_tag_byte: u8 = 0;
+        unsafe { BFCONFIGFILE_CONSTRUCTOR_0.original()(config_ptr, &kind_tag_byte as *const u8) };
+
+        unsafe {
+            ZTGAMEMGR_SET_NEW_GAME_DEFAULTS.original()(real_ptr as *const u32, config_ptr, true);
+            (*reimpl_ptr).set_new_game_defaults(config_ptr, true);
+        }
+
+        unsafe { BFCONFIGFILE_RELEASE.original()(config_ptr) };
+
+        info!("{}: is_new_game=true call-through completed without crashing on both sides", test_name);
+        write_success_line(failure_log, test_name);
+
+        gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+        gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+        false
+    }
+
+    /// `ZTGAMEMGR_START_STOP_SMOKE` - one-shot wiring check for the reimplemented `start`/`stop`
+    /// (`ztgamemgr.rs`'s Stage-5 doc comment covers the full port). Not a byte-diff: `start`/`stop` read
+    /// the live `GLOBAL_ZTScenarioMgr`/`GLOBAL_ZTApp` singletons and call through to real vanilla
+    /// `ZTSoundscape`/`ZTUI::main::unpauseGame` - side effects on shared global/audio state, not something
+    /// a standalone instance's own memory can meaningfully diff against a second standalone instance. This
+    /// only confirms the call sequence (allocate/construct/init the soundscape, read the two new raw
+    /// globals, tail-call `unpauseGame`) doesn't crash. Deferred to run last, after `run_load_live_zoo` and
+    /// after the `is_new_game=true` smoke test above, for the same reason that one is deferred:
+    /// `GLOBAL_ZTScenarioMgr`/`GLOBAL_ZTApp` being non-null pointers is not the same guarantee as their
+    /// internal state being genuinely constructed pre-zoo-load (the same "non-null but uninitialized
+    /// registry" hazard class that crashed `getBuildingList` during the `removedZooDoo` investigation).
+    fn run_gamemgr_start_stop_smoke_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_START_STOP_SMOKE";
+
+        let ptr = gamemgr_live_support::build_standalone_mgr();
+        if ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        unsafe { (*ptr).start() };
+        let started_after_start = unsafe { (*ptr).started() };
+        let soundscape_after_start = unsafe { (*ptr).soundscape_ptr() };
+
+        unsafe { (*ptr).stop() };
+        let started_after_stop = unsafe { (*ptr).started() };
+        let soundscape_after_stop = unsafe { (*ptr).soundscape_ptr() };
+
+        let mut fail_flag = false;
+        if !started_after_start || soundscape_after_start == 0 {
+            fail_flag = true;
+            error!(
+                "{}: expected started=true and a non-null soundscape_ptr after start(), got started={} soundscape_ptr={:#x}",
+                test_name, started_after_start, soundscape_after_start
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!(
+                        "Test Failed {}: after start(), started={} soundscape_ptr={:#x}\n",
+                        test_name, started_after_start, soundscape_after_start
+                    )
+                    .as_bytes(),
+                );
+            }
+        }
+        if started_after_stop || soundscape_after_stop != 0 {
+            fail_flag = true;
+            error!(
+                "{}: expected started=false and a null soundscape_ptr after stop(), got started={} soundscape_ptr={:#x}",
+                test_name, started_after_stop, soundscape_after_stop
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!(
+                        "Test Failed {}: after stop(), started={} soundscape_ptr={:#x}\n",
+                        test_name, started_after_stop, soundscape_after_stop
+                    )
+                    .as_bytes(),
+                );
+            }
+        }
+
+        if !fail_flag {
+            info!("{}: start()/stop() call sequence completed without crashing, flags/pointer toggled as expected", test_name);
+            write_success_line(failure_log, test_name);
+        }
+
+        gamemgr_live_support::destroy_standalone_mgr(ptr);
 
         fail_flag
     }
@@ -1965,7 +2177,7 @@ mod detour_zoo_main {
         };
         let mode_cstring = c"rb";
 
-        let file_ptr = unsafe { standalone::FOPEN.original()(path_cstring.as_ptr(), mode_cstring.as_ptr()) };
+        let file_ptr = unsafe { standalone::FOPEN.original()(path_cstring.as_ptr() as u32, mode_cstring.as_ptr()) };
         if file_ptr.is_null() {
             error!("{}: fopen failed for {:?} (file missing? see OPENZT_TEST_ZOO)", test_name, path);
             if let Some(log_file) = failure_log {
@@ -5268,11 +5480,19 @@ mod detour_zoo_main {
     fn run_ztshow_check_owning_habitat_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZTSHOW_CHECK_OWNING_HABITAT_LIVE";
 
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} entry\n", test_name).as_bytes());
+        }
+
         let Some((qualifying_habitat_ptr, real_show_info)) = find_real_show_tank_habitat() else {
             info!("Skipping {}: no real tank habitat with water_level()>0 and a real ZTShowInfo* attached found in test zoo", test_name);
             write_success_line(failure_log, &format!("{} (skipped: no qualifying real show-tank habitat found)", test_name));
             return false;
         };
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} found qualifying_habitat={:#010x} real_show_info={:#010x}\n", test_name, qualifying_habitat_ptr, real_show_info).as_bytes());
+        }
 
         let mut fail_flag = false;
 
@@ -5286,6 +5506,9 @@ mod detour_zoo_main {
             error!("{}: check_owning_habitat returned true (blocked) for a real working tank habitat ({:#010x}, water_level>0)", test_name, qualifying_habitat_ptr);
             fail_flag = true;
         }
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} positive case done\n", test_name).as_bytes());
+        }
 
         // Negative case: a null habitat pointer means there's no tank gating this show at all, so it must
         // not be blocked either.
@@ -5294,6 +5517,9 @@ mod detour_zoo_main {
         if ztshow::check_owning_habitat(null_show_info) {
             error!("{}: check_owning_habitat returned true (blocked) for a null habitat pointer", test_name);
             fail_flag = true;
+        }
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} negative case done\n", test_name).as_bytes());
         }
 
         // Blocking case: a real tank exhibit with zero water level must be blocked, if the test zoo has
@@ -5309,6 +5535,9 @@ mod detour_zoo_main {
         } else {
             info!("{}: no real empty tank habitat found in test zoo, skipping that half of the check", test_name);
         }
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} blocking case done\n", test_name).as_bytes());
+        }
 
         // Best-effort smoke test of the full START entry point (which is what actually calls
         // check_owning_habitat in real gameplay) against the real show already attached to the qualifying
@@ -5318,9 +5547,15 @@ mod detour_zoo_main {
         // comment), so an early return here is just as valid an outcome as a full run.
         if real_show_info != 0 {
             let real_show = real_show_info + 4;
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("CHECKPOINT {} about to call START on real_show={:#010x}\n", test_name, real_show).as_bytes());
+            }
             let start_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32)>(0x005a3db4u32) };
             start_hooked(real_show as *const u32);
             info!("{}: START smoke-test against real show {:#010x} completed without crashing", test_name, real_show);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("CHECKPOINT {} START returned\n", test_name).as_bytes());
+            }
         }
 
         if !fail_flag {
@@ -5393,7 +5628,9 @@ mod detour_zoo_main {
 
         // Create a real ZTShowScriptState for our chosen unit (real, un-hooked CREATE_SHOW_SCRIPT_STATE -
         // safe against this real, properly-constructed ZTShow's own `+0x34` state map), then fetch it back
-        // the same way `do_current_item`'s own body does.
+        // the same way `do_current_item`'s own body does. Two-arg call only (this, unit_id) - see
+        // `ztshow.rs`'s `start()` doc comment / `generated.rs`'s `CONSTRUCTOR` entry for why the old
+        // three-arg signature (a bogus `show_id: u16`) was a real stack-imbalance bug.
         let create_result = unsafe { CREATE_SHOW_SCRIPT_STATE.original()(real_show as *const u32, unit_id) };
         if create_result != 0 {
             info!("{}: CREATE_SHOW_SCRIPT_STATE returned {} (nonzero/failure) for unit {:#x}; do_current_item/do_trick_event will still be exercised via their early-return paths", test_name, create_result, unit_id);
