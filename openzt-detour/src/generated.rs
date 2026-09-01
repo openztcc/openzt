@@ -4458,16 +4458,20 @@ pub mod ztgamemgr {
     pub const PEOPLE_TIME_AGO: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32, i32) -> i8> = FunctionDef{address: 0x0046a791, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/save"))]
     pub const SAVE: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32) -> u32> = FunctionDef{address: 0x0047acc5, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/start_menu_music_fade_0"))]
+    pub const START_MENU_MUSIC_FADE_0: FunctionDef<unsafe extern "fastcall" fn(*const u32)> = FunctionDef{address: 0x00485dd5, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/removed_zoo_doo"))]
     pub const REMOVED_ZOO_DOO: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32)> = FunctionDef{address: 0x004a2c98, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/start_menu_music"))]
     pub const START_MENU_MUSIC: FunctionDef<unsafe extern "fastcall" fn(*const u32)> = FunctionDef{address: 0x004bded9, function_type: PhantomData};
-    #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/start_menu_music_fade_0"))]
-    pub const START_MENU_MUSIC_FADE_0: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x004c9d67, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/start_menu_music_fade_1"))]
-    pub const START_MENU_MUSIC_FADE_1: FunctionDef<unsafe extern "fastcall" fn(i32)> = FunctionDef{address: 0x004ca478, function_type: PhantomData};
+    pub const START_MENU_MUSIC_FADE_1: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x004c9d67, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/start_menu_music_fade_2"))]
-    pub const START_MENU_MUSIC_FADE_2: FunctionDef<unsafe extern "fastcall" fn(i32)> = FunctionDef{address: 0x004cc59d, function_type: PhantomData};
+    pub const START_MENU_MUSIC_FADE_2: FunctionDef<unsafe extern "fastcall" fn(*const u32)> = FunctionDef{address: 0x004ca2fb, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/start_menu_music_fade_3"))]
+    pub const START_MENU_MUSIC_FADE_3: FunctionDef<unsafe extern "fastcall" fn(i32)> = FunctionDef{address: 0x004ca478, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/start_menu_music_fade_4"))]
+    pub const START_MENU_MUSIC_FADE_4: FunctionDef<unsafe extern "fastcall" fn(i32)> = FunctionDef{address: 0x004cc59d, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/goto_start"))]
     pub const GOTO_START: FunctionDef<unsafe extern "stdcall" fn(u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u32, u32) -> u32> = FunctionDef{address: 0x004cc5b0, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr/is_game_date"))]
@@ -4501,7 +4505,7 @@ pub mod ztgamemgr_menumusichandler {
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr_menumusichandler/start_play"))]
     pub const START_PLAY: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x00522014, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr_menumusichandler/init"))]
-    pub const INIT: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32) -> u32> = FunctionDef{address: 0x0052205e, function_type: PhantomData};
+    pub const INIT: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32, i32) -> u32> = FunctionDef{address: 0x0052205e, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr_menumusichandler/menu_music_handler_1"))]
     pub const MENU_MUSIC_HANDLER_1: FunctionDef<unsafe extern "fastcall" fn(*const u32) -> *const u32> = FunctionDef{address: 0x00527cd1, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztgamemgr_menumusichandler/start_fade"))]
@@ -7630,18 +7634,6 @@ pub mod ztshowscriptstate {
     pub const LOAD: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32, u32) -> bool> = FunctionDef{address: 0x0046e226, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowscriptstate/get_num_items"))]
     pub const GET_NUM_ITEMS: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> i32> = FunctionDef{address: 0x005a218f, function_type: PhantomData};
-    // Hand-corrected: auto-generation had this as `fn(*const u32, u32, u16) -> u32` (this + unit_id +
-    // a spurious show_id u16). The real function only pops 0x4 bytes of stack args (`RET 0x4`, confirmed
-    // at all three return sites in ZTShowScriptState_ZTShowScriptState.asm) and never reads a second
-    // stack slot (no `[ESP+0x2c]` access anywhere in the body) - it takes only `this`/`unit_id`. The
-    // u16 field the old signature implied was a caller-supplied "show_id" is actually read internally
-    // from `this->mbr_0x4` (the calling ZTShow's own current script id, see the .asm's
-    // `MOV CX, word ptr [EBX+0x4]`), not passed in. `_initShowScriptState.c`'s own call site
-    // (`ZTShowScriptState::ZTShowScriptState((ZTShowScriptState*)this_01,(uint)piVar5,unaff_retaddr)`)
-    // confirms this independently: `unaff_retaddr` is Ghidra's decompiler-injected placeholder for
-    // "uninitialized garbage read from a stack slot that isn't a real incoming parameter" - not a
-    // genuine third argument. Calling this with the old 3-arg signature left one extra stack slot
-    // un-popped by the callee on every call, a real stack-imbalance bug (see ztshow.rs's `start()`).
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowscriptstate/constructor"))]
     pub const CONSTRUCTOR: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32) -> u32> = FunctionDef{address: 0x005a4075, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowscriptstate/set_next_item_0"))]
@@ -8926,13 +8918,8 @@ pub mod ztworldmgr {
 
     #[cfg_attr(feature = "detour-validation", validate_detour("ztworldmgr/satisfies"))]
     pub const SATISFIES: FunctionDef<unsafe extern "cdecl" fn(i32, *const i8, *const u32) -> u32> = FunctionDef{address: 0x0041239d, function_type: PhantomData};
-    // Corrected: a full ESP-relative trace of `ZTGameMgr_removedZooDoo.asm`'s call site shows a genuine
-    // thiscall (`MOV ECX,EBX` where `EBX` was just loaded from `GLOBAL_ZTWorldMgr`, right before the
-    // `CALL`), with `this` plus two stack args `(tag_string_ptr, out_list_ptr)` - not the auto-generated
-    // `stdcall`, no-`this`, 2-raw-pointer shape this entry used to carry. Same category of fix already
-    // applied to `ztgamemgr::TIME_AGO`/`HOURS_AGO` on this branch.
     #[cfg_attr(feature = "detour-validation", validate_detour("ztworldmgr/get_building_list"))]
-    pub const GET_BUILDING_LIST: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32, *const u32)> = FunctionDef{address: 0x00413db8, function_type: PhantomData};
+    pub const GET_BUILDING_LIST: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i32, *const i32)> = FunctionDef{address: 0x00413db8, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztworldmgr/get_attractions"))]
     pub const GET_ATTRACTIONS: FunctionDef<unsafe extern "stdcall" fn(*const i32)> = FunctionDef{address: 0x00427f43, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztworldmgr/get_gawk_scenery"))]
@@ -9155,21 +9142,6 @@ pub mod std_basic_string {
 pub mod standalone {
     use super::*;
 
-    // Hand-added: not picked up by the Ghidra pass yet. Confirmed against
-    // `ZTGameMgr_removedZooDoo.asm`'s `PUSH 0xc; PUSH EAX; CALL FUN_00401b16; ADD ESP,0x8` (cdecl, two
-    // args, caller-cleaned) and `ZTGameMgr_removedZooDoo.meta`'s own `calling_functions` entry
-    // (`void __cdecl FUN_00401b16(undefined4 *param_1, uint param_2)`) - a small-object free helper
-    // taking (ptr, size), used there to free `ZTWorldMgr::getBuildingList`'s 0xc-byte list nodes.
-    #[cfg_attr(feature = "detour-validation", validate_detour("standalone/free_small_object"))]
-    pub const FREE_SMALL_OBJECT: FunctionDef<unsafe extern "cdecl" fn(*const u32, u32)> = FunctionDef{address: 0x00401b16, function_type: PhantomData};
-    // Hand-added: not picked up by the Ghidra pass yet. Confirmed against `ZTGameMgr_stop.asm`'s
-    // `PUSH ESI; CALL FUN_00402629; ADD ESP,0x4` (cdecl, one arg, caller-cleaned) - a generic
-    // single-pointer free/delete helper, used there to free the `ZTSoundscape` allocation after its
-    // destructor runs. Pervasive across the decompile corpus as the paired `operator delete` for
-    // `standalone::OPERATOR_NEW` (dozens of destructors call it the same way, e.g.
-    // `BFAIMgr_~BFAIMgr_0.c`, `BFApp_~BFApp_1.c`).
-    #[cfg_attr(feature = "detour-validation", validate_detour("standalone/operator_delete"))]
-    pub const OPERATOR_DELETE: FunctionDef<unsafe extern "cdecl" fn(*const u32)> = FunctionDef{address: 0x00402629, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/nullsub_0"))]
     pub const NULLSUB_0: FunctionDef<unsafe extern "thiscall" fn(*const c_void)> = FunctionDef{address: 0x0040100b, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/nullsub_1"))]
@@ -9182,6 +9154,8 @@ pub mod standalone {
     pub const FIND_Q23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD722_TREE_Q23STD135PAIR_CQ23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD52LIST_P10ZTBUILDING_Q23STD24ALLOCATOR_P10ZTBUILDING_Q33STD380MAP_Q23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD52LIST_P10ZTBUILDING_Q23STD24ALLOCATOR_P10ZTBUILDING_Q23STD73LESS_Q23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD155ALLOCATOR_Q23STD135PAIR_CQ23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD52LIST_P10ZTBUILDING_Q23STD24ALLOCATOR_P10ZTBUILDING13VALUE_COMPARE_Q23STD155ALLOCATOR_Q23STD135PAIR_CQ23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD52LIST_P10ZTBUILDING_Q23STD24ALLOCATOR_P10ZTBUILDING_FRCQ23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q33STD722_TREE_Q23STD135PAIR_CQ23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD52LIST_P10ZTBUILDING_Q23STD24ALLOCATOR_P10ZTBUILDING_Q33STD380MAP_Q23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD52LIST_P10ZTBUILDING_Q23STD24ALLOCATOR_P10ZTBUILDING_Q23STD73LESS_Q23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD155ALLOCATOR_Q23STD135PAIR_CQ23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD52LIST_P10ZTBUILDING_Q23STD24ALLOCATOR_P10ZTBUILDING13VALUE_COMPARE_Q23STD155ALLOCATOR_Q23STD135PAIR_CQ23STD59BASIC_STRINGC_Q23STD14CHAR_TRAITSC_Q23STD12ALLOCATORC_Q23STD52LIST_P10ZTBUILDING_Q23STD24ALLOCATOR_P10ZTBUILDING21_GENERIC_ITERATOR0: FunctionDef<unsafe extern "thiscall" fn(*const c_void, *const i32, *const u8)> = FunctionDef{address: 0x00401b9f, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/search_config_method"))]
     pub const SEARCH_CONFIG_METHOD: FunctionDef<unsafe extern "thiscall" fn(*const c_void, *const i32, *const u8)> = FunctionDef{address: 0x00401eb1, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("standalone/operator_delete"))]
+    pub const OPERATOR_DELETE: FunctionDef<unsafe extern "cdecl" fn(u32)> = FunctionDef{address: 0x00402629, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/operator_new"))]
     pub const OPERATOR_NEW: FunctionDef<unsafe extern "cdecl" fn(u32) -> *const c_void> = FunctionDef{address: 0x00402a5a, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/nullsub_2"))]

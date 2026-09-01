@@ -485,10 +485,12 @@ by `ztmarketing.rs`/`ztresearch.rs`/`ztthoughtmgr.rs`/`ztmegatilemgr.rs`.
 ### `openzt-detour/src/generated.rs`
 
 - Auto-generated from a Ghidra analysis pass run **outside this repo** - there is no generator script checked
-  in. **Never hand-patch this file's existing entries** - a regeneration silently discards hand-edits. The one
-  sanctioned exception is adding an entry for a function Ghidra's pass hasn't picked up yet: add it inside the
-  relevant `pub mod <classname> { ... }` block with a `// Hand-added: <reason>` comment directly above it,
-  matching the existing hand-added block's style (search the file for `Hand-added` to find the precedent).
+  in. **Never hand-edit this file** - not existing entries (e.g. a wrong signature/ABI), not entries the pass
+  missed, not even comment-only annotations: a regeneration silently discards every hand-edit, and an entry
+  that regenerates back to a wrong signature builds detours that corrupt the stack in every un-ported caller.
+  When the pass's output is wrong or incomplete, **surface it to the user instead** - the address, the
+  `.asm`/caller evidence, and what the entry should say - so the fix can go into the generator itself, and
+  wait for the next regeneration to correct the file.
 - One `pub mod <lowercase_classname> { ... }` block per C++ class (free functions live under `standalone` or a
   UI-area module like `ztui`). Each function is `pub const <SCREAMING_NAME>: FunctionDef<unsafe extern
   "<abi>" fn(...) -> R> = FunctionDef{address: 0x..., function_type: PhantomData};`.
@@ -502,10 +504,18 @@ by `ztmarketing.rs`/`ztresearch.rs`/`ztthoughtmgr.rs`/`ztmegatilemgr.rs`.
   attribute. This is currently inert scaffolding - no `detour-validation` feature or `validate_detour` macro
   exists in the repo - just copy the attribute verbatim on any new entry for consistency, don't try to wire it
   up.
-- `FunctionDef::original()` returns the real vanilla function unconditionally (`retour::Function::from_ptr` on
-  the stored address) - it does **not** check whether that address is currently hooked. Calling `.original()`
-  on a function you have *not* detoured is always safe. Calling it *from inside that same function's own
-  detour* is not (see below).
+- `FunctionDef::original()` returns the real vanilla function - in debug builds it routes through the
+  trampoline registered by `FunctionDef::detour()` (a process-global hook registry in
+  `openzt-detour/src/lib.rs`, `#[cfg(debug_assertions)]`), so calling `.original()` on a hooked address still
+  reaches vanilla, never our own detour; in release builds it is a raw `retour::Function::from_ptr` cast of the
+  stored address (zero cost, no registry), so there calling `.original()` on a hooked address re-enters the
+  detour. The battery's `MENUMUSICHANDLER_ORIGINAL_ROUTES_TO_TRAMPOLINE` test pins the debug routing.
+  `FunctionDef::hooked()` is the deliberate re-entry API: it is the raw address cast in **every** build (what a
+  vanilla caller executing the address runs - our detour if one is installed), for the few call sites whose
+  documented intent is to invoke the hook itself (e.g. `ztshowui.rs`'s `load_display_string` wanting
+  string-registry-aware `BFApp::loadString`). Calling `.original()` on a function you have *not* detoured is
+  always safe. Calling it *from inside that same function's own detour* is not safe in release (see below) -
+  use `<NAME>_DETOUR.call(...)` there regardless of profile.
 
 ### Detouring a function (`#[detour_mod]` / `#[detour(NAME)]`)
 
@@ -538,11 +548,15 @@ pub fn init() {
   `this: *const u32` as the first parameter.
 - Use `NAME.original()(...)` to call a vanilla function's real body when you have **not** hooked that same
   function (e.g. calling a different helper, or calling through from one class's detour into another
-  class's un-hooked method).
-- Use the macro-generated `<NAME>_DETOUR.call(...)` only when calling the real body **of the function your
-  current code is itself a detour for** (its address has been patched to jump into your detour, so
-  `.original()` there would recurse into yourself). See `resource_manager/hooks.rs`'s `CONSTRUCTOR` detour for
-  the pattern (run `CONSTRUCTOR_DETOUR.call(this_ptr)` first, then layer additional Rust logic on top).
+  class's un-hooked method). In debug builds it stays correct even for addresses that *are* hooked (it routes
+  through the hook registry's trampoline); in release it is a raw address cast, so there it must stay off the
+  hooked addresses (see the `generated.rs` section above and `FunctionDef::hooked()` for deliberate re-entry).
+- Use the macro-generated `<NAME>_DETOUR.call(...)` whenever calling the real body **of the function your
+  current code is itself a detour for** (its address has been patched to jump into your detour, so in release
+  `.original()` there would recurse into yourself). This is the only correct call-through in every profile -
+  live-test "real vanilla" poles built on it (e.g. `ztgamemgr_menumusichandler::live_support::real_*`,
+  ztawardmgr's `call_real`) stay release-safe because of it. See `resource_manager/hooks.rs`'s `CONSTRUCTOR`
+  detour for the pattern (run `CONSTRUCTOR_DETOUR.call(this_ptr)` first, then layer additional Rust logic on top).
 - A **partial-override** detour (replace behavior for one input/condition, delegate to the real function for
   everything else) uses the same `<NAME>_DETOUR.call(...)` mechanism inside a `match`/`if` - see
   `resource_manager/hooks.rs`'s `zoo_ui_general_get_info_image_name` for the shape. There's no dedicated

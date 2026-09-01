@@ -1771,11 +1771,12 @@ impl ZTResearchMgr {
     /// Calls `ZTResearchMgr::save`. `file` is whatever file-handle pointer the original
     /// `WriteBytesToFile` calls expect. By default (see `research_save_reimplementation::detours`)
     /// this address is detoured onto that module's native reimplementation
-    /// (`serialize(&snapshot_mgr(self))`, written via `standalone::WRITE_BYTES_TO_FILE`); under the
-    /// `vanilla-research-save` feature no detour is installed and `.original()` reaches genuine
-    /// vanilla code instead.
+    /// (`serialize(&snapshot_mgr(self))`, written via `standalone::WRITE_BYTES_TO_FILE`), and
+    /// `.hooked()` deliberately re-enters that hook, exactly like a vanilla caller would; under the
+    /// `vanilla-research-save` feature no detour is installed and the address still holds genuine
+    /// vanilla code.
     pub fn save(&self, file: *const u32) -> bool {
-        unsafe { ztresearchmgr::SAVE.original()((self as *const Self) as *const u32, file) != 0 }
+        unsafe { ztresearchmgr::SAVE.hooked()((self as *const Self) as *const u32, file) != 0 }
     }
 
     /// Calls `ZTResearchMgr::load` - the save-file counterpart to `save()`. Per
@@ -1795,11 +1796,12 @@ impl ZTResearchMgr {
     /// files - that's `ZTResearchBranch::load_branch`/`ZTResearchCategory::load_category`/
     /// `ZTResearchProgram::load_program`. By default this address is detoured onto
     /// `research_save_reimplementation::detours::load`, a native reimplementation of exactly the
-    /// behavior described above (reading the stream via `standalone::DEALLOCATE`); under the
-    /// `vanilla-research-save` feature no detour is installed and `.original()` reaches genuine
-    /// vanilla code instead.
+    /// behavior described above (reading the stream via `standalone::DEALLOCATE`), and `.hooked()`
+    /// deliberately re-enters that hook, exactly like a vanilla caller would; under the
+    /// `vanilla-research-save` feature no detour is installed and the address still holds genuine
+    /// vanilla code.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
-        unsafe { ztresearchmgr::LOAD.original()((self as *mut Self) as *const u32, file, version) }
+        unsafe { ztresearchmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) }
     }
 
     /// Reimplementation of `ZTResearchMgr::forceResearch` (the class-level half of the "research
@@ -1831,7 +1833,7 @@ impl ZTResearchMgr {
     /// Calls the vanilla `ZTResearchMgr::clearBranches`: destroys and frees every branch (and
     /// everything under it), then resets `branch_array` to empty.
     pub fn clear_branches(&mut self) {
-        unsafe { ztresearchmgr::CLEAR_BRANCHES.original()((self as *mut Self) as *const u32) }
+        unsafe { ztresearchmgr::CLEAR_BRANCHES.hooked()((self as *mut Self) as *const u32) }
     }
 }
 
@@ -3697,7 +3699,7 @@ pub(crate) mod research_save_reimplementation {
     /// `reimplementation_tests::io_redirect`'s redirect target exactly (`standalone::DEALLOCATE`, the
     /// `fread`-shaped primitive - the name is a decompiler artifact, not descriptive) so the two stay
     /// interchangeable: in a `reimplementation-tests` build with a capture/replay window active,
-    /// `DEALLOCATE.original()` calls here transparently hit `io_redirect`'s in-memory buffer instead of
+    /// `DEALLOCATE.hooked()` calls here transparently hit `io_redirect`'s in-memory buffer instead of
     /// a real file, exactly like every other call to that address.
     #[cfg(not(feature = "vanilla-research-save"))]
     mod stream_io {
@@ -3715,13 +3717,13 @@ pub(crate) mod research_save_reimplementation {
 
         pub(super) fn read_i32(file: *const u32) -> Option<i32> {
             let mut buf = 0i32;
-            let ok = unsafe { DEALLOCATE.original()(&mut buf as *mut i32 as *const u32, 4, 1, file as *const u8) };
+            let ok = unsafe { DEALLOCATE.hooked()(&mut buf as *mut i32 as *const u32, 4, 1, file as *const u8) };
             (ok == 1).then_some(buf)
         }
 
         pub(super) fn read_u8(file: *const u32) -> Option<u8> {
             let mut buf = 0u8;
-            let ok = unsafe { DEALLOCATE.original()(&mut buf as *mut u8 as *const u32, 1, 1, file as *const u8) };
+            let ok = unsafe { DEALLOCATE.hooked()(&mut buf as *mut u8 as *const u32, 1, 1, file as *const u8) };
             (ok == 1).then_some(buf)
         }
     }
@@ -3747,7 +3749,7 @@ pub(crate) mod research_save_reimplementation {
             let mgr = unsafe { ref_from_memory::<ZTResearchMgr>(this) };
             let bytes = serialize(&snapshot_mgr(mgr));
 
-            let ok = unsafe { standalone::WRITE_BYTES_TO_FILE.original()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) };
+            let ok = unsafe { standalone::WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) };
             if !ok {
                 error!("research-save-reimplementation: WriteBytesToFile failed writing {} research bytes", bytes.len());
             }

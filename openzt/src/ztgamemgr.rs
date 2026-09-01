@@ -21,7 +21,6 @@ use std::ffi::c_void;
 use openzt_detour::generated::{
     bfscenariomgr::{GET_CROWD_AMBIENTS_NAME, GET_CROWD_CONFIG_NAME, GET_WORLD_AMBIENTS_NAME, GET_WORLD_CONFIG_NAME},
     standalone::{DEALLOCATE, OPERATOR_DELETE, OPERATOR_NEW, WRITE_BYTES_TO_FILE},
-    ztgamemgr_menumusichandler::UPDATE as MENU_MUSIC_HANDLER_UPDATE,
     ztsoundscape::{CONSTRUCTOR as ZTSOUNDSCAPE_CONSTRUCTOR, INIT as ZTSOUNDSCAPE_INIT, UPDATE as ZTSOUNDSCAPE_UPDATE, ZTSOUNDSCAPE as ZTSOUNDSCAPE_DESTRUCTOR},
     ztui_main::{
         SET_ANIMAL_RATING as ZTUI_MAIN_SET_ANIMAL_RATING, SET_DATE_TEXT as ZTUI_MAIN_SET_DATE_TEXT, SET_GUEST_RATING as ZTUI_MAIN_SET_GUEST_RATING,
@@ -51,6 +50,7 @@ use crate::{
     globals::{get_module_base, globals},
     lua_fn,
     util::{get_from_memory, mut_from_memory, ref_from_memory, save_to_memory},
+    ztgamemgr_menumusichandler::MenuMusicHandler,
 };
 
 /// `DAT_006394b8`'s RVA (Ghidra VA `0x006394b8` minus the default load base `0x400000`) - a raw, signed
@@ -534,18 +534,18 @@ impl ZTGameMgr {
     /// ANDed together, matching `ztawardmgr.rs`'s own `save`.
     pub fn save(&self, file: *const u32) -> bool {
         let marker: u32 = 0;
-        let mut ok = unsafe { WRITE_BYTES_TO_FILE.original()(&marker as *const u32, 4, 1, file as *const i8) };
+        let mut ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(&marker as *const u32, 4, 1, file as *const i8) };
 
         let zoostatus_ptr = (self as *const Self as u32 + 0x10) as *const u32;
         let zoostatus_result = unsafe { ZOOSTATUS_SAVE.original()(zoostatus_ptr, file as *const i8) };
         ok &= zoostatus_result == 1;
 
-        ok &= unsafe { WRITE_BYTES_TO_FILE.original()(&self.date as *const Systemtime as *const u32, 0x10, 1, file as *const i8) };
+        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.date as *const Systemtime as *const u32, 0x10, 1, file as *const i8) };
 
-        ok &= unsafe { WRITE_BYTES_TO_FILE.original()(&self.cash as *const f32 as *const u32, 4, 1, file as *const i8) };
+        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.cash as *const f32 as *const u32, 4, 1, file as *const i8) };
 
         // BFGameMgr::save inlined: writes the raw elapsed_sim_ticks dword.
-        ok &= unsafe { WRITE_BYTES_TO_FILE.original()(&self.elapsed_sim_ticks as *const u32, 4, 1, file as *const i8) };
+        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.elapsed_sim_ticks as *const u32, 4, 1, file as *const i8) };
 
         ok
     }
@@ -568,7 +568,7 @@ impl ZTGameMgr {
     /// `version > 0x48`; older saves leave it zeroed instead.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
         let mut marker: u32 = 0;
-        let marker_ok = unsafe { DEALLOCATE.original()(&mut marker as *mut u32 as *const u32, 4, 1, file as *const u8) } == 1;
+        let marker_ok = unsafe { DEALLOCATE.hooked()(&mut marker as *mut u32 as *const u32, 4, 1, file as *const u8) } == 1;
         if !marker_ok {
             return false;
         }
@@ -579,9 +579,9 @@ impl ZTGameMgr {
             return false;
         }
 
-        let date_ok = unsafe { DEALLOCATE.original()(&mut self.date as *mut Systemtime as *const u32, 0x10, 1, file as *const u8) } == 1;
+        let date_ok = unsafe { DEALLOCATE.hooked()(&mut self.date as *mut Systemtime as *const u32, 0x10, 1, file as *const u8) } == 1;
         let mut cash: f32 = 0.0;
-        let cash_ok = unsafe { DEALLOCATE.original()(&mut cash as *mut f32 as *const u32, 4, 1, file as *const u8) } == 1;
+        let cash_ok = unsafe { DEALLOCATE.hooked()(&mut cash as *mut f32 as *const u32, 4, 1, file as *const u8) } == 1;
 
         if !(date_ok && cash_ok) {
             return false;
@@ -591,7 +591,7 @@ impl ZTGameMgr {
 
         // BFGameMgr::load inlined: only reads elapsed_sim_ticks for saves newer than version 0x48.
         if version > 0x48 {
-            unsafe { DEALLOCATE.original()(&mut self.elapsed_sim_ticks as *mut u32 as *const u32, 4, 1, file as *const u8) == 1 }
+            unsafe { DEALLOCATE.hooked()(&mut self.elapsed_sim_ticks as *mut u32 as *const u32, 4, 1, file as *const u8) == 1 }
         } else {
             self.elapsed_sim_ticks = 0;
             true
@@ -599,11 +599,15 @@ impl ZTGameMgr {
     }
 
     /// Ports `ZTGameMgr::update` (vtable `+0x10`). Per the decompile (`ZTGameMgr_update.c`, read in
-    /// full) this is a pure call-through to the embedded, out-of-scope `MenuMusicHandler` when present -
-    /// no logic of `ZTGameMgr`'s own.
+    /// full) this is a pure call-through to the embedded `MenuMusicHandler` when present - no logic of
+    /// `ZTGameMgr`'s own. Calls the reimplemented [`MenuMusicHandler::update`] directly rather than
+    /// going through `UPDATE`'s address (`.original()`/`.hooked()`): keeping the old address-based
+    /// call-through would route around this caller's own reimplementation differently per hook state,
+    /// while every other caller reaches the Rust detour through its hooked address - two paths that
+    /// could diverge for no benefit.
     pub fn update(&self, delta: u32) {
         if self.menu_music_handler_ptr != 0 {
-            unsafe { MENU_MUSIC_HANDLER_UPDATE.original()(self.menu_music_handler_ptr as *const u32, delta) };
+            unsafe { mut_from_memory::<MenuMusicHandler>(self.menu_music_handler_ptr) }.update(delta);
         }
     }
 
@@ -767,7 +771,7 @@ impl ZTGameMgr {
     ///    `generated.rs`'s misleadingly-named `ztsoundscape::ZTSOUNDSCAPE` entry - confirmed to actually be
     ///    the destructor, not the constructor, via `ZTSoundscape_~ZTSoundscape.meta`'s matching address;
     ///    left un-renamed since it's an existing, non-hand-added `generated.rs` entry - see `CLAUDE.md`),
-    ///    then free the block (`standalone::OPERATOR_DELETE`, hand-added this pass), then zero the
+    ///    then free the block (`standalone::OPERATOR_DELETE`, typed `u32` in `generated.rs`), then zero the
     ///    pointer.
     /// 2. `started = false`.
     /// 3. Read the live `GLOBAL_ZTApp` singleton's `+0x440` byte field (`appInitSuccess` - see
@@ -784,7 +788,7 @@ impl ZTGameMgr {
     pub fn stop(&mut self) {
         if self.soundscape_ptr != 0 {
             unsafe { ZTSOUNDSCAPE_DESTRUCTOR.original()(self.soundscape_ptr as *const c_void) };
-            unsafe { OPERATOR_DELETE.original()(self.soundscape_ptr as *const u32) };
+            unsafe { OPERATOR_DELETE.original()(self.soundscape_ptr as u32) };
             self.soundscape_ptr = 0;
         }
 
@@ -850,15 +854,18 @@ pub fn command_zoostats(_args: Vec<&str>) -> Result<String, CommandError> {
 /// logic is comprehensible (tile-distance search over `ZTWorldMgr::getBuildingList("compost")`,
 /// `ZTBuilding::receiveIncome`, `ZooStatus::refundConstruction`/`addCash`) - `generated.rs`'s
 /// `ztgamemgr::REMOVED_ZOO_DOO` entry reflects this corrected address/signature, and `ztworldmgr::
-/// GET_BUILDING_LIST`'s own signature was hand-corrected to a genuine `thiscall` while investigating this
-/// (both confirmed via careful `.asm` tracing, independent of the point below). A full port was attempted
+/// GET_BUILDING_LIST`'s signature was corrected to a genuine `thiscall` while investigating this
+/// (both confirmed via careful `.asm` tracing, independent of the point below). The regeneration first
+/// reverted `GET_BUILDING_LIST` to its wrong auto-derived `stdcall` shape, but after the correction was
+/// re-surfaced to the generator pass the entry now carries the right shape natively (verified against the
+/// function's own `.c`/`.asm` and the caller's `MOV %ECX, %EBX` immediately before the `CALL`). A full port was attempted
 /// and got as far as passing its own live smoke test - but only by constructing the "compost" tag string
 /// via a real vanilla `std::string` constructor/destructor call, after a simpler, self-owned
 /// (non-vanilla-allocated) string reproducibly crashed `getBuildingList` live for a reason never fully
 /// root-caused. That result - a working path that depends on unexplained vanilla behavior, sitting on top
 /// of an already-nontrivial chain of hand-derived ABI facts (parameter order, list-node layout, a
-/// hand-added small-object-free address) - was judged too much unverified surface for a single pass, so
-/// the port was backed out. `generated.rs`'s corrections stand as confirmed ground truth for whoever
+/// small-object-free address) - was judged too much unverified surface for a single pass, so
+/// the port was backed out. The `.asm`-traced corrections remain confirmed ground truth for whoever
 /// revisits this; the Rust port itself is not wired up. Likewise, `animalTimeAgo`/`peopleTimeAgo`/
 /// `overrideNewGameDefaults` (macOS-only methods that never entered this plan's original scope at all -
 /// see [`ZTGameMgr::animal_time_ago`]/[`ZTGameMgr::people_time_ago`]/

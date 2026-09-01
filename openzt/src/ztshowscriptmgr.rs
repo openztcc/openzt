@@ -626,7 +626,7 @@ fn encode_mgr(state: &ShowScriptMgrState) -> Vec<u8> {
 pub fn save_mgr(file: *const u32) -> bool {
     let state = STATE.lock().unwrap();
     let bytes = encode_mgr(&state);
-    unsafe { WRITE_BYTES_TO_FILE.original()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }
+    unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }
 }
 
 /// Reimplementation of the "old" `ZTShowScript::save` (real name; `ztshowscript_old` per
@@ -637,11 +637,11 @@ pub fn save_script(this_ptr: u32, file: *const u32) -> bool {
     let Some(id) = resolve(&state, this_ptr) else { return false };
     let Some(script) = state.scripts.get(&id) else { return false };
     let bytes = encode_script(id, script);
-    unsafe { WRITE_BYTES_TO_FILE.original()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }
+    unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }
 }
 
 fn read_bytes(file: *const u32, buf: &mut [u8]) -> bool {
-    unsafe { DEALLOCATE.original()(buf.as_mut_ptr() as *const u32, buf.len() as u32, 1, file as *const u8) == 1 }
+    unsafe { DEALLOCATE.hooked()(buf.as_mut_ptr() as *const u32, buf.len() as u32, 1, file as *const u8) == 1 }
 }
 
 fn read_u8(file: *const u32) -> Option<u8> {

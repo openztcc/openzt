@@ -110,18 +110,20 @@ pub fn earned_count() -> i32 {
     AWARD_MGR.lock().unwrap().earned_ids.len() as i32
 }
 
-/// Writes `value` as a single little-endian dword via the real vanilla `WriteBytesToFile`, shared by
-/// [`save`]. Duplicated per-file rather than shared, matching `ztthoughtmgr.rs`'s own precedent.
+/// Writes `value` as a single little-endian dword via whatever is installed at the vanilla
+/// `WriteBytesToFile` address (`.hooked()` - the real CRT write normally, `io_redirect`'s in-memory
+/// buffer inside a live-battery capture window), shared by [`save`]. Duplicated per-file rather than
+/// shared, matching `ztthoughtmgr.rs`'s own precedent.
 fn write_dword(file: *const u32, value: u32) -> bool {
     let bytes = value.to_le_bytes();
-    unsafe { WRITE_BYTES_TO_FILE.original()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) }
+    unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) }
 }
 
-/// Reads a single little-endian dword via the real vanilla read primitive, shared by [`load`]. `None` on
-/// a short/failed read.
+/// Reads a single little-endian dword via whatever is installed at the vanilla read-primitive address
+/// (`.hooked()` - see [`write_dword`]), shared by [`load`]. `None` on a short/failed read.
 fn read_dword(file: *const u32) -> Option<u32> {
     let mut buf = 0u32;
-    let ok = unsafe { DEALLOCATE.original()(&mut buf as *mut u32 as *const u32, 4, 1, file as *const u8) };
+    let ok = unsafe { DEALLOCATE.hooked()(&mut buf as *mut u32 as *const u32, 4, 1, file as *const u8) };
     (ok == 1).then_some(buf)
 }
 
@@ -368,10 +370,10 @@ pub(crate) mod eval_award_count_override {
 
         /// Exposes the real vanilla trampoline for the live comparison test. `EVAL.original()` can't be
         /// used for this once this module's own detour has patched `EVAL`'s address - `FunctionDef::
-        /// original()` is a raw address cast with no saved trampoline (see `openzt-detour/src/lib.rs`), so
-        /// once hooked it silently starts re-entering this same detour instead of reaching real vanilla.
-        /// `EVAL_DETOUR.call(this)` (the `retour` trampoline this macro generates) is the only way back to
-        /// real vanilla behavior after that point.
+        /// original()` is a raw address cast in release (debug builds route it through openzt-detour's
+        /// hook registry, see `openzt-detour/src/lib.rs`), so once hooked it silently re-enters this same
+        /// detour instead of reaching real vanilla there. `EVAL_DETOUR.call(this)` (the `retour`
+        /// trampoline this macro generates) is the way back to real vanilla behavior in every build.
         pub(super) fn call_real(this: *const u32) -> i32 {
             unsafe { EVAL_DETOUR.call(this) }
         }
