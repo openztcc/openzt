@@ -21,7 +21,7 @@ use std::ffi::c_void;
 use openzt_detour::generated::{
     bfscenariomgr::{GET_CROWD_AMBIENTS_NAME, GET_CROWD_CONFIG_NAME, GET_WORLD_AMBIENTS_NAME, GET_WORLD_CONFIG_NAME},
     standalone::{DEALLOCATE, OPERATOR_DELETE, OPERATOR_NEW, WRITE_BYTES_TO_FILE},
-    ztsoundscape::{CONSTRUCTOR as ZTSOUNDSCAPE_CONSTRUCTOR, INIT as ZTSOUNDSCAPE_INIT, UPDATE as ZTSOUNDSCAPE_UPDATE, ZTSOUNDSCAPE as ZTSOUNDSCAPE_DESTRUCTOR},
+    ztsoundscape::ZTSOUNDSCAPE as ZTSOUNDSCAPE_DESTRUCTOR,
     ztui_main::{
         SET_ANIMAL_RATING as ZTUI_MAIN_SET_ANIMAL_RATING, SET_DATE_TEXT as ZTUI_MAIN_SET_DATE_TEXT, SET_GUEST_RATING as ZTUI_MAIN_SET_GUEST_RATING,
         SET_MONEY_TEXT as ZTUI_MAIN_SET_MONEY_TEXT, SET_ZOO_RATING as ZTUI_MAIN_SET_ZOO_RATING, UNPAUSE_GAME as ZTUI_MAIN_UNPAUSE_GAME,
@@ -51,6 +51,7 @@ use crate::{
     lua_fn,
     util::{get_from_memory, mut_from_memory, ref_from_memory, save_to_memory},
     ztgamemgr_menumusichandler::MenuMusicHandler,
+    ztsoundscape::ZTSoundscape,
 };
 
 /// `DAT_006394b8`'s RVA (Ghidra VA `0x006394b8` minus the default load base `0x400000`) - a raw, signed
@@ -626,7 +627,8 @@ impl ZTGameMgr {
     ///    between the `.c` and `.asm`), each fed through `((metric + 100) * 100) / 200` unless the
     ///    corresponding count (`num_animals`/`num_guests`) is `0`, in which case the rating is `0`
     ///    outright; zoo rating is read directly, no formula.
-    /// 5. If `soundscape_ptr` is non-null, call through `ZTSoundscape::update` (out-of-scope class).
+    /// 5. If `soundscape_ptr` is non-null, call the reimplemented [`ZTSoundscape::update`] directly
+    ///    (same no-address-call-through rationale as [`Self::update`] below).
     /// 6. Advance `date` by `delta` simulation ticks via a real `SystemTimeToFileTime`/`FileTimeToSystemTime`
     ///    round-trip (`delta * 72000000` 100ns-intervals added to the `FILETIME` value - a
     ///    `SystemTimeToFileTime` failure is intentionally ignored here, matching the decompile's own
@@ -663,7 +665,7 @@ impl ZTGameMgr {
         }
 
         if self.soundscape_ptr != 0 {
-            unsafe { ZTSOUNDSCAPE_UPDATE.original()(self.soundscape_ptr as *const c_void, delta as i32) };
+            unsafe { mut_from_memory::<ZTSoundscape>(self.soundscape_ptr) }.update(delta as i32);
         }
 
         let previous_month = self.date.w_month;
@@ -718,12 +720,14 @@ impl ZTGameMgr {
     /// 1. If already `started`: call [`Self::stop`] first (the real body's `stop(this)` recursive call -
     ///    ported directly rather than via `STOP.original()`, since once `STOP` is detoured this method's
     ///    own reimplementation is the real logic vanilla callers now run).
-    /// 2. `operator_new(0x54)` a fresh `ZTSoundscape` block, real vanilla constructor call-through
-    ///    (`ZTSoundscape::ZTSoundscape`) on success - `soundscape_ptr` stays `0` on allocation failure,
-    ///    matching the real body's own null-propagation (`pcVar1 = 0` when `operator_new` fails).
+    /// 2. `operator_new(0x54)` a fresh `ZTSoundscape` block, constructed on success by the reimplemented
+    ///    [`ZTSoundscape::construct`] called directly (same no-address-call-through rationale as
+    ///    [`Self::update`] below) - `soundscape_ptr` stays `0` on allocation failure, matching the real
+    ///    body's own null-propagation (`pcVar1 = 0` when `operator_new` fails).
     /// 3. Pull the four ambient-sound name/config strings from the live `GLOBAL_ZTScenarioMgr` singleton
     ///    (real vanilla `BFScenarioMgr` getter call-throughs - see [`GLOBAL_ZTSCENARIOMGR_RVA`]), pass all
-    ///    four into real vanilla `ZTSoundscape::init` on the new soundscape.
+    ///    four into the reimplemented [`ZTSoundscape::init`] on the new soundscape (direct call, as above;
+    ///    no null guard on `soundscape_ptr`, matching the real body).
     /// 4. `started = true`.
     pub fn start(&mut self) {
         if self.started {
@@ -734,7 +738,8 @@ impl ZTGameMgr {
         self.soundscape_ptr = if new_block.is_null() {
             0
         } else {
-            unsafe { ZTSOUNDSCAPE_CONSTRUCTOR.original()(new_block) as u32 }
+            unsafe { mut_from_memory::<ZTSoundscape>(new_block) }.construct();
+            new_block as u32
         };
 
         let scenariomgr_ptr: u32 = get_from_memory(get_module_base("zoo.exe") as u32 + GLOBAL_ZTSCENARIOMGR_RVA);
@@ -744,10 +749,9 @@ impl ZTGameMgr {
         let world_config = unsafe { GET_WORLD_CONFIG_NAME.original()(scenariomgr_ptr as i32) };
 
         unsafe {
-            ZTSOUNDSCAPE_INIT.original()(
-                self.soundscape_ptr as *const c_void,
-                crowd_ambients as *const u32,
-                world_ambients as *const u32,
+            mut_from_memory::<ZTSoundscape>(self.soundscape_ptr).init(
+                crowd_ambients as *const u8,
+                world_ambients as *const u8,
                 crowd_config,
                 world_config,
             )
@@ -873,9 +877,10 @@ pub fn command_zoostats(_args: Vec<&str>) -> Result<String, CommandError> {
 /// ported too, not part of this "left un-detoured" tier. `initMenuMusic` (also macOS-only-scoped
 /// originally) picked up a confirmed Windows address too (`ztgamemgr::INIT_MENU_MUSIC`, `0x00521e18` -
 /// the same address the `startMenuMusic` decompile's `FUN_00521e18` lead pointed at) but **stays
-/// out of scope**, unlike its three siblings: it pulls in `BFIniFile`/`MenuMusicHandler` construction,
-/// both untouched dependencies, the same reasoning `gotoStart`/`startMenuMusic*` below are left
-/// un-detoured for.
+/// out of scope**, unlike its three siblings: it pulls in `BFIniFile` construction (still an untouched
+/// dependency) plus a `MenuMusicHandler` - which has since been reimplemented itself (see
+/// `ztgamemgr_menumusichandler.rs`), so that half of the original blocker is gone; `BFIniFile` is what
+/// keeps it un-detoured.
 ///
 /// **`start()`/`stop()` are now ported**, closing out a review-flagged candidate that turned out to need a
 /// second pass: `start()`'s `.c`/`.asm` agree cleanly, but `stop()`'s `.c` export is corrupted the same way

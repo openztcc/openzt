@@ -118,6 +118,11 @@ mod ztshowui;
 /// fEstheticBonusMegatile/fStinkyMegatile) - closes the last vanilla read path into ZTMegatileMgr's grid.
 mod ztguest;
 
+/// ztsoundscape module reimplements the vanilla ZTSoundscape crowd/world ambient-audio crossfade
+/// class (structs + constructor + init + update, plus the CONSTRUCTOR/INIT/UPDATE detours; see
+/// openzt/plans/ztsoundscape-implementation-plan.md).
+mod ztsoundscape;
+
 mod experimental;
 
 /// Roof tag extension for scenery entities
@@ -238,6 +243,7 @@ mod zoo_init {
             ztshow::init();
             ztshowui::init();
             ztguest::init();
+            ztsoundscape::init();
         }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }

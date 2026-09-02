@@ -271,7 +271,7 @@ pub mod bfconfigfile {
     #[cfg_attr(feature = "detour-validation", validate_detour("bfconfigfile/get_string_1"))]
     pub const GET_STRING_1: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32, *const u32, *const u32) -> bool> = FunctionDef{address: 0x004098c1, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfconfigfile/attempt_0"))]
-    pub const ATTEMPT_0: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i8)> = FunctionDef{address: 0x00409ac0, function_type: PhantomData};
+    pub const ATTEMPT_0: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i8) -> bool> = FunctionDef{address: 0x00409ac0, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfconfigfile/get_int"))]
     pub const GET_INT: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32, u32, *const u32) -> u32> = FunctionDef{address: 0x00409c14, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfconfigfile/get_keys"))]
@@ -1408,6 +1408,8 @@ pub mod bfsndmgr {
     pub const IS_ALT_SOUND: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> u8> = FunctionDef{address: 0x00406f7f, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfsndmgr/attempt_0"))]
     pub const ATTEMPT_0: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32, *const i8) -> u32> = FunctionDef{address: 0x004070b0, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("bfsndmgr/get_screen_center"))]
+    pub const GET_SCREEN_CENTER: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32) -> *const u32> = FunctionDef{address: 0x0043f35f, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfsndmgr/constructor"))]
     pub const CONSTRUCTOR: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> *const u32> = FunctionDef{address: 0x005284a3, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfsndmgr/stop"))]
@@ -1843,7 +1845,7 @@ pub mod bfunit {
     #[cfg_attr(feature = "detour-validation", validate_detour("bfunit/get_height_above_terrain"))]
     pub const GET_HEIGHT_ABOVE_TERRAIN: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x00602c74, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfunit/vf_return0"))]
-    pub const VF_RETURN0: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32) -> u8> = FunctionDef{address: 0x0061ff2f, function_type: PhantomData};
+    pub const VF_RETURN0: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32) -> u8> = FunctionDef{address: 0x0061ff2f, function_type: PhantomData};
 }
 
 // BFUnitType class functions
@@ -9109,7 +9111,7 @@ pub mod sndutil {
     use super::*;
 
     #[cfg_attr(feature = "detour-validation", validate_detour("sndutil/compute_volume_and_pan"))]
-    pub const COMPUTE_VOLUME_AND_PAN: FunctionDef<unsafe extern "cdecl" fn(*const i32, *const i32, *const i32)> = FunctionDef{address: 0x0043f5ba, function_type: PhantomData};
+    pub const COMPUTE_VOLUME_AND_PAN: FunctionDef<unsafe extern "cdecl" fn(*const u32, *const i32, *const i32)> = FunctionDef{address: 0x0043f5ba, function_type: PhantomData};
 }
 
 // std::__vector_deleter<> class functions
