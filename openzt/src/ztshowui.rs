@@ -140,19 +140,18 @@ fn dat(rva: u32) -> u32 {
 }
 
 /// Loads a display string via `BFApp::loadString` (`bfapp::LOAD_STRING`). Deliberately calls
-/// `.original()` here even though `LOAD_STRING` **is** itself detoured by this crate's own
-/// `string_registry.rs` (OpenZT string-registry overrides + language-DLL fallback): per
-/// `FunctionDef::original()`'s own real implementation (`openzt-detour/src/lib.rs`, just
-/// `retour::Function::from_ptr(self.address)` - it does not distinguish hooked from unhooked), calling
-/// it on an address this crate has itself hooked invokes that same hook, not a bypassed "pristine" body
-/// - i.e. this gets the *same* registry-aware behavior any other real caller of `BFApp::loadString`
-/// would see, which is exactly what trick display names should have too. Returns the raw, still-encoded
-/// bytes vanilla's own loader produces (trailing NUL and any unused buffer tail included) since the only
-/// consumers ([`add_available_trick`]/[`add_assigned_trick`]) just forward the buffer pointer on to
-/// `UIListBox::addString`, matching vanilla's own `aBStack_200` usage exactly.
+/// `.hooked()` rather than `.original()` here even though `LOAD_STRING` **is** itself detoured by
+/// this crate's own `string_registry.rs` (OpenZT string-registry overrides + language-DLL
+/// fallback): `hooked()` is whatever is currently installed at the address - our detour, when
+/// string_registry has hooked it - so this gets the *same* registry-aware behavior any other real
+/// caller of `BFApp::loadString` would see, which is exactly what trick display names should have
+/// too. Returns the raw, still-encoded bytes vanilla's own loader produces (trailing NUL and any
+/// unused buffer tail included) since the only consumers ([`add_available_trick`]/[`add_assigned_trick`])
+/// just forward the buffer pointer on to `UIListBox::addString`, matching vanilla's own
+/// `aBStack_200` usage exactly.
 fn load_display_string(string_id: u16) -> [u8; 512] {
     let mut buffer = [0u8; 512];
-    unsafe { LOAD_STRING.original()(GLOBAL_BFAPP as *const u32, string_id as u32 as *const u32, buffer.as_mut_ptr()) };
+    unsafe { LOAD_STRING.hooked()(GLOBAL_BFAPP as *const u32, string_id as u32 as *const u32, buffer.as_mut_ptr()) };
     buffer
 }
 
@@ -273,7 +272,7 @@ fn add_available_trick(list_element: u32, item_ptr: u32, valid: bool) {
 /// `ZTShowScript` identity, since the real function only ever reaches show-script data through
 /// `ZTShowScript::size`/`getItem`, both already Stage-1-detoured onto this crate's own store.
 fn recalc_show_stats(script_handle: u32) {
-    unsafe { RECALC_SHOW_STATS.original()(script_handle) };
+    unsafe { RECALC_SHOW_STATS.original()(script_handle as *const u32) };
 }
 
 /// Reimplementation of `ZTUI::showpanel::fillTrickLists`, per `showpanel_fillTrickLists.c`/`.asm`. Two

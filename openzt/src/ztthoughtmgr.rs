@@ -315,18 +315,20 @@ fn resolve_object_own_habitat_ptr(object_ptr: u32) -> Option<u32> {
     Some(resolve_habitat_fn(object_ptr))
 }
 
-/// Writes `value` as a single little-endian dword via the real vanilla `WriteBytesToFile`, shared by
-/// `ZTThought::save`/`ZTThoughtMgr::save`.
+/// Writes `value` as a single little-endian dword via whatever is installed at the vanilla
+/// `WriteBytesToFile` address (`.hooked()` - the real CRT write normally, `io_redirect`'s in-memory
+/// buffer inside a live-battery capture window), shared by `ZTThought::save`/`ZTThoughtMgr::save`.
 fn write_dword(file: *const u32, value: u32) -> bool {
     let bytes = value.to_le_bytes();
-    unsafe { WRITE_BYTES_TO_FILE.original()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) }
+    unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) }
 }
 
-/// Reads a single little-endian dword via the real vanilla read primitive, shared by
-/// `ZTThought::load`/`ZTThoughtMgr::load`. `None` on a short/failed read.
+/// Reads a single little-endian dword via whatever is installed at the vanilla read-primitive address
+/// (`.hooked()` - see [`write_dword`]), shared by `ZTThought::load`/`ZTThoughtMgr::load`. `None` on a
+/// short/failed read.
 fn read_dword(file: *const u32) -> Option<u32> {
     let mut buf = 0u32;
-    let ok = unsafe { DEALLOCATE.original()(&mut buf as *mut u32 as *const u32, 4, 1, file as *const u8) };
+    let ok = unsafe { DEALLOCATE.hooked()(&mut buf as *mut u32 as *const u32, 4, 1, file as *const u8) };
     (ok == 1).then_some(buf)
 }
 
@@ -546,9 +548,10 @@ pub fn init() {
 /// corruption CLAUDE.md warns about - and there's no confirmed Windows address for the generic small-object
 /// allocator that would let us build a genuinely vanilla-freeable list instead. Given zero known callers,
 /// that work isn't justified: each detour here just logs (so a real hit would actually get noticed) and
-/// falls through to `.original()`, which is safe *by construction* - it only reads `this`'s own
-/// `sentinel_ptr`, which the module's `VecDeque` migration deliberately leaves pointing at a genuine,
-/// permanently self-referencing (i.e. permanently empty) vanilla sentinel node. Worst case, an
+/// falls through to the real vanilla body via the `<NAME>_DETOUR.call(...)` trampoline (calling
+/// `.original()` from inside these detours would recurse into the detour itself), which only reads
+/// `this`'s own `sentinel_ptr` - left pointing at a genuine, permanently self-referencing (i.e.
+/// permanently empty) vanilla sentinel node by the module's `VecDeque` migration. Worst case, an
 /// undiscovered caller sees an always-empty result - a cosmetic gap, never a crash.
 mod thought_accessor_detours {
     use openzt_detour::generated::ztthoughtmgr::{GET_THOUGHTS_BY_HABITAT, GET_THOUGHTS_BY_OBJECT, GET_THOUGHTS_BY_THINKER};
@@ -571,7 +574,7 @@ mod thought_accessor_detours {
                  will report zero matches against the permanently-empty sentinel it still reads",
                 max_count as i32
             );
-            unsafe { GET_THOUGHTS_BY_OBJECT.original()(this, out, object_ptr, max_count) }
+            unsafe { GET_THOUGHTS_BY_OBJECT_DETOUR.call(this, out, object_ptr, max_count) }
         }
 
         /// See `get_thoughts_by_object`'s doc comment re: `max_count`'s pointer typing.
@@ -583,7 +586,7 @@ mod thought_accessor_detours {
                  which will report zero matches against the permanently-empty sentinel it still reads",
                 max_count as i32
             );
-            unsafe { GET_THOUGHTS_BY_HABITAT.original()(this, out, habitat_ptr, max_count) }
+            unsafe { GET_THOUGHTS_BY_HABITAT_DETOUR.call(this, out, habitat_ptr, max_count) }
         }
 
         #[detour(GET_THOUGHTS_BY_THINKER)]
@@ -593,7 +596,7 @@ mod thought_accessor_detours {
                  should reach this anymore now that ZTThoughtMgr's persistent list lives in a Rust-side store; falling through to the real vanilla \
                  body, which will report zero matches against the permanently-empty sentinel it still reads"
             );
-            unsafe { GET_THOUGHTS_BY_THINKER.original()(this, out, thinker_ptr, max_count) }
+            unsafe { GET_THOUGHTS_BY_THINKER_DETOUR.call(this, out, thinker_ptr, max_count) }
         }
     }
 

@@ -277,16 +277,19 @@ impl ZTMarketingMgr {
         }
     }
 
-    /// Calls the vanilla `ZTMarketingMgr::save`. `file` is whatever file-handle pointer the original
+    /// Calls `ZTMarketingMgr::save`. `file` is whatever file-handle pointer the original
     /// `WriteBytesToFile` calls expect. By default this address is detoured onto
-    /// `marketing_save_reimplementation`'s native reimplementation.
+    /// `marketing_save_reimplementation`'s native reimplementation, and `.hooked()` deliberately
+    /// re-enters that hook, exactly like a vanilla caller would; with no detour installed the
+    /// address still holds genuine vanilla code.
     pub fn save(&self, file: *const u32) -> bool {
-        unsafe { ztmarketingmgr::SAVE.original()((self as *const Self) as *const u32, file) }
+        unsafe { ztmarketingmgr::SAVE.hooked()((self as *const Self) as *const u32, file) }
     }
 
-    /// Calls the vanilla `ZTMarketingMgr::load` - the save-file counterpart to `save()`.
+    /// Calls `ZTMarketingMgr::load` - the save-file counterpart to `save()`, with the same
+    /// deliberate re-entry via `.hooked()`.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
-        unsafe { ztmarketingmgr::LOAD.original()((self as *mut Self) as *const u32, file, version) }
+        unsafe { ztmarketingmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) }
     }
 }
 
@@ -482,7 +485,7 @@ pub(crate) mod marketing_save_reimplementation {
             let mgr = unsafe { ref_from_memory::<ZTMarketingMgr>(this) };
             let index = mgr.marketing().map(|m| m.current_funding_level()).unwrap_or(0);
             let bytes = index.to_le_bytes();
-            let ok = unsafe { WRITE_BYTES_TO_FILE.original()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) };
+            let ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) };
             if !ok {
                 error!("marketing-save-reimplementation: WriteBytesToFile failed writing the funding-level index");
             }
@@ -496,7 +499,7 @@ pub(crate) mod marketing_save_reimplementation {
             }
 
             let mut buf = 0u32;
-            let ok = unsafe { DEALLOCATE.original()(&mut buf as *mut u32 as *const u32, 4, 1, file as *const u8) };
+            let ok = unsafe { DEALLOCATE.hooked()(&mut buf as *mut u32 as *const u32, 4, 1, file as *const u8) };
             if ok != 1 {
                 return false;
             }

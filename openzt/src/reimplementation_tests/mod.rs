@@ -52,14 +52,30 @@ pub fn init() {
 
         // ztawardmgr's own-method detours (ADD_AWARD/GET_AWARD/SAVE/LOAD/START) are deliberately NOT
         // installed here - ZTAWARDMGR_ADD_AWARD_SAVE_LOAD/START/GET_AWARD rely on `.original()` reaching
-        // real, un-hooked vanilla code for comparison against the Rust reimplementation, and `.original()`
-        // is a raw address cast with no trampoline (see openzt-detour/src/lib.rs's `original()`) -
-        // installing that submodule's detours would make `.original()` loop back into our own code on
-        // both sides of those diffs. Only the two override-style detours needed for a live diff of their
-        // own routing/dispatch logic are installed, each exposing a `call_real` trampoline wrapper so the
-        // corresponding test can still reach genuine vanilla behavior once hooked.
+        // real, un-hooked vanilla code for comparison against the Rust reimplementation, and in release
+        // builds `.original()` is still a raw address cast with no trampoline (debug builds route it
+        // through openzt-detour's hook registry) - installing that submodule's detours would make
+        // `.original()` loop back into our own code on both sides of those diffs in release. Only the two
+        // override-style detours needed for a live diff of their own routing/dispatch logic are installed,
+        // each exposing a `call_real` trampoline wrapper so the corresponding test can still reach
+        // genuine vanilla behavior once hooked.
         crate::ztawardmgr::eval_award_count_override::init();
         crate::ztawardmgr::show_awards_detour::init();
+
+        // MenuMusicHandler: installs the class's five detours so the MENUMUSICHANDLER_* tests exercise
+        // the actual hooked path and MENUMUSICHANDLER_DETOURS_ENABLED can assert the wiring itself
+        // (nothing else in the battery distinguishes "detour installed" from "silently still vanilla").
+        // The corresponding tests' "real vanilla" pole therefore goes through live_support's real_*
+        // trampolines - `.original()` on these five addresses re-enters the Rust detours once hooked in
+        // release (raw address cast; debug builds route through the hook registry - see
+        // ztgamemgr_menumusichandler's menu_music_handler_detours::test_real doc comment).
+        crate::ztgamemgr_menumusichandler::init();
+
+        // ZTSoundscape: installs the class's three detours so the ZTSOUNDSCAPE_* tests exercise the
+        // actual hooked path and ZTSOUNDSCAPE_DETOURS_ENABLED can assert the wiring itself (same
+        // rationale as the MenuMusicHandler block above). Those tests' "real vanilla" poles therefore
+        // go through soundscape_live_support's real_* trampolines for the same per-profile reason.
+        crate::ztsoundscape::init();
 
         unsafe { detour_zoo_main::init_detours() }.is_err().then(|| {
             error!("Error initialising zoo_main detours");
@@ -96,7 +112,7 @@ mod detour_zoo_main {
     use std::{
         backtrace::Backtrace,
         cell::Cell,
-        ffi::{CStr, CString},
+        ffi::{c_void, CStr, CString},
         fs::OpenOptions,
         io::Write,
         mem::size_of,
@@ -138,13 +154,26 @@ mod detour_zoo_main {
     use openzt_detour::generated::zthabitatmgr;
     use openzt_detour::generated::ztui_gameopts::LOAD_FILE as ZTUI_GAMEOPTS_LOAD_FILE;
     use openzt_detour::generated::ztunit::GET_FOOTPRINT as ZTUNIT_GET_FOOTPRINT;
-    use openzt_detour::generated::ztshow::{CREATE_SHOW_SCRIPT_STATE, GET_SHOW_SCRIPT_STATE};
+    use openzt_detour::generated::ztshow::GET_SHOW_SCRIPT_STATE;
+    use openzt_detour::generated::ztshowscriptstate::CONSTRUCTOR as CREATE_SHOW_SCRIPT_STATE;
     use openzt_detour::generated::ztshowscript::CONSTRUCTOR as ZTSHOWSCRIPT_CONSTRUCTOR;
     use openzt_detour::generated::ztshowinfo::GET_NUM_UNITS as ZTSHOWINFO_GET_NUM_UNITS;
+    use openzt_detour::generated::bfconfigfile::{CONSTRUCTOR_0 as BFCONFIGFILE_CONSTRUCTOR_0, RELEASE as BFCONFIGFILE_RELEASE};
     use openzt_detour::generated::bfworldmgr::GET_TYPE as BFWORLDMGR_GET_TYPE;
+    use openzt_detour::generated::bfscenariomgr::{
+        GET_CROWD_AMBIENTS_NAME, GET_CROWD_CONFIG_NAME, GET_WORLD_AMBIENTS_NAME, GET_WORLD_CONFIG_NAME,
+    };
+    use openzt_detour::generated::ztgamemgr::{
+        ADD_CASH as ZTGAMEMGR_ADD_CASH, ANIMAL_TIME_AGO as ZTGAMEMGR_ANIMAL_TIME_AGO, GET_DATE as ZTGAMEMGR_GET_DATE,
+        HOURS_AGO as ZTGAMEMGR_HOURS_AGO, IS_GAME_DATE as ZTGAMEMGR_IS_GAME_DATE, IS_REAL_WORLD_DATE as ZTGAMEMGR_IS_REAL_WORLD_DATE,
+        LOAD as ZTGAMEMGR_LOAD, OVERRIDE_NEW_GAME_DEFAULTS as ZTGAMEMGR_OVERRIDE_NEW_GAME_DEFAULTS, PEOPLE_TIME_AGO as ZTGAMEMGR_PEOPLE_TIME_AGO,
+        SAVE as ZTGAMEMGR_SAVE, SET_NEW_GAME_DEFAULTS as ZTGAMEMGR_SET_NEW_GAME_DEFAULTS, SUBTRACT_CASH as ZTGAMEMGR_SUBTRACT_CASH,
+        TIME_AGO as ZTGAMEMGR_TIME_AGO, UPDATE as ZTGAMEMGR_UPDATE, UPDATE_SIM as ZTGAMEMGR_UPDATE_SIM,
+    };
     use openzt_detour::FunctionDef;
     use proptest::prelude::*;
     use tracing::{error, info};
+    use windows::Win32::Foundation::FILETIME;
 
     use crate::{
         bfentitytype::{BFEntityType, ZTAnimalType, ZTUnitType},
@@ -157,6 +186,9 @@ mod detour_zoo_main {
         ztresearch::{predict_branch_progress, predict_update, ZTResearchBranch, ZTResearchEffectKind, ZTResearchMgr},
         ztthoughtmgr::{live_support as thought_live_support, ZTThought, ZTThoughtMgr},
         ztmegatilemgr::live_support as megatile_live_support,
+        ztgamemgr::{self, live_support as gamemgr_live_support},
+        ztgamemgr_menumusichandler::{self, live_support as menumusichandler_live_support},
+        ztsoundscape::{live_support as soundscape_live_support, ZTSoundscape},
         ztguest::{self, live_support as guest_live_support},
         ztawardmgr::{self, live_support as award_live_support},
         ztworldmgr::{BFEntity, IVec3, ZTAnimal, ZTUnit},
@@ -1213,6 +1245,28 @@ mod detour_zoo_main {
         fail_flag |= run_thoughtmgr_add_thought_animal_override_test(&mut failure_log);
         fail_flag |= run_thoughtmgr_populate_thoughts_test(&mut failure_log);
         fail_flag |= run_thought_get_string_test(&mut failure_log);
+        fail_flag |= run_gamemgr_standalone_roundtrip_test(&mut failure_log);
+        fail_flag |= run_menumusichandler_detours_enabled_test(&mut failure_log);
+        #[cfg(debug_assertions)]
+        {
+            fail_flag |= run_menumusichandler_original_routes_to_trampoline_test(&mut failure_log);
+        }
+        fail_flag |= run_ztsoundscape_detours_enabled_test(&mut failure_log);
+        #[cfg(debug_assertions)]
+        {
+            fail_flag |= run_ztsoundscape_original_routes_to_trampoline_test(&mut failure_log);
+        }
+        fail_flag |= run_menumusichandler_standalone_roundtrip_test(&mut failure_log);
+        fail_flag |= run_ztsoundscape_standalone_roundtrip_test(&mut failure_log);
+        fail_flag |= run_ztsoundscape_fade_constants_test(&mut failure_log);
+        fail_flag |= run_menumusichandler_init_test(&mut failure_log);
+        fail_flag |= run_menumusichandler_start_play_test(&mut failure_log);
+        fail_flag |= run_menumusichandler_start_fade_test(&mut failure_log);
+        fail_flag |= run_menumusichandler_update_test(&mut failure_log);
+        fail_flag |= run_gamemgr_set_new_game_defaults_test(&mut failure_log);
+        fail_flag |= run_gamemgr_save_load_test(&mut failure_log);
+        fail_flag |= run_gamemgr_update_sim_test(&mut failure_log);
+        fail_flag |= run_gamemgr_finance_date_helpers_test(&mut failure_log);
 
         // Loads a real save file directly, so GLOBAL_ZTWorldMgr/GLOBAL_ZTHabitatMgr go from
         // empty/synthetic to real, populated state. Everything below this line runs against that real
@@ -1272,6 +1326,27 @@ mod detour_zoo_main {
             fail_flag |= run_ztshow_group3_trick_live_test(&mut failure_log);
             fail_flag |= run_ztshowui_fill_trick_lists_live_test(&mut failure_log);
             fail_flag |= run_ztshowscript_ctor_registration_live_test(&mut failure_log);
+
+            // Run last (see this test's own doc comment): a one-shot wiring smoke test for
+            // set_new_game_defaults's is_new_game=true branch, which calls through GLOBAL_ZTAIMgr's real
+            // vtable slot and so may have real side effects on live AI state.
+            fail_flag |= run_gamemgr_set_new_game_defaults_is_new_game_smoke_test(&mut failure_log);
+
+            // These three (only ZTGAMEMGR_START_STOP_SMOKE runs after them): need the live, zoo-loaded
+            // GLOBAL_ZTScenarioMgr registry for the four config/name getters - pre-zoo the registry is
+            // non-null-but-uninitialized and both BFConfigFile::attempt calls would fail, silently
+            // leaving the tests covering only init's defaults/tail while looking green.
+            // ZTSOUNDSCAPE_UPDATE and ZTSOUNDSCAPE_UPDATE_ATTEMPT_FAILURE additionally need the live
+            // GLOBAL_ZTGameMgr guest count.
+            fail_flag |= run_ztsoundscape_init_test(&mut failure_log);
+            fail_flag |= run_ztsoundscape_update_test(&mut failure_log);
+            fail_flag |= run_ztsoundscape_update_attempt_failure_test(&mut failure_log);
+
+            // Run last (see this test's own doc comment): a one-shot wiring smoke test for start()/stop(),
+            // which read the live GLOBAL_ZTScenarioMgr/GLOBAL_ZTApp singletons, run the Rust
+            // soundscape ctor/init + vanilla destructor end to end, and call through to real vanilla
+            // unpauseGame.
+            fail_flag |= run_gamemgr_start_stop_smoke_test(&mut failure_log);
         }
 
         if fail_flag {
@@ -1279,6 +1354,2497 @@ mod detour_zoo_main {
             std::process::exit(1);
         }
         std::process::exit(0);
+    }
+
+    /// `ZTGAMEMGR_STANDALONE_ROUNDTRIP` - `ztgamemgr-implementation-plan.md` Stage 0: builds one
+    /// standalone `ZTGameMgr` via the real vanilla free-function constructor
+    /// (`ztgamemgr::live_support::build_standalone_mgr`, wrapping `standalone::CREATE_ZTGAME_MGR`),
+    /// confirms it's non-null, dumps its raw bytes and logs which offsets are non-zero (resolves the
+    /// "does `operator_new` zero the block" caveat empirically - `_CreateZTGameMgr.c` explicitly zeroes
+    /// `started`/`soundscape_ptr`/`menu_music_handler_ptr` but says nothing about the rest), then
+    /// immediately destroys it. No comparison logic yet - this only proves the construct/destroy harness
+    /// itself is safe before Stage 1's `SET_NEW_GAME_DEFAULTS` test builds on it. Doesn't need a live
+    /// zoo (`GLOBAL_ZTWorldMgr`/`GLOBAL_ZTGameMgr`), so it runs alongside the other standalone-only tests
+    /// above, before `run_load_live_zoo`.
+    fn run_gamemgr_standalone_roundtrip_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_STANDALONE_ROUNDTRIP";
+        let ptr = gamemgr_live_support::build_standalone_mgr();
+        if ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ztgamemgr::ZTGameMgr>();
+        let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, struct_size) };
+        let non_zero_offsets: Vec<usize> = bytes.iter().enumerate().filter(|(_, b)| **b != 0).map(|(offset, _)| offset).collect();
+        info!(
+            "{}: freshly-constructed standalone ZTGameMgr has {} non-zero bytes out of {}; offsets: {:?}",
+            test_name,
+            non_zero_offsets.len(),
+            struct_size,
+            non_zero_offsets
+        );
+
+        gamemgr_live_support::destroy_standalone_mgr(ptr);
+        write_success_line(failure_log, test_name);
+        false
+    }
+
+    /// `MENUMUSICHANDLER_DETOURS_ENABLED` - wiring check: `reimplementation_tests::init()` installs
+    /// `ztgamemgr_menumusichandler::init()`, and this asserts all five of its detours actually report
+    /// enabled. Without it, a silently-failed `init_detours()` (error logged, game continues on
+    /// vanilla) would leave the whole battery green while every hooked production path runs vanilla -
+    /// the trampoline-based comparisons below can't distinguish that from a working hook. Runs before
+    /// the other `MENUMUSICHANDLER_*` tests so a wiring failure is visible first.
+    fn run_menumusichandler_detours_enabled_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "MENUMUSICHANDLER_DETOURS_ENABLED";
+        let mut disabled: Vec<&'static str> = Vec::new();
+        for (name, enabled) in menumusichandler_live_support::detour_status() {
+            if !enabled {
+                disabled.push(name);
+            }
+        }
+        if disabled.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            let msg = format!("detours not enabled: {disabled:?}");
+            error!("{}: {}", test_name, msg);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, msg).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `MENUMUSICHANDLER_ORIGINAL_ROUTES_TO_TRAMPOLINE` - debug-only anti-regression for
+    /// `openzt-detour`'s hook registry: `FunctionDef::original()` must return the *real vanilla*
+    /// function (routed through the detour's trampoline) even for the five addresses this battery
+    /// has itself hooked, not silently re-enter our own Rust detours. For each of them, asserts the
+    /// registry holds a trampoline, that `.original()` returns exactly that pointer value, and that
+    /// it differs from the raw address (zoo.exe has no ASLR, so an un-routed raw cast would compare
+    /// equal - pointer equality can't pass vacuously here the way the old `.original() == .original()`
+    /// comparisons could). Also asserts zero registry overflows: a full slot array fails open into
+    /// exactly the raw-cast behavior this test guards against. Release builds cfg this out (the raw
+    /// cast is release's documented `.original()`); the release battery is still run once-off since
+    /// its vanilla poles go through the `real_*` trampolines instead.
+    #[cfg(debug_assertions)]
+    fn run_menumusichandler_original_routes_to_trampoline_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        use openzt_detour::generated::ztgamemgr_menumusichandler as mmh;
+
+        /// `.original()`'s return value as a raw pointer value. The pointer is only inspected,
+        /// never called.
+        fn original_ptr<T>(def: &FunctionDef<T>) -> usize
+        where
+            T: retour::Function,
+        {
+            let original = unsafe { def.original() };
+            original.to_ptr() as usize
+        }
+
+        let test_name = "MENUMUSICHANDLER_ORIGINAL_ROUTES_TO_TRAMPOLINE";
+        let hooked: [(&'static str, u32, usize); 5] = [
+            ("CONSTRUCTOR", mmh::MENU_MUSIC_HANDLER_1.address, original_ptr(&mmh::MENU_MUSIC_HANDLER_1)),
+            ("INIT", mmh::INIT.address, original_ptr(&mmh::INIT)),
+            ("START_PLAY", mmh::START_PLAY.address, original_ptr(&mmh::START_PLAY)),
+            ("START_FADE", mmh::START_FADE.address, original_ptr(&mmh::START_FADE)),
+            ("UPDATE", mmh::UPDATE.address, original_ptr(&mmh::UPDATE)),
+        ];
+
+        let mut failures: Vec<String> = Vec::new();
+        for (name, address, original) in hooked {
+            match openzt_detour::trampoline_for(address) {
+                Some(trampoline) => {
+                    if original != trampoline {
+                        failures.push(format!(
+                            "{name} ({address:#010x}): .original() = {original:#010x} != registered trampoline {trampoline:#010x}"
+                        ));
+                    }
+                    if original == address as usize {
+                        failures.push(format!(
+                            "{name} ({address:#010x}): .original() equals the raw address - routing fell back to the raw cast"
+                        ));
+                    }
+                }
+                None => failures.push(format!(
+                    "{name} ({address:#010x}): no trampoline registered - detour() did not publish, or the registry overflowed"
+                )),
+            }
+        }
+        let overflow = openzt_detour::registry_overflow_count();
+        if overflow != 0 {
+            failures.push(format!("{overflow} address(es) failed to register in the hook registry (capacity overflow - fail-open raw casts)"));
+        }
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes(),
+                );
+            }
+            true
+        }
+    }
+
+    /// `MENUMUSICHANDLER_STANDALONE_ROUNDTRIP` - `menumusichandler-implementation-plan.md` Stage 1: builds
+    /// two fresh `0x14`-byte standalone `MenuMusicHandler` blocks, runs the real vanilla constructor
+    /// (via the `real_constructor` trampoline) on one and the Rust reimplementation
+    /// (`MenuMusicHandler::construct`) directly on the other, then byte-diffs the full struct. Both sides
+    /// call through to the same real `BFIniFile::read("UI", "noMenuMusic", 0)`, so `ini_menu_music_disabled`
+    /// should come out identical too - with one acknowledged blind spot: on a default install the key is
+    /// absent, so both sides read 0 and a section/key argument-order bug would pass silently (the `.c`/
+    /// `.asm` confirm the order; setting `noMenuMusic=1` in `UI.ini` and re-running would exercise the
+    /// real disabled path instead of the marker-forced one). No exclusions needed for the fields the
+    /// constructor actually touches. Both blocks are pre-zeroed before either constructor runs: neither
+    /// the real constructor
+    /// nor `MenuMusicHandler::construct` writes the `_pad1`/`_pad2` bytes (confirmed by the first live run
+    /// of this test, which saw real-side offsets `5..8` come back as raw `operator_new` heap leftovers,
+    /// `[175, 235, 3]`, against the Rust side's zeroed padding) - same "operator_new doesn't zero memory"
+    /// caveat `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS` documents.
+    fn run_menumusichandler_standalone_roundtrip_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "MENUMUSICHANDLER_STANDALONE_ROUNDTRIP";
+
+        let real_ptr = menumusichandler_live_support::allocate_uninitialized();
+        let reimpl_ptr = menumusichandler_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(reimpl_ptr);
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ztgamemgr_menumusichandler::MenuMusicHandler>();
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+
+            menumusichandler_live_support::real_constructor(real_ptr as *const u32);
+            (*reimpl_ptr).construct();
+        }
+
+        let real_bytes = unsafe { std::slice::from_raw_parts(real_ptr as *const u8, struct_size) };
+        let reimpl_bytes = unsafe { std::slice::from_raw_parts(reimpl_ptr as *const u8, struct_size) };
+        let mismatches: Vec<(usize, u8, u8)> =
+            (0..struct_size).filter_map(|i| if real_bytes[i] != reimpl_bytes[i] { Some((i, real_bytes[i], reimpl_bytes[i])) } else { None }).collect();
+
+        let failed = !mismatches.is_empty();
+        if failed {
+            error!("{}: byte mismatch(es) (offset, real, reimpl): {:?}", test_name, mismatches);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: byte mismatch(es) (offset, real, reimpl): {:?}\n", test_name, mismatches).as_bytes());
+            }
+        } else {
+            write_success_line(failure_log, test_name);
+        }
+
+        menumusichandler_live_support::destroy_standalone(real_ptr);
+        menumusichandler_live_support::destroy_standalone(reimpl_ptr);
+        failed
+    }
+
+    /// `ZTSOUNDSCAPE_DETOURS_ENABLED` - wiring check: `reimplementation_tests::init()` installs
+    /// `ztsoundscape::init()`, and this asserts all three of its detours actually report enabled.
+    /// Without it, a silently-failed `init_detours()` (error logged, game continues on vanilla) would
+    /// leave the whole battery green while every hooked production path runs vanilla - the
+    /// trampoline-based comparisons below can't distinguish that from a working hook. Runs before the
+    /// other `ZTSOUNDSCAPE_*` tests so a wiring failure is visible first.
+    fn run_ztsoundscape_detours_enabled_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSOUNDSCAPE_DETOURS_ENABLED";
+        let mut disabled: Vec<&'static str> = Vec::new();
+        for (name, enabled) in soundscape_live_support::detour_status() {
+            if !enabled {
+                disabled.push(name);
+            }
+        }
+        if disabled.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            let msg = format!("detours not enabled: {disabled:?}");
+            error!("{}: {}", test_name, msg);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, msg).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSOUNDSCAPE_ORIGINAL_ROUTES_TO_TRAMPOLINE` - debug-only anti-regression for
+    /// `openzt-detour`'s hook registry, same shape as
+    /// [`run_menumusichandler_original_routes_to_trampoline_test`] over this class's three hooked
+    /// addresses: `FunctionDef::original()` must return the *real vanilla* function (routed through the
+    /// detour's trampoline) even for the addresses this battery has itself hooked, not silently re-enter
+    /// our own Rust detours. See that test's doc comment for the full rationale (pointer equality vs.
+    /// the raw address, registry-overflow fail-open check, release cfg-out).
+    #[cfg(debug_assertions)]
+    fn run_ztsoundscape_original_routes_to_trampoline_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        use openzt_detour::generated::ztsoundscape as gen_ztsoundscape;
+
+        /// `.original()`'s return value as a raw pointer value. The pointer is only inspected,
+        /// never called.
+        fn original_ptr<T>(def: &FunctionDef<T>) -> usize
+        where
+            T: retour::Function,
+        {
+            let original = unsafe { def.original() };
+            original.to_ptr() as usize
+        }
+
+        let test_name = "ZTSOUNDSCAPE_ORIGINAL_ROUTES_TO_TRAMPOLINE";
+        let hooked: [(&'static str, u32, usize); 3] = [
+            ("UPDATE", gen_ztsoundscape::UPDATE.address, original_ptr(&gen_ztsoundscape::UPDATE)),
+            ("INIT", gen_ztsoundscape::INIT.address, original_ptr(&gen_ztsoundscape::INIT)),
+            ("CONSTRUCTOR", gen_ztsoundscape::CONSTRUCTOR.address, original_ptr(&gen_ztsoundscape::CONSTRUCTOR)),
+        ];
+
+        let mut failures: Vec<String> = Vec::new();
+        for (name, address, original) in hooked {
+            match openzt_detour::trampoline_for(address) {
+                Some(trampoline) => {
+                    if original != trampoline {
+                        failures.push(format!(
+                            "{name} ({address:#010x}): .original() = {original:#010x} != registered trampoline {trampoline:#010x}"
+                        ));
+                    }
+                    if original == address as usize {
+                        failures.push(format!(
+                            "{name} ({address:#010x}): .original() equals the raw address - routing fell back to the raw cast"
+                        ));
+                    }
+                }
+                None => failures.push(format!(
+                    "{name} ({address:#010x}): no trampoline registered - detour() did not publish, or the registry overflowed"
+                )),
+            }
+        }
+        let overflow = openzt_detour::registry_overflow_count();
+        if overflow != 0 {
+            failures.push(format!("{overflow} address(es) failed to register in the hook registry (capacity overflow - fail-open raw casts)"));
+        }
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes(),
+                );
+            }
+            true
+        }
+    }
+
+    /// `ZTSOUNDSCAPE_STANDALONE_ROUNDTRIP` - `ztsoundscape-implementation-plan.md` stage 1 (pulled
+    /// forward from stage 5): builds two fresh `0x54`-byte standalone `ZTSoundscape` blocks, runs the
+    /// real vanilla constructor on one and the Rust reimplementation (`ZTSoundscape::construct`) on the
+    /// other, then byte-diffs the full struct. The constructor is pure constant writes, so the compare
+    /// is meaningful with no exclusions.
+    ///
+    /// Both blocks are pre-zeroed before either constructor runs: the ctor writes only 32 of the `0x54`
+    /// bytes (the three embedded slots' `{vtable, inner}` dwords and the two `Ambients` pointers) - the
+    /// scalars, the filename/atten tables, and the `+0xb` pad byte stay heap garbage on both sides until
+    /// `init` writes them. Comparing uninitialized memory would diff `operator_new` leftovers, not
+    /// constructor behavior (same "operator_new doesn't zero" precedent as
+    /// `MENUMUSICHANDLER_STANDALONE_ROUNDTRIP` and `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS`).
+    ///
+    /// Pole note: the vanilla side goes through `soundscape_live_support::real_constructor` (a
+    /// `CONSTRUCTOR_DETOUR.call` trampoline) - the stage-4 obligation this test used to document (a
+    /// release build's raw-cast `.original()` would silently re-enter the Rust detour and degenerate
+    /// the test into Rust-vs-Rust) is discharged now that the detours are installed.
+    fn run_ztsoundscape_standalone_roundtrip_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSOUNDSCAPE_STANDALONE_ROUNDTRIP";
+
+        let real_ptr = soundscape_live_support::allocate_uninitialized();
+        let reimpl_ptr = soundscape_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                soundscape_live_support::destroy_standalone(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                soundscape_live_support::destroy_standalone(reimpl_ptr);
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ZTSoundscape>();
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+
+            soundscape_live_support::real_constructor(real_ptr as *const c_void);
+            (*reimpl_ptr).construct();
+        }
+
+        let real_bytes = unsafe { std::slice::from_raw_parts(real_ptr as *const u8, struct_size) };
+        let reimpl_bytes = unsafe { std::slice::from_raw_parts(reimpl_ptr as *const u8, struct_size) };
+        let mismatches: Vec<(usize, u8, u8)> =
+            (0..struct_size).filter_map(|i| if real_bytes[i] != reimpl_bytes[i] { Some((i, real_bytes[i], reimpl_bytes[i])) } else { None }).collect();
+
+        let failed = !mismatches.is_empty();
+        if failed {
+            error!("{}: byte mismatch(es) (offset, real, reimpl): {:?}", test_name, mismatches);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: byte mismatch(es) (offset, real, reimpl): {:?}\n", test_name, mismatches).as_bytes());
+            }
+        } else {
+            write_success_line(failure_log, test_name);
+        }
+
+        soundscape_live_support::destroy_standalone(real_ptr);
+        soundscape_live_support::destroy_standalone(reimpl_ptr);
+        failed
+    }
+
+    /// The three fade constants `ZTSoundscape::update` reads at runtime through data RVAs -
+    /// re-declared here per the repo's no-shared-consts precedent (`ztsoundscape.rs` carries the
+    /// originals it actually uses). Values confirmed once via a manual PE-section parse of zoo.exe's
+    /// `.rdata` (see `ztsoundscape.rs`'s doc comment for the derivation and the `fade_atten_a`/
+    /// `fade_atten_b` unit tests that bake them in as literals).
+    const FADE_DAT_0063542C_RVA: u32 = 0x0063542c - 0x400000;
+    const FADE_DAT_00635428_RVA: u32 = 0x00635428 - 0x400000;
+    const FADE_DAT_00635490_RVA: u32 = 0x00635490 - 0x400000;
+
+    /// `ZTSOUNDSCAPE_FADE_CONSTANTS` - a review finding, not part of the original implementation plan:
+    /// `ZTSoundscape::update`'s fade-attenuation math (`fade_atten_a`/`fade_atten_b`) reads three
+    /// `.rdata` floats live via `get_module_base + RVA`, and the whole f64-truncation-parity argument
+    /// for those functions rests on those constants holding the exact values a one-time manual PE
+    /// parse confirmed (`DAT_0063542c` = f32 `0x38D1B717`, `DAT_00635428` = `4500.0`, `DAT_00635490` =
+    /// `1.0`). Nothing else in the battery would catch drift here: `SET_FADE_ATTENUATION` is called on
+    /// an opaque real `SNDSound` object, so `ZTSOUNDSCAPE_UPDATE`'s struct-only compare never observes
+    /// the actual attenuation argument the port computes from these constants. This test closes that
+    /// gap directly - no live zoo/game state needed, just the loaded module's `.rdata`, so it runs
+    /// alongside the other standalone-only tests rather than after `run_load_live_zoo`.
+    fn run_ztsoundscape_fade_constants_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSOUNDSCAPE_FADE_CONSTANTS";
+
+        let base = get_module_base("zoo.exe") as u32;
+        let c1: f32 = get_from_memory(base + FADE_DAT_0063542C_RVA);
+        let c2: f32 = get_from_memory(base + FADE_DAT_00635428_RVA);
+        let c3: f32 = get_from_memory(base + FADE_DAT_00635490_RVA);
+
+        let expected_c1 = f32::from_bits(0x38D1_B717);
+        let expected_c2 = 4500.0_f32;
+        let expected_c3 = 1.0_f32;
+
+        let mut mismatches: Vec<String> = Vec::new();
+        if c1.to_bits() != expected_c1.to_bits() {
+            mismatches.push(format!(
+                "DAT_0063542c: expected {:#010x} ({expected_c1}), got {:#010x} ({c1})",
+                expected_c1.to_bits(),
+                c1.to_bits()
+            ));
+        }
+        if c2 != expected_c2 {
+            mismatches.push(format!("DAT_00635428: expected {expected_c2}, got {c2}"));
+        }
+        if c3 != expected_c3 {
+            mismatches.push(format!("DAT_00635490: expected {expected_c3}, got {c3}"));
+        }
+
+        if mismatches.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            error!("{}: mismatch(es): {:?}", test_name, mismatches);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: mismatch(es): {:?}\n", test_name, mismatches).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `GLOBAL_ZTScenarioMgr`'s global-slot RVA (`ZTGameMgr_start.c`/`.asm` ground truth). Re-declared
+    /// here per the repo's no-shared-consts precedent (each file declares its own copy -
+    /// `ztgamemgr.rs` carries the original); that file's copy is left untouched so this stage's diff
+    /// stays out of its staged call-site rewiring.
+    const GLOBAL_ZTSCENARIOMGR_RVA: u32 = 0x00638ff8 - 0x400000;
+
+    /// The shared game RNG state's RVA (`DAT_00638060`) that `ZTSoundscape::update`'s position jitter
+    /// advances through the classic MSVC LCG. Re-declared here per the same no-shared-consts precedent
+    /// (`ztsoundscape.rs` carries the original).
+    const GAME_RNG_RVA: u32 = 0x00638060 - 0x400000;
+
+    /// `ZTSOUNDSCAPE_INIT` - `ztsoundscape-implementation-plan.md` stage 2 (pulled forward from stage
+    /// 5; needs no detours of its own): builds two fresh standalone `ZTSoundscape` blocks (real
+    /// vanilla ctor / [`ZTSoundscape::construct`]), **0xAA-fills both** before constructing, then
+    /// calls `init` on each - real vanilla (via the `real_init` trampoline) vs. the Rust port - and
+    /// compares.
+    ///
+    /// Inputs come from the live `GLOBAL_ZTScenarioMgr` singleton via its four real getter
+    /// call-throughs, captured **once** up front and handed to both poles, so the poles can't drift
+    /// apart on getter results. Must run after `run_load_live_zoo` (registered last in the battery,
+    /// right before `ZTGAMEMGR_START_STOP_SMOKE`): pre-zoo the scenario registry is non-null-but-
+    /// uninitialized (the hazard class `ZTGAMEMGR_START_STOP_SMOKE`'s doc describes), both
+    /// `BFConfigFile::attempt`s would fail, and the test would silently cover only the defaults/tail
+    /// while looking green.
+    ///
+    /// **Vanilla pole first, then a full snapshot of its block plus owned copies of every string its
+    /// pointer fields reference, and only then the reimpl pole.** The snapshot is load-bearing: both
+    /// poles' `init` calls reuse the same two *global* `BFConfigFile` instances, and the second
+    /// pole's `release`+`attempt`+parse frees/reallocates the parsed storage the first pole's
+    /// `crowd_filename`/`world_name` pointers point into (live-confirmed false-failure mode of this
+    /// test's first draft, which compared both sides live: the vanilla side's slot 2 was left reading
+    /// the new parse's `"sounds/quiet.wav"` buffer and slots 0/1 landed mid-string - vanilla's own
+    /// values were correct at its init time). The reimpl side is compared while its own parse is
+    /// still live.
+    ///
+    /// Comparison set (snapshot vs. the live reimpl block; masked regions re-covered by replacements):
+    /// - `+0x09` (`fade_step_in`, one of the two deliberately-uninitialized bytes): asserted still
+    ///   `0xAA` on **both** sides - the byte-diff alone can't catch a port that wrongly *writes* a
+    ///   byte both sides leave alone, but a raw filler assert does.
+    /// - `+0x1c..=0x2b` (`crowd_filename`): per-slot CStr **content** compare - the pointers
+    ///   legitimately differ across the two parses.
+    /// - `+0x40..=0x43` (`world_snd.inner`): null-ness parity only. Per-attempt vanilla-owned
+    ///   resource object (live-confirmed: the same attempted name handed the two poles different
+    ///   handles), so a value compare is wrong by construction.
+    /// - `+0x44..=0x47` (`world_name`): null-ness parity, then content compare when the vanilla
+    ///   snapshot's is non-zero - its pointer also legitimately differs across parses (live-confirmed).
+    /// - `+0x48..=0x4b` (`world_atten`, the second deliberately-uninitialized byte - untouched when
+    ///   no world sound is configured): compared only when the vanilla snapshot's `world_name`
+    ///   (`+0x44`) is non-zero.
+    /// - `+0x4c..=0x53` (both `Ambients*`, real heap addresses): null-ness parity only.
+    /// Everything else - the scalars, both idle crowd `SNDSound` slots, the world slot's vtable, and
+    /// the four `crowd_atten` values - is byte-compared as-is.
+    ///
+    /// Distinctness probe: the four vanilla-side `crowd_filename` pointers are checked for pairwise
+    /// distinctness (all equal/overlapping would mean `getString` reuses a scratch buffer, parity
+    /// still holds, and the content compare degenerates to trivial). Recorded in this test's own
+    /// success line (direct file write - `info!` lines placed mid-test are lost to the battery's
+    /// known tracing lossiness under `std::process::exit`): live run 2026-09-02 recorded **pairwise
+    /// distinct**. Relevant to `update`'s later filename reads: parsed names live in per-key storage,
+    /// not one scratch buffer.
+    ///
+    /// Audible caveat: both poles run `init` for real, so the battery briefly plays the world sound
+    /// **twice, overlapping** (each side loops one until teardown stops it) - documented, not a
+    /// failure.
+    ///
+    /// Teardown goes through [`soundscape_live_support::destroy_standalone_after_init`] on both
+    /// blocks, which releases the vanilla-allocated `Ambients` blocks via the real destructor and
+    /// stops each side's sound (see its doc comment for the cross-allocator reasoning).
+    ///
+    /// Pole note: the vanilla side goes through `soundscape_live_support::real_init` (an
+    /// `INIT_DETOUR.call` trampoline) - the stage-4 obligation this test used to document (a release
+    /// build's raw-cast `.original()` would re-enter the Rust detour and degenerate this test into
+    /// Rust-vs-Rust) is discharged now that the detours are installed. The four `bfscenariomgr` getter
+    /// captures above stay `.original()` - none of those is detoured.
+    ///
+    /// Accepted gaps: `OPERATOR_NEW`'s failure paths (the store-`0` + skip-ctor propagation) can't be
+    /// exercised live; `world_snd.inner` is only null-ness-compared (see above).
+    fn run_ztsoundscape_init_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSOUNDSCAPE_INIT";
+
+        let scenariomgr_ptr: u32 = get_from_memory(get_module_base("zoo.exe") as u32 + GLOBAL_ZTSCENARIOMGR_RVA);
+        if scenariomgr_ptr == 0 {
+            info!("Skipping {}: GLOBAL_ZTScenarioMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTScenarioMgr not initialized)", test_name));
+            return false;
+        }
+
+        // Capture the four getter results once; both poles get exactly these.
+        let crowd_ambients = unsafe { GET_CROWD_AMBIENTS_NAME.original()(scenariomgr_ptr as i32) };
+        let world_ambients = unsafe { GET_WORLD_AMBIENTS_NAME.original()(scenariomgr_ptr as i32) };
+        let crowd_config = unsafe { GET_CROWD_CONFIG_NAME.original()(scenariomgr_ptr as i32) };
+        let world_config = unsafe { GET_WORLD_CONFIG_NAME.original()(scenariomgr_ptr as i32) };
+
+        let real_ptr = soundscape_live_support::allocate_uninitialized();
+        let reimpl_ptr = soundscape_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            // Nothing was constructed or init'ed on this path, so a plain free is complete - the
+            // dtor-aware path would walk 0xAA garbage.
+            if !real_ptr.is_null() {
+                soundscape_live_support::destroy_standalone(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                soundscape_live_support::destroy_standalone(reimpl_ptr);
+            }
+            return true;
+        }
+
+        // Owned copy of one pointed-to name; `None` = no usable pointer (null or 0xAA filler).
+        fn copy_cstr(p: u32) -> Option<Vec<u8>> {
+            if p == 0 || p == 0xAAAA_AAAA {
+                return None;
+            }
+            Some(unsafe { CStr::from_ptr(p as *const i8) }.to_bytes().to_vec())
+        }
+
+        let struct_size = size_of::<ZTSoundscape>();
+        let mut mismatches: Vec<String> = Vec::new();
+
+        unsafe {
+            // 0xAA fill (not zero) so every deliberately-uninitialized byte is detectably garbage.
+            std::ptr::write_bytes(real_ptr as *mut u8, 0xAA, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0xAA, struct_size);
+
+            soundscape_live_support::real_constructor(real_ptr as *const c_void);
+            (*reimpl_ptr).construct();
+
+            // Vanilla pole first: the generated INIT's params 2/3 carry a `*const u32` wart - cast
+            // here, in the test, not inside the port (see `ZTSoundscape::init`'s doc comment).
+            soundscape_live_support::real_init(
+                real_ptr as *const c_void,
+                crowd_ambients as *const u32,
+                world_ambients as *const u32,
+                crowd_config,
+                world_config,
+            );
+
+        }
+
+        // Snapshot before the reimpl pole re-parses the shared global config instances (see this
+        // test's doc comment): the whole block; the pointer-valued fields get owned string copies
+        // extracted below, before anything can invalidate the storage they reference.
+        let vanilla_snap = unsafe { std::slice::from_raw_parts(real_ptr as *const u8, struct_size) }.to_vec();
+
+        // Vanilla-side snapshot extraction (all safe - vanilla_snap is an owned copy), plus the
+        // distinctness probe (see this test's doc comment): pointers equal -> getString shares a
+        // scratch buffer and the content compare below degenerates to trivial.
+        let dword = |bytes: &[u8], off: usize| u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+        let vanilla_name_ptrs: [u32; 4] = std::array::from_fn(|s| dword(&vanilla_snap, 0x1c + s * 4));
+        let vanilla_crowd_names: [Option<Vec<u8>>; 4] = std::array::from_fn(|s| copy_cstr(vanilla_name_ptrs[s]));
+        let vanilla_world_name_ptr = dword(&vanilla_snap, 0x44);
+        let vanilla_world_name = copy_cstr(vanilla_world_name_ptr);
+        let vanilla_distinct = (0..4).all(|a| (a + 1..4).all(|b| vanilla_name_ptrs[a] != vanilla_name_ptrs[b]));
+
+        unsafe {
+            // Reimpl pole second; its own parse is still live at compare time.
+            (*reimpl_ptr).init(crowd_ambients, world_ambients, crowd_config, world_config);
+            let reimpl_bytes = std::slice::from_raw_parts(reimpl_ptr as *const u8, struct_size);
+
+            // fade_step_in (+0x09): must still be raw filler on both sides.
+            if vanilla_snap[0x09] != 0xAA {
+                mismatches.push("fade_step_in (+0x09) written on the vanilla side (expected untouched 0xAA filler)".to_string());
+            }
+            if reimpl_bytes[0x09] != 0xAA {
+                mismatches.push("fade_step_in (+0x09) written on the reimpl side (expected untouched 0xAA filler)".to_string());
+            }
+
+            // Whole-block byte diff, minus the masked regions - crowd_filename, world_snd.inner,
+            // world_name, world_atten, both Ambients pointers - each re-covered by a replacement
+            // check below.
+            for i in 0..struct_size {
+                if matches!(i, 0x1c..=0x2b | 0x40..=0x53) || vanilla_snap[i] == reimpl_bytes[i] {
+                    continue;
+                }
+                mismatches.push(format!("byte +{i:#04x}: vanilla={:#04x}, reimpl={:#04x}", vanilla_snap[i], reimpl_bytes[i]));
+            }
+
+            // crowd_filename: per-slot content compare of snapshot vs. the live reimpl pointers.
+            for slot in 0..4 {
+                let reimpl_ptr_val = dword(reimpl_bytes, 0x1c + slot * 4);
+                match (vanilla_crowd_names[slot].as_deref(), copy_cstr(reimpl_ptr_val).as_deref()) {
+                    (Some(v), Some(r)) if v == r => {}
+                    (v, r) => mismatches.push(format!(
+                        "crowd_filename[{slot}] content: vanilla={:?}, reimpl={:?}",
+                        v.map(|b| String::from_utf8_lossy(b).into_owned()),
+                        r.map(|b| String::from_utf8_lossy(b).into_owned()),
+                    )),
+                }
+            }
+
+            // world_snd.inner: null-ness parity only (per-attempt resource object - see doc).
+            let (vanilla_inner, reimpl_inner) = (dword(&vanilla_snap, 0x40), dword(reimpl_bytes, 0x40));
+            if (vanilla_inner != 0) != (reimpl_inner != 0) {
+                mismatches.push(format!("world_snd.inner null-ness: vanilla={vanilla_inner:#010x}, reimpl={reimpl_inner:#010x}"));
+            }
+
+            // world_name: null-ness parity, then content compare when configured.
+            let reimpl_world_name_ptr = dword(reimpl_bytes, 0x44);
+            if (vanilla_world_name_ptr != 0) != (reimpl_world_name_ptr != 0) {
+                mismatches.push(format!("world_name null-ness: vanilla={vanilla_world_name_ptr:#010x}, reimpl={reimpl_world_name_ptr:#010x}"));
+            } else if let (Some(v), Some(r)) = (vanilla_world_name.as_deref(), copy_cstr(reimpl_world_name_ptr).as_deref()) {
+                if v != r {
+                    mismatches.push(format!(
+                        "world_name content: vanilla={:?}, reimpl={:?}",
+                        String::from_utf8_lossy(v),
+                        String::from_utf8_lossy(r),
+                    ));
+                }
+            }
+
+            // world_atten: only comparable when a world sound was actually configured.
+            if vanilla_world_name_ptr != 0 {
+                let (v, r) = (dword(&vanilla_snap, 0x48), dword(reimpl_bytes, 0x48));
+                if v != r {
+                    mismatches.push(format!("world_atten: vanilla={v:#010x}, reimpl={r:#010x}"));
+                }
+            }
+
+            // Both Ambients pointers: null-ness parity only.
+            for (name, off) in [("crowd_ambients", 0x4c), ("world_ambients", 0x50)] {
+                let (v, r) = (dword(&vanilla_snap, off), dword(reimpl_bytes, off));
+                if (v != 0) != (r != 0) {
+                    mismatches.push(format!("{name} null-ness: vanilla={v:#010x}, reimpl={r:#010x}"));
+                }
+            }
+        }
+
+        if !mismatches.is_empty() {
+            error!("{}: mismatch(es): {:?}", test_name, mismatches);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: mismatch(es): {:?}\n", test_name, mismatches).as_bytes());
+            }
+        } else {
+            write_success_line(failure_log, &format!("{} (vanilla crowd_filename pointers pairwise distinct: {})", test_name, vanilla_distinct));
+        }
+
+        soundscape_live_support::destroy_standalone_after_init(real_ptr);
+        soundscape_live_support::destroy_standalone_after_init(reimpl_ptr);
+        !mismatches.is_empty()
+    }
+
+    /// `ZTSOUNDSCAPE_UPDATE` - `ztsoundscape-implementation-plan.md` stage 3 (pulled forward from
+    /// stage 5 per the per-stage pattern stages 1-2 established): runs `ZTSoundscape::update` on
+    /// **three** standalone twins - A = real vanilla (via the `real_update` trampoline), B = the Rust
+    /// port, C = vanilla again (determinism control, so "port diverged" is distinguishable from
+    /// "environment nondeterministic") - and compares. Needs the live zoo (scenario-registry config
+    /// names + real crowd `.wav`s), so it registers right after [`run_ztsoundscape_init_test`].
+    ///
+    /// Twins are built exactly as `ZTSOUNDSCAPE_INIT` builds its two: `allocate_uninitialized` ->
+    /// `0xAA` fill -> ctor (vanilla A/C / Rust B) -> `init` with the same four captured
+    /// `GLOBAL_ZTScenarioMgr` getter strings.
+    ///
+    /// **Pre-equalization** (needed because each pole's `init` re-parses the two shared *global*
+    /// `BFConfigFile` instances, so pointer-valued fields legitimately drift - the same discovery
+    /// `ZTSOUNDSCAPE_INIT` documented; `update` never re-reads configs): `crowd_filename[4]`,
+    /// `crowd_atten[4]`, `world_name`, and `world_atten` are copied from B (the freshest live parse)
+    /// into A and C, and `fade_step_in` (+0x09, deliberately-uninitialized filler) is written `0` on
+    /// all three - only ever read while `fading`, but this makes +0x09 byte-comparable once the start
+    /// block (which rewrites it identically from the equal `next_slot_is_b = 0`) has run. Each side's
+    /// own `world_snd.inner` is left alone (teardown still releases its own handle).
+    ///
+    /// **Guest-count override**: the hysteresis holds a track forever at a constant guest count, so
+    /// the plan's phase script (mid-fade tick, then a clamp-to-endpoint tick with a same-tick
+    /// restart, then an endpoint tick that really stops the playing slot and restarts again) is only
+    /// reachable in a guest band where every phase's selection lands on a *new* target: `>= 161`
+    /// (`-1 -> 1` on the start tick, `1 -> 2` on phase 2's fall-through restart, `2 -> 3` on phase
+    /// 3's). The dword at `ZTGameMgr+0x54` is therefore forced to 200 for the test (vanilla reads a
+    /// full dword there) and restored afterwards; the live value is recorded in the success line.
+    ///
+    /// **RNG discipline** (update jitters both `Ambients` blocks through the shared global game RNG):
+    /// the state at VA `0x00638060` is snapshotted before phase 1; A runs the phase's ticks, the RNG
+    /// is rewound, B runs the same ticks, rewound again, C runs them; the snapshot is restored at test
+    /// end (no net stream shift for the vanilla consumers). The rewinds survive for that stream
+    /// discipline, but the *position-equality* compare across poles they were meant to enable is
+    /// retired - see the fallback note below. Phases 2-3 run A then B without rewinds.
+    ///
+    /// **Fallback applied (first live run)**: the plan's escape hatch ("if the rewind/compare proves
+    /// flaky in practice, scope down to struct-only compare + an 'ambients positions changed' sanity
+    /// assert", `ZTAdvTerrainMgr` precedent) fired on the very first run. The A-vs-C vanilla
+    /// determinism control failed identically to A-vs-B, with **B == C bit-for-bit** (crowd
+    /// (3111, 596, 0), world (3262, 702, 0) on both) and only A - the pole that ran first - holding
+    /// different positions. That is vanilla nondeterminism under the rewind scheme, not a port
+    /// divergence (a port jitter bug reads A == C != B): the real sound subsystem's asynchronous
+    /// response to `Ambients::play` (itself a vanilla shared-RNG consumer) draws the global state from
+    /// its own thread, so the first pole runs from the clean snapshot while every later pole runs from
+    /// a state polluted after its rewind. Genuinely non-comparable, so: struct-only compare (the
+    /// state machine never holds jitter values and passed byte-exact through all three phases) plus a
+    /// per-pole "ambients positions changed" sanity assert; the jitter math itself stays pinned by the
+    /// hand-computed seed vectors in `ztsoundscape.rs`'s unit tests, and this run's B == C is live
+    /// evidence the port's jitter reproduces vanilla's bit-for-bit from an equal starting state.
+    ///
+    /// Phase script (both fade ticks land mid-script by construction - the start tick sets
+    /// `fade = 10000` with `fading = 1` and no fade block):
+    /// - **Phase 1** - two `delta = 1000` ticks per pole: tick 1 starts the crowd loop on slot A
+    ///   (`fading = 1`, `fade = 10000`, `fade_step_in = 0`), tick 2 steps the ramp to 9000 (real
+    ///   `SET_FADE_ATTENUATION`/`SET_VOLUME` on the live slot A at a mid-ramp value). Compare: masked
+    ///   struct A vs B and A vs C, plus the per-pole "ambients positions changed" sanity.
+    /// - **Phase 2** - one `delta = 10000` tick on A then B: fade 9000 -> wraps past 0 -> clamps to 0
+    ///   -> endpoint stop gated off (slot B never started, `VALID` false) -> `fading` cleared ->
+    ///   fall-through restart on slot B (`fade_step_in = 1`, `fade = 0`). Covers advance+clamp, the
+    ///   endpoint logic's gated-off arm, and the same-tick restart.
+    /// - **Phase 3** - one `delta = 10000` tick on A then B: fade 0 -> 10000 -> endpoint **really
+    ///   stops the playing slot A** (`VALID` true -> `STOP` + `RELEASE`) and restarts on slot A
+    ///   (target 3, `next_slot_is_b` back at 0).
+    ///
+    /// Masked compare regions (carry-over from `ZTSOUNDSCAPE_INIT`'s live-confirmed discoveries):
+    /// per-attempt vanilla-owned inner handles - `+0x10..=0x13`, `+0x18..=0x1b` (crowd slots, both
+    /// firing attempts from phase 1 on) and `+0x40..=0x43` (world) - null-ness parity only, plus
+    /// `+0x4c..=0x53` (each twin's own `Ambients*`, real per-twin heap addresses - null-ness only;
+    /// the plan's masked list omits these, but they can never be byte-equal across twins).
+    /// Everything else is byte-compared, including `+0x09`.
+    ///
+    /// Pole note: both vanilla poles go through `soundscape_live_support::real_update` (an
+    /// `UPDATE_DETOUR.call` trampoline) - the stage-4 obligation this test used to document (a release
+    /// build's raw-cast `.original()` would re-enter the Rust detour and degenerate them into
+    /// Rust-vs-Rust, taking the A/C determinism control down with them) is discharged now that the
+    /// detours are installed.
+    ///
+    /// Audible caveat: real crowd loops are started/stopped across the phases and several overlap
+    /// (A/B/C each loop one world + crowd sound until teardown) - documented, not a failure.
+    ///
+    /// Teardown: `destroy_standalone_after_init` x3 (real vanilla destructor + `operator delete` -
+    /// see [`soundscape_live_support::destroy_standalone_after_init`]'s cross-allocator reasoning).
+    fn run_ztsoundscape_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSOUNDSCAPE_UPDATE";
+
+        let scenariomgr_ptr: u32 = get_from_memory(get_module_base("zoo.exe") as u32 + GLOBAL_ZTSCENARIOMGR_RVA);
+        if scenariomgr_ptr == 0 {
+            info!("Skipping {}: GLOBAL_ZTScenarioMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTScenarioMgr not initialized)", test_name));
+            return false;
+        }
+        let gamemgr_ptr = globals().ztgamemgr_ptr();
+        if gamemgr_ptr.is_null() {
+            info!("Skipping {}: GLOBAL_ZTGameMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTGameMgr not initialized)", test_name));
+            return false;
+        }
+
+        // Capture the four getter results once; all three poles get exactly these.
+        let crowd_ambients = unsafe { GET_CROWD_AMBIENTS_NAME.original()(scenariomgr_ptr as i32) };
+        let world_ambients = unsafe { GET_WORLD_AMBIENTS_NAME.original()(scenariomgr_ptr as i32) };
+        let crowd_config = unsafe { GET_CROWD_CONFIG_NAME.original()(scenariomgr_ptr as i32) };
+        let world_config = unsafe { GET_WORLD_CONFIG_NAME.original()(scenariomgr_ptr as i32) };
+
+        let vanilla_a = soundscape_live_support::allocate_uninitialized();
+        let reimpl_b = soundscape_live_support::allocate_uninitialized();
+        let vanilla_c = soundscape_live_support::allocate_uninitialized();
+        if vanilla_a.is_null() || reimpl_b.is_null() || vanilla_c.is_null() {
+            error!(
+                "{}: OPERATOR_NEW returned null (a={:?}, b={:?}, c={:?})",
+                test_name, vanilla_a, reimpl_b, vanilla_c
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!(
+                        "Test Failed {}: OPERATOR_NEW returned null (a={:?}, b={:?}, c={:?})\n",
+                        test_name, vanilla_a, reimpl_b, vanilla_c
+                    )
+                    .as_bytes(),
+                );
+            }
+            // Nothing was constructed or init'ed on this path, so a plain free is complete.
+            for ptr in [vanilla_a, reimpl_b, vanilla_c] {
+                if !ptr.is_null() {
+                    soundscape_live_support::destroy_standalone(ptr);
+                }
+            }
+            return true;
+        }
+
+        let base = get_module_base("zoo.exe") as u32;
+        let rng_addr = base + GAME_RNG_RVA;
+        let guests_addr = gamemgr_ptr as u32 + 0x54;
+        let live_guests: i32 = get_from_memory(guests_addr);
+        const FORCED_GUESTS: i32 = 200; // >= 161: every phase's hysteresis selection lands on a new target
+
+        let struct_size = size_of::<ZTSoundscape>();
+        let dword = |bytes: &[u8], off: usize| u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+        let mut mismatches: Vec<String> = Vec::new();
+
+        unsafe {
+            // Build all three twins: 0xAA fill, ctor, init (vanilla A/C, Rust B). The generated
+            // INIT's params 2/3 carry a `*const u32` wart - cast here, in the test, not inside the
+            // port (see `ZTSoundscape::init`'s doc comment).
+            for ptr in [vanilla_a, reimpl_b, vanilla_c] {
+                std::ptr::write_bytes(ptr as *mut u8, 0xAA, struct_size);
+            }
+            soundscape_live_support::real_constructor(vanilla_a as *const c_void);
+            soundscape_live_support::real_constructor(vanilla_c as *const c_void);
+            (*reimpl_b).construct();
+            for ptr in [vanilla_a, vanilla_c] {
+                soundscape_live_support::real_init(
+                    ptr as *const c_void,
+                    crowd_ambients as *const u32,
+                    world_ambients as *const u32,
+                    crowd_config,
+                    world_config,
+                );
+            }
+            (*reimpl_b).init(crowd_ambients, world_ambients, crowd_config, world_config);
+
+            // Pre-equalization: B's freshest live parse into A and C (see this test's doc comment).
+            for twin in [vanilla_a, vanilla_c] {
+                for off in (0x1c..0x3c).step_by(4) {
+                    // crowd_filename[4] + crowd_atten[4]
+                    let v: u32 = get_from_memory(reimpl_b as u32 + off);
+                    save_to_memory(twin as u32 + off, v);
+                }
+                for off in [0x44, 0x48] {
+                    // world_name, world_atten
+                    let v: u32 = get_from_memory(reimpl_b as u32 + off);
+                    save_to_memory(twin as u32 + off, v);
+                }
+            }
+            for twin in [vanilla_a, reimpl_b, vanilla_c] {
+                save_to_memory(twin as u32 + 0x09, 0u8); // fade_step_in
+            }
+        }
+
+        // Masked struct compare (see this test's doc comment for the masked regions). The Ambients
+        // position triples are deliberately NOT compared across poles - retired per the applied
+        // fallback (see this test's doc comment); their only live check is the "positions changed"
+        // sanity below.
+        let compare = |label: &'static str,
+                       a_ptr: *const ZTSoundscape,
+                       b_ptr: *const ZTSoundscape,
+                       mismatches: &mut Vec<String>| {
+            let a = unsafe { std::slice::from_raw_parts(a_ptr as *const u8, struct_size) };
+            let b = unsafe { std::slice::from_raw_parts(b_ptr as *const u8, struct_size) };
+            for i in 0..struct_size {
+                if matches!(i, 0x10..=0x13 | 0x18..=0x1b | 0x40..=0x43 | 0x4c..=0x53) || a[i] == b[i] {
+                    continue;
+                }
+                mismatches.push(format!("{label}: byte +{i:#04x}: {:#04x} vs {:#04x}", a[i], b[i]));
+            }
+            for (name, off) in [
+                ("crowd_snd_a.inner", 0x10),
+                ("crowd_snd_b.inner", 0x18),
+                ("world_snd.inner", 0x40),
+                ("crowd_ambients", 0x4c),
+                ("world_ambients", 0x50),
+            ] {
+                let (x, y) = (dword(a, off), dword(b, off));
+                if (x != 0) != (y != 0) {
+                    mismatches.push(format!("{label}: {name} null-ness: {x:#010x} vs {y:#010x}"));
+                }
+            }
+        };
+
+        // One pole's `(crowd, world)` Ambients position triples, read from its own blocks.
+        let ambients_triple = |ptr: *const ZTSoundscape| -> [(i32, i32, i32); 2] {
+            [0x4c, 0x50].map(|off| {
+                let p = dword(unsafe { std::slice::from_raw_parts(ptr as *const u8, struct_size) }, off);
+                if p == 0 {
+                    (0, 0, 0)
+                } else {
+                    unsafe {
+                        (
+                            get_from_memory::<i32>(p + 0xc),
+                            get_from_memory::<i32>(p + 0x10),
+                            get_from_memory::<i32>(p + 0x14),
+                        )
+                    }
+                }
+            })
+        };
+
+        // The guest-count override covers every update call below; both orders are safe because the
+        // vanilla pole reads the same dword the Rust port does.
+        save_to_memory(guests_addr, FORCED_GUESTS);
+
+        // "Positions changed" sanity (the applied fallback - see doc comment): capture each pole's
+        // pre-update triples to diff against after phase 1.
+        let poles = [("A", vanilla_a), ("B", reimpl_b), ("C", vanilla_c)];
+        let pre_positions: Vec<_> = poles.iter().map(|(_, p)| ambients_triple(*p)).collect();
+
+        // Phase 1: two delta=1000 ticks per pole, RNG-rewound between poles (see doc comment).
+        let s0: u32 = get_from_memory(rng_addr);
+        unsafe {
+            // Pole A: real vanilla twice.
+            soundscape_live_support::real_update(vanilla_a as *const c_void, 1000);
+            soundscape_live_support::real_update(vanilla_a as *const c_void, 1000);
+        }
+        save_to_memory(rng_addr, s0);
+        unsafe {
+            // Pole B: the Rust port twice.
+            (*reimpl_b).update(1000);
+            (*reimpl_b).update(1000);
+        }
+        save_to_memory(rng_addr, s0);
+        unsafe {
+            // Pole C: real vanilla again (determinism control).
+            soundscape_live_support::real_update(vanilla_c as *const c_void, 1000);
+            soundscape_live_support::real_update(vanilla_c as *const c_void, 1000);
+        }
+        compare("phase 1 A/B", vanilla_a, reimpl_b, &mut mismatches);
+        compare("phase 1 A/C", vanilla_a, vanilla_c, &mut mismatches);
+
+        // "Positions changed" sanity: each pole's jitter + write path must have moved at least one
+        // Ambients block off its pre-update triple (a zero-jitter coincidence on one block is
+        // possible but both blocks standing still means step 4 never ran on that pole).
+        for ((name, ptr), pre) in poles.iter().zip(&pre_positions) {
+            let post = ambients_triple(*ptr);
+            if post == *pre {
+                mismatches.push(format!(
+                    "phase 1: ambients positions did not change on pole {name}: {pre:?} -> {post:?}"
+                ));
+            }
+        }
+
+        // Phase 2: fade 9000 -> clamp 0 -> gated-off endpoint -> fall-through restart on slot B.
+        unsafe {
+            soundscape_live_support::real_update(vanilla_a as *const c_void, 10000);
+        }
+        unsafe {
+            (*reimpl_b).update(10000);
+        }
+        compare("phase 2 A/B", vanilla_a, reimpl_b, &mut mismatches);
+
+        // Phase 3: fade 0 -> 10000 -> endpoint really stops slot A -> fall-through restart on slot A.
+        unsafe {
+            soundscape_live_support::real_update(vanilla_a as *const c_void, 10000);
+        }
+        unsafe {
+            (*reimpl_b).update(10000);
+        }
+        compare("phase 3 A/B", vanilla_a, reimpl_b, &mut mismatches);
+
+        // Teardown: restore the shared global state first, then release all three twins through the
+        // real vanilla destructor (stops every sound they started).
+        save_to_memory(rng_addr, s0);
+        save_to_memory(guests_addr, live_guests);
+        soundscape_live_support::destroy_standalone_after_init(vanilla_a);
+        soundscape_live_support::destroy_standalone_after_init(reimpl_b);
+        soundscape_live_support::destroy_standalone_after_init(vanilla_c);
+
+        if !mismatches.is_empty() {
+            error!("{}: mismatch(es): {:?}", test_name, mismatches);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: mismatch(es): {:?}\n", test_name, mismatches).as_bytes());
+            }
+        } else {
+            write_success_line(
+                failure_log,
+                &format!("{} (live guest count {}, forced to {} for the phase script)", test_name, live_guests, FORCED_GUESTS),
+            );
+        }
+        mismatches.is_empty()
+    }
+
+    /// `ZTSOUNDSCAPE_UPDATE_ATTEMPT_FAILURE` - a review finding, not part of the original
+    /// implementation plan: `ZTSOUNDSCAPE_UPDATE`'s phase script always plays real, present crowd
+    /// `.wav`s, so it never reaches `update`'s start block's `ATTEMPT`-fails branch. Per
+    /// `ZTSoundscape::update`'s doc comment, `current_track` updates to the selected target even when
+    /// the attempt to start that track's sound fails - only the `fading`/`fade_step_in`/`fade`/
+    /// `next_slot_is_b` crossfade-state-machine advance is gated on success. This test forces that
+    /// branch directly and pins both halves of that contract.
+    ///
+    /// Builds two standalone twins (real vanilla / reimpl) exactly as `ZTSOUNDSCAPE_INIT`/`_UPDATE` do
+    /// (`allocate_uninitialized` -> `0xAA` fill -> ctor -> `init` with the same four captured
+    /// `GLOBAL_ZTScenarioMgr` getter strings), then - because each pole's `init` re-parses the shared
+    /// global `BFConfigFile` instances and so legitimately ends up with different pointer values in
+    /// `crowd_filename`/`crowd_atten`/`world_name`/`world_atten` (`ZTSOUNDSCAPE_INIT`'s documented
+    /// discovery) - pre-equalizes those fields from the reimpl pole into the vanilla pole exactly as
+    /// `ZTSOUNDSCAPE_UPDATE` does, so the later struct compare isn't comparing two independent parses.
+    ///
+    /// Only then does it overwrite `crowd_filename[0]` on **both** twins with a filename engineered to
+    /// fail, and forces the live `GLOBAL_ZTGameMgr` guest count to `0`: with `current_track` fresh at
+    /// `-1` after `init`, `select_target_track(-1, 0)` deterministically picks target `0` (the
+    /// `g <= 14 && t != 0` arm), so the start block's `ATTEMPT` is guaranteed to run against the bogus
+    /// filename on both poles.
+    ///
+    /// **The filename can't just be "nonexistent" - it has to fail `SNDSound::attempt`'s own gate.**
+    /// `SNDSound_attempt.asm` shows `attempt` never touches the filesystem or `DX8SndMgr` for a
+    /// same-vtable check first: it reads the filename's **last character** and short-circuits to
+    /// `false` with no allocation at all unless that character is `'v'`/`'V'` (a crude `.wav`-extension
+    /// sniff, `CMP %CL, 0x76` / `0x56` at `.1ece9e`/`.1ecebc`) - only past that gate does it allocate a
+    /// `DX8Sound` and call through to real `BFSndMgr`/DirectSound. A first draft of this test used a
+    /// `__openzt_test_nonexistent_*.wav` name (mirroring `MENUMUSICHANDLER_INIT`'s own guaranteed-
+    /// missing-file idiom) and it live-failed: both poles agreed the attempt **succeeded** (`fading = 1,
+    /// fade = 10000, next_slot_is_b = 1` on both) - not a port divergence, since real and reimpl matched
+    /// bit-for-bit, but proof the deeper `DX8Sound`/`BFSndMgr` path doesn't fail synchronously on a
+    /// missing file either (the real load is presumably async/deferred). A second draft then tried
+    /// `"...notawav"`, missing that "notawav" itself still ends in `'v'` - same live failure, same
+    /// signature, root-caused by re-reading `.asm:14` (`MOV %CL, [ECX + EBX - 1]`, the string's *last*
+    /// byte, not merely "looks like a `.wav` name" as a whole). The filename below ends in `.txt`
+    /// instead, which fails deterministically at the string-shape gate alone - no dependency on any
+    /// real sound-loading behavior, and no near-miss on the extension check either.
+    ///
+    /// One `update` tick runs on each pole, then: a masked struct compare (same per-attempt inner-handle
+    /// and `Ambients*` null-ness-only regions as `ZTSOUNDSCAPE_UPDATE` - no RNG rewind needed since
+    /// those are the only RNG-sensitive bytes in the compared struct, and they're masked) catches any
+    /// unexpected divergence, and four explicit assertions per pole pin the contract itself:
+    /// `current_track == 0` (updated despite the failed attempt), `fading == 0`, `fade == 0`, and
+    /// `next_slot_is_b == 0` (the crossfade state machine never armed).
+    ///
+    /// Teardown via `destroy_standalone_after_init` on both, same cross-allocator reasoning as the
+    /// other `ZTSOUNDSCAPE_*` tests.
+    fn run_ztsoundscape_update_attempt_failure_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSOUNDSCAPE_UPDATE_ATTEMPT_FAILURE";
+
+        let scenariomgr_ptr: u32 = get_from_memory(get_module_base("zoo.exe") as u32 + GLOBAL_ZTSCENARIOMGR_RVA);
+        if scenariomgr_ptr == 0 {
+            info!("Skipping {}: GLOBAL_ZTScenarioMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTScenarioMgr not initialized)", test_name));
+            return false;
+        }
+        let gamemgr_ptr = globals().ztgamemgr_ptr();
+        if gamemgr_ptr.is_null() {
+            info!("Skipping {}: GLOBAL_ZTGameMgr not initialized at this injection point", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: ZTGameMgr not initialized)", test_name));
+            return false;
+        }
+
+        let crowd_ambients = unsafe { GET_CROWD_AMBIENTS_NAME.original()(scenariomgr_ptr as i32) };
+        let world_ambients = unsafe { GET_WORLD_AMBIENTS_NAME.original()(scenariomgr_ptr as i32) };
+        let crowd_config = unsafe { GET_CROWD_CONFIG_NAME.original()(scenariomgr_ptr as i32) };
+        let world_config = unsafe { GET_WORLD_CONFIG_NAME.original()(scenariomgr_ptr as i32) };
+
+        let vanilla_a = soundscape_live_support::allocate_uninitialized();
+        let reimpl_b = soundscape_live_support::allocate_uninitialized();
+        if vanilla_a.is_null() || reimpl_b.is_null() {
+            error!("{}: OPERATOR_NEW returned null (a={:?}, b={:?})", test_name, vanilla_a, reimpl_b);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!("Test Failed {}: OPERATOR_NEW returned null (a={:?}, b={:?})\n", test_name, vanilla_a, reimpl_b).as_bytes(),
+                );
+            }
+            for ptr in [vanilla_a, reimpl_b] {
+                if !ptr.is_null() {
+                    soundscape_live_support::destroy_standalone(ptr);
+                }
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ZTSoundscape>();
+        let guests_addr = gamemgr_ptr as u32 + 0x54;
+        let live_guests: i32 = get_from_memory(guests_addr);
+        const FORCED_GUESTS: i32 = 0; // <= 14: select_target_track(-1, 0) deterministically picks target 0
+        // Last byte before the nul is deliberately NOT 'v'/'V' - SNDSound::attempt (SNDSound_attempt.asm)
+        // reads only that byte and short-circuits to false with no allocation and no BFSndMgr/DX8Sound
+        // call at all otherwise (see this test's doc comment for why a "*.wav" name doesn't work here).
+        // NB: "notawav" itself still ends in 'v' - the live-confirmed failure mode of this constant's
+        // first fix attempt. ".txt" ends in 't', clear of the gate.
+        const BOGUS_FILENAME: &[u8] = b"__openzt_test_forced_attempt_failure.txt\0";
+
+        let mut mismatches: Vec<String> = Vec::new();
+
+        unsafe {
+            std::ptr::write_bytes(vanilla_a as *mut u8, 0xAA, struct_size);
+            std::ptr::write_bytes(reimpl_b as *mut u8, 0xAA, struct_size);
+
+            soundscape_live_support::real_constructor(vanilla_a as *const c_void);
+            (*reimpl_b).construct();
+
+            // Generated INIT's params 2/3 carry a `*const u32` wart - cast here, in the test, not
+            // inside the port (see `ZTSoundscape::init`'s doc comment).
+            soundscape_live_support::real_init(
+                vanilla_a as *const c_void,
+                crowd_ambients as *const u32,
+                world_ambients as *const u32,
+                crowd_config,
+                world_config,
+            );
+            (*reimpl_b).init(crowd_ambients, world_ambients, crowd_config, world_config);
+
+            // Pre-equalization: B's freshest live parse into A, same shape as ZTSOUNDSCAPE_UPDATE's
+            // (both poles' `init` re-parse the shared global config instances, so these pointer-valued
+            // fields legitimately drift between independent parses - see that test's doc comment).
+            for off in (0x1c..0x3c).step_by(4) {
+                // crowd_filename[4] + crowd_atten[4]
+                let v: u32 = get_from_memory(reimpl_b as u32 + off);
+                save_to_memory(vanilla_a as u32 + off, v);
+            }
+            for off in [0x44, 0x48] {
+                // world_name, world_atten
+                let v: u32 = get_from_memory(reimpl_b as u32 + off);
+                save_to_memory(vanilla_a as u32 + off, v);
+            }
+
+            // Overwrite crowd_filename[0] on both twins with a filename that cannot resolve, forcing
+            // the update start block's ATTEMPT to fail on the branch this test targets. Applied after
+            // pre-equalization so it isn't clobbered by the copy above.
+            let bogus_ptr = BOGUS_FILENAME.as_ptr() as u32;
+            save_to_memory(vanilla_a as u32 + 0x1c, bogus_ptr);
+            save_to_memory(reimpl_b as u32 + 0x1c, bogus_ptr);
+        }
+
+        save_to_memory(guests_addr, FORCED_GUESTS);
+        unsafe {
+            soundscape_live_support::real_update(vanilla_a as *const c_void, 1000);
+            (*reimpl_b).update(1000);
+        }
+        save_to_memory(guests_addr, live_guests);
+
+        let dword = |bytes: &[u8], off: usize| u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+        unsafe {
+            let a = std::slice::from_raw_parts(vanilla_a as *const u8, struct_size);
+            let b = std::slice::from_raw_parts(reimpl_b as *const u8, struct_size);
+
+            // Masked struct compare - same per-attempt inner-handle / Ambients-pointer null-ness-only
+            // regions as ZTSOUNDSCAPE_UPDATE.
+            for i in 0..struct_size {
+                if matches!(i, 0x10..=0x13 | 0x18..=0x1b | 0x40..=0x43 | 0x4c..=0x53) || a[i] == b[i] {
+                    continue;
+                }
+                mismatches.push(format!("byte +{i:#04x}: vanilla={:#04x}, reimpl={:#04x}", a[i], b[i]));
+            }
+            for (name, off) in [
+                ("crowd_snd_a.inner", 0x10),
+                ("crowd_snd_b.inner", 0x18),
+                ("world_snd.inner", 0x40),
+                ("crowd_ambients", 0x4c),
+                ("world_ambients", 0x50),
+            ] {
+                let (x, y) = (dword(a, off), dword(b, off));
+                if (x != 0) != (y != 0) {
+                    mismatches.push(format!("{name} null-ness: vanilla={x:#010x}, reimpl={y:#010x}"));
+                }
+            }
+
+            // The contract this test exists to pin: current_track updates to the selected target on
+            // BOTH poles even though the attempt failed, while the crossfade state machine (fading/
+            // fade/next_slot_is_b) must NOT have advanced from init's tail values.
+            let current_track = |p: &[u8]| i32::from_le_bytes(p[0x0..0x4].try_into().unwrap());
+            for (label, bytes) in [("vanilla", a), ("reimpl", b)] {
+                if current_track(bytes) != 0 {
+                    mismatches.push(format!("{label}: current_track = {} (expected 0, the selected target)", current_track(bytes)));
+                }
+                if bytes[0xa] != 0 {
+                    mismatches.push(format!("{label}: fading = {} (expected 0 - the attempt-gated block must not have run)", bytes[0xa]));
+                }
+                if dword(bytes, 0x4) != 0 {
+                    mismatches.push(format!("{label}: fade = {} (expected 0, untouched from init's tail)", dword(bytes, 0x4) as i32));
+                }
+                if bytes[0x8] != 0 {
+                    mismatches.push(format!("{label}: next_slot_is_b = {} (expected 0, untouched from init's tail)", bytes[0x8]));
+                }
+            }
+        }
+
+        if !mismatches.is_empty() {
+            error!("{}: mismatch(es): {:?}", test_name, mismatches);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: mismatch(es): {:?}\n", test_name, mismatches).as_bytes());
+            }
+        } else {
+            write_success_line(failure_log, &format!("{} (live guest count {}, forced to {} for one tick)", test_name, live_guests, FORCED_GUESTS));
+        }
+
+        soundscape_live_support::destroy_standalone_after_init(vanilla_a);
+        soundscape_live_support::destroy_standalone_after_init(reimpl_b);
+        !mismatches.is_empty()
+    }
+
+    /// `MENUMUSICHANDLER_INIT` - `menumusichandler-implementation-plan.md` Stage 2: constructs two fresh
+    /// standalone `MenuMusicHandler`s (real vanilla ctor / `MenuMusicHandler::construct`), then calls
+    /// `init` on each (real vanilla via the `real_init` trampoline / `MenuMusicHandler::init` - see
+    /// `run_menumusichandler_detours_enabled_test` for why `.original()` can't be used here) with a
+    /// guaranteed-missing filename - per the plan's own caveat, this avoids the "plays audio during the
+    /// test battery" side effect a real `sounds/*.wav` path would have, at the cost of only exercising
+    /// `init`'s allocation/attenuation-call shape, not `DX8SndMgr::attempt`'s success path. Compares the
+    /// `bool` return and the fields in [`menumusichandler_field_mismatches`]; `sound_ptr` is compared
+    /// for null-ness only (a real heap address, expected to differ between the two independent
+    /// allocations; both sides go through the same real `operator_new`, so a real vs. reimplemented
+    /// `SNDSound` should end up either both allocated or both null together, matching `init`'s own
+    /// success/failure branching).
+    ///
+    /// A second phase calls `init` again on the already-init'ed pair - entering the "existing sound,
+    /// not playing" branch (`sound_ptr != 0`, `IS_PLAYING` false -> skip stop/release), then
+    /// re-allocating and re-running the failed attempt. The first init's `SNDSound` is deliberately
+    /// leaked on both sides (vanilla's own re-init path leaks it identically - 8 bytes once per battery
+    /// run); the teardown below releases only the current `sound_ptr`.
+    fn run_menumusichandler_init_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "MENUMUSICHANDLER_INIT";
+
+        let real_ptr = menumusichandler_live_support::allocate_uninitialized();
+        let reimpl_ptr = menumusichandler_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(reimpl_ptr);
+            }
+            return true;
+        }
+
+        const FILENAME: &[u8] = b"__openzt_test_nonexistent_menu_music.wav\0";
+        const ATTENUATION: i32 = 0;
+        let mut failed = false;
+
+        let (real, reimpl) = unsafe { (&*real_ptr, &*reimpl_ptr) };
+        let mut mismatches: Vec<String> = Vec::new();
+
+        unsafe {
+            menumusichandler_live_support::real_constructor(real_ptr as *const u32);
+            (*reimpl_ptr).construct();
+
+            // Phase 1: first init on a fresh constructor.
+            let real_result = menumusichandler_live_support::real_init(real_ptr as *const u32, FILENAME.as_ptr() as u32, ATTENUATION);
+            let reimpl_result = (*reimpl_ptr).init(FILENAME.as_ptr() as *const i8, ATTENUATION) as u32;
+
+            if (real_result != 0) != (reimpl_result != 0) {
+                mismatches.push(format!("return value: real={real_result}, reimpl={reimpl_result}"));
+            }
+            mismatches.extend(menumusichandler_field_mismatches(real, reimpl));
+            if !mismatches.is_empty() {
+                error!("{}: mismatch(es): {:?}", test_name, mismatches);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: mismatch(es): {:?}\n", test_name, mismatches).as_bytes());
+                }
+                failed = true;
+            }
+
+            // Phase 2: second init on the already-init'ed pair (see this test's doc comment).
+            if !failed {
+                let real_result = menumusichandler_live_support::real_init(real_ptr as *const u32, FILENAME.as_ptr() as u32, ATTENUATION);
+                let reimpl_result = (*reimpl_ptr).init(FILENAME.as_ptr() as *const i8, ATTENUATION) as u32;
+
+                mismatches.clear();
+                if (real_result != 0) != (reimpl_result != 0) {
+                    mismatches.push(format!("second-init return value: real={real_result}, reimpl={reimpl_result}"));
+                }
+                mismatches.extend(menumusichandler_field_mismatches(real, reimpl));
+                if !mismatches.is_empty() {
+                    error!("{}: second-init mismatch(es): {:?}", test_name, mismatches);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: second-init mismatch(es): {:?}\n", test_name, mismatches).as_bytes());
+                    }
+                    failed = true;
+                }
+            }
+        }
+
+        if !failed {
+            write_success_line(failure_log, test_name);
+        }
+
+        menumusichandler_live_support::destroy_standalone_after_init(real_ptr);
+        menumusichandler_live_support::destroy_standalone_after_init(reimpl_ptr);
+        failed
+    }
+
+    /// Field-by-field comparison shared by the two Stage-3 `MenuMusicHandler` tests - same comparison set
+    /// as `MENUMUSICHANDLER_INIT` (`sound_ptr` by null-ness only, everything else exactly).
+    fn menumusichandler_field_mismatches(
+        real: &ztgamemgr_menumusichandler::MenuMusicHandler,
+        reimpl: &ztgamemgr_menumusichandler::MenuMusicHandler,
+    ) -> Vec<String> {
+        let mut mismatches: Vec<String> = Vec::new();
+        if (real.sound_ptr() != 0) != (reimpl.sound_ptr() != 0) {
+            mismatches.push(format!("sound_ptr null-ness: real={:#x}, reimpl={:#x}", real.sound_ptr(), reimpl.sound_ptr()));
+        }
+        if real.fading() != reimpl.fading() {
+            mismatches.push(format!("fading: real={}, reimpl={}", real.fading(), reimpl.fading()));
+        }
+        if real.fade_counter() != reimpl.fade_counter() {
+            mismatches.push(format!("fade_counter: real={}, reimpl={}", real.fade_counter(), reimpl.fade_counter()));
+        }
+        if real.ini_menu_music_disabled() != reimpl.ini_menu_music_disabled() {
+            mismatches.push(format!("ini_menu_music_disabled: real={}, reimpl={}", real.ini_menu_music_disabled(), reimpl.ini_menu_music_disabled()));
+        }
+        if real.warmup_ticks() != reimpl.warmup_ticks() {
+            mismatches.push(format!("warmup_ticks: real={}, reimpl={}", real.warmup_ticks(), reimpl.warmup_ticks()));
+        }
+        mismatches
+    }
+
+    /// Writes marker values through raw field offsets (the struct's fields are private outside
+    /// `ztgamemgr_menumusichandler`, and its layout is `const`-asserted): `fading` (+0x4) = `fading`,
+    /// `fade_counter` (+0x8) = `fade_counter`, `ini_menu_music_disabled` (+0xc) = `ini_disabled`,
+    /// `warmup_ticks` (+0x10) = `warmup`.
+    ///
+    /// # Safety
+    /// `ptr` must point at a live, `0x14`-byte standalone `MenuMusicHandler` allocation.
+    unsafe fn write_menumusichandler_markers(ptr: *mut ztgamemgr_menumusichandler::MenuMusicHandler, fading: u8, fade_counter: i32, ini_disabled: u8, warmup: i32) {
+        let base = ptr as *mut u8;
+        base.add(0x4).write(fading);
+        (base.add(0x8) as *mut i32).write(fade_counter);
+        base.add(0xc).write(ini_disabled);
+        (base.add(0x10) as *mut i32).write(warmup);
+    }
+
+    /// `MENUMUSICHANDLER_START_PLAY` - `menumusichandler-implementation-plan.md` Stage 3: constructs and
+    /// `init`s two fresh standalone `MenuMusicHandler`s (real vanilla / Rust reimplementation, same
+    /// guaranteed-missing filename as `MENUMUSICHANDLER_INIT` - see that test's doc comment for why no
+    /// real `.wav` path), then calls `startPlay` on each (real vanilla via the `real_start_play`
+    /// trampoline / `MenuMusicHandler::start_play`) and field-diffs. With `attempt` known to have failed, the
+    /// `VALID`-gated play branch is skipped on both sides while the unconditional tail (clear
+    /// `fading`/`fade_counter`, `SET_FADE_ATTENUATION(0)`/`SET_VOLUME(0)`) still runs - vanilla makes
+    /// those last two calls even on a failed-attempt sound, so both sides exercise the same calls.
+    /// A second phase then covers `startPlay`'s first gate: with `ini_menu_music_disabled` forced to 1
+    /// and non-zero marker values written into `fading`/`fade_counter` on both sides, another `startPlay`
+    /// on each must leave both untouched (without the gate, `startPlay` would have cleared them to 0).
+    fn run_menumusichandler_start_play_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "MENUMUSICHANDLER_START_PLAY";
+
+        let real_ptr = menumusichandler_live_support::allocate_uninitialized();
+        let reimpl_ptr = menumusichandler_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(reimpl_ptr);
+            }
+            return true;
+        }
+
+        const FILENAME: &[u8] = b"__openzt_test_nonexistent_menu_music.wav\0";
+        const ATTENUATION: i32 = 0;
+        let mut failed = false;
+
+        unsafe {
+            menumusichandler_live_support::real_constructor(real_ptr as *const u32);
+            (*reimpl_ptr).construct();
+            menumusichandler_live_support::real_init(real_ptr as *const u32, FILENAME.as_ptr() as u32, ATTENUATION);
+            (*reimpl_ptr).init(FILENAME.as_ptr() as *const i8, ATTENUATION);
+
+            // Phase 1: the normal path (gates open, VALID-gated play branch skipped by the failed
+            // attempt, unconditional tail runs).
+            menumusichandler_live_support::real_start_play(real_ptr as *const u32);
+            (*reimpl_ptr).start_play();
+            let mismatches = menumusichandler_field_mismatches(&*real_ptr, &*reimpl_ptr);
+            if !mismatches.is_empty() {
+                error!("{}: startPlay phase mismatches: {:?}", test_name, mismatches);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: startPlay phase mismatches: {:?}\n", test_name, mismatches).as_bytes());
+                }
+                failed = true;
+            }
+
+            // Phase 2: the ini gate - forced-disabled plus non-zero markers must survive untouched.
+            if !failed {
+                write_menumusichandler_markers(real_ptr, 1, 77, 1, 0);
+                write_menumusichandler_markers(reimpl_ptr, 1, 77, 1, 0);
+                menumusichandler_live_support::real_start_play(real_ptr as *const u32);
+                (*reimpl_ptr).start_play();
+                let mismatches = menumusichandler_field_mismatches(&*real_ptr, &*reimpl_ptr);
+                if !mismatches.is_empty() {
+                    error!("{}: ini-gate phase mismatches: {:?}", test_name, mismatches);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: ini-gate phase mismatches: {:?}\n", test_name, mismatches).as_bytes());
+                    }
+                    failed = true;
+                } else if (*real_ptr).fading() != 1 || (*real_ptr).fade_counter() != 77 || (*real_ptr).ini_menu_music_disabled() != 1 {
+                    // Both sides agreeing isn't enough here - the gate's whole point is that nothing
+                    // changes, so also check the markers really did survive on the real side (a broken
+                    // port and a broken gate would agree with each other just as well as two working
+                    // sides would).
+                    let msg = format!(
+                        "ini-gate markers did not survive: fading={}, fade_counter={}, ini={}",
+                        (*real_ptr).fading(), (*real_ptr).fade_counter(), (*real_ptr).ini_menu_music_disabled()
+                    );
+                    error!("{}: {}", test_name, msg);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, msg).as_bytes());
+                    }
+                    failed = true;
+                }
+            }
+
+            if !failed {
+                write_success_line(failure_log, test_name);
+            }
+        }
+
+        menumusichandler_live_support::destroy_standalone_after_init(real_ptr);
+        menumusichandler_live_support::destroy_standalone_after_init(reimpl_ptr);
+        failed
+    }
+
+    /// `MENUMUSICHANDLER_START_FADE` - `menumusichandler-implementation-plan.md` Stage 3: calls
+    /// `startFade` (real vanilla via the `real_start_fade` trampoline / `MenuMusicHandler::start_fade`)
+    /// on warm (already-`init`ed)
+    /// standalone instances and compares `fading`/`fade_counter`. The positive branch (`IS_PLAYING` true
+    /// -> arm the fade) needs genuinely playing audio, so - same missing-filename caveat as
+    /// `MENUMUSICHANDLER_INIT`/`_START_PLAY` - only the gate paths are exercised live: with a
+    /// failed-attempt sound, `IS_PLAYING` reads false and `startFade` must leave everything untouched;
+    /// with `fading` marker-forced to 1, the already-fading gate must also leave everything untouched
+    /// (markers checked for survival, not just real-vs-reimpl equality); and a construct-only pair
+    /// (`sound_ptr` still 0) covers the null-sound gate.
+    fn run_menumusichandler_start_fade_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "MENUMUSICHANDLER_START_FADE";
+
+        let real_ptr = menumusichandler_live_support::allocate_uninitialized();
+        let reimpl_ptr = menumusichandler_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(reimpl_ptr);
+            }
+            return true;
+        }
+
+        // A second, construct-only pair for the null-`sound_ptr` gate - no `init`, so these tear down
+        // through plain `destroy_standalone`.
+        let nullgate_real_ptr = menumusichandler_live_support::allocate_uninitialized();
+        let nullgate_reimpl_ptr = menumusichandler_live_support::allocate_uninitialized();
+        if nullgate_real_ptr.is_null() || nullgate_reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for null-gate pair (real={:?}, reimpl={:?})", test_name, nullgate_real_ptr, nullgate_reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for null-gate pair (real={:?}, reimpl={:?})\n", test_name, nullgate_real_ptr, nullgate_reimpl_ptr).as_bytes());
+            }
+            if !nullgate_real_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(nullgate_real_ptr);
+            }
+            if !nullgate_reimpl_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(nullgate_reimpl_ptr);
+            }
+            menumusichandler_live_support::destroy_standalone_after_init(real_ptr);
+            menumusichandler_live_support::destroy_standalone_after_init(reimpl_ptr);
+            return true;
+        }
+
+        const FILENAME: &[u8] = b"__openzt_test_nonexistent_menu_music.wav\0";
+        const ATTENUATION: i32 = 0;
+        let mut failed = false;
+
+        unsafe {
+            menumusichandler_live_support::real_constructor(real_ptr as *const u32);
+            (*reimpl_ptr).construct();
+            menumusichandler_live_support::real_init(real_ptr as *const u32, FILENAME.as_ptr() as u32, ATTENUATION);
+            (*reimpl_ptr).init(FILENAME.as_ptr() as *const i8, ATTENUATION);
+
+            // Phase 1: warm instance, sound not playing - the IS_PLAYING gate must keep everything at 0.
+            menumusichandler_live_support::real_start_fade(real_ptr as *const u32);
+            (*reimpl_ptr).start_fade();
+            let mismatches = menumusichandler_field_mismatches(&*real_ptr, &*reimpl_ptr);
+            if !mismatches.is_empty() {
+                error!("{}: not-playing phase mismatches: {:?}", test_name, mismatches);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: not-playing phase mismatches: {:?}\n", test_name, mismatches).as_bytes());
+                }
+                failed = true;
+            }
+
+            // Phase 2: the already-fading gate - a marker-forced `fading` = 1 must survive untouched.
+            if !failed {
+                write_menumusichandler_markers(real_ptr, 1, 0x55, 0, 0);
+                write_menumusichandler_markers(reimpl_ptr, 1, 0x55, 0, 0);
+                menumusichandler_live_support::real_start_fade(real_ptr as *const u32);
+                (*reimpl_ptr).start_fade();
+                let mismatches = menumusichandler_field_mismatches(&*real_ptr, &*reimpl_ptr);
+                if !mismatches.is_empty() {
+                    error!("{}: already-fading phase mismatches: {:?}", test_name, mismatches);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: already-fading phase mismatches: {:?}\n", test_name, mismatches).as_bytes());
+                    }
+                    failed = true;
+                } else if (*real_ptr).fading() != 1 || (*real_ptr).fade_counter() != 0x55 {
+                    let msg = format!("already-fading markers did not survive: fading={}, fade_counter={}", (*real_ptr).fading(), (*real_ptr).fade_counter());
+                    error!("{}: {}", test_name, msg);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, msg).as_bytes());
+                    }
+                    failed = true;
+                }
+            }
+
+            // Phase 3: the null-sound gate - construct-only instances (`sound_ptr` still 0).
+            menumusichandler_live_support::real_constructor(nullgate_real_ptr as *const u32);
+            (*nullgate_reimpl_ptr).construct();
+            menumusichandler_live_support::real_start_fade(nullgate_real_ptr as *const u32);
+            (*nullgate_reimpl_ptr).start_fade();
+            let mismatches = menumusichandler_field_mismatches(&*nullgate_real_ptr, &*nullgate_reimpl_ptr);
+            if !mismatches.is_empty() {
+                error!("{}: null-sound phase mismatches: {:?}", test_name, mismatches);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: null-sound phase mismatches: {:?}\n", test_name, mismatches).as_bytes());
+                }
+                failed = true;
+            }
+
+            if !failed {
+                write_success_line(failure_log, test_name);
+            }
+        }
+
+        menumusichandler_live_support::destroy_standalone_after_init(real_ptr);
+        menumusichandler_live_support::destroy_standalone_after_init(reimpl_ptr);
+        menumusichandler_live_support::destroy_standalone(nullgate_real_ptr);
+        menumusichandler_live_support::destroy_standalone(nullgate_reimpl_ptr);
+        failed
+    }
+
+    /// `MENUMUSICHANDLER_UPDATE` - `menumusichandler-implementation-plan.md` Stage 4: constructs and
+    /// `init`s two fresh standalone `MenuMusicHandler`s (real vanilla / Rust reimplementation, same
+    /// guaranteed-missing filename as the other `MENUMUSICHANDLER_*` tests - see `MENUMUSICHANDLER_INIT`'s
+    /// doc comment for why no real `.wav` path), marker-forces `fading` = 1 (the one thing `startFade`
+    /// can't arm live without playing audio, per `MENUMUSICHANDLER_START_FADE`'s doc comment), then drives
+    /// `update` (real vanilla via the `real_update` trampoline / `MenuMusicHandler::update`) through its
+    /// state machine in phases:
+    ///
+    /// 1. **Warm-up gating**: five `update(1000)` calls must each just increment `warmup_ticks` (0 -> 5)
+    ///    and never touch `fade_counter` - checked for survival, not just real-vs-reimpl equality.
+    /// 2. **Accumulation**: the sixth `update(1000)` runs the accumulation path -
+    ///    `fade_counter = trunc(1000 * 0.5)` = 500 - which also makes both sides push the new counter
+    ///    through `SET_FADE_ATTENUATION`/`SET_VOLUME` on their failed-attempt `SNDSound`s, the same call
+    ///    shape `MENUMUSICHANDLER_START_PLAY` already exercises live.
+    /// 3. **Delta gate**: `update(2000)` (the unsigned `>=` boundary itself) must leave `fade_counter` at
+    ///    500.
+    /// 4. **Completion branch, not-playing sound**: with `fade_counter` marker-forced to 2995, one
+    ///    `update(100)` crosses the 3000 threshold (3045) - and because the failed-attempt sound reports
+    ///    not playing, the decompile leaves *everything* untouched (`IS_PLAYING` gates the clears, not the
+    ///    other way round; see `MenuMusicHandler::update`'s doc comment on how the plan's "always clear"
+    ///    summary misread this). Survival-checked on `fading`/`fade_counter`/`sound_ptr`.
+    ///
+    /// The `IS_PLAYING`-**true** completion path (`STOP` + slot-0 release + `sound_ptr` = 0) needs genuinely
+    /// playing audio to enter live, so it isn't exercised here - its teardown calls are the exact
+    /// [`SNDSOUND_1`] release idiom `MENUMUSICHANDLER_INIT`'s teardown path already runs for real.
+    fn run_menumusichandler_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "MENUMUSICHANDLER_UPDATE";
+
+        let real_ptr = menumusichandler_live_support::allocate_uninitialized();
+        let reimpl_ptr = menumusichandler_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                menumusichandler_live_support::destroy_standalone(reimpl_ptr);
+            }
+            return true;
+        }
+
+        const FILENAME: &[u8] = b"__openzt_test_nonexistent_menu_music.wav\0";
+        const ATTENUATION: i32 = 0;
+        let mut failed = false;
+
+        unsafe {
+            menumusichandler_live_support::real_constructor(real_ptr as *const u32);
+            (*reimpl_ptr).construct();
+            menumusichandler_live_support::real_init(real_ptr as *const u32, FILENAME.as_ptr() as u32, ATTENUATION);
+            (*reimpl_ptr).init(FILENAME.as_ptr() as *const i8, ATTENUATION);
+
+            // Arm the fade marker-wise: `init` leaves `fading` = 0 and only a real playing sound would
+            // let `startFade` arm it, so write it directly on both sides.
+            write_menumusichandler_markers(real_ptr, 1, 0, 0, 0);
+            write_menumusichandler_markers(reimpl_ptr, 1, 0, 0, 0);
+
+            // Phase 1: five warm-up calls - `warmup_ticks` counts 0 -> 5, `fade_counter` untouched.
+            for _ in 0..5 {
+                menumusichandler_live_support::real_update(real_ptr as *const u32, 1000);
+                (*reimpl_ptr).update(1000);
+            }
+            let mismatches = menumusichandler_field_mismatches(&*real_ptr, &*reimpl_ptr);
+            if !mismatches.is_empty() {
+                error!("{}: warm-up phase mismatches: {:?}", test_name, mismatches);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: warm-up phase mismatches: {:?}\n", test_name, mismatches).as_bytes());
+                }
+                failed = true;
+            } else if (*real_ptr).warmup_ticks() != 5 || (*real_ptr).fade_counter() != 0 {
+                let msg = format!(
+                    "warm-up markers did not advance as expected: warmup_ticks={}, fade_counter={}",
+                    (*real_ptr).warmup_ticks(), (*real_ptr).fade_counter()
+                );
+                error!("{}: {}", test_name, msg);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, msg).as_bytes());
+                }
+                failed = true;
+            }
+
+            // Phase 2: the sixth call (now warm) accumulates trunc(1000 * 0.5) = 500.
+            if !failed {
+                menumusichandler_live_support::real_update(real_ptr as *const u32, 1000);
+                (*reimpl_ptr).update(1000);
+                let mismatches = menumusichandler_field_mismatches(&*real_ptr, &*reimpl_ptr);
+                if !mismatches.is_empty() {
+                    error!("{}: accumulation phase mismatches: {:?}", test_name, mismatches);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: accumulation phase mismatches: {:?}\n", test_name, mismatches).as_bytes());
+                    }
+                    failed = true;
+                } else if (*real_ptr).fade_counter() != 500 {
+                    let msg = format!("accumulation did not reach 500: fade_counter={}", (*real_ptr).fade_counter());
+                    error!("{}: {}", test_name, msg);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, msg).as_bytes());
+                    }
+                    failed = true;
+                }
+            }
+
+            // Phase 3: the delta gate - 2000 (the unsigned boundary itself) must leave everything alone.
+            if !failed {
+                menumusichandler_live_support::real_update(real_ptr as *const u32, 2000);
+                (*reimpl_ptr).update(2000);
+                let mismatches = menumusichandler_field_mismatches(&*real_ptr, &*reimpl_ptr);
+                if !mismatches.is_empty() {
+                    error!("{}: delta-gate phase mismatches: {:?}", test_name, mismatches);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: delta-gate phase mismatches: {:?}\n", test_name, mismatches).as_bytes());
+                    }
+                    failed = true;
+                } else if (*real_ptr).fade_counter() != 500 {
+                    let msg = format!("delta gate did not hold: fade_counter={}", (*real_ptr).fade_counter());
+                    error!("{}: {}", test_name, msg);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, msg).as_bytes());
+                    }
+                    failed = true;
+                }
+            }
+
+            // Phase 4: completion branch with a not-playing sound - everything must survive untouched.
+            if !failed {
+                write_menumusichandler_markers(real_ptr, 1, 2995, 0, 5);
+                write_menumusichandler_markers(reimpl_ptr, 1, 2995, 0, 5);
+                menumusichandler_live_support::real_update(real_ptr as *const u32, 100);
+                (*reimpl_ptr).update(100);
+                let mismatches = menumusichandler_field_mismatches(&*real_ptr, &*reimpl_ptr);
+                if !mismatches.is_empty() {
+                    error!("{}: not-playing completion phase mismatches: {:?}", test_name, mismatches);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: not-playing completion phase mismatches: {:?}\n", test_name, mismatches).as_bytes());
+                    }
+                    failed = true;
+                } else if (*real_ptr).fading() != 1 || (*real_ptr).fade_counter() != 3045 || (*real_ptr).sound_ptr() == 0 {
+                    let msg = format!(
+                        "not-playing completion markers did not survive: fading={}, fade_counter={}, sound_ptr={:#x}",
+                        (*real_ptr).fading(), (*real_ptr).fade_counter(), (*real_ptr).sound_ptr()
+                    );
+                    error!("{}: {}", test_name, msg);
+                    if let Some(log_file) = failure_log {
+                        let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, msg).as_bytes());
+                    }
+                    failed = true;
+                }
+            }
+
+            if !failed {
+                write_success_line(failure_log, test_name);
+            }
+        }
+
+        menumusichandler_live_support::destroy_standalone_after_init(real_ptr);
+        menumusichandler_live_support::destroy_standalone_after_init(reimpl_ptr);
+        failed
+    }
+
+    /// `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS` - `ztgamemgr-implementation-plan.md` Stage 1: builds two
+    /// standalone `ZTGameMgr` instances (Stage 0's harness), runs the real
+    /// `SET_NEW_GAME_DEFAULTS.original()` against one and the Rust
+    /// `ztgamemgr::ZTGameMgr::set_new_game_defaults` against the other (one shared, real vanilla-
+    /// constructed `BFConfigFile` passed to both - see below for why a zeroed/`Default` one crashes),
+    /// then diffs the full `0x11b0`-byte block.
+    ///
+    /// **`config` must be built via the real vanilla constructor, not a zeroed `BFConfigFile::default()`.**
+    /// First attempt used a zeroed instance and reliably crashed inside vanilla `ZooStatus::init`'s
+    /// tail call into `BFConfigFile::getString` (`bfconfigfile::GET_STRING_1`) ->
+    /// `standalone::SEARCH_CONFIG_METHOD`, a null-pointer dereference (`mov edi,[edx+4]` with `edx=0`,
+    /// confirmed via `./openzt.bat crash-capture`). `BFConfigFile_BFConfigFile_0.c` shows why: a real
+    /// constructor allocates a red-black-tree sentinel node and links it to itself
+    /// (`node->left = node; node->right = node`) as `tree_root` - a *raw* `0` there (what `#[derive(Default)]`
+    /// produces) isn't a valid "empty tree", it's a dangling sentinel the search code doesn't guard against.
+    /// So this builds a real one via `BFCONFIGFILE_CONSTRUCTOR_0.original()` and tears it down via
+    /// `BFCONFIGFILE_RELEASE.original()` - matching the real `BFConfigFile::BFConfigFile`/`::release`
+    /// pair, entirely vanilla-allocator-owned (its tree node comes from vanilla's own small-object
+    /// freelist - see `BFConfigFile_BFConfigFile_0.c`'s `FUN_00402f85`/freelist-pop shape), so there's no
+    /// cross-allocator hazard freeing it via the matching real `release` call.
+    ///
+    /// `is_new_game` is pinned to `false` on both sides rather than proptested: the `true` branch calls
+    /// through `GLOBAL_ZTAIMgr`'s real vtable slot `+0x4` (`openzt_detour::generated::ztaimgr::VIRT_METH_0X58F269`),
+    /// the *global*, shared AI manager singleton - not part of either standalone instance's own memory -
+    /// so triggering it here would be a real side effect on live game state, the same class of risk the
+    /// plan's own Stage 3 flags for `ZTUI::main::set*`/`ZTSoundscape::update`.
+    fn run_gamemgr_set_new_game_defaults_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_SET_NEW_GAME_DEFAULTS";
+
+        let real_ptr = gamemgr_live_support::build_standalone_mgr();
+        let reimpl_ptr = gamemgr_live_support::build_standalone_mgr();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+            }
+            return true;
+        }
+
+        // Resolves Stage 0's own "operator_new doesn't zero memory" caveat: ZooStatus::init reads at
+        // least one field (`this[0xd].field_0xc`, per `ZooStatus_init.c`) before ever writing it in this
+        // function - genuine uninitialized-read behavior in the real decompile, not a porting bug - so
+        // two independently-allocated standalone instances can carry different heap leftovers there and
+        // diverge downstream. Zeroing both blocks first (matching a fresh page from a clean process heap,
+        // the same assumption vanilla's own single real construction relies on) makes both sides start
+        // identical, so the diff below only ever reflects a genuine `set_new_game_defaults` difference.
+        let struct_size = size_of::<ztgamemgr::ZTGameMgr>();
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+        }
+
+        let mut config = std::mem::MaybeUninit::<crate::bfconfigfile::BFConfigFile>::uninit();
+        let config_ptr = config.as_mut_ptr() as *const u32;
+        let kind_tag_byte: u8 = 0;
+        unsafe { BFCONFIGFILE_CONSTRUCTOR_0.original()(config_ptr, &kind_tag_byte as *const u8) };
+
+        unsafe {
+            ZTGAMEMGR_SET_NEW_GAME_DEFAULTS.original()(real_ptr as *const u32, config_ptr, false);
+            (*reimpl_ptr).set_new_game_defaults(config_ptr, false);
+        }
+
+        unsafe { BFCONFIGFILE_RELEASE.original()(config_ptr) };
+
+        let real_bytes = unsafe { std::slice::from_raw_parts(real_ptr as *const u8, struct_size) };
+        let reimpl_bytes = unsafe { std::slice::from_raw_parts(reimpl_ptr as *const u8, struct_size) };
+
+        // soundscape_ptr (0x1190)/menu_music_handler_ptr (0x11A4): both null pre-start() on a freshly
+        // constructed instance, so these should already match - excluded only defensively, per the plan.
+        let excluded_ranges: [std::ops::Range<usize>; 2] = [0x1190..0x1194, 0x11A4..0x11A8];
+
+        let mismatches: Vec<(usize, u8, u8)> = (0..struct_size)
+            .filter(|i| !excluded_ranges.iter().any(|r| r.contains(i)))
+            .filter_map(|i| if real_bytes[i] != reimpl_bytes[i] { Some((i, real_bytes[i], reimpl_bytes[i])) } else { None })
+            .collect();
+
+        let failed = !mismatches.is_empty();
+        if failed {
+            let shown = &mismatches[..mismatches.len().min(32)];
+            error!("{}: {} byte mismatch(es) (offset, real, reimpl), first {}: {:?}", test_name, mismatches.len(), shown.len(), shown);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} byte mismatch(es), first {}: {:?}\n", test_name, mismatches.len(), shown.len(), shown).as_bytes());
+            }
+        } else {
+            write_success_line(failure_log, test_name);
+        }
+
+        gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+        gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+        failed
+    }
+
+    /// Canonicalizes a `cash` bit pattern for `ZTGAMEMGR_SAVE_LOAD`'s comparison: any NaN collapses to a
+    /// single representative bit pattern, sidestepping both IEEE-754 `NaN != NaN` on direct equality *and*
+    /// a real, root-caused x87-vs-SSE2 NaN-canonicalization artifact this test's own failures surfaced.
+    ///
+    /// A failing case had `cash` written as a *signaling* NaN (mantissa MSB `0`): `save`'s captured output
+    /// was bit-identical real vs. reimpl (so `ZooStatus::save`, which never touches `cash`, wasn't
+    /// involved), but after `load`, the real side came back as a *quiet* NaN (mantissa MSB `1`, i.e.
+    /// `real_bits == reimpl_bits | 0x0040_0000`) while the reimplemented side kept the original signaling
+    /// bits. `ZTGameMgr_load.asm` (read in full) pins this to `ZTGameMgr::load`'s own `this->cash =
+    /// local_8;` line: it compiles to `FLD float ptr [ESP+0x10]` / `FSTP float ptr [ESP]` (the field is
+    /// genuinely `float`-typed, even though the decompiler shows a raw `undefined4` dword copy) - x87
+    /// silences a signaling NaN by setting its quiet bit on any load/store through the FPU stack. This
+    /// reimplementation's `self.cash = cash;` is a plain SSE2 move with no FPU round-trip, so it preserves
+    /// the raw bits unchanged - not a port bug, just not bit-for-bit identical to a real `load` that
+    /// happens to touch a signaling NaN, which real gameplay never produces from a legitimate cash value.
+    fn normalize_cash_bits(cash: f32) -> u32 {
+        if cash.is_nan() {
+            0x7fc0_0000
+        } else {
+            cash.to_bits()
+        }
+    }
+
+    /// `ZTGAMEMGR_SAVE_LOAD` - `ztgamemgr-implementation-plan.md` Stage 2: builds two Stage-1-seeded
+    /// standalone `ZTGameMgr` instances (real `SET_NEW_GAME_DEFAULTS.original()` run on both, via the
+    /// same real `BFConfigFile` construction `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS`'s own test already uses),
+    /// then for a generated `(cash, date_bytes, elapsed_sim_ticks, version)` seeds both instances
+    /// identically via the test-only `set_cash`/`set_date_bytes`/`set_elapsed_sim_ticks` accessors
+    /// (`ztgamemgr.rs`'s `Systemtime` is private, so the raw 16-byte `date` blob is generated/compared
+    /// byte-for-byte rather than field-by-field) and runs the real `SAVE.original()` against one and the
+    /// reimplemented `ztgamemgr::ZTGameMgr::save` against the other, capturing each side's
+    /// `WRITE_BYTES_TO_FILE` output via `io_redirect` - both should be byte-identical, since
+    /// `ZooStatus::save`'s own contribution is the *same* real function running against identically-seeded
+    /// memory on both sides. Then replays each side's captured bytes back into a fresh, zeroed third
+    /// standalone instance (real `LOAD.original()`/reimplemented `load()` respectively) and compares the
+    /// resulting `cash`/`date`/`elapsed_sim_ticks` fields - `version` is generated from both sides of the
+    /// `BFGameMgr::load` `0x48` threshold (`BFGameMgr_load.c`) so both the "read elapsed_sim_ticks" and
+    /// "zero it instead" branches get exercised. `cash` is compared via [`normalize_cash_bits`] rather
+    /// than raw `to_bits()` - see that function's doc comment for why.
+    fn run_gamemgr_save_load_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_SAVE_LOAD";
+
+        let real_ptr = gamemgr_live_support::build_standalone_mgr();
+        let reimpl_ptr = gamemgr_live_support::build_standalone_mgr();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ztgamemgr::ZTGameMgr>();
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+        }
+
+        let mut config = std::mem::MaybeUninit::<crate::bfconfigfile::BFConfigFile>::uninit();
+        let config_ptr = config.as_mut_ptr() as *const u32;
+        let kind_tag_byte: u8 = 0;
+        unsafe { BFCONFIGFILE_CONSTRUCTOR_0.original()(config_ptr, &kind_tag_byte as *const u8) };
+        unsafe {
+            ZTGAMEMGR_SET_NEW_GAME_DEFAULTS.original()(real_ptr as *const u32, config_ptr, false);
+            (*reimpl_ptr).set_new_game_defaults(config_ptr, false);
+        }
+        unsafe { BFCONFIGFILE_RELEASE.original()(config_ptr) };
+
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+        let mut fail_flag = false;
+
+        let dummy_file: u32 = 0;
+        let date_bytes_strategy = prop::collection::vec(any::<u8>(), 16).prop_map(|v| {
+            let mut out = [0u8; 0x10];
+            out.copy_from_slice(&v);
+            out
+        });
+        let version_strategy = prop_oneof![0u32..0x49, 0x49u32..0x1000];
+
+        let result = runner.run(&(any::<f32>(), date_bytes_strategy, any::<u32>(), version_strategy), |(cash, date_bytes, elapsed_sim_ticks, version)| {
+            unsafe {
+                (*real_ptr).set_cash(cash);
+                (*real_ptr).set_date_bytes(date_bytes);
+                (*real_ptr).set_elapsed_sim_ticks(elapsed_sim_ticks);
+                (*reimpl_ptr).set_cash(cash);
+                (*reimpl_ptr).set_date_bytes(date_bytes);
+                (*reimpl_ptr).set_elapsed_sim_ticks(elapsed_sim_ticks);
+            }
+
+            io_redirect::begin_capture();
+            unsafe { ZTGAMEMGR_SAVE.original()(real_ptr as *const u32, &dummy_file as *const u32) };
+            let real_bytes = io_redirect::end_capture();
+
+            io_redirect::begin_capture();
+            let _ = unsafe { (*reimpl_ptr).save(&dummy_file as *const u32) };
+            let reimpl_bytes = io_redirect::end_capture();
+
+            prop_assert_eq!(
+                &real_bytes,
+                &reimpl_bytes,
+                "save byte mismatch for cash={}, date_bytes={:?}, elapsed_sim_ticks={}",
+                cash,
+                date_bytes,
+                elapsed_sim_ticks
+            );
+
+            let real_load_ptr = gamemgr_live_support::build_standalone_mgr();
+            let reimpl_load_ptr = gamemgr_live_support::build_standalone_mgr();
+            prop_assume!(!real_load_ptr.is_null() && !reimpl_load_ptr.is_null());
+            unsafe {
+                std::ptr::write_bytes(real_load_ptr as *mut u8, 0, struct_size);
+                std::ptr::write_bytes(reimpl_load_ptr as *mut u8, 0, struct_size);
+            }
+
+            io_redirect::begin_replay(real_bytes.clone());
+            let real_load_ok = unsafe { ZTGAMEMGR_LOAD.original()(real_load_ptr as *const u32, &dummy_file as *const u32, version) };
+            io_redirect::end_replay();
+
+            io_redirect::begin_replay(reimpl_bytes.clone());
+            let reimpl_load_ok = unsafe { (*reimpl_load_ptr).load(&dummy_file as *const u32, version) };
+            io_redirect::end_replay();
+
+            let real_result = unsafe { (normalize_cash_bits((*real_load_ptr).cash()), (*real_load_ptr).date_bytes(), (*real_load_ptr).elapsed_sim_ticks()) };
+            let reimpl_result = unsafe { (normalize_cash_bits((*reimpl_load_ptr).cash()), (*reimpl_load_ptr).date_bytes(), (*reimpl_load_ptr).elapsed_sim_ticks()) };
+
+            gamemgr_live_support::destroy_standalone_mgr(real_load_ptr);
+            gamemgr_live_support::destroy_standalone_mgr(reimpl_load_ptr);
+
+            prop_assert_eq!(real_load_ok != 0, reimpl_load_ok, "load ok mismatch for version={}", version);
+            prop_assert_eq!(real_result, reimpl_result, "load result mismatch for version={}", version);
+
+            Ok(())
+        });
+
+        match result {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+                write_success_line(failure_log, test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+        gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+        fail_flag
+    }
+
+    /// `ZTGAMEMGR_UPDATE_SIM` - `ztgamemgr-implementation-plan.md` Stage 3: builds two Stage-1-seeded
+    /// standalone `ZTGameMgr` instances, then for a generated `(delta, valid date fields,
+    /// elapsed_sim_ticks)` seeds both instances identically (`set_date_bytes`/`set_elapsed_sim_ticks`/
+    /// `set_day_changed_flag(false)`) and runs the real `UPDATE_SIM.original()` against one and the
+    /// reimplemented `ztgamemgr::ZTGameMgr::update_sim` against the other, comparing the resulting
+    /// `date`/`elapsed_sim_ticks`/`day_changed_flag` (via the same accessor methods - real and reimpl
+    /// memory share the same layout, so `(*real_ptr).date_bytes()` etc. work identically on either
+    /// pointer, no separate raw-offset reads needed).
+    ///
+    /// Generated dates are constrained to valid `SYSTEMTIME` field ranges (year `1601..=9999`, month
+    /// `1..=12`, day `1..=28`, etc.) rather than arbitrary byte garbage: an invalid `SYSTEMTIME` makes
+    /// `SystemTimeToFileTime` fail, and vanilla's own decompiled body (`ZTGameMgr_updateSim.c`/`.asm`)
+    /// then proceeds with whatever garbage bytes happened to be on its stack in that case - not
+    /// reproducible from this side, and not the interesting path this test means to exercise (the real
+    /// date-arithmetic round-trip). `delta` is bounded to `0..=0x3e9` (1001) and the shared global tick
+    /// accumulator (`DAT_006394b8`) is reset to `0` immediately before *each* side's call - both
+    /// standalone instances' `updateSim` reads/writes the *same* process-wide global, so without this
+    /// reset the two sides would race each other into (and out of) the `ZTUI::main::set*`-refresh branch
+    /// depending purely on call order. Per the implementation plan's own caution, this branch is never
+    /// exercised here: calling those UI-refresh functions against a standalone, non-globally-registered
+    /// `ZTGameMgr` risks corrupting real, unrelated live UI state (the rating-formula arithmetic that
+    /// branch also gates is covered separately, live-independent, by `ztgamemgr.rs`'s own
+    /// `rating_from_metric` unit tests).
+    ///
+    /// Two more branches also get zero live exercise here, worth calling out explicitly rather than
+    /// leaving implicit: `soundscape_ptr`/`menu_music_handler_ptr` (the latter via [`Self::update`] below,
+    /// not `update_sim` itself) stay null on every standalone instance this battery ever builds - nothing
+    /// in the Stage-1 `set_new_game_defaults` seeding path or anywhere else in scope ever sets either
+    /// field (only the out-of-scope `start()` does, per `ztgamemgr.rs`'s Stage-5 doc comment) - so their
+    /// `ZTSoundscape::update`/`MenuMusicHandler::update` call-through branches never run, live or
+    /// otherwise. Acceptable since both delegate entirely to still-out-of-scope classes with no logic of
+    /// `ZTGameMgr`'s own to verify, but genuinely untested rather than intentionally skipped.
+    fn run_gamemgr_update_sim_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_UPDATE_SIM";
+
+        let real_ptr = gamemgr_live_support::build_standalone_mgr();
+        let reimpl_ptr = gamemgr_live_support::build_standalone_mgr();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ztgamemgr::ZTGameMgr>();
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+        }
+
+        let mut config = std::mem::MaybeUninit::<crate::bfconfigfile::BFConfigFile>::uninit();
+        let config_ptr = config.as_mut_ptr() as *const u32;
+        let kind_tag_byte: u8 = 0;
+        unsafe { BFCONFIGFILE_CONSTRUCTOR_0.original()(config_ptr, &kind_tag_byte as *const u8) };
+        unsafe {
+            ZTGAMEMGR_SET_NEW_GAME_DEFAULTS.original()(real_ptr as *const u32, config_ptr, false);
+            (*reimpl_ptr).set_new_game_defaults(config_ptr, false);
+        }
+        unsafe { BFCONFIGFILE_RELEASE.original()(config_ptr) };
+
+        let dat_006394b8_addr = get_module_base("zoo.exe") as u32 + (0x006394b8u32 - 0x400000u32);
+
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+
+        let date_fields_strategy = (1601u16..=9999, 1u16..=12, 1u16..=28, 0u16..=23, 0u16..=59, 0u16..=59, 0u16..=999);
+
+        let result = runner.run(&(0u32..=0x3e9, date_fields_strategy, any::<u32>()), |(delta, (year, month, day, hour, minute, second, milliseconds), elapsed_sim_ticks)| {
+            let mut date_bytes = [0u8; 0x10];
+            date_bytes[0..2].copy_from_slice(&year.to_le_bytes());
+            date_bytes[2..4].copy_from_slice(&month.to_le_bytes());
+            // date_bytes[4..6] (w_day_of_week) intentionally left 0 - ignored on input by SystemTimeToFileTime.
+            date_bytes[6..8].copy_from_slice(&day.to_le_bytes());
+            date_bytes[8..10].copy_from_slice(&hour.to_le_bytes());
+            date_bytes[10..12].copy_from_slice(&minute.to_le_bytes());
+            date_bytes[12..14].copy_from_slice(&second.to_le_bytes());
+            date_bytes[14..16].copy_from_slice(&milliseconds.to_le_bytes());
+
+            unsafe {
+                (*real_ptr).set_date_bytes(date_bytes);
+                (*real_ptr).set_elapsed_sim_ticks(elapsed_sim_ticks);
+                (*real_ptr).set_day_changed_flag(false);
+                (*reimpl_ptr).set_date_bytes(date_bytes);
+                (*reimpl_ptr).set_elapsed_sim_ticks(elapsed_sim_ticks);
+                (*reimpl_ptr).set_day_changed_flag(false);
+            }
+
+            save_to_memory(dat_006394b8_addr, 0i32);
+            unsafe { ZTGAMEMGR_UPDATE_SIM.original()(real_ptr as *const u32, delta) };
+
+            save_to_memory(dat_006394b8_addr, 0i32);
+            unsafe { (*reimpl_ptr).update_sim(delta) };
+
+            let real_result = unsafe { ((*real_ptr).date_bytes(), (*real_ptr).elapsed_sim_ticks(), (*real_ptr).day_changed_flag()) };
+            let reimpl_result = unsafe { ((*reimpl_ptr).date_bytes(), (*reimpl_ptr).elapsed_sim_ticks(), (*reimpl_ptr).day_changed_flag()) };
+
+            prop_assert_eq!(
+                real_result,
+                reimpl_result,
+                "updateSim mismatch for delta={}, date=({},{},{},{},{},{},{}), elapsed_sim_ticks={}",
+                delta,
+                year,
+                month,
+                day,
+                hour,
+                minute,
+                second,
+                milliseconds,
+                elapsed_sim_ticks
+            );
+
+            Ok(())
+        });
+
+        let mut fail_flag = false;
+        match result {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        // A small, dedicated `update(delta)` check - both instances have a null menu_music_handler_ptr
+        // (never set by set_new_game_defaults or anything above), so this should be a pure no-op on both
+        // sides with nothing to diff, but still gets *some* live coverage per the implementation plan.
+        unsafe {
+            ZTGAMEMGR_UPDATE.original()(real_ptr as *const u32, 16);
+            (*reimpl_ptr).update(16);
+        }
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        }
+
+        gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+        gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+        fail_flag
+    }
+
+    /// `ZTGAMEMGR_FINANCE_DATE_HELPERS` - `ztgamemgr-implementation-plan.md` Stage 4 (+ Stage 7's
+    /// follow-up methods): builds two Stage-1-seeded standalone `ZTGameMgr` instances, then proptests
+    /// `addCash`/`subtractCash`/`getDate`/`isGameDate`/`isRealWorldDate`/`timeAgo`/`hoursAgo`/
+    /// `animalTimeAgo`/`peopleTimeAgo`/`overrideNewGameDefaults` real `.original()` vs the reimplemented
+    /// methods. `removedZooDoo` itself is not ported/detoured - see `ztgamemgr.rs`'s Stage-5 doc comment
+    /// for why - so there's no test for it here.
+    ///
+    /// `addCash`/`subtractCash` mutate `cash`, so both sides are reseeded to the same generated `cash`
+    /// value (`set_cash`) before each call and compared via `normalize_cash_bits` (NaN-safe, see that
+    /// helper's own doc comment). The date-family helpers (`getDate`/`isGameDate`/`timeAgo`/`hoursAgo`/
+    /// `animalTimeAgo`/`peopleTimeAgo`) don't mutate `this`, so both sides are seeded with the same
+    /// generated `date` bytes (`set_date_bytes`) and compared purely on return value - `isGameDate`'s real
+    /// return has garbage upper bits (see `ZTGameMgr::is_game_date`'s own doc comment), so only the low
+    /// byte is compared; `animalTimeAgo`/`peopleTimeAgo` similarly only compare the low dword/byte (see
+    /// their own doc comments for why the rest is undefined leftover). `isRealWorldDate` takes no
+    /// `this`/seeded state at all (calls `GetSystemTime` directly on both sides, independently,
+    /// microseconds apart) - comparing real vs reimpl booleans here only risks a spurious mismatch in the
+    /// astronomically unlikely case a call lands exactly on a day/month rollover between the two calls.
+    /// `overrideNewGameDefaults` mutates the embedded `ZooStatus` via the same real vanilla function on
+    /// both sides, so the whole `0x10..0x1160` region is byte-diffed afterward rather than compared
+    /// field-by-field.
+    ///
+    /// Calls the real `TIME_AGO.original()`/`HOURS_AGO.original()` using the hand-corrected signatures
+    /// now in `generated.rs` (see those `FunctionDef`s' own doc comments) - calling either with the
+    /// original, auto-generated signatures would have corrupted the stack/dropped the high dword.
+    fn run_gamemgr_finance_date_helpers_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_FINANCE_DATE_HELPERS";
+
+        let real_ptr = gamemgr_live_support::build_standalone_mgr();
+        let reimpl_ptr = gamemgr_live_support::build_standalone_mgr();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ztgamemgr::ZTGameMgr>();
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+        }
+
+        let mut config = std::mem::MaybeUninit::<crate::bfconfigfile::BFConfigFile>::uninit();
+        let config_ptr = config.as_mut_ptr() as *const u32;
+        let kind_tag_byte: u8 = 0;
+        unsafe { BFCONFIGFILE_CONSTRUCTOR_0.original()(config_ptr, &kind_tag_byte as *const u8) };
+        unsafe {
+            ZTGAMEMGR_SET_NEW_GAME_DEFAULTS.original()(real_ptr as *const u32, config_ptr, false);
+            (*reimpl_ptr).set_new_game_defaults(config_ptr, false);
+        }
+        unsafe { BFCONFIGFILE_RELEASE.original()(config_ptr) };
+
+        // Dedicated, kept-alive config for the overrideNewGameDefaults comparison below - the one above
+        // is released immediately after seeding set_new_game_defaults, matching the rest of this test's
+        // existing pattern.
+        let mut override_config = std::mem::MaybeUninit::<crate::bfconfigfile::BFConfigFile>::uninit();
+        let override_config_ptr = override_config.as_mut_ptr() as *const u32;
+        unsafe { BFCONFIGFILE_CONSTRUCTOR_0.original()(override_config_ptr, &kind_tag_byte as *const u8) };
+
+        let runner_config = ProptestConfig {
+            failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
+            ..ProptestConfig::default()
+        };
+        let mut runner = proptest::test_runner::TestRunner::new(runner_config);
+
+        let date_fields_strategy = (1601u16..=9999, 1u16..=12, 1u16..=28, 0u16..=23, 0u16..=59, 0u16..=59, 0u16..=999);
+        let day_strategy = prop_oneof![Just(0xffffffffu32), 1u32..=28];
+        let month_strategy = prop_oneof![Just(0xffffffffu32), 1u32..=12];
+
+        let result = runner.run(
+            &(
+                any::<f32>(),
+                any::<f32>(),
+                date_fields_strategy,
+                day_strategy,
+                month_strategy,
+                any::<u64>(),
+            ),
+            |(add_amount, sub_amount, (year, month, day, hour, minute, second, milliseconds), game_day, game_month, reference)| {
+                // addCash/subtractCash: reseed cash identically on both sides, then compare.
+                unsafe {
+                    (*real_ptr).set_cash(0.0);
+                    (*reimpl_ptr).set_cash(0.0);
+                    ZTGAMEMGR_ADD_CASH.original()(real_ptr as *const u32, add_amount);
+                    (*reimpl_ptr).add_cash(add_amount);
+                }
+                prop_assert_eq!(
+                    normalize_cash_bits(unsafe { (*real_ptr).cash() }),
+                    normalize_cash_bits(unsafe { (*reimpl_ptr).cash() }),
+                    "addCash mismatch for amount={}",
+                    add_amount
+                );
+
+                unsafe {
+                    (*real_ptr).set_cash(0.0);
+                    (*reimpl_ptr).set_cash(0.0);
+                    ZTGAMEMGR_SUBTRACT_CASH.original()(real_ptr as *const u32, sub_amount, false);
+                    (*reimpl_ptr).subtract_cash(sub_amount);
+                }
+                prop_assert_eq!(
+                    normalize_cash_bits(unsafe { (*real_ptr).cash() }),
+                    normalize_cash_bits(unsafe { (*reimpl_ptr).cash() }),
+                    "subtractCash mismatch for amount={}",
+                    sub_amount
+                );
+
+                // getDate/isGameDate/timeAgo/hoursAgo: reseed date identically, then compare.
+                let mut date_bytes = [0u8; 0x10];
+                date_bytes[0..2].copy_from_slice(&year.to_le_bytes());
+                date_bytes[2..4].copy_from_slice(&month.to_le_bytes());
+                date_bytes[6..8].copy_from_slice(&day.to_le_bytes());
+                date_bytes[8..10].copy_from_slice(&hour.to_le_bytes());
+                date_bytes[10..12].copy_from_slice(&minute.to_le_bytes());
+                date_bytes[12..14].copy_from_slice(&second.to_le_bytes());
+                date_bytes[14..16].copy_from_slice(&milliseconds.to_le_bytes());
+                unsafe {
+                    (*real_ptr).set_date_bytes(date_bytes);
+                    (*reimpl_ptr).set_date_bytes(date_bytes);
+                }
+
+                let mut real_date_out = FILETIME::default();
+                let real_date_ptr = unsafe { ZTGAMEMGR_GET_DATE.original()(real_ptr as *const u32, &mut real_date_out as *const FILETIME) };
+                prop_assert_eq!(real_date_ptr as *const FILETIME, &real_date_out as *const FILETIME, "getDate should return the out-pointer it was given");
+                let real_date_ticks = ((real_date_out.dwHighDateTime as u64) << 32) | real_date_out.dwLowDateTime as u64;
+                let reimpl_date = unsafe { (*reimpl_ptr).get_date() };
+                prop_assert_eq!(real_date_ticks, reimpl_date, "getDate mismatch for date=({},{},{},{},{},{},{})", year, month, day, hour, minute, second, milliseconds);
+
+                let real_is_game_date = unsafe { ZTGAMEMGR_IS_GAME_DATE.original()(real_ptr as *const u32, game_day, game_month) };
+                let reimpl_is_game_date = unsafe { (*reimpl_ptr).is_game_date(game_day, game_month) };
+                prop_assert_eq!(
+                    real_is_game_date & 0xff,
+                    reimpl_is_game_date as u32,
+                    "isGameDate mismatch for day={}, month={}, date=({},{},{},{},{},{},{})",
+                    game_day,
+                    game_month,
+                    year,
+                    month,
+                    day,
+                    hour,
+                    minute,
+                    second,
+                    milliseconds
+                );
+
+                let reference_low = reference as u32;
+                let reference_high = (reference >> 32) as u32;
+                let reference_filetime = FILETIME {
+                    dwLowDateTime: reference_low,
+                    dwHighDateTime: reference_high,
+                };
+                let mut real_time_ago_out = FILETIME::default();
+                unsafe {
+                    ZTGAMEMGR_TIME_AGO.original()(real_ptr as *const u32, &mut real_time_ago_out as *const FILETIME, reference_filetime);
+                }
+                let real_time_ago_ticks = ((real_time_ago_out.dwHighDateTime as u64) << 32) | real_time_ago_out.dwLowDateTime as u64;
+                let reimpl_time_ago = unsafe { (*reimpl_ptr).time_ago(reference) };
+                prop_assert_eq!(real_time_ago_ticks, reimpl_time_ago, "timeAgo mismatch for reference={}", reference);
+
+                let real_hours_ago = unsafe { ZTGAMEMGR_HOURS_AGO.original()(real_ptr as *const u32, reference_low, reference_high as i32) };
+                let reimpl_hours_ago = unsafe { (*reimpl_ptr).hours_ago(reference) };
+                prop_assert_eq!(real_hours_ago, reimpl_hours_ago, "hoursAgo mismatch for reference={}", reference);
+
+                // animalTimeAgo/peopleTimeAgo: same seeded date/reference as timeAgo/hoursAgo above - only
+                // the low dword of the real register-pair return is meaningful (see each method's own doc
+                // comment), so only that half is compared.
+                let real_animal_time_ago = unsafe { ZTGAMEMGR_ANIMAL_TIME_AGO.original()(real_ptr as *const u32, reference_low, reference_high as i32) };
+                let reimpl_animal_time_ago = unsafe { (*reimpl_ptr).animal_time_ago(reference) };
+                prop_assert_eq!(
+                    real_animal_time_ago as u32,
+                    reimpl_animal_time_ago,
+                    "animalTimeAgo mismatch for reference={}",
+                    reference
+                );
+
+                let real_people_time_ago = unsafe { ZTGAMEMGR_PEOPLE_TIME_AGO.original()(real_ptr as *const u32, reference_low, reference_high as i32) };
+                let reimpl_people_time_ago = unsafe { (*reimpl_ptr).people_time_ago(reference) };
+                prop_assert_eq!(
+                    real_people_time_ago as u8 as u32,
+                    reimpl_people_time_ago,
+                    "peopleTimeAgo mismatch for reference={}",
+                    reference
+                );
+                // overrideNewGameDefaults: the same real ZooStatus::override runs against both sides'
+                // embedded ZooStatus with the same config, so the whole embedded region (0x10..0x1160)
+                // should stay byte-identical afterward - nothing else in this test's proptest body touches
+                // that region.
+                unsafe {
+                    ZTGAMEMGR_OVERRIDE_NEW_GAME_DEFAULTS.original()(real_ptr as *const u32, override_config_ptr);
+                    (*reimpl_ptr).override_new_game_defaults(override_config_ptr);
+                }
+                let real_zoostatus_bytes = unsafe { std::slice::from_raw_parts((real_ptr as *const u8).add(0x10), 0x1150) };
+                let reimpl_zoostatus_bytes = unsafe { std::slice::from_raw_parts((reimpl_ptr as *const u8).add(0x10), 0x1150) };
+                prop_assert_eq!(real_zoostatus_bytes, reimpl_zoostatus_bytes, "overrideNewGameDefaults: embedded ZooStatus diverged");
+
+                // isRealWorldDate: no seeded state - both sides call GetSystemTime independently.
+                let real_is_real_world = unsafe { ZTGAMEMGR_IS_REAL_WORLD_DATE.original()(game_day as i32, game_month) };
+                let reimpl_is_real_world = ztgamemgr::ZTGameMgr::is_real_world_date(game_day, game_month);
+                prop_assert_eq!(
+                    (real_is_real_world & 0xff) != 0,
+                    reimpl_is_real_world,
+                    "isRealWorldDate mismatch for day={}, month={}",
+                    game_day,
+                    game_month
+                );
+
+                Ok(())
+            },
+        );
+
+        let mut fail_flag = false;
+        match result {
+            Ok(_) => {
+                info!("Proptest passed for {}", test_name);
+            }
+            Err(e) => {
+                error!("Proptest failed: {:?}", e);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: {:?}\n", test_name, e).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        unsafe { BFCONFIGFILE_RELEASE.original()(override_config_ptr) };
+
+        if !fail_flag {
+            write_success_line(failure_log, test_name);
+        }
+
+        gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+        gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+        fail_flag
+    }
+
+    /// `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS_IS_NEW_GAME_SMOKE` - one-shot wiring check for
+    /// `set_new_game_defaults`'s `is_new_game=true` branch, which `ZTGAMEMGR_SET_NEW_GAME_DEFAULTS` above
+    /// deliberately never exercises (that test pins `is_new_game=false` on both sides - see its own doc
+    /// comment for why: the `true` branch calls through `GLOBAL_ZTAIMgr`'s real vtable slot, the live,
+    /// shared AI manager singleton, so exercising it is a real side effect on live game state, not
+    /// something a synthetic standalone instance can safely absorb before a zoo has even loaded). Deferred
+    /// to here, after `run_load_live_zoo`, for the same reason `removedZooDoo`'s own smoke test had to move
+    /// (see `ztgamemgr.rs`'s Stage-5 doc comment / this file's git history): a global pointer being
+    /// non-null (`GLOBAL_ZTAIMgr` is set well before this point) is not the same guarantee as the global's
+    /// *internal* state being genuinely constructed, and calling into a still-uninitialized manager's real
+    /// vtable slot pre-zoo-load is exactly the class of bug that crashed `getBuildingList` there. Once a
+    /// real zoo is loaded, calling this is no different from what real "start new game" gameplay already
+    /// does.
+    ///
+    /// Not a byte-diff: both sides call through to the *same* live `GLOBAL_ZTAIMgr` singleton, so a memory
+    /// comparison between the two standalone instances wouldn't reflect anything meaningful about either
+    /// side's own logic. This only confirms the call wiring (`this`/args passed into
+    /// `BFAIMGR_LOAD_DATA.original()`) doesn't crash on either side - a wrong-`this`/wrong-arg bug there is
+    /// exactly what the pinned-`false` Stage 1 test structurally cannot see. Run last in this file's
+    /// battery (see `run_all_tests`), since `BFAIMgr::loadData` may have real side effects on live AI state
+    /// that earlier tests shouldn't have to account for.
+    fn run_gamemgr_set_new_game_defaults_is_new_game_smoke_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_SET_NEW_GAME_DEFAULTS_IS_NEW_GAME_SMOKE";
+
+        let real_ptr = gamemgr_live_support::build_standalone_mgr();
+        let reimpl_ptr = gamemgr_live_support::build_standalone_mgr();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes());
+            }
+            if !real_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+            }
+            if !reimpl_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+            }
+            return true;
+        }
+
+        let struct_size = size_of::<ztgamemgr::ZTGameMgr>();
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+        }
+
+        let mut config = std::mem::MaybeUninit::<crate::bfconfigfile::BFConfigFile>::uninit();
+        let config_ptr = config.as_mut_ptr() as *const u32;
+        let kind_tag_byte: u8 = 0;
+        unsafe { BFCONFIGFILE_CONSTRUCTOR_0.original()(config_ptr, &kind_tag_byte as *const u8) };
+
+        unsafe {
+            ZTGAMEMGR_SET_NEW_GAME_DEFAULTS.original()(real_ptr as *const u32, config_ptr, true);
+            (*reimpl_ptr).set_new_game_defaults(config_ptr, true);
+        }
+
+        unsafe { BFCONFIGFILE_RELEASE.original()(config_ptr) };
+
+        info!("{}: is_new_game=true call-through completed without crashing on both sides", test_name);
+        write_success_line(failure_log, test_name);
+
+        gamemgr_live_support::destroy_standalone_mgr(real_ptr);
+        gamemgr_live_support::destroy_standalone_mgr(reimpl_ptr);
+
+        false
+    }
+
+    /// `ZTGAMEMGR_START_STOP_SMOKE` - one-shot wiring check for the reimplemented `start`/`stop`
+    /// (`ztgamemgr.rs`'s Stage-5 doc comment covers the full port). Not a byte-diff: `start`/`stop` read
+    /// the live `GLOBAL_ZTScenarioMgr`/`GLOBAL_ZTApp` singletons and call through to real vanilla
+    /// `ZTSoundscape`/`ZTUI::main::unpauseGame` - side effects on shared global/audio state, not something
+    /// a standalone instance's own memory can meaningfully diff against a second standalone instance. This
+    /// only confirms the call sequence (allocate/construct/init the soundscape, read the two new raw
+    /// globals, tail-call `unpauseGame`) doesn't crash. Deferred to run last, after `run_load_live_zoo` and
+    /// after the `is_new_game=true` smoke test above, for the same reason that one is deferred:
+    /// `GLOBAL_ZTScenarioMgr`/`GLOBAL_ZTApp` being non-null pointers is not the same guarantee as their
+    /// internal state being genuinely constructed pre-zoo-load (the same "non-null but uninitialized
+    /// registry" hazard class that crashed `getBuildingList` during the `removedZooDoo` investigation).
+    fn run_gamemgr_start_stop_smoke_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_START_STOP_SMOKE";
+
+        let ptr = gamemgr_live_support::build_standalone_mgr();
+        if ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        unsafe { (*ptr).start() };
+        let started_after_start = unsafe { (*ptr).started() };
+        let soundscape_after_start = unsafe { (*ptr).soundscape_ptr() };
+
+        unsafe { (*ptr).stop() };
+        let started_after_stop = unsafe { (*ptr).started() };
+        let soundscape_after_stop = unsafe { (*ptr).soundscape_ptr() };
+
+        let mut fail_flag = false;
+        if !started_after_start || soundscape_after_start == 0 {
+            fail_flag = true;
+            error!(
+                "{}: expected started=true and a non-null soundscape_ptr after start(), got started={} soundscape_ptr={:#x}",
+                test_name, started_after_start, soundscape_after_start
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!(
+                        "Test Failed {}: after start(), started={} soundscape_ptr={:#x}\n",
+                        test_name, started_after_start, soundscape_after_start
+                    )
+                    .as_bytes(),
+                );
+            }
+        }
+        if started_after_stop || soundscape_after_stop != 0 {
+            fail_flag = true;
+            error!(
+                "{}: expected started=false and a null soundscape_ptr after stop(), got started={} soundscape_ptr={:#x}",
+                test_name, started_after_stop, soundscape_after_stop
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!(
+                        "Test Failed {}: after stop(), started={} soundscape_ptr={:#x}\n",
+                        test_name, started_after_stop, soundscape_after_stop
+                    )
+                    .as_bytes(),
+                );
+            }
+        }
+
+        if !fail_flag {
+            info!("{}: start()/stop() call sequence completed without crashing, flags/pointer toggled as expected", test_name);
+            write_success_line(failure_log, test_name);
+        }
+
+        gamemgr_live_support::destroy_standalone_mgr(ptr);
+
+        fail_flag
     }
 
     /// Default path for `run_load_live_zoo`'s save file - a real save (not embedded/synthetic) placed
@@ -1311,7 +3877,7 @@ mod detour_zoo_main {
         };
         let mode_cstring = c"rb";
 
-        let file_ptr = unsafe { standalone::FOPEN.original()(path_cstring.as_ptr(), mode_cstring.as_ptr()) };
+        let file_ptr = unsafe { standalone::FOPEN.original()(path_cstring.as_ptr() as u32, mode_cstring.as_ptr()) };
         if file_ptr.is_null() {
             error!("{}: fopen failed for {:?} (file missing? see OPENZT_TEST_ZOO)", test_name, path);
             if let Some(log_file) = failure_log {
@@ -3915,8 +6481,9 @@ mod detour_zoo_main {
     /// representations (the real vector via `ADD_AWARD.original()`, the Rust store via
     /// `ztawardmgr::add_award`) so a mismatch would be visible, then compares real vanilla behavior
     /// (`ztawardmgr::eval_award_count_override::call_real`, the `retour` trampoline - **not**
-    /// `EVAL.original()`, which is a raw address cast with no trampoline and would now just loop back into
-    /// this same detour once it's hooked, see that helper's own doc comment) against a direct call
+    /// `EVAL.original()`, which in release is a raw address cast with no trampoline that would loop back
+    /// into this same detour once it's hooked; debug `.original()` routes through the hook registry, but
+    /// `call_real` keeps the vanilla pole release-safe, see that helper's own doc comment) against a direct call
     /// through the hooked address for: the gate-passing case at the exact threshold boundary (both should
     /// equal the seeded count, since both representations are in sync), the gate-failing case just past
     /// the boundary, and two unrelated submetric values under the same goal kind - the override must fall
@@ -4000,8 +6567,9 @@ mod detour_zoo_main {
     /// against real vanilla. Seeds both the real singleton and the Rust store with the same two catalogue
     /// award ids (from `ZTAWARDMGR_START`, which has already run earlier in this battery), clears the
     /// listbox and populates it via real vanilla (`ztawardmgr::show_awards_detour::call_real`'s `retour`
-    /// trampoline - **not** `SHOW_AWARDS.original()`, which is a raw address cast that would now just loop
-    /// back into this same detour once it's hooked), counts items via [`listbox_item_count`], then repeats
+    /// trampoline - **not** `SHOW_AWARDS.original()`, which in release is a raw address cast that would
+    /// just loop back into this same detour once it's hooked; debug `.original()` routes through the hook
+    /// registry, but `call_real` keeps the vanilla pole release-safe), counts items via [`listbox_item_count`], then repeats
     /// against the hooked address (our detour, driven by the Rust store) and compares counts. Runs after
     /// `run_load_live_zoo` since it needs a live `BFUIMgr` element `0x101c` to exist.
     ///
@@ -4614,11 +7182,19 @@ mod detour_zoo_main {
     fn run_ztshow_check_owning_habitat_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZTSHOW_CHECK_OWNING_HABITAT_LIVE";
 
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} entry\n", test_name).as_bytes());
+        }
+
         let Some((qualifying_habitat_ptr, real_show_info)) = find_real_show_tank_habitat() else {
             info!("Skipping {}: no real tank habitat with water_level()>0 and a real ZTShowInfo* attached found in test zoo", test_name);
             write_success_line(failure_log, &format!("{} (skipped: no qualifying real show-tank habitat found)", test_name));
             return false;
         };
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} found qualifying_habitat={:#010x} real_show_info={:#010x}\n", test_name, qualifying_habitat_ptr, real_show_info).as_bytes());
+        }
 
         let mut fail_flag = false;
 
@@ -4632,6 +7208,9 @@ mod detour_zoo_main {
             error!("{}: check_owning_habitat returned true (blocked) for a real working tank habitat ({:#010x}, water_level>0)", test_name, qualifying_habitat_ptr);
             fail_flag = true;
         }
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} positive case done\n", test_name).as_bytes());
+        }
 
         // Negative case: a null habitat pointer means there's no tank gating this show at all, so it must
         // not be blocked either.
@@ -4640,6 +7219,9 @@ mod detour_zoo_main {
         if ztshow::check_owning_habitat(null_show_info) {
             error!("{}: check_owning_habitat returned true (blocked) for a null habitat pointer", test_name);
             fail_flag = true;
+        }
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} negative case done\n", test_name).as_bytes());
         }
 
         // Blocking case: a real tank exhibit with zero water level must be blocked, if the test zoo has
@@ -4655,6 +7237,9 @@ mod detour_zoo_main {
         } else {
             info!("{}: no real empty tank habitat found in test zoo, skipping that half of the check", test_name);
         }
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} blocking case done\n", test_name).as_bytes());
+        }
 
         // Best-effort smoke test of the full START entry point (which is what actually calls
         // check_owning_habitat in real gameplay) against the real show already attached to the qualifying
@@ -4664,9 +7249,15 @@ mod detour_zoo_main {
         // comment), so an early return here is just as valid an outcome as a full run.
         if real_show_info != 0 {
             let real_show = real_show_info + 4;
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("CHECKPOINT {} about to call START on real_show={:#010x}\n", test_name, real_show).as_bytes());
+            }
             let start_hooked = unsafe { std::mem::transmute::<u32, extern "thiscall" fn(*const u32)>(0x005a3db4u32) };
             start_hooked(real_show as *const u32);
             info!("{}: START smoke-test against real show {:#010x} completed without crashing", test_name, real_show);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("CHECKPOINT {} START returned\n", test_name).as_bytes());
+            }
         }
 
         if !fail_flag {
@@ -4739,7 +7330,9 @@ mod detour_zoo_main {
 
         // Create a real ZTShowScriptState for our chosen unit (real, un-hooked CREATE_SHOW_SCRIPT_STATE -
         // safe against this real, properly-constructed ZTShow's own `+0x34` state map), then fetch it back
-        // the same way `do_current_item`'s own body does.
+        // the same way `do_current_item`'s own body does. Two-arg call only (this, unit_id) - see
+        // `ztshow.rs`'s `start()` doc comment / `generated.rs`'s `CONSTRUCTOR` entry for why the old
+        // three-arg signature (a bogus `show_id: u16`) was a real stack-imbalance bug.
         let create_result = unsafe { CREATE_SHOW_SCRIPT_STATE.original()(real_show as *const u32, unit_id) };
         if create_result != 0 {
             info!("{}: CREATE_SHOW_SCRIPT_STATE returned {} (nonzero/failure) for unit {:#x}; do_current_item/do_trick_event will still be exercised via their early-return paths", test_name, create_result, unit_id);

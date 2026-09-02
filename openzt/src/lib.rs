@@ -71,6 +71,10 @@ mod bfconfigfile;
 /// ztgamemgr module has commands to interact with the live zoo stats such as cash, num animals, species, guests, etc. via the vanilla ZTGameMgr class.
 mod ztgamemgr;
 
+/// ztgamemgr_menumusichandler module reimplements ZTGameMgr::MenuMusicHandler, a self-contained leaf
+/// class embedded/pointed to by ZTGameMgr - see openzt/plans/menumusichandler-implementation-plan.md.
+mod ztgamemgr_menumusichandler;
+
 /// ztmapview is the main view in zoo tycoon, all map interaction is done through this class.
 pub mod ztmapview;
 
@@ -113,6 +117,11 @@ mod ztshowui;
 /// ztguest module reimplements ZTGuest's three megatile-reading methods (fCrowdDensityMegatile/
 /// fEstheticBonusMegatile/fStinkyMegatile) - closes the last vanilla read path into ZTMegatileMgr's grid.
 mod ztguest;
+
+/// ztsoundscape module reimplements the vanilla ZTSoundscape crowd/world ambient-audio crossfade
+/// class (structs + constructor + init + update, plus the CONSTRUCTOR/INIT/UPDATE detours; see
+/// openzt/plans/ztsoundscape-implementation-plan.md).
+mod ztsoundscape;
 
 mod experimental;
 
@@ -221,6 +230,7 @@ mod zoo_init {
             info!("Feature 'experimental' enabled");
             ztadvterrainmgr::init();
             ztgamemgr::init();
+            ztgamemgr_menumusichandler::init();
             experimental::init();
             ztmapview::init();
             zthabitatmgr::init();
@@ -233,6 +243,7 @@ mod zoo_init {
             ztshow::init();
             ztshowui::init();
             ztguest::init();
+            ztsoundscape::init();
         }
         unsafe { LOAD_LANG_DLLS_DETOUR.call(this) }
     }

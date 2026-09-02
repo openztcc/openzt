@@ -19,21 +19,21 @@ use openzt_detour::generated::{
     bfworldmgr::{GET_TYPE, GET_UNIT},
     ztgamemgr::GET_DATE,
     ztshow::{
-        CALCULATE_PERCENT_ADJUSTMENT, CHECK_SCRIPT, CLEAR_SHOW_SCRIPT_STATES, CREATE_SHOW_SCRIPT_STATE, DO_CURRENT_ITEM,
-        DO_KEEPER_EVENT, DO_TRICK_EVENT, GATHER_UNITS, GET_SHOW_SCRIPT_STATE, REINIT, RESOLVE_NEXT_SCHEDULED_SCRIPT_ID, START,
-        STOP_0, VALIDATE, VALIDATE_ITEM,
+        CALCULATE_PERCENT_ADJUSTMENT, CHECK_SCRIPT, CLEAR_SHOW_SCRIPT_STATES, DO_CURRENT_ITEM, DO_KEEPER_EVENT, DO_TRICK_EVENT,
+        GATHER_UNITS, GET_SHOW_SCRIPT_STATE, REINIT, RESOLVE_NEXT_SCHEDULED_SCRIPT_ID, START, STOP_0, VALIDATE, VALIDATE_ITEM,
     },
     ztshowinfo::{
         ADD_SCRIPT, ADD_SHOW, CHECK_PENDING_SCRIPTS, CHECK_UNIT, CHECK_UNIT_TYPE, GET_NUM_UNITS, GET_SHOW_UNIT_LIST, IS_STARTED,
         RECALCULATE_SCHEDULE, REMOVE_SHOW, REMOVE_UNIT, SEND_EVENT,
     },
-    ztshowscriptstate::GET_NUM_ITEMS,
+    ztshowscriptstate::{CONSTRUCTOR as CREATE_SHOW_SCRIPT_STATE, GET_NUM_ITEMS},
     standalone::OPERATOR_NEW,
     ztshowmgr::GET_SHOW_INFO,
-    zttankexhibit::ON_SHOW_STARTED,
+    zthabitat::PLAY_SHOW_START_SOUND,
 };
 use openzt_detour_macro::detour_mod;
 use tracing::error;
+use windows::Win32::Foundation::FILETIME;
 
 use crate::{
     globals::globals,
@@ -511,10 +511,25 @@ pub fn calculate_percent_adjustment(this: u32) -> i32 {
 }
 
 /// Reimplementation of `ZTShow::start` - real body is `ztshow::START` (`0x005a3db4`, a thin wrapper) tail
-/// -calling into `ztshow::RESOLVE_NEXT_SCHEDULED_SCRIPT_ID`/`FUN_005a3de4`; see the `generated.rs` hand
-/// -added-entry comments and this module doc comment for how those addresses were resolved. Ported from
-/// `FUN_005a3de4`'s decompiled source (supplied directly, not a local decompile file), cross-checked
-/// against the macOS `ZTShow::start` decompile's matching call sequence.
+/// -calling into `ztshow::RESOLVE_NEXT_SCHEDULED_SCRIPT_ID`/`standalone::INIT_SHOW_SCRIPT_STATE`
+/// (`0x005a3de4`). Ported from `INIT_SHOW_SCRIPT_STATE`'s decompiled source (supplied directly, not a
+/// local decompile file), cross-checked against the macOS `ZTShow::start` decompile's matching call
+/// sequence. The per-unit `ZTShowScriptState` constructor it calls is `ztshowscriptstate::CONSTRUCTOR`
+/// (`0x005a4075`, imported here as `CREATE_SHOW_SCRIPT_STATE`).
+///
+/// **Real stack-imbalance bug found and fixed** while investigating a live crash in this function's own
+/// "best-effort" `START` smoke test (`reimplementation_tests`'s `ZTSHOW_CHECK_OWNING_HABITAT_LIVE`):
+/// `CREATE_SHOW_SCRIPT_STATE` (`ztshowscriptstate::CONSTRUCTOR`) was called with a bogus third `show_id:
+/// u16` stack argument that the real function doesn't take - confirmed via `RET 0x4` at all three return
+/// sites in its `.asm` (only one 4-byte stack arg popped) and via `_initShowScriptState.c`'s own call site,
+/// where the decompiler labels that slot `unaff_retaddr` (its notation for "uninitialized stack garbage
+/// with no real incoming parameter behind it", not a genuine argument). The real function reads the u16 it
+/// writes into the new state's own `+0x4` field from `this->mbr_0x4`(+2) internally, not from a caller
+/// argument. Passing the extra argument left one stack slot un-popped on every call, corrupting the stack
+/// for whatever ran next - see `generated.rs`'s own corrected `CONSTRUCTOR` entry for the full account.
+/// `show_id` (read from `this+0x6`) is still computed and used below - just no longer passed into this
+/// call - since the real function's caller separately writes it into the unit's own `+0x254` field
+/// afterward (`_initShowScriptState.c` line 85), which this port already did correctly.
 ///
 /// Two pieces of the real function's success-path tail are deliberately **not** ported:
 /// - `(this->cls_0x6355b8+0xc)`/`ZTShow+0x24`'s write from `GLOBAL_ZTAIMgr->field_0xec` - `GLOBAL_ZTAIMgr`
@@ -576,11 +591,11 @@ pub fn start(this: u32) {
             let needs_state = (owning_show_info != 0 && unsafe { IS_STARTED.original()(owning_show_info as *const u32) } == 0)
                 || !unsafe { call_entity_vtable_noargs(unit_ptr, 0x22c) };
             if needs_state {
+                let show_id = get_from_memory::<u16>(this + 0x6);
                 let result = unsafe { CREATE_SHOW_SCRIPT_STATE.original()(this as *const u32, unit_id) };
                 if result != 0 {
                     return;
                 }
-                let show_id = get_from_memory::<u16>(this + 0x6);
                 save_to_memory(unit_ptr + 0x254, show_id);
             }
         }
@@ -596,7 +611,7 @@ pub fn start(this: u32) {
         let show_info = get_from_memory::<u32>(this + 0x10);
         unsafe { send_event(show_info, 0x2713, 0, 0x57, 0, 0, 1) };
         let habitat = get_from_memory::<u32>(show_info + 0xa0);
-        unsafe { ON_SHOW_STARTED.original()(habitat as *const u32) };
+        unsafe { PLAY_SHOW_START_SOUND.original()(habitat as *const u32) };
         // "Show has started" UI toast intentionally skipped - see this function's doc comment.
     }
 }
@@ -854,9 +869,10 @@ pub fn add_script(show_info: u32, unit_type_id: u32, new_script_id: u16) -> bool
 
     let (node, was_inserted) = find_or_insert_pending_script_node(show_info, unit_type_id);
     if was_inserted {
-        let mut date: i64 = 0;
-        unsafe { GET_DATE.original()(globals().ztgamemgr_ptr() as *const u32, &mut date as *const i64) };
-        save_to_memory(node + 0x40, date);
+        let mut date = FILETIME::default();
+        unsafe { GET_DATE.original()(globals().ztgamemgr_ptr() as *const u32, &mut date as *const FILETIME) };
+        let date_ticks = ((date.dwHighDateTime as u64) << 32) | date.dwLowDateTime as u64;
+        save_to_memory(node + 0x40, date_ticks as i64);
     }
 
     save_to_memory(node + 0x1e, new_script_id);

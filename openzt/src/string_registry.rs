@@ -347,9 +347,14 @@ fn is_user_type_id(param_1: u32) -> bool {
     (19000..=21999).contains(&param_1) || (49000..=51999).contains(&param_1) || (74000..=76999).contains(&param_1)
 }
 
+/// Last-resort fallback of `load_string_by_id`'s resolution chain (registry -> overrides ->
+/// language-DLL cache -> game): goes straight to the real `BFApp::loadString` body via `.hooked()`.
+/// `LOAD_STRING` is itself detoured by `zoo_string` below, but every check that detour makes has
+/// already missed by the time this fallback runs, so re-entering it would only redo the same misses
+/// before falling through to the same vanilla body.
 fn load_string_from_game(string_id: u32) -> Option<String> {
     let mut buffer = [0u8; LOAD_STRING_BUFFER_SIZE];
-    let length = unsafe { LOAD_STRING.original()(GLOBAL_BFAPP as *const u32, string_id as *const u32, buffer.as_mut_ptr() as *const u8) };
+    let length = unsafe { LOAD_STRING.hooked()(GLOBAL_BFAPP as *const u32, string_id as *const u32, buffer.as_mut_ptr() as *const u8) };
     if length == 0 {
         return None;
     }

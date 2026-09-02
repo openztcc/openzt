@@ -71,6 +71,15 @@ pub struct ZTShowMgr {
     _private: [u8; 0],
 }
 
+/// Opaque type for ZTAIMgr. Out-of-scope for reimplementation (see
+/// `openzt/plans/ztgamemgr-implementation-plan.md`) - only exposed so `ZTGameMgr::setNewGameDefaults` can
+/// call through its real vtable slot `+0x4` (`0x0058f269`, inherited unchanged from `BFAIMgr`) exactly as
+/// vanilla does.
+#[repr(C)]
+pub struct ZTAIMgr {
+    _private: [u8; 0],
+}
+
 /// Walks a pointer chain and returns the final address.
 ///
 /// # Arguments
@@ -172,6 +181,7 @@ pub struct Globals {
     ztthoughtmgr: CachedGlobalInstance<ZTThoughtMgr>,
     ztmegatilemgr: CachedGlobalInstance<ZTMegatileMgr>,
     ztshowmgr: CachedGlobalInstance<ZTShowMgr>,
+    ztaimgr: CachedGlobalInstance<ZTAIMgr>,
 }
 
 impl Globals {
@@ -317,6 +327,14 @@ impl Globals {
             self.ztshowmgr.get() as *const crate::ztshow::ZTShowMgr
         }
     }
+
+    /// Returns a raw pointer to the real vanilla `ZTAIMgr` singleton (`GLOBAL_ZTAIMgr`), possibly null.
+    /// `ZTAIMgr` itself is out of scope for reimplementation - this is only exposed as an opaque `*const
+    /// u32`-shaped handle to pass as `this` into its real vtable slot `+0x4` call (see
+    /// `ztgamemgr::set_new_game_defaults`), never dereferenced as a typed struct.
+    pub fn ztaimgr_ptr(&self) -> *const u32 {
+        unsafe { self.ztaimgr.get() as *const u32 }
+    }
 }
 
 // SAFETY: Globals only contains CachedGlobalInstance values which are Send + Sync
@@ -374,6 +392,9 @@ fn ensure_globals() -> &'static Globals {
             // GLOBAL_ZTShowMgr, Ghidra VA 0x00639008 -> RVA 0x00239008 (same neighborhood cluster as the
             // managers above) - see ztshowscriptmgr-implementation-plan.md's "Composition" section.
             ztshowmgr: CachedGlobalInstance::new(base + 0x00239008, &[0]),
+            // GLOBAL_ZTAIMgr, Ghidra VA 0x00638098 -> RVA 0x00238098 (same neighborhood cluster as
+            // ZTWorldMgr/ZTGameMgr/ZTAdvTerrainMgr/ZTHabitatMgr at 0x238040-0x23805c above).
+            ztaimgr: CachedGlobalInstance::new(base + 0x00238098, &[0]),
         }
     })
 }
