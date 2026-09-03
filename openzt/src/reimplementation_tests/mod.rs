@@ -168,8 +168,10 @@ mod detour_zoo_main {
     use openzt_detour::generated::bfapp::GET_INSTALLED_EXPANSION as BFAPP_GET_INSTALLED_EXPANSION;
     use openzt_detour::generated::ztshowmgr::{
         CONSTRUCTOR as ZTSHOWMGR_CONSTRUCTOR, ENTER_NEW_MONTH as ZTSHOWMGR_ENTER_NEW_MONTH, GET_SCRIPT_ID as ZTSHOWMGR_GET_SCRIPT_ID,
-        GET_SHOW_INFO as ZTSHOWMGR_GET_SHOW_INFO, LOAD as ZTSHOWMGR_LOAD, REGISTER_SHOW as ZTSHOWMGR_REGISTER_SHOW,
-        SAVE as ZTSHOWMGR_SAVE, UNREGISTER_SHOW as ZTSHOWMGR_UNREGISTER_SHOW, UPDATE as ZTSHOWMGR_UPDATE,
+        GET_SHOW_INFO as ZTSHOWMGR_GET_SHOW_INFO, IS_DOING_SHOW as ZTSHOWMGR_IS_DOING_SHOW,
+        IS_SHOW_SCRIPT_DONE as ZTSHOWMGR_IS_SHOW_SCRIPT_DONE, LOAD as ZTSHOWMGR_LOAD,
+        REGISTER_SHOW as ZTSHOWMGR_REGISTER_SHOW, SAVE as ZTSHOWMGR_SAVE, UNREGISTER_SHOW as ZTSHOWMGR_UNREGISTER_SHOW,
+        UPDATE as ZTSHOWMGR_UPDATE,
     };
     use openzt_detour::generated::bfconfigfile::{CONSTRUCTOR_0 as BFCONFIGFILE_CONSTRUCTOR_0, RELEASE as BFCONFIGFILE_RELEASE};
     use openzt_detour::generated::bfworldmgr::GET_TYPE as BFWORLDMGR_GET_TYPE;
@@ -684,6 +686,8 @@ mod detour_zoo_main {
         tests.push(RegisteredTest { name: "ZTSHOWMGR_ENTER_NEW_MONTH", run: run_ztshowmgr_enter_new_month_test });
         tests.push(RegisteredTest { name: "ZTSHOWMGR_UPDATE", run: run_ztshowmgr_update_test });
         tests.push(RegisteredTest { name: "ZTSHOWMGR_SAVE_LOAD", run: run_ztshowmgr_save_load_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_IS_DOING_SHOW", run: run_ztshowmgr_is_doing_show_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_IS_SHOW_SCRIPT_DONE", run: run_ztshowmgr_is_show_script_done_test });
         tests.push(RegisteredTest { name: "ZTSOUNDSCAPE_FADE_CONSTANTS", run: run_ztsoundscape_fade_constants_test });
         tests.push(RegisteredTest { name: "MENUMUSICHANDLER_INIT", run: run_menumusichandler_init_test });
         tests.push(RegisteredTest { name: "MENUMUSICHANDLER_START_PLAY", run: run_menumusichandler_start_play_test });
@@ -3194,7 +3198,281 @@ mod detour_zoo_main {
         }
     }
 
-    /// The three fade constants `ZTSoundscape::update` reads at runtime through data RVAs -
+    /// `ZTSHOWMGR_IS_DOING_SHOW` - stage 7 (`ztshowmgr-implementation-plan.md`): `ZTShowMgr::
+    /// isDoingShow` composes the store-backed `getShowInfo` lookup (stage 4) with one real,
+    /// untouched `ZTShow::getShowScriptState` walk over the found show's embedded `ZTShow`, so
+    /// both poles read the same registrations out of the same store - the real body's internal
+    /// `getShowInfo` `CALL` lands in the stage-4 detour - and the differential is the glue each
+    /// pole owns: the port's clean 0/1 (macOS's body normalizes to the same full-width predicate)
+    /// against vanilla's `SETNZ %AL`-only return plus the `LEA %ECX, [EAX + 0x4]` embedded-show
+    /// hand-off.
+    ///
+    /// The state side is built by hand on a standalone show: the embedded `ZTShow`'s script-state
+    /// map is the self-referential header object at `show_info+0x38` (the same header shape the
+    /// stage-3 test builds for `ZTShowState::clear`), with one zero-padded `0x18` node hung off
+    /// its root slot at `+0x3c` - key (the unit id) at node `+0x10`, a non-null value at `+0x14`
+    /// (the real callee returns `[node+0x14]` without dereferencing it, so an opaque non-null
+    /// buffer stands in for the `ZTShowScriptState`). `AI_cls_0x404fd6::find`'s key compare is a
+    /// full 32-bit `CMP dword ptr [EAX+0x10]` (`AI_cls_0x404fd6_find.asm`), which the zeroed node
+    /// padding satisfies and which a probe crossing bit 16 must NOT match - both poles answer
+    /// through the same real walk, so that probe pins the effective key width rather than
+    /// differentiating the poles. All teardown is leak-only; the store drains through the hooked
+    /// unregister path and a final both-poles pass confirms the registration is really gone.
+    fn run_ztshowmgr_is_doing_show_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_IS_DOING_SHOW";
+
+        if ztshowmgr::registered_show_count() != 0 {
+            let msg = "Rust registered-shows store should be empty when the test starts";
+            error!("{}: {} (has {} entries)", test_name, msg, ztshowmgr::registered_show_count());
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} (has {} entries)\n", test_name, msg, ztshowmgr::registered_show_count()).as_bytes());
+            }
+            return true;
+        }
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        /// Both poles over one (unit, show) probe. The Rust pole must return exactly `expected`
+        /// (the port's clean 0/1); the real body defines only its `AL` byte (upper EAX holds the
+        /// state pointer's high bits on a hit), so its return is compared through the low-byte
+        /// mask.
+        fn check(label: &str, mgr: *mut ZTShowMgr, unit_id: u32, show_id: u16, expected: u32, failures: &mut Vec<String>) {
+            let rust_ret = unsafe { ZTSHOWMGR_IS_DOING_SHOW.hooked()(mgr as *const u32, unit_id, show_id) };
+            if rust_ret != expected {
+                failures.push(format!("{label}: rust pole should return {expected}, got {rust_ret:#010x}"));
+            }
+            let real_ret = showmgr_live_support::call_real_is_doing_show(mgr as *const u32, unit_id, show_id) & 0xff;
+            if real_ret != expected {
+                failures.push(format!("{label}: real pole should return {expected} (AL-masked), got {real_ret:#010x}"));
+            }
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        // show_a carries the seeded state (unit UNIT_A -> a non-null script-state pointer) inside
+        // its embedded ZTShow's script-state map; show_b stays stateless (empty self-referential
+        // header only). Leak-only allocations throughout.
+        const UNIT_A: u32 = 0x2a;
+        let show_a = ztshow_live_support::build_standalone_show_info();
+        let show_b = ztshow_live_support::build_standalone_show_info();
+        for show in [show_a, show_b] {
+            // The map object at show_info+0x38 doubles as its own empty header (self-sentinel) -
+            // a zeroed +0x38 would leave `find`'s header load null and crash its root read.
+            save_to_memory(show + 0x38, show + 0x38);
+        }
+        let fake_state = unsafe { standalone::OPERATOR_NEW.original()(0x20) } as u32;
+        unsafe { std::ptr::write_bytes(fake_state as *mut u8, 0, 0x20) };
+        let node = unsafe { standalone::OPERATOR_NEW.original()(0x18) } as u32;
+        unsafe { std::ptr::write_bytes(node as *mut u8, 0, 0x18) };
+        save_to_memory(node + 0x4, show_a + 0x38); // parent = header (hygiene; find never reads it)
+        save_to_memory(node + 0x10, UNIT_A); // key: the unit id; node stays zero-padded at +0x12
+        save_to_memory(node + 0x14, fake_state); // value: only null-tested by the real callee
+        save_to_memory(show_a + 0x3c, node); // the header's root slot
+
+        const PRESET_ID_A: u16 = 0x1234;
+        save_to_memory(show_a + 0x70, PRESET_ID_A);
+        // show_b keeps its zero-init `field_0x70` (the counter-assignment case).
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_a as *const u32, false) } != 1 {
+            failures.push("register(A, false) should return 1".to_string());
+        }
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_b as *const u32, false) } != 1 {
+            failures.push("register(B, false) should return 1".to_string());
+        }
+        let id_b = get_from_memory::<u16>(show_b + 0x70);
+        if id_b == 0 || id_b == PRESET_ID_A {
+            failures.push(format!("register(B) should have assigned a fresh non-colliding id, got {id_b:#06x}"));
+        }
+
+        // Unregistered probes: both poles miss on the store-backed lookup.
+        for probe in [0x0000u16, 0x8000, 0xffff] {
+            check(&format!("unregistered id {probe:#06x}"), mgr, UNIT_A, probe, 0, &mut failures);
+        }
+        // The seeded hit: UNIT_A is doing show A through both poles.
+        check("seeded state hit", mgr, UNIT_A, PRESET_ID_A, 1, &mut failures);
+        // Misses against the seeded show: unknown unit, the unit-id-0 boundary, and a key that
+        // matches only below bit 16 (the 32-bit key-compare pin).
+        check("unknown unit on seeded show", mgr, UNIT_A + 1, PRESET_ID_A, 0, &mut failures);
+        check("unit id 0 on seeded show", mgr, 0, PRESET_ID_A, 0, &mut failures);
+        check("key differing above bit 16", mgr, UNIT_A | 0x1_0000, PRESET_ID_A, 0, &mut failures);
+        // Registered but stateless: the walk runs over an empty map and misses for every unit.
+        check("stateless show, seeded unit", mgr, UNIT_A, id_b, 0, &mut failures);
+        check("stateless show, unit id 0", mgr, 0, id_b, 0, &mut failures);
+
+        // Cleanup: drain both through the hooked unregister (clear=false - the clear path is the
+        // stage-3 tests' concern), then the hit probe must miss through both poles.
+        for show in [show_a, show_b] {
+            unsafe { ZTSHOWMGR_UNREGISTER_SHOW.hooked()(mgr as *const u32, 0, show as *const u32, false) };
+        }
+        let remaining = ztshowmgr::registered_show_count();
+        if remaining != 0 {
+            failures.push(format!("store should be empty after cleanup, has {remaining} entries"));
+        }
+        check("unregistered after cleanup", mgr, UNIT_A, PRESET_ID_A, 0, &mut failures);
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOWMGR_IS_SHOW_SCRIPT_DONE` - stage 8 (`ztshowmgr-implementation-plan.md`): `ZTShowMgr::
+    /// isShowScriptDone` is structurally stage 7's sibling - the same store-backed `getShowInfo`
+    /// lookup (whose stage-4 detour the real body's raw `CALL` lands in) and the same real
+    /// `ZTShow::getShowScriptState` walk - so both poles again read the same registrations out of
+    /// the same store, and the differential is the glue each pole owns: the port's clean
+    /// zero-extended done byte against vanilla's `MOV %AL, byte ptr [EAX + 0x13]` read plus its
+    /// AL-only return.
+    ///
+    /// The state side is built exactly like the stage-7 test's (self-referential header at
+    /// `show_info+0x38`, one zero-padded `0x18` node hung off its root slot, key at `+0x10`,
+    /// non-null value at `+0x14`) with one extra dimension: unlike `isDoingShow`, stage 8
+    /// *dereferences* the state pointer, so the stand-in's `+0x13` byte is meaningful. It is swept
+    /// through `0x00`/`0x37`/`0xff`: the `0x37` probe pins that the port returns the raw byte (a
+    /// wrongly normalized 0/1 would return `1` there, and the real pole's AL-masked compare would
+    /// catch the mirror-image mistake), and `0x00` pins that a found state with a zero done byte is
+    /// indistinguishable from a miss through the observable return, exactly like vanilla. All
+    /// teardown is leak-only; the store drains through the hooked unregister path and a final
+    /// both-poles pass confirms the registration is really gone.
+    fn run_ztshowmgr_is_show_script_done_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_IS_SHOW_SCRIPT_DONE";
+
+        if ztshowmgr::registered_show_count() != 0 {
+            let msg = "Rust registered-shows store should be empty when the test starts";
+            error!("{}: {} (has {} entries)", test_name, msg, ztshowmgr::registered_show_count());
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} (has {} entries)\n", test_name, msg, ztshowmgr::registered_show_count()).as_bytes());
+            }
+            return true;
+        }
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        /// Both poles over one (script, show) probe. The Rust pole must return exactly `expected`
+        /// (the port's clean zero-extended byte); the real body defines only its `AL` byte (upper
+        /// EAX holds the state pointer's high bits on a hit), so its return is compared through the
+        /// low-byte mask.
+        fn check(label: &str, mgr: *mut ZTShowMgr, script_id: u32, show_id: u16, expected: u32, failures: &mut Vec<String>) {
+            let rust_ret = unsafe { ZTSHOWMGR_IS_SHOW_SCRIPT_DONE.hooked()(mgr as *const u32, script_id, show_id) };
+            if rust_ret != expected {
+                failures.push(format!("{label}: rust pole should return {expected}, got {rust_ret:#010x}"));
+            }
+            let real_ret = showmgr_live_support::call_real_is_show_script_done(mgr as *const u32, script_id, show_id) & 0xff;
+            if real_ret != expected {
+                failures.push(format!("{label}: real pole should return {expected} (AL-masked), got {real_ret:#010x}"));
+            }
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        // show_a carries the seeded state (unit UNIT_A -> a script-state stand-in whose +0x13 done
+        // byte is swept below) inside its embedded ZTShow's script-state map; show_b stays
+        // stateless (empty self-referential header only). Leak-only allocations throughout.
+        const UNIT_A: u32 = 0x2a;
+        let show_a = ztshow_live_support::build_standalone_show_info();
+        let show_b = ztshow_live_support::build_standalone_show_info();
+        for show in [show_a, show_b] {
+            // The map object at show_info+0x38 doubles as its own empty header (self-sentinel) -
+            // a zeroed +0x38 would leave `find`'s header load null and crash its root read.
+            save_to_memory(show + 0x38, show + 0x38);
+        }
+        let fake_state = unsafe { standalone::OPERATOR_NEW.original()(0x20) } as u32;
+        unsafe { std::ptr::write_bytes(fake_state as *mut u8, 0, 0x20) };
+        let node = unsafe { standalone::OPERATOR_NEW.original()(0x18) } as u32;
+        unsafe { std::ptr::write_bytes(node as *mut u8, 0, 0x18) };
+        save_to_memory(node + 0x4, show_a + 0x38); // parent = header (hygiene; find never reads it)
+        save_to_memory(node + 0x10, UNIT_A); // key: the unit id; node stays zero-padded at +0x12
+        save_to_memory(node + 0x14, fake_state); // value: dereferenced at +0x13 by both poles
+        save_to_memory(show_a + 0x3c, node); // the header's root slot
+
+        const PRESET_ID_A: u16 = 0x1234;
+        save_to_memory(show_a + 0x70, PRESET_ID_A);
+        // show_b keeps its zero-init `field_0x70` (the counter-assignment case).
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_a as *const u32, false) } != 1 {
+            failures.push("register(A, false) should return 1".to_string());
+        }
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_b as *const u32, false) } != 1 {
+            failures.push("register(B, false) should return 1".to_string());
+        }
+        let id_b = get_from_memory::<u16>(show_b + 0x70);
+        if id_b == 0 || id_b == PRESET_ID_A {
+            failures.push(format!("register(B) should have assigned a fresh non-colliding id, got {id_b:#06x}"));
+        }
+
+        // Unregistered probes: both poles miss on the store-backed lookup.
+        for probe in [0x0000u16, 0x8000, 0xffff] {
+            check(&format!("unregistered id {probe:#06x}"), mgr, UNIT_A, probe, 0, &mut failures);
+        }
+        // The seeded hit, with the done byte swept: the raw byte must come back through both poles
+        // unchanged (0x37 would expose a wrongly normalized 0/1 on either side).
+        for byte in [0x00u8, 0x37, 0xff] {
+            save_to_memory(fake_state + 0x13, byte);
+            check(&format!("done byte {byte:#04x}"), mgr, UNIT_A, PRESET_ID_A, byte as u32, &mut failures);
+        }
+        // Misses against the seeded show: unknown unit, the unit-id-0 boundary, and a key that
+        // matches only below bit 16 (the 32-bit key-compare pin).
+        check("unknown unit on seeded show", mgr, UNIT_A + 1, PRESET_ID_A, 0, &mut failures);
+        check("unit id 0 on seeded show", mgr, 0, PRESET_ID_A, 0, &mut failures);
+        check("key differing above bit 16", mgr, UNIT_A | 0x1_0000, PRESET_ID_A, 0, &mut failures);
+        // Registered but stateless: the walk runs over an empty map and misses for every unit.
+        check("stateless show, seeded unit", mgr, UNIT_A, id_b, 0, &mut failures);
+        check("stateless show, unit id 0", mgr, 0, id_b, 0, &mut failures);
+
+        // Cleanup: drain both through the hooked unregister (clear=false - the clear path is the
+        // stage-3 tests' concern), then the hit probe must miss through both poles.
+        for show in [show_a, show_b] {
+            unsafe { ZTSHOWMGR_UNREGISTER_SHOW.hooked()(mgr as *const u32, 0, show as *const u32, false) };
+        }
+        let remaining = ztshowmgr::registered_show_count();
+        if remaining != 0 {
+            failures.push(format!("store should be empty after cleanup, has {remaining} entries"));
+        }
+        check("unregistered after cleanup", mgr, UNIT_A, PRESET_ID_A, 0, &mut failures);
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
     /// re-declared here per the repo's no-shared-consts precedent (`ztsoundscape.rs` carries the
     /// originals it actually uses). Values confirmed once via a manual PE-section parse of zoo.exe's
     /// `.rdata` (see `ztsoundscape.rs`'s doc comment for the derivation and the `fade_atten_a`/

@@ -59,8 +59,8 @@
 //! through those trampolines now *do* re-enter the hooked `GET_SHOW_INFO` address internally. The
 //! plan's open item - when (and whether) the writers drop their call-through to become full style-2
 //! ports, taking the `DAT_0063e480` counter into Rust ownership together with stage 6's save/load -
-//! is deliberately still open; the dual-write state is behavior-safe indefinitely while the mirror
-//! stays in sync, which the battery's cross-store oracles assert after every mutation.
+//! is now tracked as the plan's stage 9; the dual-write state is behavior-safe indefinitely while
+//! the mirror stays in sync, which the battery's cross-store oracles assert after every mutation.
 //!
 //! **Stage 5** ports the two whole-map walks, `enterNewMonth`/`update`
 //! ([`ZTShowMgr::enter_new_month`]/[`ZTShowMgr::update`]), onto the store - the first consumers
@@ -81,6 +81,21 @@
 //! place - the vanilla-shaped half of the plan's stage-6 counter-ownership note (if the writers'
 //! call-through is ever dropped, the counter moves into [`SHOW_STORE`] and these two ports must be
 //! repointed at it).
+//!
+//! **Stage 7** ports `isDoingShow` ([`ZTShowMgr::is_doing_show`]) - the "is this unit performing in
+//! that show" probe `ZTUnit::isDoingShow` (`0x00437402`, the corpus's one caller) reaches through.
+//! It introduces no new state: it composes the two halves earlier stages put in place, the
+//! store-backed `getShowInfo` lookup (stage 4) and one real, untouched `ZTShow::getShowScriptState`
+//! walk over the found show's embedded `ZTShow` - the same callee `ztshow.rs`'s `do_current_item`
+//! already drives.
+//!
+//! **Stage 8** ports `isShowScriptDone` ([`ZTShowMgr::is_show_script_done`]) - the last method in
+//! the plan's inventory (`ztshowmgr-implementation-plan.md` stage 8), unblocked once a Ghidra regen
+//! added its `generated.rs` entry and Windows decompile. Structurally a sibling of stage 7 - same
+//! store-backed lookup, same real `getShowScriptState` walk - differing only in what it does with
+//! the found script state: the walk's state pointer is dereferenced for the "done" byte at `+0x13`,
+//! which is returned raw. That completes the plan's method inventory; the remaining open item (the
+//! stage-3 writers' vanilla call-through) is tracked as the plan's stage 9, not in this module.
 
 use std::{
     collections::BTreeMap,
@@ -93,9 +108,11 @@ use crate::util::{get_from_memory, mut_from_memory};
 use openzt_detour::generated::bfapp::GET_INSTALLED_EXPANSION;
 use openzt_detour::generated::bfconfigfile::{CONSTRUCTOR_0, GET_INT, RELEASE};
 use openzt_detour::generated::standalone::{DEALLOCATE, WRITE_BYTES_TO_FILE};
+use openzt_detour::generated::ztshow::GET_SHOW_SCRIPT_STATE;
 use openzt_detour::generated::ztshowinfo::ENTER_NEW_MONTH as ZTSHOWINFO_ENTER_NEW_MONTH;
 use openzt_detour::generated::ztshowmgr::{
-    ENTER_NEW_MONTH, GET_SCRIPT_ID, GET_SHOW_INFO, INIT_SHOW_PARAMS, LOAD, REGISTER_SHOW, SAVE, UNREGISTER_SHOW, UPDATE,
+    ENTER_NEW_MONTH, GET_SCRIPT_ID, GET_SHOW_INFO, INIT_SHOW_PARAMS, IS_DOING_SHOW, IS_SHOW_SCRIPT_DONE, LOAD, REGISTER_SHOW, SAVE,
+    UNREGISTER_SHOW, UPDATE,
 };
 use openzt_detour::generated::ztshowscriptmgr::{LOAD as ZTSHOWSCRIPTMGR_LOAD, SAVE as ZTSHOWSCRIPTMGR_SAVE};
 use openzt_detour_macro::detour_mod;
@@ -409,6 +426,9 @@ impl ZTShowMgr {
     /// `BTreeMap::insert` mirrors that exactly. The real body reports success in `AL` only (upper
     /// EAX bits are leftover register garbage there, its `MOV %AL,%BL` exit); this returns it cleaned
     /// to a full `0`/`1`, which every caller observes through the low byte alone.
+    ///
+    /// Transitional: the plan's stage 9 replaces this with a full port (call-through dropped, the
+    /// `DAT_0063e480` counter moved into the store).
     pub fn register_show(&mut self, show: *const u32, force: bool) -> u32 {
         let real_return = detours::call_real_register_show(self as *const ZTShowMgr as *const u32, show, force);
         let succeeded = real_return & 0xff != 0;
@@ -442,6 +462,9 @@ impl ZTShowMgr {
     /// null guard), exactly as real vanilla would. Success is `AL=1` even when the key was absent
     /// (a silent no-op erase), which `BTreeMap::remove`'s own absent-key behavior mirrors. Upper
     /// EAX bits are garbage; returned cleaned to `0`/`1` like [`ZTShowMgr::register_show`].
+    ///
+    /// Transitional: the plan's stage 9 replaces this with a full port (call-through dropped, the
+    /// clear-target lookup taken from the store directly).
     pub fn unregister_show(&mut self, id: u16, show: *const u32, clear: bool) -> u32 {
         let real_return = detours::call_real_unregister_show(self as *const ZTShowMgr as *const u32, id, show, clear);
         let succeeded = real_return & 0xff != 0;
@@ -582,6 +605,75 @@ impl ZTShowMgr {
         ok as u32
     }
 
+    /// Stage 7 port of `ZTShowMgr::isDoingShow` (`0x0059eb6e`, per `ZTShowMgr_isDoingShow.asm`/
+    /// `.c`): the "is `unit_id` performing in show `show_id`" probe. Vanilla shape, `.asm`-verified
+    /// (`RET 0x8` - a u32 and a u16 stack slot): `getShowInfo(this, show_id)`, answered from
+    /// [`SHOW_STORE`] exactly like [`ZTShowMgr::get_show_info`], which this calls directly the way
+    /// [`ZTShowMgr::get_script_id`] does (the real body only ever forwards its `this` to that
+    /// lookup, which the stage-4 detour answers from the store); on a hit, the real
+    /// `ZTShow::getShowScriptState` (`0x0059eb99`) on the found show's embedded `ZTShow` at `+0x4`,
+    /// the same `LEA %ECX, [EAX + 0x4]` hand-off vanilla makes and the same callee
+    /// `ztshow.rs`'s `do_current_item` already drives. Any script state recorded for that unit
+    /// (a non-null `+0x14` value out of the embedded `ZTShow`'s script-state map walk) means the
+    /// unit is doing the show.
+    ///
+    /// The callee call reproduces vanilla's direct `CALL ZTShow::getShowScriptState` via
+    /// `.hooked()` (same direct-address rule as [`ZTShowMgr::enter_new_month`]: a direct CALL
+    /// executes whatever sits at the raw address, so routing must match vanilla's own callers in
+    /// every profile). The real body reports its answer in `AL` only (`SETNZ %AL`, with EAX's
+    /// upper bits left holding the state pointer's high bits); macOS's `ZTShowMgr_isDoingShow.c`
+    /// normalizes the same predicate to a full-width 0/1 (`(-v | v) >> 0x1f`), which this returns.
+    /// That is the observable contract too: vanilla's own `ZTUnit::isDoingShow` propagates the
+    /// full EAX but has a sibling path returning garbage-upper-bits-with-`AL=1`, so its callers
+    /// necessarily test the low byte alone.
+    pub fn is_doing_show(unit_id: u32, show_id: u16) -> u32 {
+        let show_info = Self::get_show_info(show_id);
+        if show_info != 0 {
+            let state = unsafe { GET_SHOW_SCRIPT_STATE.hooked()((show_info + 0x4) as *const u32, unit_id) };
+            (state != 0) as u32
+        } else {
+            0
+        }
+    }
+
+    /// Stage 8 port of `ZTShowMgr::isShowScriptDone` (`0x0059fab2`, per
+    /// `ZTShowMgr_isShowScriptDone.asm`/`.c`; macOS's `ZTShowMgr_isShowScriptDone.c` agrees): the
+    /// "has `script_id`'s script in show `show_id` reached its done state" probe
+    /// `ZTUnit::isShowScriptDone` reaches through (vtable slot `+0x230`, `0x0059fa79` - not to be
+    /// confused with that caller's own address, which the regen attributed to `ztanimal`;
+    /// `generated.rs`'s `ztshowmgr::IS_SHOW_SCRIPT_DONE` is this method). Vanilla shape,
+    /// `.asm`-verified (`RET 0x8` - a u32 and a u16 stack slot; `this` is forwarded to nothing but
+    /// the `getShowInfo` lookup): `getShowInfo(this, show_id)`, answered from [`SHOW_STORE`]
+    /// exactly like [`ZTShowMgr::get_show_info`], which this calls directly the way
+    /// [`ZTShowMgr::is_doing_show`] does; on a hit, the real `ZTShow::getShowScriptState`
+    /// (`0x0059eb99`) on the found show's embedded `ZTShow` at `+0x4` - the same
+    /// `LEA %ECX, [EAX + 0x4]` hand-off and `.hooked()` routing [`ZTShowMgr::is_doing_show`]
+    /// uses - and, where that sibling null-tests the returned state pointer, this reads the found
+    /// `ZTShowScriptState`'s done byte at `+0x13` (`MOV %AL, byte ptr [EAX + 0x13]`). Both miss
+    /// paths (unregistered show, stateless unit) return `0`, like the real body's `MOV %AL, %BL`
+    /// exits.
+    ///
+    /// The hit path returns the raw done byte zero-extended, not a normalized 0/1 - macOS's
+    /// version returns the same byte (`undefined1`), so the byte is the contract. Upper EAX bits
+    /// are garbage in the real body (left holding the state pointer's high bits), but that is
+    /// unobservable for the same reason it is in [`ZTShowMgr::is_doing_show`]: the only corpus
+    /// caller chain (`ZTUnit::isShowScriptDone`) propagates the full EAX yet has a sibling early
+    /// path exiting `MOV %AL, %BL` - garbage upper bits with `AL=0` - so no caller can compare the
+    /// full width against anything stable; the low byte is all any caller can meaningfully read.
+    pub fn is_show_script_done(script_id: u32, show_id: u16) -> u32 {
+        let show_info = Self::get_show_info(show_id);
+        if show_info != 0 {
+            let state = unsafe { GET_SHOW_SCRIPT_STATE.hooked()((show_info + 0x4) as *const u32, script_id) };
+            if state != 0 {
+                get_from_memory::<u8>(state + 0x13) as u32
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    }
+
     /// Copy of the store's registered values, in the `BTreeMap`'s ascending-`u16`-key order. The
     /// lock is held only for the copy - never across the walks' callee calls, which can re-enter
     /// the detoured `GET_SHOW_INFO`/`REGISTER_SHOW`/`UNREGISTER_SHOW` addresses (event processing
@@ -621,6 +713,14 @@ impl ZTShowMgr {
 /// save-game flow (`ZTWorldMgr::save`/`load`, the corpus's only callers) now runs the Rust script
 /// store's save/load through the same direct `CALL` vanilla makes and persists the vanilla-owned
 /// show-id counter around it - see [`ZTShowMgr::save`]/[`ZTShowMgr::load`].
+///
+/// Stage 7 adds a read-side probe: `IS_DOING_SHOW` (`0x0059eb6e`), the address
+/// `ZTUnit::isDoingShow` (the corpus's one caller) reaches through with a unit id and the unit's
+/// current show id - see [`ZTShowMgr::is_doing_show`].
+///
+/// Stage 8 adds the last probe: `IS_SHOW_SCRIPT_DONE` (`0x0059fab2`), the address
+/// `ZTUnit::isShowScriptDone` (vtable slot `+0x230`) reaches through with the same two ids -
+/// see [`ZTShowMgr::is_show_script_done`].
 #[detour_mod]
 mod detours {
     use super::*;
@@ -682,6 +782,22 @@ mod detours {
     #[detour(LOAD)]
     unsafe extern "thiscall" fn load_detour(this: *const u32, file: *const u32, version: u32) -> u32 {
         unsafe { mut_from_memory::<ZTShowMgr>(this).load(file, version) }
+    }
+
+    /// Stage 7 probe - see [`ZTShowMgr::is_doing_show`]. Dropped `this`, same single-store
+    /// reasoning as [`get_show_info_detour`]: the real body only ever forwards `this` to
+    /// `getShowInfo`, whose stage-4 detour already answers from the store.
+    #[detour(IS_DOING_SHOW)]
+    unsafe extern "thiscall" fn is_doing_show_detour(_this: *const u32, unit_id: u32, show_id: u16) -> u32 {
+        ZTShowMgr::is_doing_show(unit_id, show_id)
+    }
+
+    /// Stage 8 probe - see [`ZTShowMgr::is_show_script_done`]. Dropped `this`, same single-store
+    /// reasoning as [`get_show_info_detour`]: the real body only ever forwards `this` to
+    /// `getShowInfo`, whose stage-4 detour already answers from the store.
+    #[detour(IS_SHOW_SCRIPT_DONE)]
+    unsafe extern "thiscall" fn is_show_script_done_detour(_this: *const u32, script_id: u32, show_id: u16) -> u32 {
+        ZTShowMgr::is_show_script_done(script_id, show_id)
     }
 
     /// The real vanilla body through the detour's trampoline - the only release-safe way back to
@@ -752,13 +868,34 @@ mod detours {
     pub(super) fn call_real_load(this: *const u32, file: *const u32, version: u32) -> u32 {
         unsafe { LOAD_DETOUR.call(this, file, version) }
     }
+
+    /// Same mechanism for the real `isDoingShow` - the `ZTSHOWMGR_IS_DOING_SHOW` real-side pole.
+    /// Its `getShowInfo` leg resolves through the stage-4 detoured reader (a raw `CALL`), so the
+    /// pole isolates vanilla's own tail: the embedded-`ZTShow` hand-off (`LEA %ECX, [EAX + 0x4]`)
+    /// and the `SETNZ %AL` combine on the real `getShowScriptState` walk. Only its `AL` byte is
+    /// defined (upper EAX holds the state pointer's high bits), so callers comparing it against
+    /// the port's clean 0/1 must mask to the low byte.
+    pub(super) fn call_real_is_doing_show(this: *const u32, unit_id: u32, show_id: u16) -> u32 {
+        unsafe { IS_DOING_SHOW_DETOUR.call(this, unit_id, show_id) }
+    }
+
+    /// Same mechanism for the real `isShowScriptDone` - the `ZTSHOWMGR_IS_SHOW_SCRIPT_DONE`
+    /// real-side pole. Its `getShowInfo` leg resolves through the stage-4 detoured reader (a raw
+    /// `CALL`), so the pole isolates vanilla's own tail: the embedded-`ZTShow` hand-off
+    /// (`LEA %ECX, [EAX + 0x4]`), the real `getShowScriptState` walk, and the `+0x13` byte read.
+    /// Only its `AL` byte is defined (upper EAX holds the state pointer's high bits on the hit
+    /// path), so callers comparing it against the port's clean zero-extended byte must mask to the
+    /// low byte.
+    pub(super) fn call_real_is_show_script_done(this: *const u32, script_id: u32, show_id: u16) -> u32 {
+        unsafe { IS_SHOW_SCRIPT_DONE_DETOUR.call(this, script_id, show_id) }
+    }
 }
 
-/// Enables the stage-2 through stage-6 detours (`INIT_SHOW_PARAMS`, the registered-shows
+/// Enables the stage-2 through stage-8 detours (`INIT_SHOW_PARAMS`, the registered-shows
 /// shadow/mirror pair, the `getShowInfo`/`getScriptID` read cutover, the
-/// `enterNewMonth`/`update` walk ports, and the `save`/`load` pair). Called from `lib.rs`'s
-/// `experimental` block and from `reimplementation_tests::init` (the test harness never runs
-/// `openztlib::init()`).
+/// `enterNewMonth`/`update` walk ports, the `save`/`load` pair, and the `isDoingShow`/
+/// `isShowScriptDone` probes). Called from `lib.rs`'s `experimental` block and from
+/// `reimplementation_tests::init` (the test harness never runs `openztlib::init()`).
 pub fn init() {
     if let Err(e) = unsafe { detours::init_detours() } {
         error!("Failed to initialise ztshowmgr detours: {e:?}");
@@ -771,7 +908,7 @@ pub fn init() {
 /// call-through vanilla `registerShow`/`unregisterShow` bodies keep maintaining at the live global's
 /// `+0x28`; stage 4's read cutover then flipped `getShowInfo`/`getScriptID` onto this map, making it
 /// the source of truth every reader - Rust and un-decompiled vanilla alike - answers from. Vanilla's
-/// own tree stays dual-written by the trampoline call-throughs until the plan's open item (dropping
+/// own tree stays dual-written by the trampoline call-throughs until the plan's stage 9 (dropping
 /// the writers' call-through, moving the `DAT_0063e480` id counter into Rust with stage 6's
 /// save/load) resolves, at which point it goes safely-inert dead weight.
 ///
@@ -875,6 +1012,22 @@ pub(crate) mod live_support {
     /// Same for the real `ZTShowMgr::load` - see [`call_real_save`].
     pub(crate) fn call_real_load(this: *const u32, file: *const u32, version: u32) -> u32 {
         detours::call_real_load(this, file, version)
+    }
+
+    /// Calls the real vanilla `ZTShowMgr::isDoingShow` through the detour's trampoline - the
+    /// `ZTSHOWMGR_IS_DOING_SHOW` real-side pole; `.original()` has been a release-profile re-entry
+    /// hazard on this address since stage 7 hooked it. Only its `AL` byte is defined (see
+    /// [`detours::call_real_is_doing_show`]).
+    pub(crate) fn call_real_is_doing_show(this: *const u32, unit_id: u32, show_id: u16) -> u32 {
+        detours::call_real_is_doing_show(this, unit_id, show_id)
+    }
+
+    /// Calls the real vanilla `ZTShowMgr::isShowScriptDone` through the detour's trampoline - the
+    /// `ZTSHOWMGR_IS_SHOW_SCRIPT_DONE` real-side pole; `.original()` has been a release-profile
+    /// re-entry hazard on this address since stage 8 hooked it. Only its `AL` byte is defined (see
+    /// [`detours::call_real_is_show_script_done`]).
+    pub(crate) fn call_real_is_show_script_done(this: *const u32, script_id: u32, show_id: u16) -> u32 {
+        detours::call_real_is_show_script_done(this, script_id, show_id)
     }
 
     /// Calls the real vanilla `ZTShowMgr::registerShow` through the detour's trampoline,
