@@ -214,10 +214,17 @@ fn selected_habitat_and_unit_type() -> Option<(u32, u32)> {
 /// own real `zt_show_info_ptr` field, already named and exposed by `zthabitatmgr.rs` - read raw here
 /// rather than through that accessor purely because this module only needs the one dependent field, not
 /// a full `ZTHabitat` wrapper).
+///
+/// Calls `.hooked()` rather than `.original()` because `GET_SHOW_INFO` **is** itself detoured by
+/// `ztshowmgr.rs` (stage 4's read cutover onto the Rust registered-shows store): `hooked()` is
+/// whatever is currently installed at the address, so this gets the *same* answer any other real
+/// caller of `ZTShowMgr::getShowInfo` sees - the [`load_display_string`] precedent. A release build's
+/// raw-cast `.original()` would be an accidental re-entry here while debug silently routed to
+/// vanilla's tree instead.
 fn show_info_for_habitat(habitat_ptr: u32) -> u32 {
     let zt_show_info_ptr = get_from_memory::<u32>(habitat_ptr + 0x4);
     let show_info_id = if zt_show_info_ptr == 0 { 0u16 } else { get_from_memory::<u16>(zt_show_info_ptr + 0x70) };
-    unsafe { GET_SHOW_INFO.original()(globals().ztshowmgr_ptr() as *const u32, show_info_id) }
+    unsafe { GET_SHOW_INFO.hooked()(globals().ztshowmgr_ptr() as *const u32, show_info_id) }
 }
 
 /// Adds one real trick-list item (`item_ptr`, real vanilla memory, see [`find_trick_by_id`]) to the

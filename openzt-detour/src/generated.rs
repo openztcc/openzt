@@ -116,6 +116,8 @@ pub mod bfanimcache {
     pub const CONSTRUCTOR: FunctionDef<unsafe extern "fastcall" fn(*const i32) -> *const i32> = FunctionDef{address: 0x005283f4, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfanimcache/instantiate"))]
     pub const INSTANTIATE: FunctionDef<unsafe extern "stdcall" fn() -> u32> = FunctionDef{address: 0x00528447, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("bfanimcache/destroy"))]
+    pub const DESTROY: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x0057db2e, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("bfanimcache/unload_anims"))]
     pub const UNLOAD_ANIMS: FunctionDef<unsafe extern "fastcall" fn(i32)> = FunctionDef{address: 0x0061ca3b, function_type: PhantomData};
 }
@@ -3814,8 +3816,6 @@ pub mod ztanimal {
     pub const SHOW_ESCAPED_ANIMAL_ALERT: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x0058cb88, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztanimal/drop_test_fence_chance"))]
     pub const DROP_TEST_FENCE_CHANCE: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x0059c4ba, function_type: PhantomData};
-    #[cfg_attr(feature = "detour-validation", validate_detour("ztanimal/is_show_script_done"))]
-    pub const IS_SHOW_SCRIPT_DONE: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> u32> = FunctionDef{address: 0x0059fa79, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztanimal/f_return_to_building"))]
     pub const F_RETURN_TO_BUILDING: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> u32> = FunctionDef{address: 0x005a05e7, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztanimal/handle_show_events"))]
@@ -7538,10 +7538,12 @@ pub mod ztshowmgr {
     pub const INIT_SHOW_PARAMS: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> u32> = FunctionDef{address: 0x0051f59b, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowmgr/constructor"))]
     pub const CONSTRUCTOR: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> *const u32> = FunctionDef{address: 0x0051f73a, function_type: PhantomData};
-    #[cfg_attr(feature = "detour-validation", validate_detour("ztshowmgr/destroy"))]
-    pub const DESTROY: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x0057db2e, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowmgr/ztshow_mgr"))]
     pub const ZTSHOW_MGR: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> *const u32> = FunctionDef{address: 0x0057dd9d, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztshowmgr/is_doing_show"))]
+    pub const IS_DOING_SHOW: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32, u16) -> u32> = FunctionDef{address: 0x0059eb6e, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztshowmgr/is_show_script_done"))]
+    pub const IS_SHOW_SCRIPT_DONE: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32, u16) -> u32> = FunctionDef{address: 0x0059fab2, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowmgr/get_script"))]
     pub const GET_SCRIPT: FunctionDef<unsafe extern "thiscall" fn(*const u32, u16)> = FunctionDef{address: 0x005a25b7, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowmgr/get_script_id"))]
@@ -8804,6 +8806,8 @@ pub mod ztunit {
     pub const SET_IS_REMOVED: FunctionDef<unsafe extern "thiscall" fn(*const u32, u8)> = FunctionDef{address: 0x004fa78e, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztunit/init_after_load"))]
     pub const INIT_AFTER_LOAD: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32) -> u32> = FunctionDef{address: 0x005951b3, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztunit/is_show_script_done"))]
+    pub const IS_SHOW_SCRIPT_DONE: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> u32> = FunctionDef{address: 0x0059fa79, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztunit/get_show_item"))]
     pub const GET_SHOW_ITEM: FunctionDef<unsafe extern "thiscall" fn(*const u32, u16, u16)> = FunctionDef{address: 0x005a2682, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztunit/has_show_keeper"))]

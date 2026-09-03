@@ -106,6 +106,12 @@ mod ztawardmgr;
 /// openzt/plans/ztshowscriptmgr-implementation-plan.md.
 mod ztshowscriptmgr;
 
+/// ztshowmgr module - Stage 2 (struct + constructor + registered-shows store + the config-driven
+/// `initShowParams`) of the vanilla ZTShowMgr reimplementation, see
+/// openzt/plans/ztshowmgr-implementation-plan.md. The real vanilla constructor keeps running for the
+/// live global by design - its tail-call into the now-detoured `initShowParams` runs the Rust port.
+mod ztshowmgr;
+
 /// ztshow module - Stage 2 (ZTShow/ZTShowInfo raw-access call sites) of the show-script
 /// reimplementation, see openzt/plans/ztshowscriptmgr-implementation-plan.md.
 mod ztshow;
@@ -241,6 +247,7 @@ mod zoo_init {
             ztawardmgr::init();
             ztshowscriptmgr::init();
             ztshow::init();
+            ztshowmgr::init();
             ztshowui::init();
             ztguest::init();
             ztsoundscape::init();

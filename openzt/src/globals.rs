@@ -314,17 +314,17 @@ impl Globals {
     /// Returns a shared reference to the ZTShowMgr (read-only). Note this is `ZTShowMgr` itself, not the
     /// `ZTShowScriptMgr` embedded within it at `+0x34` (that data lives in `ztshowscriptmgr.rs`'s own
     /// independent Rust store, not read through this accessor).
-    pub fn ztshowmgr(&self) -> &crate::ztshow::ZTShowMgr {
+    pub fn ztshowmgr(&self) -> &crate::ztshowmgr::ZTShowMgr {
         unsafe {
-            &*(self.ztshowmgr.get() as *const crate::ztshow::ZTShowMgr)
+            &*(self.ztshowmgr.get() as *const crate::ztshowmgr::ZTShowMgr)
         }
     }
 
     /// Returns a raw pointer to `ZTShowMgr`, possibly null (mirrors vanilla's own `GLOBAL_ZTShowMgr != 0`
     /// guard before dereferencing it - see `ztshow::do_trick_event`'s threshold lookup).
-    pub fn ztshowmgr_ptr(&self) -> *const crate::ztshow::ZTShowMgr {
+    pub fn ztshowmgr_ptr(&self) -> *const crate::ztshowmgr::ZTShowMgr {
         unsafe {
-            self.ztshowmgr.get() as *const crate::ztshow::ZTShowMgr
+            self.ztshowmgr.get() as *const crate::ztshowmgr::ZTShowMgr
         }
     }
 

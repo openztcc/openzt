@@ -4,8 +4,10 @@
 //! real vanilla functions that used to dereference those classes' raw memory directly (and would
 //! otherwise crash against Stage 1's synthetic handles/sentinels) onto that store's id-keyed accessors.
 //!
-//! `ZTShow`/`ZTShowInfo`/`ZTShowMgr` themselves stay real, un-virtualized vanilla memory - only the
-//! embedded show-script data moved into Rust. Field offsets below are confirmed directly from
+//! `ZTShow`/`ZTShowInfo` themselves stay real, un-virtualized vanilla memory - only the
+//! embedded show-script data moved into Rust. (`ZTShowMgr` has since started its own reimplementation -
+//! see `ztshowmgr.rs`; this module reads only its threshold fields off the live global.) Field offsets
+//! below are confirmed directly from
 //! `.asm`-level reads (see each function's doc comment), not the (less reliable) decompiled `.c` alone,
 //! except where noted as semantics-unconfirmed-but-byte-faithful.
 //!
@@ -40,20 +42,6 @@ use crate::{
     util::{get_from_memory, save_to_memory},
     ztmegatilemgr::entity_type_matches,
 };
-
-/// Partial, `#[repr(C)]` mirror of vanilla `ZTShowMgr` (real size `0x44`, `ZTShowScriptMgr` embedded at
-/// `+0x34` - see the plan's "Composition" section) - only exposes the three `doTrickEvent` threshold
-/// fields Stage 2 currently needs. Not size-asserted since the rest of the struct is unmapped.
-#[repr(C)]
-pub struct ZTShowMgr {
-    _unmapped_0x0: [u8; 0x8],
-    /// `+0x8` - semantics unconfirmed (comparison order faithfully preserved from `ZTShow_doTrickEvent.asm`).
-    pub threshold_a: u32,
-    /// `+0xc` - semantics unconfirmed.
-    pub threshold_b: u32,
-    /// `+0x10` - semantics unconfirmed.
-    pub threshold_c: u32,
-}
 
 /// `DAT_006386b0`'s RVA - the same vtable-slot-`0x1c` "isKindOf"-style type-check argument used by
 /// `ztmegatilemgr::entity_type_matches`'s own callers, here gating `doCurrentItem`/`validateItem`'s
@@ -587,7 +575,12 @@ pub fn start(this: u32) {
             unsafe { REMOVE_UNIT.original()(show_info as *const u32, unit_type_for_list, &unit_id as *const u32 as *const i32) };
         } else {
             let assigned_show_id = get_from_memory::<u16>(unit_ptr + 0x254);
-            let owning_show_info = unsafe { GET_SHOW_INFO.original()(globals().ztshowmgr_ptr() as *const u32, assigned_show_id) };
+            // `.hooked()`, not `.original()`: `ZTShowMgr::getShowInfo` is detoured onto the Rust
+            // registered-shows store since `ztshowmgr.rs`'s stage 4, and this call site wants exactly
+            // what any other real caller of the address now gets (the `load_display_string` precedent
+            // in `ztshowui.rs`). A release build's raw-cast `.original()` would be an accidental
+            // re-entry here while debug silently routed to vanilla's tree instead.
+            let owning_show_info = unsafe { GET_SHOW_INFO.hooked()(globals().ztshowmgr_ptr() as *const u32, assigned_show_id) };
             let needs_state = (owning_show_info != 0 && unsafe { IS_STARTED.original()(owning_show_info as *const u32) } == 0)
                 || !unsafe { call_entity_vtable_noargs(unit_ptr, 0x22c) };
             if needs_state {
