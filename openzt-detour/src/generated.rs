@@ -7454,10 +7454,14 @@ pub mod ztshowinfo {
     pub const UPDATE_FROM_LOAD: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const u32)> = FunctionDef{address: 0x00484ec8, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/enter_new_month"))]
     pub const ENTER_NEW_MONTH: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x0048b57e, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/constructor_0"))]
+    pub const CONSTRUCTOR_0: FunctionDef<unsafe extern "thiscall" fn(*const u32, i32) -> *const u32> = FunctionDef{address: 0x004c978e, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/set_show_frequency"))]
     pub const SET_SHOW_FREQUENCY: FunctionDef<unsafe extern "thiscall" fn(*const u32, i32)> = FunctionDef{address: 0x004cc86a, function_type: PhantomData};
-    #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/constructor"))]
-    pub const CONSTRUCTOR: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> *const u32> = FunctionDef{address: 0x004cc890, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/constructor_1"))]
+    pub const CONSTRUCTOR_1: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> *const u32> = FunctionDef{address: 0x004cc890, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/ztshow_info_0"))]
+    pub const ZTSHOW_INFO_0: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> *const u32> = FunctionDef{address: 0x004f28f6, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/recalculate_schedule"))]
     pub const RECALCULATE_SCHEDULE: FunctionDef<unsafe extern "thiscall" fn(*const u32, i8)> = FunctionDef{address: 0x004f2947, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/get_scheduled_show_script"))]
@@ -7506,8 +7510,8 @@ pub mod ztshowinfo {
     pub const ADD_UNIT: FunctionDef<unsafe extern "thiscall" fn(*const u32, i32) -> u32> = FunctionDef{address: 0x005a9c81, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/remove_unit"))]
     pub const REMOVE_UNIT: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32, *const i32)> = FunctionDef{address: 0x005a9c96, function_type: PhantomData};
-    #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/ztshow_info"))]
-    pub const ZTSHOW_INFO: FunctionDef<unsafe extern "thiscall" fn(*const u32, u8) -> *const u32> = FunctionDef{address: 0x005aad53, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/ztshow_info_1"))]
+    pub const ZTSHOW_INFO_1: FunctionDef<unsafe extern "thiscall" fn(*const u32, u8) -> *const u32> = FunctionDef{address: 0x005aad53, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/set_show_info_id"))]
     pub const SET_SHOW_INFO_ID: FunctionDef<unsafe extern "thiscall" fn(*const u32, u16) -> bool> = FunctionDef{address: 0x005ab8c3, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztshowinfo/init"))]
