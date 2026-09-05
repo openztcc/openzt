@@ -1,7 +1,9 @@
 use nt_time::{time::UtcDateTime, FileTime};
 use openzt_detour_macro::detour_mod;
 use std::fmt;
-use tracing::info;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+use tracing::{error, info};
 
 use getset::Getters;
 
@@ -283,6 +285,169 @@ pub mod hooks_zthabitatmgr {
     }
 }
 
+/// Diagnosing a real save-corruption report (see
+/// `openzt/plans/ztshow-save-corruption-investigation.md`): real, un-reimplemented `ZTHabitatMgr::save`/
+/// `load` is the very first thing `ZTWorldMgr::save`/`load` calls, ahead of every already-instrumented
+/// manager (`ZTShowMgr` etc., whose own `DIAG` lines proved a real reload desyncs somewhere upstream of
+/// them). Passthrough-only (`<NAME>_DETOUR.call(...)`, never altering behavior) counting of every real
+/// `WriteBytesToFile`/read call bracketed around `ZTHabitatMgr::save`/`load` gives an exact real
+/// bytes-written-on-save vs. bytes-consumed-on-load count for this manager, without re-invoking it
+/// out-of-band the way the live test battery's byte-count tests do for `ZTShowInfo`: unlike `ZTShowInfo`
+/// (whose real `load` rewrites the same already-existing object in place), `ZTHabitatMgr::load`'s own
+/// decompile (`ZTHabitatMgr_load.asm`) shows it allocating fresh `ZTShowInfo`/habitat-history objects and
+/// growing a global std::vector-shaped structure (`DAT_0063917c`/`_78`/`_80`) - calling it a second time
+/// against an already-loaded live manager would duplicate/corrupt that state, not just leak. So this only
+/// ever observes one real save-then-reload cycle the user triggers normally in-game; it never calls
+/// `SAVE`/`LOAD` itself. `grep DIAG openzt.log` after a real save+reload shows whether `ZTHabitatMgr`'s own
+/// byte counts already disagree - narrowing the desync to before/inside this manager's block, or ruling it
+/// out in favor of something later in `ZTWorldMgr::save`/`load`'s walk.
+///
+/// Gated off entirely under `reimplementation-tests`: that build's `io_redirect.rs` already detours these
+/// same two low-level `WRITE_BYTES_TO_FILE`/`DEALLOCATE` addresses (for its own synthetic capture/replay
+/// tests), and `experimental` (which this module's own `init()` runs under) is active in that build too -
+/// detouring the same address twice in one binary would conflict with that battery.
+#[cfg(not(feature = "reimplementation-tests"))]
+mod save_load_diag {
+    use super::*;
+    use openzt_detour::generated::bfevent::LOAD as BFEVENT_LOAD;
+    use openzt_detour::generated::standalone::{DEALLOCATE, WRITE_BYTES_TO_FILE};
+    use openzt_detour::generated::ztshowinfo::LOAD as ZTSHOWINFO_LOAD;
+    use openzt_detour::generated::zthabitatmgr::{LOAD, SAVE};
+
+    static BYTE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    /// Per-call `(size_in_bytes, count, first_4_bytes_as_u32)` for every real `WriteBytesToFile`/read call
+    /// seen while inside the current `ZTHabitatMgr::save`/`load` bracket, in call order - lets a save's
+    /// sequence be diffed directly against a load's sequence (see the `save_load_diag` module doc comment)
+    /// to find exactly which Nth field's size first disagrees, instead of only seeing the two totals
+    /// disagree. `size_in_bytes`/`count` are kept separate (not pre-multiplied) so a `(2,2)` two-element
+    /// array read can't be confused in the log with a single `(4,1)` scalar read - both have the same
+    /// total but are genuinely different calls. The captured value is always the first up-to-4 bytes
+    /// actually transferred, zero-padded if the field is shorter - lets a divergence be cross-referenced
+    /// directly against known field values (e.g. a small count) without separately hex-dumping the file.
+    // 4th element: the call's raw source/dest address - lets a field be identified by its exact byte
+    // offset from a known base (e.g. the nested ZTShowInfo::load's own `this`) instead of by counting
+    // call positions by hand against a decompile, which this investigation has repeatedly gotten wrong.
+    static CALL_SIZES: Mutex<Vec<(u32, u32, u32, u32)>> = Mutex::new(Vec::new());
+
+    fn peek_u32(ptr: *const u8, len: usize) -> u32 {
+        let mut buf = [0u8; 4];
+        let n = len.min(4);
+        unsafe { std::ptr::copy_nonoverlapping(ptr, buf.as_mut_ptr(), n) };
+        u32::from_le_bytes(buf)
+    }
+
+    #[detour_mod]
+    mod detours {
+        use super::*;
+
+        #[detour(WRITE_BYTES_TO_FILE)]
+        unsafe extern "cdecl" fn write_bytes_to_file(source_ptr: *const u32, size_in_bytes: u32, count: u32, file_ptr: *const i8) -> i32 {
+            let total = (size_in_bytes as usize) * (count as usize);
+            let value = peek_u32(source_ptr as *const u8, total);
+            BYTE_COUNTER.fetch_add(total, Ordering::Relaxed);
+            CALL_SIZES.lock().unwrap().push((size_in_bytes, count, value, source_ptr as u32));
+            unsafe { WRITE_BYTES_TO_FILE_DETOUR.call(source_ptr, size_in_bytes, count, file_ptr) }
+        }
+
+        #[detour(DEALLOCATE)]
+        unsafe extern "cdecl" fn deallocate(dest_ptr: *const u32, size_in_bytes: u32, count: u32, file_ptr: *const u8) -> u32 {
+            let total = (size_in_bytes as usize) * (count as usize);
+            let result = unsafe { DEALLOCATE_DETOUR.call(dest_ptr, size_in_bytes, count, file_ptr) };
+            let value = peek_u32(dest_ptr as *const u8, total);
+            BYTE_COUNTER.fetch_add(total, Ordering::Relaxed);
+            CALL_SIZES.lock().unwrap().push((size_in_bytes, count, value, dest_ptr as u32));
+            result
+        }
+
+        #[detour(SAVE)]
+        unsafe extern "thiscall" fn save(this: *const u32, file: *const i8) -> u32 {
+            BYTE_COUNTER.store(0, Ordering::Relaxed);
+            CALL_SIZES.lock().unwrap().clear();
+            error!("DIAG SAVE_ENTER ZTHabitatMgr");
+            let ok = unsafe { SAVE_DETOUR.call(this, file) };
+            let bytes = BYTE_COUNTER.load(Ordering::Relaxed);
+            let calls = CALL_SIZES.lock().unwrap();
+            error!("DIAG SAVE_RESULT ZTHabitatMgr ok={ok} bytes={bytes} calls={} sizes={:?}", calls.len(), &*calls);
+            ok
+        }
+
+        #[detour(LOAD)]
+        unsafe extern "thiscall" fn load(this: *const u32, file: *const u32, version: u32) -> u32 {
+            BYTE_COUNTER.store(0, Ordering::Relaxed);
+            CALL_SIZES.lock().unwrap().clear();
+            BFEVENT_LOAD_FIRE_COUNT.store(0, Ordering::Relaxed);
+            error!("DIAG LOAD_ENTER ZTHabitatMgr version={version}");
+            let ok = unsafe { LOAD_DETOUR.call(this, file, version) };
+            let bytes = BYTE_COUNTER.load(Ordering::Relaxed);
+            let calls = CALL_SIZES.lock().unwrap();
+            let bfevent_fires = BFEVENT_LOAD_FIRE_COUNT.load(Ordering::Relaxed);
+            error!(
+                "DIAG LOAD_RESULT ZTHabitatMgr ok={ok} bytes={bytes} calls={} bfevent_load_fires={bfevent_fires} sizes={:?}",
+                calls.len(),
+                &*calls
+            );
+            ok
+        }
+
+        /// Passive, passthrough-only trace on the *nested* `ZTShowInfo::load` call real vanilla
+        /// `ZTHabitatMgr::load` makes once per habitat that has a show attached (confirmed via the macOS
+        /// `ZTHabitatMgr_load.c` decompile, line ~240 - no Windows `.c` exists for this function, only
+        /// `.asm`, so this is the first authoritative confirmation that this nested call exists at all).
+        /// `ztshowinfo::LOAD` has no other production caller anywhere in this codebase (grepped) - every
+        /// real invocation during a real save/reload cycle is one of these nested per-habitat calls, so
+        /// this needs no bracket/gating logic of its own. Logs the outer `CALL_SIZES` length *at the
+        /// moment of entry* so a nested call's position can be cross-referenced directly against the
+        /// `LOAD_RESULT ZTHabitatMgr` call-index where the byte-level divergence documented in
+        /// `ztshow-save-corruption-investigation.md` was found (call #150) - answering whether the
+        /// divergence falls inside the first nested call, a later one, or before any nested call has even
+        /// started.
+        #[detour(ZTSHOWINFO_LOAD)]
+        unsafe extern "thiscall" fn ztshowinfo_load(this: *const u32, file: *const u32, version: u32) -> u8 {
+            let at_call_index = CALL_SIZES.lock().unwrap().len();
+            error!("DIAG NESTED_SHOWINFO_LOAD_ENTER this={this:?} version={version} at_call_index={at_call_index}");
+            let ok = unsafe { ZTSHOWINFO_LOAD_DETOUR.call(this, file, version) };
+            let at_call_index_after = CALL_SIZES.lock().unwrap().len();
+            // Live re-walk of the just-loaded tree, straight off the stack-local object `ZTHabitatMgr::load`
+            // just populated, before the vector_pod copy or any tick processing touches it - isolates
+            // whether a real, on-disk node-count regression happens during LOAD itself versus afterward.
+            let live_node_count = crate::ztshow::pending_script_node_count(this as u32);
+            error!(
+                "DIAG NESTED_SHOWINFO_LOAD_RESULT this={this:?} ok={ok} calls_consumed={} live_node_count={live_node_count}",
+                at_call_index_after - at_call_index
+            );
+            ok
+        }
+
+        /// Passive, passthrough-only trace on `BFEvent::load` - `ZTShowInfo::load`'s own decompile
+        /// (`ZTShowInfo_load.c` lines 254-318) calls this once per element of a `local_e4`-driven loop
+        /// gated on `param_2 > 0x60` (true for the real save version 106), reading a *third*, distinct
+        /// reuse of the same `local_e4` local as an event count. If the byte-level read-size divergence
+        /// this module's `NESTED_SHOWINFO_LOAD_ENTER`/`_RESULT` pair narrowed down to (see
+        /// `ztshow-save-corruption-investigation.md`) is really this count being misread as a huge/garbage
+        /// value, this loop would start firing far earlier (lower `at_call_index`) - or an implausible
+        /// number of times - on the corrupted reload versus a working load. No other production caller of
+        /// `bfevent::LOAD` exists in this codebase (grepped), so every firing during a save-reload cycle is
+        /// one of these iterations.
+        #[detour(BFEVENT_LOAD)]
+        unsafe extern "thiscall" fn bfevent_load(this: *const u32, file: *const u32, version: u32) -> bool {
+            let at_call_index = CALL_SIZES.lock().unwrap().len();
+            let count = BFEVENT_LOAD_FIRE_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+            if count <= 5 || count % 5000 == 0 {
+                error!("DIAG BFEVENT_LOAD_ENTER this={this:?} version={version} at_call_index={at_call_index} fire_count={count}");
+            }
+            unsafe { BFEVENT_LOAD_DETOUR.call(this, file, version) }
+        }
+    }
+
+    static BFEVENT_LOAD_FIRE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    pub fn init() {
+        if let Err(e) = unsafe { detours::init_detours() } {
+            error!("Failed to initialise ZTHabitatMgr save/load DIAG detours: {e:?}");
+        }
+    }
+}
+
 pub fn init() {
     // get_zthabitatmgr() - no args
     lua_fn!("get_zthabitatmgr", "Returns ZTHabitatMgr debug info", "get_zthabitatmgr()", || {
@@ -303,4 +468,7 @@ pub fn init() {
     if let Err(e) = unsafe { hooks_zthabitatmgr::init_detours() } {
         info!("Error initialising zthabitatmgr detours: {}", e);
     }
+
+    #[cfg(not(feature = "reimplementation-tests"))]
+    save_load_diag::init();
 }

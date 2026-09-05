@@ -283,13 +283,19 @@ impl ZTMarketingMgr {
     /// re-enters that hook, exactly like a vanilla caller would; with no detour installed the
     /// address still holds genuine vanilla code.
     pub fn save(&self, file: *const u32) -> bool {
-        unsafe { ztmarketingmgr::SAVE.hooked()((self as *const Self) as *const u32, file) }
+        error!("DIAG SAVE_ENTER ZTMarketingMgr");
+        let ok = unsafe { ztmarketingmgr::SAVE.hooked()((self as *const Self) as *const u32, file) };
+        error!("DIAG SAVE_RESULT ZTMarketingMgr ok={ok}");
+        ok
     }
 
     /// Calls `ZTMarketingMgr::load` - the save-file counterpart to `save()`, with the same
     /// deliberate re-entry via `.hooked()`.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
-        unsafe { ztmarketingmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) }
+        error!("DIAG LOAD_ENTER ZTMarketingMgr version={version}");
+        let ok = unsafe { ztmarketingmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) };
+        error!("DIAG LOAD_RESULT ZTMarketingMgr ok={ok}");
+        ok
     }
 }
 
@@ -485,7 +491,7 @@ pub(crate) mod marketing_save_reimplementation {
             let mgr = unsafe { ref_from_memory::<ZTMarketingMgr>(this) };
             let index = mgr.marketing().map(|m| m.current_funding_level()).unwrap_or(0);
             let bytes = index.to_le_bytes();
-            let ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) };
+            let ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) } == 1;
             if !ok {
                 error!("marketing-save-reimplementation: WriteBytesToFile failed writing the funding-level index");
             }

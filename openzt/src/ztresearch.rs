@@ -1776,7 +1776,10 @@ impl ZTResearchMgr {
     /// `vanilla-research-save` feature no detour is installed and the address still holds genuine
     /// vanilla code.
     pub fn save(&self, file: *const u32) -> bool {
-        unsafe { ztresearchmgr::SAVE.hooked()((self as *const Self) as *const u32, file) != 0 }
+        error!("DIAG SAVE_ENTER ZTResearchMgr");
+        let ok = unsafe { ztresearchmgr::SAVE.hooked()((self as *const Self) as *const u32, file) != 0 };
+        error!("DIAG SAVE_RESULT ZTResearchMgr ok={ok}");
+        ok
     }
 
     /// Calls `ZTResearchMgr::load` - the save-file counterpart to `save()`. Per
@@ -1801,7 +1804,10 @@ impl ZTResearchMgr {
     /// `vanilla-research-save` feature no detour is installed and the address still holds genuine
     /// vanilla code.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
-        unsafe { ztresearchmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) }
+        error!("DIAG LOAD_ENTER ZTResearchMgr version={version}");
+        let ok = unsafe { ztresearchmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) };
+        error!("DIAG LOAD_RESULT ZTResearchMgr ok={ok}");
+        ok
     }
 
     /// Reimplementation of `ZTResearchMgr::forceResearch` (the class-level half of the "research
@@ -3749,7 +3755,7 @@ pub(crate) mod research_save_reimplementation {
             let mgr = unsafe { ref_from_memory::<ZTResearchMgr>(this) };
             let bytes = serialize(&snapshot_mgr(mgr));
 
-            let ok = unsafe { standalone::WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) };
+            let ok = unsafe { standalone::WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) } == 1;
             if !ok {
                 error!("research-save-reimplementation: WriteBytesToFile failed writing {} research bytes", bytes.len());
             }

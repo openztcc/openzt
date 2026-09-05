@@ -74,13 +74,21 @@
 //!   `+0x1ac` trick list (found by matching `id`) instead - see [`fill_trick_lists`]'s own doc comment
 //!   for why this is a sound substitution (the two copies share the same field values in the common,
 //!   non-corrupted case, which is exactly the case this check exists to confirm).
+//! - **`addTrick`** (the "Add" button handler moving a selection from "available" to "assigned"; real
+//!   name confirmed via macOS's `_addTrick.c` - no Windows `generated.rs` entry exists for it, so it
+//!   can't be detoured yet) is left real/un-ported. It only ever reads real vanilla memory this crate
+//!   doesn't own (the selected unit type's own trick list via `ZTUnitType::getTrick`,
+//!   `ZTShowInfo::validateTrick`, the "assigned" listbox) - **except** one real global vector this
+//!   module must keep in sync as a side effect of [`fill_trick_lists`]; see
+//!   [`AVAILABLE_TRICK_IDS_BEGIN_RVA`]'s own doc comment for the mechanism and the live crash on "Add"
+//!   this fixed.
 
 use std::ffi::CString;
 
 use openzt_detour::generated::{
     bfapp::LOAD_STRING,
     bfuimgr::GET_ELEMENT_0,
-    standalone::OPERATOR_NEW,
+    standalone::{OPERATOR_DELETE, OPERATOR_NEW},
     uilistbox::{ADD_STRING_2, CLEAR, GET_ITEM},
     uilistboxitem::DISABLE,
     ztshowinfo::{CREATE_DEFAULT_SCRIPT, VALIDATE_TRICK},
@@ -127,6 +135,61 @@ const MISMATCH_FLAG_RVA: u32 = 0x0023_e4a8;
 /// that exact key) - the per-segment trick-complexity budget before a "return to keeper" trick
 /// ([`SENTINEL_TRICK_ID`]) gets auto-inserted. Read-only from this module's perspective.
 const COMPLEXITY_BUDGET_RVA: u32 = 0x0023_e4ac;
+
+/// `DAT_0063ba58`/`DAT_0063ba5c`/`DAT_0063ba60`'s RVAs - the real vanilla `_Myfirst`/`_Mylast`/`_Myend`
+/// triple of a `std::vector<u32>` (4-byte, zero-extended-u16 trick-id slots) that real, still-un-ported
+/// vanilla `addTrick` (the show-editor's "Add" button handler moving a selection from "available" to
+/// "assigned" - confirmed via macOS's `_addTrick.c`; no Windows `generated.rs` entry exists for it yet,
+/// its body sits in the gap `zoo_functions.rs` never attributes between `GET_SHOW_SCRIPT_ITEMS` and
+/// `CLEAR_ALL`) indexes with the "available tricks" listbox's own currently-selected index to recover
+/// which trick id was picked (`_DAT_102dc200[2 + selected_index]` on macOS; `.asm`'s
+/// `MOV %ECX, dword ptr [EAX + 8]` shape on Windows) before looking it up via `ZTUnitType::getTrick`
+/// and validating/appending it to the "assigned" list. Real vanilla `fillTrickLists` populates this
+/// vector as a side effect while building the "available tricks" listbox
+/// (`showpanel_fillTrickLists.c`/`.asm`: resets the size cursor to `DAT_0063ba58` up front, then pushes
+/// each non-sentinel item's id, valid or not, in the exact order it's added to the listbox) - since
+/// [`fill_trick_lists`] replaces that entire body, it must reproduce this side effect itself
+/// ([`rewrite_available_trick_ids`]) or `addTrick` reads stale/out-of-bounds data, which is the
+/// confirmed cause of a live crash on "Add" (fault EIP `~0x475a32`, inside this un-attributed real
+/// function). `showpanel::fillExhibitInfo` (also real, un-ported) independently resets just the size
+/// cursor (`DAT_0063ba5c = DAT_0063ba58`) when the panel is cleared - compatible with this module owning
+/// the buffer's allocation, since that reset never touches `DAT_0063ba58`/`DAT_0063ba60`.
+const AVAILABLE_TRICK_IDS_BEGIN_RVA: u32 = 0x0023_ba58;
+const AVAILABLE_TRICK_IDS_END_RVA: u32 = 0x0023_ba5c;
+const AVAILABLE_TRICK_IDS_CAP_RVA: u32 = 0x0023_ba60;
+
+/// Rewrites the real vanilla vector at [`AVAILABLE_TRICK_IDS_BEGIN_RVA`] to hold exactly `ids`, in
+/// order - the [`fill_trick_lists`] side effect real vanilla `addTrick` depends on (see that constant's
+/// own doc comment). Always frees the previous buffer first (real `operator delete`, a documented no-op
+/// on a null/never-allocated pointer - matches this global's zero-initialized start state) and, for a
+/// non-empty `ids`, allocates a fresh buffer sized exactly to `ids.len()` (real `operator new`) rather
+/// than replicating vanilla's own incremental-growth reallocation: nothing else ever appends to this
+/// buffer (`addTrick` only reads it, `fillExhibitInfo` only resets the size cursor), so this function can
+/// safely own the buffer's entire lifecycle on every call instead. Leaves the vector empty (all three
+/// fields `0`, matching a default-constructed vector) if `ids` is empty or allocation fails.
+fn rewrite_available_trick_ids(ids: &[u16]) {
+    let old_buf = get_from_memory::<u32>(dat(AVAILABLE_TRICK_IDS_BEGIN_RVA));
+    if old_buf != 0 {
+        unsafe { OPERATOR_DELETE.original()(old_buf) };
+    }
+    save_to_memory(dat(AVAILABLE_TRICK_IDS_BEGIN_RVA), 0u32);
+    save_to_memory(dat(AVAILABLE_TRICK_IDS_END_RVA), 0u32);
+    save_to_memory(dat(AVAILABLE_TRICK_IDS_CAP_RVA), 0u32);
+    if ids.is_empty() {
+        return;
+    }
+    let new_buf = unsafe { OPERATOR_NEW.original()(ids.len() as u32 * 4) } as u32;
+    if new_buf == 0 {
+        return;
+    }
+    for (index, &id) in ids.iter().enumerate() {
+        save_to_memory(new_buf + index as u32 * 4, id as u32);
+    }
+    let end = new_buf + ids.len() as u32 * 4;
+    save_to_memory(dat(AVAILABLE_TRICK_IDS_BEGIN_RVA), new_buf);
+    save_to_memory(dat(AVAILABLE_TRICK_IDS_END_RVA), end);
+    save_to_memory(dat(AVAILABLE_TRICK_IDS_CAP_RVA), end);
+}
 
 /// `GLOBAL_BFUIMgr`'s own fixed address (not a pointer slot) - same constant already established in
 /// `ztawardmgr.rs`/`ztresearch.rs`/`ztthoughtmgr.rs`, duplicated locally per those modules' own
@@ -312,6 +375,7 @@ pub fn fill_trick_lists() {
     let available_list = unsafe { GET_ELEMENT_0.original()(global_bfuimgr(), AVAILABLE_TRICKS_LIST_ELEMENT_ID) } as u32;
     if available_list != 0 {
         unsafe { CLEAR.original()(available_list as *const u32) };
+        let mut available_id_order: Vec<u16> = Vec::new();
         for &item_ptr in &all_tricks {
             let id = get_from_memory::<u16>(item_ptr + 0x6);
             if id == SENTINEL_TRICK_ID {
@@ -320,7 +384,9 @@ pub fn fill_trick_lists() {
             let valid = validate_trick(show_info, item_ptr);
             add_available_trick(available_list, item_ptr, valid);
             available_ids.insert(id);
+            available_id_order.push(id);
         }
+        rewrite_available_trick_ids(&available_id_order);
     }
 
     let assigned_list = unsafe { GET_ELEMENT_0.original()(global_bfuimgr(), ASSIGNED_TRICKS_LIST_ELEMENT_ID) } as u32;
@@ -586,5 +652,30 @@ pub(crate) mod live_support {
         let available = unsafe { GET_ELEMENT_0.original()(global_bfuimgr(), AVAILABLE_TRICKS_LIST_ELEMENT_ID) };
         let assigned = unsafe { GET_ELEMENT_0.original()(global_bfuimgr(), ASSIGNED_TRICKS_LIST_ELEMENT_ID) };
         !available.is_null() && !assigned.is_null()
+    }
+
+    /// Number of non-[`SENTINEL_TRICK_ID`] items in `unit_type_ptr`'s own real trick list - the count
+    /// [`super::fill_trick_lists`] should have written into the real vanilla vector at
+    /// [`AVAILABLE_TRICK_IDS_BEGIN_RVA`] the last time it ran against this unit type (with the "available
+    /// tricks" listbox present). Lets a live test confirm [`rewrite_available_trick_ids`] actually kept
+    /// that vector in sync, independent of re-deriving the same count a second, differently-shaped way.
+    pub(crate) fn non_sentinel_trick_count(unit_type_ptr: u32) -> usize {
+        walk_trick_list(unit_type_ptr)
+            .into_iter()
+            .filter(|&item_ptr| get_from_memory::<u16>(item_ptr + 0x6) != SENTINEL_TRICK_ID)
+            .count()
+    }
+
+    /// The real vanilla vector at [`AVAILABLE_TRICK_IDS_BEGIN_RVA`], read back as owned `u32`s (trick ids,
+    /// zero-extended) - what real, still-un-ported vanilla `addTrick` would index into on an "Add" click.
+    /// See that constant's own doc comment for why this vector exists and what keeps it in sync.
+    pub(crate) fn available_trick_id_vector() -> Vec<u32> {
+        let begin = get_from_memory::<u32>(dat(AVAILABLE_TRICK_IDS_BEGIN_RVA));
+        let end = get_from_memory::<u32>(dat(AVAILABLE_TRICK_IDS_END_RVA));
+        if begin == 0 || end <= begin {
+            return Vec::new();
+        }
+        let count = (end - begin) / 4;
+        (0..count).map(|index| get_from_memory::<u32>(begin + index * 4)).collect()
     }
 }

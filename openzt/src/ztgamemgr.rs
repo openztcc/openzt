@@ -534,20 +534,22 @@ impl ZTGameMgr {
     /// between can mutate `cash`); then chain to base (just `elapsed_sim_ticks`). Every step's success is
     /// ANDed together, matching `ztawardmgr.rs`'s own `save`.
     pub fn save(&self, file: *const u32) -> bool {
+        error!("DIAG SAVE_ENTER ZTGameMgr");
         let marker: u32 = 0;
-        let mut ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(&marker as *const u32, 4, 1, file as *const i8) };
+        let mut ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(&marker as *const u32, 4, 1, file as *const i8) } == 1;
 
         let zoostatus_ptr = (self as *const Self as u32 + 0x10) as *const u32;
         let zoostatus_result = unsafe { ZOOSTATUS_SAVE.original()(zoostatus_ptr, file as *const i8) };
         ok &= zoostatus_result == 1;
 
-        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.date as *const Systemtime as *const u32, 0x10, 1, file as *const i8) };
+        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.date as *const Systemtime as *const u32, 0x10, 1, file as *const i8) } == 1;
 
-        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.cash as *const f32 as *const u32, 4, 1, file as *const i8) };
+        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.cash as *const f32 as *const u32, 4, 1, file as *const i8) } == 1;
 
         // BFGameMgr::save inlined: writes the raw elapsed_sim_ticks dword.
-        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.elapsed_sim_ticks as *const u32, 4, 1, file as *const i8) };
+        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.elapsed_sim_ticks as *const u32, 4, 1, file as *const i8) } == 1;
 
+        error!("DIAG SAVE_RESULT ZTGameMgr ok={ok}");
         ok
     }
 
@@ -568,15 +570,18 @@ impl ZTGameMgr {
     /// `BFGameMgr::load`'s own inlined base body (`BFGameMgr_load.c`) only reads `elapsed_sim_ticks` when
     /// `version > 0x48`; older saves leave it zeroed instead.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
+        error!("DIAG LOAD_ENTER ZTGameMgr version={version}");
         let mut marker: u32 = 0;
         let marker_ok = unsafe { DEALLOCATE.hooked()(&mut marker as *mut u32 as *const u32, 4, 1, file as *const u8) } == 1;
         if !marker_ok {
+            error!("DIAG LOAD_RESULT ZTGameMgr ok=false stage=marker");
             return false;
         }
 
         let zoostatus_ptr = (self as *mut Self as u32 + 0x10) as *const u32;
         let zoostatus_result = unsafe { ZOOSTATUS_LOAD.original()(zoostatus_ptr, file as *const u8, version) };
         if (zoostatus_result & 0xff) == 0 {
+            error!("DIAG LOAD_RESULT ZTGameMgr ok=false stage=zoostatus");
             return false;
         }
 
@@ -585,18 +590,21 @@ impl ZTGameMgr {
         let cash_ok = unsafe { DEALLOCATE.hooked()(&mut cash as *mut f32 as *const u32, 4, 1, file as *const u8) } == 1;
 
         if !(date_ok && cash_ok) {
+            error!("DIAG LOAD_RESULT ZTGameMgr ok=false stage=date_cash date_ok={date_ok} cash_ok={cash_ok}");
             return false;
         }
 
         self.cash = cash;
 
         // BFGameMgr::load inlined: only reads elapsed_sim_ticks for saves newer than version 0x48.
-        if version > 0x48 {
+        let final_ok = if version > 0x48 {
             unsafe { DEALLOCATE.hooked()(&mut self.elapsed_sim_ticks as *mut u32 as *const u32, 4, 1, file as *const u8) == 1 }
         } else {
             self.elapsed_sim_ticks = 0;
             true
-        }
+        };
+        error!("DIAG LOAD_RESULT ZTGameMgr ok={final_ok} stage=final");
+        final_ok
     }
 
     /// Ports `ZTGameMgr::update` (vtable `+0x10`). Per the decompile (`ZTGameMgr_update.c`, read in

@@ -43,7 +43,9 @@
 //! its `<NAME>_DETOUR.call` trampoline first - vanilla keeps owning the real tree at `+0x28`, the
 //! `DAT_0063e480` id counter, the `field_0x70` id writes, and `clearShowScriptStates` - and only on
 //! the real body's success byte mirrors the outcome into [`SHOW_STORE`]. Live-game mutation behavior
-//! is therefore exactly vanilla, while the store is a live-verified copy of the real tree.
+//! is therefore exactly vanilla, while the store is a live-verified copy of the real tree. (Stage
+//! 9 below has since retired the mirroring itself - the shadow phase's job was to prove the store
+//! in sync before anything read it, which five live-green stages on top of the read cutover did.)
 //!
 //! **Stage 4** flips the read path onto the store: `getShowInfo`/`getScriptID`
 //! ([`ZTShowMgr::get_show_info`]/[`ZTShowMgr::get_script_id`]) are detoured and answer every caller -
@@ -58,9 +60,9 @@
 //! mutex critical sections copy-and-unlock without calling out - even though vanilla bodies reached
 //! through those trampolines now *do* re-enter the hooked `GET_SHOW_INFO` address internally. The
 //! plan's open item - when (and whether) the writers drop their call-through to become full style-2
-//! ports, taking the `DAT_0063e480` counter into Rust ownership together with stage 6's save/load -
-//! is now tracked as the plan's stage 9; the dual-write state is behavior-safe indefinitely while
-//! the mirror stays in sync, which the battery's cross-store oracles assert after every mutation.
+//! ports - is resolved by stage 9 below; until then the dual-write state was behavior-safe
+//! indefinitely while the mirror stayed in sync, which the battery's cross-store oracles asserted
+//! after every mutation.
 //!
 //! **Stage 5** ports the two whole-map walks, `enterNewMonth`/`update`
 //! ([`ZTShowMgr::enter_new_month`]/[`ZTShowMgr::update`]), onto the store - the first consumers
@@ -76,26 +78,43 @@
 //! **Stage 6** ports the save/load pair ([`ZTShowMgr::save`]/[`ZTShowMgr::load`]) - vanilla's thin
 //! wrapper around two pieces: the embedded `ZTShowScriptMgr`'s own save/load (already
 //! `ztshowscriptmgr.rs`'s Rust store, reached through the same direct `CALL` vanilla makes) and the
-//! 2-byte `DAT_0063e480` show-id-counter persistence. Because the stage-3 writers still keep their
-//! vanilla call-through, that counter stays vanilla-owned, so both ports read/write the global in
-//! place - the vanilla-shaped half of the plan's stage-6 counter-ownership note (if the writers'
-//! call-through is ever dropped, the counter moves into [`SHOW_STORE`] and these two ports must be
-//! repointed at it).
+//! 2-byte show-id-counter persistence. Those ports landed reading/writing the `DAT_0063e480`
+//! global in place because the stage-3 writers still kept their vanilla call-through (the counter
+//! was then vanilla-owned); stage 9 has since moved the counter into [`SHOW_STORE`] and repointed
+//! both ports at it, making the persisted counter single-owned end to end.
 //!
 //! **Stage 7** ports `isDoingShow` ([`ZTShowMgr::is_doing_show`]) - the "is this unit performing in
 //! that show" probe `ZTUnit::isDoingShow` (`0x00437402`, the corpus's one caller) reaches through.
 //! It introduces no new state: it composes the two halves earlier stages put in place, the
-//! store-backed `getShowInfo` lookup (stage 4) and one real, untouched `ZTShow::getShowScriptState`
-//! walk over the found show's embedded `ZTShow` - the same callee `ztshow.rs`'s `do_current_item`
-//! already drives.
+//! store-backed `getShowInfo` lookup (stage 4) and a lookup over the found show's embedded
+//! `ZTShow`'s script-state map - the same callee `ztshow.rs`'s `do_current_item` already drives.
+//! A later review pass ([`crate::ztshow::get_show_script_state`]) replaced that lookup's real,
+//! `.hooked()`-routed vanilla call with a pure Rust reader of the same read-only tree - see that
+//! function's own doc comment.
 //!
 //! **Stage 8** ports `isShowScriptDone` ([`ZTShowMgr::is_show_script_done`]) - the last method in
 //! the plan's inventory (`ztshowmgr-implementation-plan.md` stage 8), unblocked once a Ghidra regen
 //! added its `generated.rs` entry and Windows decompile. Structurally a sibling of stage 7 - same
-//! store-backed lookup, same real `getShowScriptState` walk - differing only in what it does with
-//! the found script state: the walk's state pointer is dereferenced for the "done" byte at `+0x13`,
-//! which is returned raw. That completes the plan's method inventory; the remaining open item (the
-//! stage-3 writers' vanilla call-through) is tracked as the plan's stage 9, not in this module.
+//! store-backed lookup, same script-state map lookup - differing only in what it does with the
+//! found script state: the state pointer is dereferenced for the "done" byte at `+0x13`, which is
+//! returned raw. That completed the plan's method inventory.
+//!
+//! **Stage 9** finishes the style-2 end state: [`ZTShowMgr::register_show`]/[`ZTShowMgr::
+//! unregister_show`] drop their `<NAME>_DETOUR.call` call-throughs and become full ports of the
+//! real bodies (`ZTShowMgr_registerShow.asm`/`ZTShowMgr_unregisterShow.asm`), and the
+//! `DAT_0063e480` show-id counter moves into [`SHOW_STORE`] as a `u16` field (the real increment
+//! is a *word* `INC`; the assigned id is `(u16)counter % 0xffff`, so `0xffff` is never assigned
+//! and the counter's `0xffff` and wrapped-to-`0` states both yield id `0`). The counter is seeded
+//! once from the global at detour-install time ([`init`]); after that the global is inert exactly
+//! like vanilla's `+0x28` tree - its three consumers (verified against the full decompile corpus:
+//! `registerShow`'s increment, `save`'s write, `load`'s read) are all this module's detoured
+//! addresses now, and stage 6's save/load were repointed at the store's field in the same change
+//! so the persisted counter never has two owners at any buildable midpoint. The fresh-id write
+//! goes through a Rust reimplementation of `ZTShowInfo::setShowInfoID`
+//! ([`ZTShowMgr::set_show_info_id`]) - not a plain `field_0x70` store, because the real setter
+//! also keeps the embedded `ZTShow`'s `+0x10` back-pointer and `+0x6` id copy in sync. Behavior
+//! in-game is unchanged by any of this; the stage exists to retire the permanent store-tree sync
+//! obligation of the shadow phase.
 
 use std::{
     collections::BTreeMap,
@@ -104,11 +123,11 @@ use std::{
 };
 
 use crate::globals::get_module_base;
-use crate::util::{get_from_memory, mut_from_memory};
+use crate::util::{get_from_memory, mut_from_memory, save_to_memory};
 use openzt_detour::generated::bfapp::GET_INSTALLED_EXPANSION;
 use openzt_detour::generated::bfconfigfile::{CONSTRUCTOR_0, GET_INT, RELEASE};
 use openzt_detour::generated::standalone::{DEALLOCATE, WRITE_BYTES_TO_FILE};
-use openzt_detour::generated::ztshow::GET_SHOW_SCRIPT_STATE;
+use openzt_detour::generated::ztshow::CLEAR_SHOW_SCRIPT_STATES;
 use openzt_detour::generated::ztshowinfo::ENTER_NEW_MONTH as ZTSHOWINFO_ENTER_NEW_MONTH;
 use openzt_detour::generated::ztshowmgr::{
     ENTER_NEW_MONTH, GET_SCRIPT_ID, GET_SHOW_INFO, INIT_SHOW_PARAMS, IS_DOING_SHOW, IS_SHOW_SCRIPT_DONE, LOAD, REGISTER_SHOW, SAVE,
@@ -148,12 +167,12 @@ const GREAT_SHOW_KEY_RVA: u32 = 0x00642ac4 - 0x400000;
 /// nodes - matching free idiom, different size class.
 const CONFIG_FREELIST_HEAD_RVA: u32 = 0x0063800c - 0x400000;
 
-/// `DAT_0063e480` - the show-id counter global behind `registerShow`'s inlined `makeID` logic
-/// (16-bit `INC`, assigned id = `(u16)counter % 0xffff`, so `0xffff` is never assigned). Vanilla
-/// `ZTShowMgr::save`/`load` persist exactly its low 2 bytes around the embedded `ZTShowScriptMgr`
-/// delegation (stage 6). The counter stays vanilla-owned while the stage-3 writers keep their
-/// call-through, so both ports read/write the global in place rather than through a Rust-owned
-/// copy (see the plan's stage-6 counter-ownership note).
+/// `DAT_0063e480` - the vanilla show-id counter global behind `registerShow`'s inlined `makeID`
+/// logic (16-bit `INC`, assigned id = `(u16)counter % 0xffff`, so `0xffff` is never assigned).
+/// Stage 9 moved the counter into [`SHOW_STORE`], so this global is inert exactly like vanilla's
+/// `+0x28` tree: it is read exactly once, by [`init`]'s one-time seed, and afterwards only by the
+/// battery's real-pole save/load seeding ([`live_support::show_id_counter_addr`]) - the vanilla
+/// save/load bodies reached through those trampolines still read and write this address in place.
 const SHOW_ID_COUNTER_RVA: u32 = 0x0063e480 - 0x400000;
 
 /// `ZTShowMgr`'s real vtable VA (`private/docs/vtables/ZTShowMgr.md` - 2 slots: destructor, `update`),
@@ -409,73 +428,124 @@ impl ZTShowMgr {
         1
     }
 
-    /// Stage 3 shadow/mirror of `ZTShowMgr::registerShow` (`0x005abb26`, per
-    /// `ZTShowMgr_registerShow.asm`; `ztshowmgr-implementation-plan.md` stage 3): calls the real
-    /// vanilla body through the [`detours::call_real_register_show`] trampoline - vanilla keeps
-    /// owning the real tree at `+0x28`, the `DAT_0063e480` id counter, and the `field_0x70` id write,
-    /// all deliberately not reimplemented this phase - then, only on the real body's success byte,
-    /// mirrors the resulting id -> show pair into [`SHOW_STORE`].
+    /// Stage 9 full port of `ZTShowMgr::registerShow` (`0x005abb26`, per
+    /// `ZTShowMgr_registerShow.asm`; `ztshowmgr-implementation-plan.md` stage 9): the style-2 end
+    /// state of the stage-3 shadow/mirror - the `<NAME>_DETOUR.call` call-through is gone, and
+    /// everything the real body owned (the tree insert, the `DAT_0063e480` counter, the
+    /// `field_0x70` write) is Rust-owned now.
     ///
     /// Vanilla shape, `.asm`-verified: a null `show` returns `AL=0` before touching anything;
-    /// otherwise a find on the show's *current* `field_0x70` runs first (already present -> `AL=0`,
-    /// nothing written, even with the force flag set); only then does the force flag **or**
-    /// `field_0x70 == 0` assign a fresh id (`INC word ptr DAT_0063e480`, id =
-    /// `(u16)counter % 0xffff` - so `0xffff` is never assigned, wrapping to `0`) through the real
-    /// `field_0x70` setter; the final tree write is insert-or-assign, so a force re-register under a
-    /// *different* key leaves the show's previous (stale) entry in place - [`SHOW_STORE`]'s own
-    /// `BTreeMap::insert` mirrors that exactly. The real body reports success in `AL` only (upper
-    /// EAX bits are leftover register garbage there, its `MOV %AL,%BL` exit); this returns it cleaned
-    /// to a full `0`/`1`, which every caller observes through the low byte alone.
-    ///
-    /// Transitional: the plan's stage 9 replaces this with a full port (call-through dropped, the
-    /// `DAT_0063e480` counter moved into the store).
+    /// otherwise a find on the show's *current* `field_0x70` runs first (already present ->
+    /// `AL=0`, nothing written, even with the force flag set - and the probe uses the current
+    /// value *even when it is 0*, since id 0 can legitimately sit in the map after counter wrap);
+    /// only then does the force flag **or** `field_0x70 == 0` assign a fresh id (`INC word ptr
+    /// DAT_0063e480`, id = `(u16)counter % 0xffff` - so `0xffff` is never assigned, and the
+    /// counter's `0xffff` and wrapped-to-`0` states both yield id `0`) written through the real
+    /// `ZTShowInfo::setShowInfoID`, reimplemented as [`ZTShowMgr::set_show_info_id`]; the final
+    /// tree write is insert-or-assign, so a force-assigned id colliding with a registered id
+    /// steals that slot in place, which `BTreeMap::insert` reproduces exactly. The real body
+    /// reports success in `AL` only (upper EAX bits are leftover register garbage there, its
+    /// `MOV %AL,%BL` exit); this returns a clean `1`, which every caller observes through the
+    /// low byte alone. The real body's setter-return insert gate (`TEST %BL,%BL; JZ`) is not
+    /// reproduced separately: the guard that can return `0` in `ZTShowInfo_setShowInfoID.asm`
+    /// compares the field the setter just wrote, so it is unreachable through this call (the
+    /// plan's implementation-time verification) and the setter helper has no failure path.
     pub fn register_show(&mut self, show: *const u32, force: bool) -> u32 {
-        let real_return = detours::call_real_register_show(self as *const ZTShowMgr as *const u32, show, force);
-        let succeeded = real_return & 0xff != 0;
-        if succeeded {
-            // `AL == 1` implies `show` is non-null (vanilla's null-show path exits before anything
-            // else runs), and both success paths end with the inserted key sitting in the show's own
-            // `field_0x70` (a preset id keeps it; a fresh id is written there by the real setter) -
-            // so reading it back here yields exactly the key vanilla inserted.
-            let show_addr = show as u32;
-            let id = get_from_memory::<u16>(show_addr + 0x70);
-            SHOW_STORE.lock().unwrap().registered_shows.insert(id, show_addr);
+        if show.is_null() {
+            return 0;
         }
-        succeeded as u32
+        let show_addr = show as u32;
+        let current_id = get_from_memory::<u16>(show_addr + 0x70);
+        let fresh_id = {
+            let mut store = SHOW_STORE.lock().unwrap();
+            if store.registered_shows.contains_key(&current_id) {
+                return 0;
+            }
+            if force || current_id == 0 {
+                store.show_id_counter = store.show_id_counter.wrapping_add(1);
+                Some(store.show_id_counter % 0xffff)
+            } else {
+                None
+            }
+        };
+        let id = match fresh_id {
+            Some(id) => {
+                Self::set_show_info_id(show_addr, id);
+                id
+            }
+            None => current_id,
+        };
+        SHOW_STORE.lock().unwrap().registered_shows.insert(id, show_addr);
+        1
     }
 
-    /// Stage 3 shadow/mirror of `ZTShowMgr::unregisterShow` (`0x005aaa95`, per
-    /// `ZTShowMgr_unregisterShow.asm`/`.c`): calls the real vanilla body through the
-    /// [`detours::call_real_unregister_show`] trampoline - vanilla keeps owning the tree erase and
-    /// the `clearShowScriptStates` call - then, only on the real body's success byte, removes the
-    /// effective id from [`SHOW_STORE`].
+    /// Rust reimplementation of `ZTShowInfo::setShowInfoID` (`0x005ab8c3`, per
+    /// `ZTShowInfo_setShowInfoID.asm`; macOS symbolizes the same address split across
+    /// `ZTShowInfo_setShowInfoID.c` + `ZTShow_setShowInfoID.c`), reached from
+    /// [`ZTShowMgr::register_show`]'s fresh-id branch. The real setter is not a trivial
+    /// `field_0x70` store: after `show->field_0x70 = id`, it re-points the embedded `ZTShow`'s
+    /// (`show+0x4`) `+0x10` back-pointer at `show` unless it already points at an object whose
+    /// own `field_0x70` equals the new id, and always refreshes the `ZTShow`'s `+0x6` u16 id
+    /// copy - all four writes reproduced here, in the real order, so a plain `field_0x70` store
+    /// could not leave the embedded mirror fields stale.
     ///
-    /// Vanilla's path matrix, all verified against the `.c`/`.asm`: null `show` + null `id` returns
-    /// `AL=0` (nothing mirrored); `show != 0 && id == 0` - the one path that never reads
-    /// `GLOBAL_ZTShowMgr` - derives the id from the show's own `field_0x70` (deliberately *stale*
-    /// after a prior unregister, since vanilla never zeroes that field, so the mirror derives the
-    /// same way) and, with the clear flag set, runs the real `clearShowScriptStates` on the show's
-    /// embedded `ZTShow` directly; both `id != 0` paths (with or without a show pointer) end in an
-    /// unconditional `getShowInfo(GLOBAL_ZTShowMgr, id)` used only to pick the clear target - where
-    /// the `show != 0` variant first calls `getShowInfo(this, id)` and *discards* the result, a
-    /// verified vanilla wart - and that lookup faults if the global is null (`getShowInfo` has no
-    /// null guard), exactly as real vanilla would. Success is `AL=1` even when the key was absent
-    /// (a silent no-op erase), which `BTreeMap::remove`'s own absent-key behavior mirrors. Upper
-    /// EAX bits are garbage; returned cleaned to `0`/`1` like [`ZTShowMgr::register_show`].
-    ///
-    /// Transitional: the plan's stage 9 replaces this with a full port (call-through dropped, the
-    /// clear-target lookup taken from the store directly).
-    pub fn unregister_show(&mut self, id: u16, show: *const u32, clear: bool) -> u32 {
-        let real_return = detours::call_real_unregister_show(self as *const ZTShowMgr as *const u32, id, show, clear);
-        let succeeded = real_return & 0xff != 0;
-        if succeeded {
-            // Success excludes the null-show + null-id case (that path exits `AL=0`), so when `id`
-            // is zero here `show` is necessarily non-null and vanilla's own derivation applies:
-            // remove the key the show's `field_0x70` still carries.
-            let effective_id = if id != 0 { id } else { get_from_memory::<u16>(show as u32 + 0x70) };
-            SHOW_STORE.lock().unwrap().registered_shows.remove(&effective_id);
+    /// Not reproduced: the real body's return-0 path ("outer show's `field_0x70` != the new id";
+    /// macOS's `ZTShow::setShowInfoID` returns 0 there explicitly) - the guard compares the field
+    /// this port's first write just set, so through [`ZTShowMgr::register_show`] it is
+    /// unreachable and the real body always exits `AL=1`; and the `.asm`'s null-`show` guard
+    /// (`TEST %EDX,%EDX; JZ`), which [`ZTShowMgr::register_show`]'s own null check already
+    /// excludes. Reading traps honored: the Windows `.c` renders the embedded-`ZTShow` half with
+    /// confusing flattened offsets - trust the `.asm`'s `ADD %ECX, 0x4` (the offsets here), not
+    /// the decompile's `this->field_0x14`/`this->field_0xa` renderings.
+    fn set_show_info_id(show: u32, id: u16) {
+        save_to_memory(show + 0x70, id);
+        let ztshow = show + 0x4;
+        let back_pointer: u32 = get_from_memory(ztshow + 0x10);
+        if back_pointer == 0 || get_from_memory::<u16>(back_pointer + 0x70) != id {
+            save_to_memory(ztshow + 0x10, show);
         }
-        succeeded as u32
+        save_to_memory(ztshow + 0x6, id);
+    }
+
+    /// Stage 9 full port of `ZTShowMgr::unregisterShow` (`0x005aaa95`, per
+    /// `ZTShowMgr_unregisterShow.asm`/`.c`): the style-2 end state of the stage-3 shadow/mirror -
+    /// vanilla's tree erase is now [`BTreeMap::remove`], and the clear-target lookup the real body
+    /// made through `GLOBAL_ZTShowMgr` comes straight off [`SHOW_STORE`] (coherent: that internal
+    /// `getShowInfo` call has resolved through the stage-4 detoured reader since the cutover).
+    ///
+    /// Vanilla's path matrix, all verified against the `.c`/`.asm`: null `show` + null `id`
+    /// returns `AL=0`; `id == 0` with a show pointer derives the id from the show's own
+    /// `field_0x70` - deliberately *stale* after a prior unregister, since vanilla never zeroes
+    /// that field - and, with the clear flag set, runs the real `clearShowScriptStates` on that
+    /// show's embedded `ZTShow` directly (no lookup); both `id != 0` paths (with or without a
+    /// show pointer) pick the clear target up from the store and only clear on a hit. The real
+    /// body's discarded-result wart in the show-pointer + id path (it calls
+    /// `getShowInfo(this, id)` and throws the answer away) simply disappears in the port - it was
+    /// unobservable; noted so the omission isn't mistaken for infidelity. Absent-key remove is a
+    /// silent success, like vanilla's erase-by-key; the return is a clean `1` whenever it
+    /// proceeds (the real body's `MOV %AL, 0x1`).
+    pub fn unregister_show(&mut self, id: u16, show: *const u32, clear: bool) -> u32 {
+        if show.is_null() && id == 0 {
+            return 0;
+        }
+        let effective_id = if id != 0 {
+            id
+        } else {
+            // `id == 0` excludes the null-show early return above, so `show` is non-null here and
+            // vanilla's own derivation applies.
+            get_from_memory::<u16>(show as u32 + 0x70)
+        };
+        if clear {
+            // The id-0 path clears the passed show itself; the id paths look the target up - the
+            // real body through `GLOBAL_ZTShowMgr`'s `getShowInfo` (which has answered from this
+            // store since the stage-4 cutover), the port straight off the map.
+            let target = if id != 0 { Self::get_show_info(id) } else { show as u32 };
+            if target != 0 {
+                unsafe { CLEAR_SHOW_SCRIPT_STATES.hooked()((target + 0x4) as *const u32) };
+            }
+        }
+        SHOW_STORE.lock().unwrap().registered_shows.remove(&effective_id);
+        1
     }
 
     /// Stage 4 read cutover of `ZTShowMgr::getShowInfo` (`0x0041ebfd`, per
@@ -567,21 +637,27 @@ impl ZTShowMgr {
 
     /// Stage 6 port of `ZTShowMgr::save` (`0x00479fa4`, per `ZTShowMgr_save.asm`/`.c`; macOS's
     /// `ZTShowMgr_save.c` agrees): delegates to the embedded `ZTShowScriptMgr`'s own save, then
-    /// persists the 2-byte show-id counter global ([`SHOW_ID_COUNTER_RVA`]) straight off its
-    /// address through real `WriteBytesToFile`. The registered-shows map itself is deliberately
-    /// *not* serialized - every `ZTShowInfo` re-registers through its own separate load path - so
-    /// the counter bytes are this method's only own payload. Vanilla runs the counter write even
-    /// when the delegation fails and combines the two with plain `&` (no short-circuit), which is
-    /// reproduced. The delegation goes through a direct `CALL ZTShowScriptMgr::save`, so it is
-    /// routed via `.hooked()` (same direct-address rule as [`ZTShowMgr::enter_new_month`]): a
-    /// direct CALL executes whatever sits at the raw address, which is `ztshowscriptmgr.rs`'s
-    /// Rust detour once installed. Returns `0`/`1` - the real body only guarantees its
-    /// `SETZ`-produced `AL`; upper EAX is leftover register garbage there.
+    /// persists the 2-byte show-id counter through real `WriteBytesToFile`. The registered-shows
+    /// map itself is deliberately *not* serialized - every `ZTShowInfo` re-registers through its
+    /// own separate load path - so the counter bytes are this method's only own payload. Vanilla
+    /// runs the counter write even when the delegation fails and combines the two with plain `&`
+    /// (no short-circuit), which is reproduced. The delegation goes through a direct
+    /// `CALL ZTShowScriptMgr::save`, so it is routed via `.hooked()` (same direct-address rule as
+    /// [`ZTShowMgr::enter_new_month`]): a direct CALL executes whatever sits at the raw address,
+    /// which is `ztshowscriptmgr.rs`'s Rust detour once installed. Returns `0`/`1` - the real
+    /// body only guarantees its `SETZ`-produced `AL`; upper EAX is leftover register garbage
+    /// there.
+    ///
+    /// Stage 9 repointed the counter read at [`SHOW_STORE`]'s field (the counter's single owner
+    /// since the writers' cutover); the bytes are copied out under the lock and written from a
+    /// local, so the store mutex is never held across the `WriteBytesToFile` call-out.
     pub fn save(&mut self, file: *const i8) -> u32 {
+        error!("DIAG SAVE_ENTER ZTShowMgr");
         let script_ok =
             unsafe { ZTSHOWSCRIPTMGR_SAVE.hooked()(&raw const self.show_script_mgr as *const u32, file) } & 0xff != 0;
-        let counter_addr = (get_module_base("zoo.exe") as u32 + SHOW_ID_COUNTER_RVA) as *const u32;
-        let write_ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(counter_addr, 2, 1, file) };
+        let counter: u16 = SHOW_STORE.lock().unwrap().show_id_counter;
+        let write_ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(&raw const counter as *const u32, 2, 1, file) } == 1;
+        error!("DIAG SAVE_RESULT ZTShowMgr script_ok={script_ok} write_ok={write_ok}");
         (script_ok & write_ok) as u32
     }
 
@@ -589,19 +665,30 @@ impl ZTShowMgr {
     /// `ZTShowMgr_load.c` agrees): the mirror of [`ZTShowMgr::save`] - same `ZTShowScriptMgr`
     /// delegation through `.hooked()` (same direct-CALL routing) - then, only for
     /// `version > 0x60` (the `.asm` gates on unsigned `CMP %ESI, 0x61` / `JC`), reads the 2-byte
-    /// counter back into [`SHOW_ID_COUNTER_RVA`] through real `deallocate` and ANDs the read's
-    /// success into the result. The read is attempted whenever the version gate passes - even
-    /// after a failed delegation - exactly like vanilla. Returns `0`/`1` cleaned like
-    /// [`ZTShowMgr::save`].
+    /// counter back through real `deallocate` and ANDs the read's success into the result. The
+    /// read is attempted whenever the version gate passes - even after a failed delegation -
+    /// exactly like vanilla. Returns `0`/`1` cleaned like [`ZTShowMgr::save`].
+    ///
+    /// Stage 9 repointed the counter destination at [`SHOW_STORE`]'s field: the read lands in a
+    /// local (so the store mutex is never held across the `deallocate` call-out) and is copied
+    /// into the store only on a successful read - the same only-on-success visibility the real
+    /// body's in-place global write gave the battery's short-read pins.
     pub fn load(&mut self, file: *const u32, version: u32) -> u32 {
+        error!("DIAG LOAD_ENTER ZTShowMgr version={version}");
         let mut ok =
             unsafe { ZTSHOWSCRIPTMGR_LOAD.hooked()(&raw const self.show_script_mgr as *const u32, file, version) } & 0xff
                 != 0;
+        error!("DIAG ZTShowMgr showscriptmgr_load_ok={ok}");
         if version > 0x60 {
-            let counter_addr = (get_module_base("zoo.exe") as u32 + SHOW_ID_COUNTER_RVA) as *const u32;
-            let read_ok = unsafe { DEALLOCATE.hooked()(counter_addr, 2, 1, file as *const u8) } == 1;
+            let mut counter: u16 = 0;
+            let read_ok =
+                unsafe { DEALLOCATE.hooked()(&raw mut counter as *const u32, 2, 1, file as *const u8) } == 1;
+            if read_ok {
+                SHOW_STORE.lock().unwrap().show_id_counter = counter;
+            }
             ok &= read_ok;
         }
+        error!("DIAG LOAD_RESULT ZTShowMgr ok={ok}");
         ok as u32
     }
 
@@ -610,26 +697,22 @@ impl ZTShowMgr {
     /// (`RET 0x8` - a u32 and a u16 stack slot): `getShowInfo(this, show_id)`, answered from
     /// [`SHOW_STORE`] exactly like [`ZTShowMgr::get_show_info`], which this calls directly the way
     /// [`ZTShowMgr::get_script_id`] does (the real body only ever forwards its `this` to that
-    /// lookup, which the stage-4 detour answers from the store); on a hit, the real
-    /// `ZTShow::getShowScriptState` (`0x0059eb99`) on the found show's embedded `ZTShow` at `+0x4`,
-    /// the same `LEA %ECX, [EAX + 0x4]` hand-off vanilla makes and the same callee
-    /// `ztshow.rs`'s `do_current_item` already drives. Any script state recorded for that unit
-    /// (a non-null `+0x14` value out of the embedded `ZTShow`'s script-state map walk) means the
-    /// unit is doing the show.
+    /// lookup, which the stage-4 detour answers from the store); on a hit, the pure Rust
+    /// [`crate::ztshow::get_show_script_state`] reader on the found show's embedded `ZTShow` at
+    /// `+0x4` - the same read-only script-state map lookup `ztshow.rs`'s `do_current_item` already
+    /// drives. Any script state recorded for that unit (a non-null `+0x14` value out of the
+    /// embedded `ZTShow`'s script-state map walk) means the unit is doing the show.
     ///
-    /// The callee call reproduces vanilla's direct `CALL ZTShow::getShowScriptState` via
-    /// `.hooked()` (same direct-address rule as [`ZTShowMgr::enter_new_month`]: a direct CALL
-    /// executes whatever sits at the raw address, so routing must match vanilla's own callers in
-    /// every profile). The real body reports its answer in `AL` only (`SETNZ %AL`, with EAX's
-    /// upper bits left holding the state pointer's high bits); macOS's `ZTShowMgr_isDoingShow.c`
-    /// normalizes the same predicate to a full-width 0/1 (`(-v | v) >> 0x1f`), which this returns.
-    /// That is the observable contract too: vanilla's own `ZTUnit::isDoingShow` propagates the
-    /// full EAX but has a sibling path returning garbage-upper-bits-with-`AL=1`, so its callers
-    /// necessarily test the low byte alone.
+    /// The real body reports its answer in `AL` only (`SETNZ %AL`, with EAX's upper bits left
+    /// holding the state pointer's high bits); macOS's `ZTShowMgr_isDoingShow.c` normalizes the
+    /// same predicate to a full-width 0/1 (`(-v | v) >> 0x1f`), which this returns. That is the
+    /// observable contract too: vanilla's own `ZTUnit::isDoingShow` propagates the full EAX but has
+    /// a sibling path returning garbage-upper-bits-with-`AL=1`, so its callers necessarily test the
+    /// low byte alone.
     pub fn is_doing_show(unit_id: u32, show_id: u16) -> u32 {
         let show_info = Self::get_show_info(show_id);
         if show_info != 0 {
-            let state = unsafe { GET_SHOW_SCRIPT_STATE.hooked()((show_info + 0x4) as *const u32, unit_id) };
+            let state = crate::ztshow::get_show_script_state(show_info + 0x4, unit_id);
             (state != 0) as u32
         } else {
             0
@@ -645,13 +728,12 @@ impl ZTShowMgr {
     /// `.asm`-verified (`RET 0x8` - a u32 and a u16 stack slot; `this` is forwarded to nothing but
     /// the `getShowInfo` lookup): `getShowInfo(this, show_id)`, answered from [`SHOW_STORE`]
     /// exactly like [`ZTShowMgr::get_show_info`], which this calls directly the way
-    /// [`ZTShowMgr::is_doing_show`] does; on a hit, the real `ZTShow::getShowScriptState`
-    /// (`0x0059eb99`) on the found show's embedded `ZTShow` at `+0x4` - the same
-    /// `LEA %ECX, [EAX + 0x4]` hand-off and `.hooked()` routing [`ZTShowMgr::is_doing_show`]
-    /// uses - and, where that sibling null-tests the returned state pointer, this reads the found
-    /// `ZTShowScriptState`'s done byte at `+0x13` (`MOV %AL, byte ptr [EAX + 0x13]`). Both miss
-    /// paths (unregistered show, stateless unit) return `0`, like the real body's `MOV %AL, %BL`
-    /// exits.
+    /// [`ZTShowMgr::is_doing_show`] does; on a hit, the same pure Rust
+    /// [`crate::ztshow::get_show_script_state`] reader on the found show's embedded `ZTShow` at
+    /// `+0x4` [`ZTShowMgr::is_doing_show`] uses - and, where that sibling null-tests the returned
+    /// state pointer, this reads the found `ZTShowScriptState`'s done byte at `+0x13` (`MOV %AL,
+    /// byte ptr [EAX + 0x13]`). Both miss paths (unregistered show, stateless unit) return `0`,
+    /// like the real body's `MOV %AL, %BL` exits.
     ///
     /// The hit path returns the raw done byte zero-extended, not a normalized 0/1 - macOS's
     /// version returns the same byte (`undefined1`), so the byte is the contract. Upper EAX bits
@@ -663,7 +745,7 @@ impl ZTShowMgr {
     pub fn is_show_script_done(script_id: u32, show_id: u16) -> u32 {
         let show_info = Self::get_show_info(show_id);
         if show_info != 0 {
-            let state = unsafe { GET_SHOW_SCRIPT_STATE.hooked()((show_info + 0x4) as *const u32, script_id) };
+            let state = crate::ztshow::get_show_script_state(show_info + 0x4, script_id);
             if state != 0 {
                 get_from_memory::<u8>(state + 0x13) as u32
             } else {
@@ -695,9 +777,9 @@ impl ZTShowMgr {
 /// The decompile corpus has no other caller (`ZTShowMgr_ZTShowMgr.c` is the only reference).
 ///
 /// Stage 3 adds the registered-shows write path to the same block: `REGISTER_SHOW`/`UNREGISTER_SHOW`
-/// (`0x005abb26`/`0x005aaa95`, no other `openzt/src` callers of either address) as shadow/mirror
-/// detours - see [`ZTShowMgr::register_show`]/[`ZTShowMgr::unregister_show`]. Vanilla keeps owning
-/// the real tree; the store mirrors it.
+/// (`0x005abb26`/`0x005aaa95`, no other `openzt/src` callers of either address) - detoured first as
+/// shadow/mirrors over the call-through vanilla bodies, then completed by stage 9 into full ports
+/// (call-through dropped) - see [`ZTShowMgr::register_show`]/[`ZTShowMgr::unregister_show`].
 ///
 /// Stage 4 adds the read cutover: `GET_SHOW_INFO`/`GET_SCRIPT_ID` (`0x0041ebfd`/`0x005a2665`)
 /// route every caller - including un-decompiled vanilla code and the real `unregisterShow` body's
@@ -820,10 +902,10 @@ mod detours {
     }
 
     /// The real vanilla `getShowInfo` through the detour's trampoline - the only route back to the
-    /// genuine tree walk now that stage 4 hooks the address. This is the battery's real-side pole
-    /// (`ZTSHOWMGR_REGISTER_UNREGISTER_SHOW`'s diff oracle and
-    /// `ZTSHOWMGR_GET_SHOW_INFO_GET_SCRIPT_ID`'s vanilla pole): during the dual-write phase it must
-    /// agree with [`SHOW_STORE`] after every mutation, which is exactly what those tests assert.
+    /// genuine tree walk now that stage 4 hooks the address. The battery's real-side pole for it:
+    /// since stage 9 stopped the writers maintaining the tree, this walk answers only what was
+    /// planted there through the raw trampolines (see [`call_real_register_show`]), which is exactly
+    /// the tree-only differential the stage-5 walk tests pin.
     pub(super) fn call_real_get_show_info(this: *const u32, id: u16) -> u32 {
         unsafe { GET_SHOW_INFO_DETOUR.call(this, id) }
     }
@@ -891,26 +973,31 @@ mod detours {
     }
 }
 
-/// Enables the stage-2 through stage-8 detours (`INIT_SHOW_PARAMS`, the registered-shows
-/// shadow/mirror pair, the `getShowInfo`/`getScriptID` read cutover, the
+/// Enables the stage-2 through stage-9 detours (`INIT_SHOW_PARAMS`, the `registerShow`/
+/// `unregisterShow` write ports, the `getShowInfo`/`getScriptID` read cutover, the
 /// `enterNewMonth`/`update` walk ports, the `save`/`load` pair, and the `isDoingShow`/
-/// `isShowScriptDone` probes). Called from `lib.rs`'s `experimental` block and from
-/// `reimplementation_tests::init` (the test harness never runs `openztlib::init()`).
+/// `isShowScriptDone` probes), and seeds the Rust-owned show-id counter ([`ZTShowMgrState::
+/// show_id_counter`]) from the vanilla `DAT_0063e480` global it replaces. The seed runs before the
+/// hooks go live: nothing vanilla can reach the counter through except this module's (about to be
+/// detoured) addresses, so from the instant they are armed the store's copy is the only live one -
+/// the global is inert exactly like vanilla's `+0x28` tree. Called from `lib.rs`'s `experimental`
+/// block and from `reimplementation_tests::init` (the test harness never runs `openztlib::init()`).
 pub fn init() {
+    let counter_addr = (get_module_base("zoo.exe") as u32 + SHOW_ID_COUNTER_RVA) as *const u16;
+    SHOW_STORE.lock().unwrap().show_id_counter = unsafe { *counter_addr };
     if let Err(e) = unsafe { detours::init_detours() } {
         error!("Failed to initialise ztshowmgr detours: {e:?}");
     }
 }
 
 /// Process-global store backing the one real `ZTShowMgr` singleton, keyed by nothing (one real
-/// instance, same shape as `ztawardmgr.rs`'s store). Style 2's end state is for this to be the *only*
-/// live copy of the registered-shows map. Stage 3 landed it as a live **mirror** of the real tree the
-/// call-through vanilla `registerShow`/`unregisterShow` bodies keep maintaining at the live global's
-/// `+0x28`; stage 4's read cutover then flipped `getShowInfo`/`getScriptID` onto this map, making it
-/// the source of truth every reader - Rust and un-decompiled vanilla alike - answers from. Vanilla's
-/// own tree stays dual-written by the trampoline call-throughs until the plan's stage 9 (dropping
-/// the writers' call-through, moving the `DAT_0063e480` id counter into Rust with stage 6's
-/// save/load) resolves, at which point it goes safely-inert dead weight.
+/// instance, same shape as `ztawardmgr.rs`'s store). Since stage 9 this is the *only* live copy of
+/// the registered-shows map *and* of the show-id counter: stage 3 landed it as a live mirror of
+/// vanilla's tree, stage 4's read cutover flipped `getShowInfo`/`getScriptID` onto it, and stage 9
+/// dropped the writers' call-throughs, moving the tree insert/erase (`register_show`/
+/// `unregister_show`) and the `DAT_0063e480` counter ([`ZTShowMgrState::show_id_counter`], seeded
+/// once from the global by [`init`]) in with them. Vanilla's own `+0x28` tree and counter global
+/// are now safely-inert dead weight, maintained by nothing.
 ///
 /// Values are real, vanilla-owned `ZTShowInfo*` addresses - **never owned, never freed, never
 /// dereferenced-freed** by this module (`ZTShowInfo` objects are constructed/owned by their real
@@ -919,6 +1006,11 @@ pub fn init() {
 #[derive(Debug, Default)]
 struct ZTShowMgrState {
     registered_shows: BTreeMap<u16, u32>,
+    /// The show-id counter vanilla kept at `DAT_0063e480` - a u16, since every one of the global's
+    /// three consumers accesses it 16-bit (`registerShow`'s word `INC` and both of save/load's
+    /// 2-byte transfers). Incremented by [`ZTShowMgr::register_show`]'s fresh-id branch and
+    /// persisted by stage 6's save/load; never `0xffff` as an assigned id (`% 0xffff`).
+    show_id_counter: u16,
 }
 
 static SHOW_STORE: LazyLock<Mutex<ZTShowMgrState>> = LazyLock::new(|| Mutex::new(ZTShowMgrState::default()));
@@ -931,13 +1023,23 @@ pub(crate) fn registered_show_count() -> usize {
     SHOW_STORE.lock().unwrap().registered_shows.len()
 }
 
-/// The store's answer for one show id - the store side of the battery's cross-store diff oracles
+/// The store's answer for one show id - the battery's store-content probe
 /// (`ZTSHOWMGR_REGISTER_UNREGISTER_SHOW` and `ZTSHOWMGR_GET_SHOW_INFO_GET_SCRIPT_ID`). Since stage
 /// 4's read cutover this is also the live implementation: [`ZTShowMgr::get_show_info`] and the
 /// `GET_SHOW_INFO` detour answer every in-game caller from the same map this reads.
 #[cfg(feature = "reimplementation-tests")]
 pub(crate) fn registered_show_for_id(id: u16) -> Option<u32> {
     SHOW_STORE.lock().unwrap().registered_shows.get(&id).copied()
+}
+
+/// Every `(id, show_addr)` pair currently in the store - diagnostic for a live test to check for
+/// duplicate `show_addr` values under different ids, the signature of a stale entry left behind by
+/// `ZTShowInfo::updateFromLoad`'s real register-then-unregister-old-id dance (see
+/// `private/resources/decompiles/ZTShowInfo_updateFromLoad.c`) if [`ZTShowMgr::register_show`]/
+/// [`ZTShowMgr::unregister_show`] ever mishandle it.
+#[cfg(feature = "reimplementation-tests")]
+pub(crate) fn all_registered_shows() -> Vec<(u16, u32)> {
+    SHOW_STORE.lock().unwrap().registered_shows.iter().map(|(&id, &addr)| (id, addr)).collect()
 }
 
 #[cfg(feature = "reimplementation-tests")]
@@ -996,10 +1098,27 @@ pub(crate) mod live_support {
         detours::call_real_update(this)
     }
 
-    /// Runtime address of the vanilla show-id counter global ([`SHOW_ID_COUNTER_RVA`]) - lets
-    /// `ZTSHOWMGR_SAVE_LOAD` seed/clobber/restore the counter without its own RVA redeclaration.
+    /// Runtime address of the vanilla show-id counter global ([`SHOW_ID_COUNTER_RVA`]) - inert to
+    /// the implementation since stage 9, but still read/written **in place** by the real
+    /// save/load bodies the battery reaches through their trampolines, so `ZTSHOWMGR_SAVE_LOAD`
+    /// seeds/clobbers/restores it around those poles (alongside the store's own copy via
+    /// [`show_id_counter`]/[`set_show_id_counter`]).
     pub(crate) fn show_id_counter_addr() -> u32 {
         get_module_base("zoo.exe") as u32 + SHOW_ID_COUNTER_RVA
+    }
+
+    /// The store's show-id counter - the single live copy since stage 9. Test-support for
+    /// `ZTSHOWMGR_REGISTER_UNREGISTER_SHOW`'s counter pins (fresh-id step, wrap semantics) and
+    /// `ZTSHOWMGR_SAVE_LOAD`'s pole-specific seeding.
+    pub(crate) fn show_id_counter() -> u16 {
+        SHOW_STORE.lock().unwrap().show_id_counter
+    }
+
+    /// Overwrites the store's show-id counter - the stage-9 test rework seeds exact values to make
+    /// fresh-id assignment deterministic and to reach the wrap boundary (`0xfffe`/`0xffff`)
+    /// without needing 65k registrations.
+    pub(crate) fn set_show_id_counter(value: u16) {
+        SHOW_STORE.lock().unwrap().show_id_counter = value;
     }
 
     /// Calls the real vanilla `ZTShowMgr::save` through the detour's trampoline - the
@@ -1031,11 +1150,14 @@ pub(crate) mod live_support {
     }
 
     /// Calls the real vanilla `ZTShowMgr::registerShow` through the detour's trampoline,
-    /// **bypassing the stage-3 mirroring** - the stage-5 walk tests use it to plant a registration
+    /// **bypassing the stage-9 port** - the stage-5 walk tests use it to plant a registration
     /// that exists only in the standalone vanilla tree, proving the Rust walks read [`SHOW_STORE`]
-    /// and not the tree (a hooked register would dual-write and make the differential invisible).
-    /// The raw body only guarantees its success byte in `AL` (upper EAX is register garbage -
-    /// callers must mask `& 0xff`); the hooked path is the one returning a cleaned `0`/`1`.
+    /// and not the tree (the hooked register writes only the store, so the raw body is the only
+    /// way to make the two stores disagree on purpose). The raw body only guarantees its success
+    /// byte in `AL` (upper EAX is register garbage - callers must mask `& 0xff`); the hooked path
+    /// is the one returning a cleaned `0`/`1`. Note the raw body still increments the now-inert
+    /// vanilla counter global and writes `field_0x70` through the real setter - both harmless to
+    /// the store, which never reads either.
     pub(crate) fn call_real_register_show(this: *const u32, show: *const u32, force: bool) -> u32 {
         detours::call_real_register_show(this, show, force)
     }
