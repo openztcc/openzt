@@ -9,7 +9,7 @@
 //! Multiple ergonomic syntaxes are supported:
 //!
 //! ```rust
-//! use openzt::shortcuts::{Key, Ctrl, Shift, Alt, VkKey, R};
+//! use openztlib::shortcuts::{Key, Ctrl, Shift, Alt, R, register_shortcut};
 //! use windows::Win32::UI::Input::KeyboardAndMouse::*;
 //!
 //! // Method 1: Using const key items (most ergonomic)
@@ -21,12 +21,8 @@
 //! // Method 2: Using VK constants directly
 //! let ctrl_a = Key::<{ VK_A.0 as i32 }>::new() + Ctrl;
 //!
-//! // Method 3: Using VkKey::code() in a const
-//! const X_KEY: i32 = VkKey::X.code();
-//! let ctrl_x = Key::<X_KEY>::new() + Ctrl;
-//!
 //! // Register the shortcut
-//! register_shortcut("module", "description", ctrl_r, false, || {});
+//! register_shortcut("module", "description", ctrl_r, false, || {}).unwrap();
 //! ```
 
 use std::marker::PhantomData;
@@ -191,7 +187,7 @@ impl<const CTRL: bool, const ALT: bool, const SHIFT: bool, const KEY: i32> Short
 /// # Example
 ///
 /// ```rust
-/// use openzt::shortcuts::{Ctrl, Shift, R};
+/// use openztlib::shortcuts::{Ctrl, Shift, R};
 ///
 /// // Shift-only: produces PartialShortcut (not registerable)
 /// let partial = R + Shift;  // PartialShortcut<false, false, true, R_CODE>
@@ -513,7 +509,8 @@ impl<const CTRL: bool, const ALT: bool, const SHIFT: bool, const KEY: i32> Regis
 /// # Example
 ///
 /// ```rust
-/// use openzt::shortcuts::{Key, Ctrl, Shift};
+/// use openztlib::shortcuts::{Key, Ctrl, Shift, register_shortcut};
+/// use windows::Win32::UI::Input::KeyboardAndMouse::VK_A;
 ///
 /// register_shortcut(
 ///     "mymodule",
@@ -524,6 +521,7 @@ impl<const CTRL: bool, const ALT: bool, const SHIFT: bool, const KEY: i32> Regis
 ///         // Handler code
 ///     }
 /// )?;
+/// # Ok::<(), String>(())
 /// ```
 pub fn register_shortcut<S: Registerable>(module: &str, description: &str, shortcut: S, override_existing: bool, callback: fn()) -> Result<(), String> {
     let key_code = shortcut.key_code();
@@ -638,6 +636,10 @@ pub fn list_shortcuts() -> String {
 /// # Example
 ///
 /// ```rust
+/// use openztlib::shortcuts::{Key, Ctrl};
+/// use openztlib::shortcut;
+/// use windows::Win32::UI::Input::KeyboardAndMouse::VK_F6;
+///
 /// shortcut!(
 ///     "ztgamemgr",
 ///     "Add $10,000 to budget",

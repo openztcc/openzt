@@ -138,10 +138,10 @@ mod roofs;
 mod dll_dependencies;
 
 /// Global runtime state store for cross-module state sharing
-mod runtime_state;
+pub mod runtime_state;
 
 /// Keyboard shortcut registration system for game thread callbacks
-mod shortcuts;
+pub mod shortcuts;
 
 /// Patches in the current OpenZT build version into the game's version string.
 mod version;

@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```rust
-//! use openzt::runtime_state;
+//! use openztlib::runtime_state;
 //!
 //! // Store and retrieve boolean values
 //! runtime_state::set_bool("my_feature_enabled", true);
@@ -16,7 +16,7 @@
 //! let new_state = runtime_state::toggle_bool("my_feature_enabled"); // false
 //!
 //! // Store and retrieve string values
-//! runtime_state::set_string("last_file", "config.txt");
+//! runtime_state::set_string("last_file", "config.txt".to_string());
 //! let file = runtime_state::get_string("last_file"); // "config.txt"
 //!
 //! // Check if a key exists

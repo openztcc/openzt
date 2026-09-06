@@ -6110,6 +6110,8 @@ pub mod zthabitat {
     pub const GET_GATE_TILE_IN: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> *const u32> = FunctionDef{address: 0x00410349, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/get_all_animals"))]
     pub const GET_ALL_ANIMALS: FunctionDef<unsafe extern "thiscall" fn(*const u32, i8) -> *const i32> = FunctionDef{address: 0x00410def, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/get_species_list"))]
+    pub const GET_SPECIES_LIST: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> i32> = FunctionDef{address: 0x00410f26, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/get_gate_tile_out"))]
     pub const GET_GATE_TILE_OUT: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> i32> = FunctionDef{address: 0x00411285, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/get_num_animals"))]
@@ -6132,10 +6134,14 @@ pub mod zthabitat {
     pub const UPDATE_PORTALS: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x0043578f, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/update"))]
     pub const UPDATE: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32)> = FunctionDef{address: 0x004357c6, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/get_attractiveness"))]
+    pub const GET_ATTRACTIVENESS: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> i32> = FunctionDef{address: 0x0043aaea, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/get_size"))]
     pub const GET_SIZE: FunctionDef<unsafe extern "thiscall" fn(*const u32, bool) -> i32> = FunctionDef{address: 0x0044097c, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/recalculate_characteristics"))]
     pub const RECALCULATE_CHARACTERISTICS: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x00444827, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/construct_surrounding_species_list"))]
+    pub const CONSTRUCT_SURROUNDING_SPECIES_LIST: FunctionDef<unsafe extern "fastcall" fn(*const i32)> = FunctionDef{address: 0x00446265, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/revise_species_list"))]
     pub const REVISE_SPECIES_LIST: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x00447dc1, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitat/add_species"))]
@@ -6240,6 +6246,8 @@ pub mod zthabitatmgr {
     pub const SCENERY_ENTITY_CHANGE: FunctionDef<unsafe extern "thiscall" fn(*const u32, i32)> = FunctionDef{address: 0x00417295, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitatmgr/replace_gate"))]
     pub const REPLACE_GATE: FunctionDef<unsafe extern "thiscall" fn(*const u32)> = FunctionDef{address: 0x0041ec94, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("zthabitatmgr/get_num_species"))]
+    pub const GET_NUM_SPECIES: FunctionDef<unsafe extern "fastcall" fn(*const u32) -> i32> = FunctionDef{address: 0x0041f0a6, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitatmgr/get_nonempty_non_world_habitats"))]
     pub const GET_NONEMPTY_NON_WORLD_HABITATS: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const c_void)> = FunctionDef{address: 0x00440d9a, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitatmgr/recalculate_deterioration"))]
@@ -6366,6 +6374,10 @@ pub mod zthabitatmgr {
     pub const SPLIT_TANK_INTO_LAND: FunctionDef<unsafe extern "thiscall" fn(*const u32, *const i32, *const u32, *const u32) -> u32> = FunctionDef{address: 0x006044a5, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("zthabitatmgr/terrain_tile_changed"))]
     pub const TERRAIN_TILE_CHANGED: FunctionDef<unsafe extern "thiscall" fn(*const u32, i32)> = FunctionDef{address: 0x0060497a, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("zthabitatmgr/get_num_families"))]
+    pub const GET_NUM_FAMILIES: FunctionDef<unsafe extern "fastcall" fn(i32) -> i32> = FunctionDef{address: 0x006049b5, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("zthabitatmgr/get_average_habitat_attractiveness"))]
+    pub const GET_AVERAGE_HABITAT_ATTRACTIVENESS: FunctionDef<unsafe extern "fastcall" fn(i32) -> i32> = FunctionDef{address: 0x00604aae, function_type: PhantomData};
 }
 
 // ZTHelicopter class functions
@@ -7180,6 +7192,8 @@ pub mod ztscenariosimplegoal {
     pub const GET_STATE: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> u32> = FunctionDef{address: 0x0041d754, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztscenariosimplegoal/eval00"))]
     pub const EVAL00: FunctionDef<unsafe extern "fastcall" fn(i32) -> u32> = FunctionDef{address: 0x0041da81, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("ztscenariosimplegoal/eval03"))]
+    pub const EVAL03: FunctionDef<unsafe extern "thiscall" fn(*const u32) -> i32> = FunctionDef{address: 0x0041dcfa, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztscenariosimplegoal/update"))]
     pub const UPDATE: FunctionDef<unsafe extern "thiscall" fn(*const u32, u32)> = FunctionDef{address: 0x004240f5, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("ztscenariosimplegoal/set_state"))]
@@ -9426,6 +9440,8 @@ pub mod standalone {
     pub const NULLSUB_17: FunctionDef<unsafe extern "stdcall" fn()> = FunctionDef{address: 0x004b31cf, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/time"))]
     pub const TIME: FunctionDef<unsafe extern "cdecl" fn(*const i32)> = FunctionDef{address: 0x004bc0c7, function_type: PhantomData};
+    #[cfg_attr(feature = "detour-validation", validate_detour("standalone/get_old_date"))]
+    pub const GET_OLD_DATE: FunctionDef<unsafe extern "stdcall" fn() -> i64> = FunctionDef{address: 0x004c2bb9, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/fopen"))]
     pub const FOPEN: FunctionDef<unsafe extern "cdecl" fn(u32, *const i8) -> *const u32> = FunctionDef{address: 0x004c641b, function_type: PhantomData};
     #[cfg_attr(feature = "detour-validation", validate_detour("standalone/nullsub_18"))]

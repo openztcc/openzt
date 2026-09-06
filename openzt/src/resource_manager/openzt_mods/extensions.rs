@@ -306,7 +306,7 @@ fn guess_entity_type_from_vtable(vtable: u32) -> Option<LegacyEntityType> {
 /// * `None` - If the entity type cannot be determined
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// if let Some(base) = get_entity_base(entity_ptr) {
 ///     println!("Entity base: {}", base); // "legacy.scenery.statue"
 /// }
