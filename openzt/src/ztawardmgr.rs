@@ -116,7 +116,7 @@ pub fn earned_count() -> i32 {
 /// shared, matching `ztthoughtmgr.rs`'s own precedent.
 fn write_dword(file: *const u32, value: u32) -> bool {
     let bytes = value.to_le_bytes();
-    unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) }
+    (unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) }) == 1
 }
 
 /// Reads a single little-endian dword via whatever is installed at the vanilla read-primitive address
@@ -146,12 +146,20 @@ pub fn save(file: *const u32) -> bool {
 /// (`i32` count + `i32[count]`) byte-for-byte.
 pub fn load(file: *const u32) -> bool {
     AWARD_MGR.lock().unwrap().earned_ids.clear();
-    let Some(count) = read_dword(file) else { return false };
+    let Some(count) = read_dword(file) else {
+        return false;
+    };
     let mut ok = true;
     for _ in 0..count {
         match read_dword(file) {
             Some(id) => add_award(id as i32),
-            None => ok = false,
+            None => {
+                // A corrupted/truncated stream fails every subsequent read identically - stop instead
+                // of spinning through the rest of `count` (which can be a huge garbage value read off
+                // a corrupted save).
+                ok = false;
+                break;
+            }
         }
     }
     ok
@@ -540,6 +548,23 @@ pub(crate) mod live_support {
         let tooltip_id = get_from_memory::<i32>(node + 0x18);
         out.push((key, name_id, tooltip_id));
         walk_tree(get_from_memory::<u32>(node + 0xc), out);
+    }
+
+    /// Read-only, direct-memory read of the real vanilla `vector<int>` at `+0xc`/`+0x10` (begin/end) -
+    /// the earned-award-id set `addAward`/`save`/`load` maintain directly, per
+    /// `private/docs/vtables/ZTAwardMgr.md`. Used by the real-zoo save/load round-trip test to see what
+    /// real, undetoured vanilla `ZTAwardMgr::load` actually populated from the loaded zoo file - nothing
+    /// in `AWARD_MGR` mirrors it, since this test build never installs `award_mgr_detours` (see
+    /// `reimplementation_tests/mod.rs`'s own `init()` doc comment on why). Never mutates anything.
+    pub(crate) fn read_vanilla_earned_ids() -> Vec<i32> {
+        let this = real_ptr() as u32;
+        let begin = get_from_memory::<u32>(this + 0xc);
+        let end = get_from_memory::<u32>(this + 0x10);
+        if begin == 0 || end <= begin {
+            return Vec::new();
+        }
+        let count = ((end - begin) / 4) as usize;
+        (0..count).map(|i| get_from_memory::<i32>(begin + (i * 4) as u32)).collect()
     }
 }
 

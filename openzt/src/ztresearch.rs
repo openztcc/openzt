@@ -990,7 +990,17 @@ impl ZTResearchBranch {
         if rate <= 0.0 {
             return None;
         }
-        let raw = (((program.target_cost - program.current_progress) * 100.0) / program.target_cost).trunc();
+        // The subtract/multiply/divide chain runs in `f64`, not `f32`, to approximate the x87 FPU's own
+        // 80-bit extended-precision intermediates: real vanilla never rounds `(target_cost -
+        // current_progress) * 100.0` down to a 32-bit float before dividing by `target_cost`, but plain
+        // `f32` arithmetic (this project's i686 target uses SSE2, rounding after every op) does. That
+        // extra rounding is invisible for most inputs but flips the truncated integer at the boundary:
+        // live-reproduced for `target_cost=-0.7881632, current_progress=0.0` (mathematically exactly
+        // `100`), where strict per-op `f32` gives `99.99999237` (truncates to `99`) but real vanilla
+        // returns `100` - `f64` intermediates reproduce vanilla's `100` exactly.
+        let target_cost = program.target_cost as f64;
+        let current_progress = program.current_progress as f64;
+        let raw = (((target_cost - current_progress) * 100.0) / target_cost).trunc();
         Some(if raw.is_finite() { raw as i64 as i32 } else { 0 })
     }
 
@@ -3749,7 +3759,7 @@ pub(crate) mod research_save_reimplementation {
             let mgr = unsafe { ref_from_memory::<ZTResearchMgr>(this) };
             let bytes = serialize(&snapshot_mgr(mgr));
 
-            let ok = unsafe { standalone::WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) };
+            let ok = unsafe { standalone::WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) } == 1;
             if !ok {
                 error!("research-save-reimplementation: WriteBytesToFile failed writing {} research bytes", bytes.len());
             }

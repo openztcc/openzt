@@ -4,8 +4,10 @@
 //! real vanilla functions that used to dereference those classes' raw memory directly (and would
 //! otherwise crash against Stage 1's synthetic handles/sentinels) onto that store's id-keyed accessors.
 //!
-//! `ZTShow`/`ZTShowInfo`/`ZTShowMgr` themselves stay real, un-virtualized vanilla memory - only the
-//! embedded show-script data moved into Rust. Field offsets below are confirmed directly from
+//! `ZTShow`/`ZTShowInfo` themselves stay real, un-virtualized vanilla memory - only the
+//! embedded show-script data moved into Rust. (`ZTShowMgr` has since started its own reimplementation -
+//! see `ztshowmgr.rs`; this module reads only its threshold fields off the live global.) Field offsets
+//! below are confirmed directly from
 //! `.asm`-level reads (see each function's doc comment), not the (less reliable) decompiled `.c` alone,
 //! except where noted as semantics-unconfirmed-but-byte-faithful.
 //!
@@ -20,7 +22,7 @@ use openzt_detour::generated::{
     ztgamemgr::GET_DATE,
     ztshow::{
         CALCULATE_PERCENT_ADJUSTMENT, CHECK_SCRIPT, CLEAR_SHOW_SCRIPT_STATES, DO_CURRENT_ITEM, DO_KEEPER_EVENT, DO_TRICK_EVENT,
-        GATHER_UNITS, GET_SHOW_SCRIPT_STATE, REINIT, RESOLVE_NEXT_SCHEDULED_SCRIPT_ID, START, STOP_0, VALIDATE, VALIDATE_ITEM,
+        GATHER_UNITS, REINIT, RESOLVE_NEXT_SCHEDULED_SCRIPT_ID, START, STOP_0, VALIDATE, VALIDATE_ITEM,
     },
     ztshowinfo::{
         ADD_SCRIPT, ADD_SHOW, CHECK_PENDING_SCRIPTS, CHECK_UNIT, CHECK_UNIT_TYPE, GET_NUM_UNITS, GET_SHOW_UNIT_LIST, IS_STARTED,
@@ -40,20 +42,6 @@ use crate::{
     util::{get_from_memory, save_to_memory},
     ztmegatilemgr::entity_type_matches,
 };
-
-/// Partial, `#[repr(C)]` mirror of vanilla `ZTShowMgr` (real size `0x44`, `ZTShowScriptMgr` embedded at
-/// `+0x34` - see the plan's "Composition" section) - only exposes the three `doTrickEvent` threshold
-/// fields Stage 2 currently needs. Not size-asserted since the rest of the struct is unmapped.
-#[repr(C)]
-pub struct ZTShowMgr {
-    _unmapped_0x0: [u8; 0x8],
-    /// `+0x8` - semantics unconfirmed (comparison order faithfully preserved from `ZTShow_doTrickEvent.asm`).
-    pub threshold_a: u32,
-    /// `+0xc` - semantics unconfirmed.
-    pub threshold_b: u32,
-    /// `+0x10` - semantics unconfirmed.
-    pub threshold_c: u32,
-}
 
 /// `DAT_006386b0`'s RVA - the same vtable-slot-`0x1c` "isKindOf"-style type-check argument used by
 /// `ztmegatilemgr::entity_type_matches`'s own callers, here gating `doCurrentItem`/`validateItem`'s
@@ -90,12 +78,50 @@ pub fn check_unit_type(this: u32, unit_type: u32) -> u32 {
     }
 }
 
+/// Pure `_Tree::find` descent over `ZTShow::getShowScriptState`'s script-state map, per
+/// `AI_cls_0x404fd6_find.asm`: standard MSVC lower-bound-then-equality-check shape, node layout
+/// `+0x8` left, `+0xc` right, `+0x10` key (a full **32-bit** compare, confirmed via `.asm` - not the
+/// 16-bit width a unit id might suggest), `+0x14` value. `header` is the map's own header/nil node
+/// (self-referential when empty, matching every other `_Tree` header this codebase has already
+/// ported); this returns the header itself on a miss, exactly like vanilla's own descent, leaving the
+/// final equality check to the caller.
+fn find_script_state_node(header: u32, key: u32) -> u32 {
+    let mut candidate = header;
+    let mut node = get_from_memory::<u32>(header + 0x4);
+    while node != 0 {
+        if get_from_memory::<u32>(node + 0x10) < key {
+            node = get_from_memory::<u32>(node + 0xc);
+        } else {
+            candidate = node;
+            node = get_from_memory::<u32>(node + 0x8);
+        }
+    }
+    candidate
+}
+
+/// Reimplementation of `ZTShow::getShowScriptState` (`ztshow::GET_SHOW_SCRIPT_STATE`, `0x0059eb99`,
+/// deliberately left un-detoured - nothing needs interception, and external un-decompiled callers keep
+/// working unchanged): a plain, read-only lookup in the `std::map<u32, ZTShowScriptState*>` whose
+/// header lives at `ztshow+0x34` (`show_info+0x38`, per `ztshowmgr.rs`'s `is_doing_show`/
+/// `is_show_script_done` callers). Reads vanilla's still-vanilla-owned, vanilla-written, vanilla-freed
+/// tree directly in place - no ownership claim, no allocator interaction, same "narrow vanilla-memory
+/// carve-out" this file's other tree readers already rely on.
+pub fn get_show_script_state(ztshow: u32, key: u32) -> u32 {
+    let header = get_from_memory::<u32>(ztshow + 0x34);
+    let candidate = find_script_state_node(header, key);
+    if candidate != header && get_from_memory::<u32>(candidate + 0x10) <= key {
+        get_from_memory::<u32>(candidate + 0x14)
+    } else {
+        0
+    }
+}
+
 /// Reimplementation of `ZTShow::doCurrentItem`, per `ZTShow_doCurrentItem.c`/`.asm`. `this` is `ZTShow*`;
 /// `+0x4` its assigned script id (u16), `+0x6` a secondary u16 field passed through to the unit's own
 /// trick-dispatch call (semantics unconfirmed - same raw field `ZTShow::start` also propagates onto units,
 /// per that function's own decompile).
 pub fn do_current_item(this: u32, unit_id: u32) -> i32 {
-    let state = unsafe { GET_SHOW_SCRIPT_STATE.original()(this as *const u32, unit_id) };
+    let state = get_show_script_state(this, unit_id);
     if state == 0 {
         return 5;
     }
@@ -587,7 +613,12 @@ pub fn start(this: u32) {
             unsafe { REMOVE_UNIT.original()(show_info as *const u32, unit_type_for_list, &unit_id as *const u32 as *const i32) };
         } else {
             let assigned_show_id = get_from_memory::<u16>(unit_ptr + 0x254);
-            let owning_show_info = unsafe { GET_SHOW_INFO.original()(globals().ztshowmgr_ptr() as *const u32, assigned_show_id) };
+            // `.hooked()`, not `.original()`: `ZTShowMgr::getShowInfo` is detoured onto the Rust
+            // registered-shows store since `ztshowmgr.rs`'s stage 4, and this call site wants exactly
+            // what any other real caller of the address now gets (the `load_display_string` precedent
+            // in `ztshowui.rs`). A release build's raw-cast `.original()` would be an accidental
+            // re-entry here while debug silently routed to vanilla's tree instead.
+            let owning_show_info = unsafe { GET_SHOW_INFO.hooked()(globals().ztshowmgr_ptr() as *const u32, assigned_show_id) };
             let needs_state = (owning_show_info != 0 && unsafe { IS_STARTED.original()(owning_show_info as *const u32) } == 0)
                 || !unsafe { call_entity_vtable_noargs(unit_ptr, 0x22c) };
             if needs_state {
@@ -635,6 +666,19 @@ fn collect_pending_script_nodes(node: u32, out: &mut Vec<u32>) {
     collect_pending_script_nodes(get_from_memory::<u32>(node + 0x8), out);
     out.push(node);
     collect_pending_script_nodes(get_from_memory::<u32>(node + 0xc), out);
+}
+
+/// Live node count for `show_info`'s pending-scripts tree (`+0x44`), via the same trusted, always-compiled
+/// walk [`check_pending_scripts`] itself runs every tick - unlike `live_support::collect_pending_script_nodes`
+/// (only compiled under `reimplementation-tests`), this is available to any build, specifically so
+/// `zthabitatmgr.rs`'s `save_load_diag` module can compare "what does the live tree actually contain right
+/// after load" against "what does the file say on reload" for `ztshow-save-corruption-investigation.md`.
+pub(crate) fn pending_script_node_count(show_info: u32) -> usize {
+    let header = get_from_memory::<u32>(show_info + 0x44);
+    let root = get_from_memory::<u32>(header + 4);
+    let mut nodes = Vec::new();
+    collect_pending_script_nodes(root, &mut nodes);
+    nodes.len()
 }
 
 /// Reimplementation of `ZTShowInfo::checkPendingScripts`, per `ZTShowInfo_checkPendingScripts.c`/`.asm`.
@@ -818,9 +862,27 @@ fn plan_pending_node_insert(header: u32, unit_type_id: u32) -> PendingNodeInsert
     }
 }
 
+/// `show_info + 0x48` is **not** part of the tree's own header (that lives behind the pointer at
+/// `show_info + 0x44` - a separately-allocated `AI_cls_0x404fd6` control block; `header + 4`/`header + 8` are
+/// its real root/leftmost fields, per [`plan_pending_node_insert`]'s own use of `header`). `show_info + 0x48`
+/// is a **separate cached node count** `ZTShowInfo` maintains itself: real vanilla `ZTShowInfo::save`
+/// (`ZTShowInfo_save.c` line 61-62) writes this field's raw value directly to disk immediately before the
+/// tree-walk loop, and real vanilla `ZTShowInfo::load` reads that exact file position back as the tile-record
+/// loop's iteration count (`ZTShowInfo_load.c` line 100's `local_e4`) - i.e. this field, not a tree walk, is
+/// the save format's authoritative node count. Confirmed live (`ztshowinfo-pending-scripts-tree-plan.md`):
+/// with a real tree holding 3 nodes (`pending_script_node_count` walk, matching file content), `show_info +
+/// 0x48` read directly (no indirection through `header` at all) held `2` - stale, stuck at whatever `load`
+/// originally set it to. Real vanilla's own insert helper (`AI_cls_0x404fd6::meth_0x5abe74`, not called here -
+/// this function is an independent reimplementation) must increment it on every genuine insert; not
+/// replicating that was the actual root cause of the save-corruption bug this plan document investigates.
+fn increment_pending_script_node_count(show_info: u32) {
+    let count = get_from_memory::<u32>(show_info + 0x48);
+    save_to_memory(show_info + 0x48, count + 1);
+}
+
 pub(crate) fn find_or_insert_pending_script_node(show_info: u32, unit_type_id: u32) -> (u32, bool) {
     let header = get_from_memory::<u32>(show_info + 0x44);
-    match plan_pending_node_insert(header, unit_type_id) {
+    let result = match plan_pending_node_insert(header, unit_type_id) {
         PendingNodeInsertPlan::Found(node) => (node, false),
         PendingNodeInsertPlan::NewRoot => {
             let new_node = allocate_pending_script_node(unit_type_id);
@@ -844,7 +906,11 @@ pub(crate) fn find_or_insert_pending_script_node(show_info: u32, unit_type_id: u
             save_to_memory(parent + 0xc, new_node);
             (new_node, true)
         }
+    };
+    if result.1 {
+        increment_pending_script_node_count(show_info);
     }
+    result
 }
 
 /// Reimplementation of `ZTShowInfo::addScript`, per `ZTShowInfo_addScript.c`/`.asm`. Assigns `new_script_id`
@@ -975,24 +1041,42 @@ pub fn init() {
 pub(crate) mod live_support {
     use super::*;
 
-    /// Allocates and zero-initializes a standalone, `0xb0`-byte `ZTShowInfo` buffer via the real vanilla
+    /// Allocates and zero-initializes a standalone, `0xa8`-byte `ZTShowInfo` buffer via the real vanilla
     /// allocator (`standalone::OPERATOR_NEW`) - **without** running the real `ZTShowInfo::ZTShowInfo` ctor,
     /// which unconditionally dereferences an unconfirmed `GLOBAL_ZTAIMgr` field (see `start`'s own doc
-    /// comment on why that field is skipped project-wide). Real size `0xb0`, confirmed via
-    /// `ZTHabitat_setIsShowExhibit.c`'s own `new(0xb0)`.
+    /// comment on why that field is skipped project-wide). Real size `0xa8` on Windows, confirmed via
+    /// `ZTHabitat_setIsShowExhibit.c`'s own `new(0xa8)` (macOS uses `0xb0` - a real per-platform struct-size
+    /// difference, not a bug; this project builds for Windows).
     ///
     /// The one piece of real-ctor state this buffer *does* need is the pending-scripts tree header at
-    /// `+0x44` (`AI_cls_0x404fd6`, read by `ZTShowInfo::addScript`/`checkPendingScripts`/
-    /// `find_or_insert_pending_script_node`): its own first field is a self-pointer sentinel (confirmed via
-    /// `AI_cls_0x404fd6::find`'s decompile treating a "not found" result as "equal to the value read from
-    /// `this`'s own first field" - the standard self-referencing-header pattern), so this writes
-    /// `*(show_info+0x44) = show_info+0x44` before returning; without it, `find`/`find_or_insert_pending_
-    /// script_node` would dereference a null header and crash on the very first call. Every other field
-    /// stays zeroed, matching what the real ctor's own explicit zero-writes to `+0x50..+0xa4` already
-    /// produce (see `ZTShowInfo_ZTShowInfo.c`) - the fields this buffer's zero-init does *not* match the
-    /// real ctor for are `+0x68` (real ctor sets `1`) and the `GLOBAL_ZTAIMgr`-derived `+0x6c`/`+0x70`
-    /// fields, none of which `add_script`/`check_pending_scripts`/`check_owning_habitat` (this buffer's
-    /// intended consumers) ever read.
+    /// `+0x44`: `find_or_insert_pending_script_node`/`plan_pending_node_insert` dereference `header+4`
+    /// (root) and `header+8` (leftmost), so `+0x44` must hold a valid, writable pointer, not null.
+    ///
+    /// **Does not point `+0x44` at `show_info` itself.** An earlier version of this function wrote
+    /// `*(show_info+0x44) = show_info+0x44`, treating the header as embedded in place - modeled on
+    /// `AI_cls_0x404fd6`'s self-referencing-sentinel pattern, but that pattern describes the header
+    /// object's own internal layout, not where it lives. `ztshowinfo-pending-scripts-tree-plan.md`'s
+    /// live investigation of a *real* `ZTShowInfo` disproves the embedded reading directly: `header`'s
+    /// value (read from `this+0x44`) did **not** equal `this+0x44`, proving the header is a genuinely
+    /// separate allocation for real objects. Aliasing it onto `show_info` here made `header+4` land on
+    /// `show_info+0x48` - a real, distinct `ZTShowInfo` field (`increment_pending_script_node_count`'s
+    /// save-format node count). The very first `find_or_insert_pending_script_node` insert would then
+    /// increment that field by reading the tree's own justwritten root pointer as if it were a small
+    /// integer count and writing back `root_pointer + 1`, corrupting the root into an unmapped address -
+    /// live-reproduced via `crash-capture`: an access violation on `mov edx,[ecx+0x10]` with `ecx` a
+    /// bogus, non-heap value once the corrupted "root" was dereferenced on the next lookup.
+    ///
+    /// Fixed by allocating the header as its own, separate `0xc`-byte block (`self`/`root`/`leftmost` -
+    /// the three fields `find_or_insert_pending_script_node`'s Rust logic actually reads/writes; real
+    /// vanilla's own `AI_cls_0x404fd6::find` is never called through this buffer, so no larger real-struct
+    /// size is needed here) and storing *that* block's address at `show_info+0x44` - the same
+    /// separate-allocation shape `reimplementation_tests/mod.rs`'s `ZTSHOWMGR_ENTER_NEW_MONTH` test already
+    /// uses for its own `init_pending_script_header` helper. Every other field of `show_info` stays zeroed,
+    /// matching what the real ctor's own explicit zero-writes to `+0x50..+0xa4` already produce (see
+    /// `ZTShowInfo_ZTShowInfo.c`) - the fields this buffer's zero-init does *not* match the real ctor for
+    /// are `+0x68` (real ctor sets `1`) and the `GLOBAL_ZTAIMgr`-derived `+0x6c`/`+0x70` fields, none of
+    /// which `add_script`/`check_pending_scripts`/`check_owning_habitat` (this buffer's intended consumers)
+    /// ever read.
     ///
     /// Deliberately never freed by a matching helper here: this is a one-shot smoke-test buffer (see
     /// `reimplementation_tests/mod.rs`'s `ZTSHOWINFO_ADD_SCRIPT_CHECK_PENDING_SCRIPTS_LIVE` test), and real
@@ -1000,12 +1084,17 @@ pub(crate) mod live_support {
     /// `+0x50`/`+0x54`/`+0x58` dynamic array by the time the test finishes - freeing only the outer buffer
     /// while leaving that memory dangling would be a partial/incorrect teardown, so per CLAUDE.md's
     /// leak-only-teardown precedent (`ztthoughtmgr.rs`'s `destroy_standalone_mgr_leaking_nodes`), this
-    /// buffer and anything real vanilla code links into it are just left allocated for the rest of the
-    /// (short, one-shot) test process's lifetime instead.
+    /// buffer, its separately-allocated header block, and anything real vanilla code links into it are just
+    /// left allocated for the rest of the (short, one-shot) test process's lifetime instead.
     pub(crate) fn build_standalone_show_info() -> u32 {
-        let show_info = unsafe { OPERATOR_NEW.original()(0xb0) } as u32;
-        unsafe { std::ptr::write_bytes(show_info as *mut u8, 0, 0xb0) };
-        save_to_memory(show_info + 0x44, show_info + 0x44);
+        let show_info = unsafe { OPERATOR_NEW.original()(0xa8) } as u32;
+        unsafe { std::ptr::write_bytes(show_info as *mut u8, 0, 0xa8) };
+
+        let header = unsafe { OPERATOR_NEW.original()(0xc) } as u32;
+        unsafe { std::ptr::write_bytes(header as *mut u8, 0, 0xc) };
+        save_to_memory(header, header);
+        save_to_memory(show_info + 0x44, header);
+
         show_info
     }
 
@@ -1081,6 +1170,44 @@ mod tests {
         assert_eq!(*removed.borrow(), vec![11, 13]);
         assert_eq!(*items.borrow(), vec![10, 12, 14]);
     }
+
+    /// Fixed stand-in for one script-state map node, laid out at the same `+0x8`/`+0xc`/`+0x10`/`+0x14`
+    /// (left/right/key/value) offsets [`find_script_state_node`]/[`get_show_script_state`] read.
+    #[repr(C)]
+    struct FakeStateNode {
+        _unused: [u8; 8],
+        left: u32,
+        right: u32,
+        key: u32,
+        value: u32,
+    }
+
+    #[test]
+    fn get_show_script_state_returns_zero_for_empty_tree() {
+        let mut show = [0u8; 0x38];
+        let header = [0u8; 0x18];
+        let header_addr = header.as_ptr() as u32;
+        save_to_memory(show.as_mut_ptr() as u32 + 0x34, header_addr);
+        let this = show.as_ptr() as u32;
+        assert_eq!(get_show_script_state(this, 0), 0);
+        assert_eq!(get_show_script_state(this, 0xffff_ffff), 0);
+    }
+
+    #[test]
+    fn get_show_script_state_finds_single_node_and_misses_other_keys() {
+        let mut show = [0u8; 0x38];
+        let mut header = [0u8; 0x18];
+        let node = FakeStateNode { _unused: [0; 8], left: 0, right: 0, key: 7, value: 0xdead_beef };
+        let node_addr = &node as *const FakeStateNode as u32;
+        save_to_memory(header.as_mut_ptr() as u32 + 4, node_addr);
+        let header_addr = header.as_ptr() as u32;
+        save_to_memory(show.as_mut_ptr() as u32 + 0x34, header_addr);
+        let this = show.as_ptr() as u32;
+
+        assert_eq!(get_show_script_state(this, 7), 0xdead_beef);
+        assert_eq!(get_show_script_state(this, 6), 0);
+        assert_eq!(get_show_script_state(this, 8), 0);
+    }
 }
 
 #[cfg(test)]
@@ -1104,13 +1231,28 @@ mod pending_node_plan_tests {
     /// `ptr::read`/`ptr::write`, so real heap addresses of these Rust allocations work exactly like real
     /// game memory addresses would.
     struct Arena {
-        header: Box<[u8; 0xc]>,
+        // 0x10 bytes, not the tree header's real 0xc: the vanilla successor-walk this module's own
+        // `vanilla_inorder_walk` test replica transliterates reads one field past the header
+        // (`header+0xc`, the real game's *separate*, unrelated `ZTShowInfo+0x50` field per
+        // `find_or_insert_pending_script_node`'s own doc comment) as part of its climb-termination check -
+        // a too-small buffer here reads out of bounds instead of the deterministic zero a real adjacent
+        // field would (usually) provide.
+        header: Box<[u8; 0x10]>,
         nodes: Vec<Box<FakeNode>>,
     }
 
     impl Arena {
+        /// Matches real vanilla `AI_cls_0x404fd6`'s own constructor: an empty tree's `leftmost` cache is
+        /// self-referential (`header+8 == &header`), not null - confirmed via `ZTShowInfo_save.c`'s own
+        /// empty-tree check (`iVar3 != iVar2` where both start as the header's self-pointer). Getting this
+        /// wrong crashes [`vanilla_inorder_walk`] on an empty tree (reads from address `0xc` instead of
+        /// returning immediately) rather than silently mis-testing anything - caught by
+        /// `vanilla_walk_empty_tree` itself the first time this was tried without the fixup.
         fn new() -> Self {
-            Arena { header: Box::new([0u8; 0xc]), nodes: Vec::new() }
+            let mut arena = Arena { header: Box::new([0u8; 0x10]), nodes: Vec::new() };
+            let header = arena.header_addr();
+            save_to_memory(header + 8, header);
+            arena
         }
 
         fn header_addr(&self) -> u32 {
@@ -1198,5 +1340,154 @@ mod pending_node_plan_tests {
         arena.set_root(root);
         arena.set_leftmost(left_child);
         assert_eq!(plan_pending_node_insert(arena.header_addr(), 7), PendingNodeInsertPlan::InsertRight { parent: left_child });
+    }
+
+    /// Full mutation (not just the pure decision) for [`Arena`]-backed test nodes: mirrors
+    /// [`super::find_or_insert_pending_script_node`]'s real memory writes exactly (parent pointer, child
+    /// slot, leftmost cache), just allocating via [`Arena::push_node`] instead of real vanilla
+    /// `OPERATOR_NEW`. Returns the node address (new or existing).
+    fn insert(arena: &mut Arena, key: u32) -> u32 {
+        let header = arena.header_addr();
+        match plan_pending_node_insert(header, key) {
+            PendingNodeInsertPlan::Found(node) => node,
+            PendingNodeInsertPlan::NewRoot => {
+                let node = arena.push_node(key, 0, 0);
+                save_to_memory(node + 4, header);
+                arena.set_root(node);
+                arena.set_leftmost(node);
+                node
+            }
+            PendingNodeInsertPlan::InsertLeft { parent, parent_is_leftmost } => {
+                let node = arena.push_node(key, 0, 0);
+                save_to_memory(node + 4, parent);
+                save_to_memory(parent + 8, node);
+                if parent_is_leftmost {
+                    arena.set_leftmost(node);
+                }
+                node
+            }
+            PendingNodeInsertPlan::InsertRight { parent } => {
+                let node = arena.push_node(key, 0, 0);
+                save_to_memory(node + 4, parent);
+                save_to_memory(parent + 0xc, node);
+                node
+            }
+        }
+    }
+
+    /// Faithful, unmodified transliteration of real vanilla `ZTShowInfo::save`'s in-order tree walk
+    /// (`ZTShowInfo_save.c` lines 63-136: the standard Dinkumware/MSVC `_Tree::_Inc` successor algorithm -
+    /// climb via the parent pointer when there's no right child, otherwise descend to the right subtree's
+    /// leftmost node), starting from the header's leftmost cache and stopping when the walk returns to the
+    /// header itself. This exists to answer one question empirically rather than by further manual
+    /// decompile arithmetic (already a source of at least one wrong turn on this same investigation - see
+    /// `ztshow-save-corruption-investigation.md`): does this algorithm visit every node of a tree built via
+    /// [`super::find_or_insert_pending_script_node`], for a variety of insertion orders? If it silently
+    /// visits **fewer** nodes than were inserted, that's byte-for-byte the same shape as the live symptom
+    /// this investigation is chasing (`ZTHabitatMgr`'s own reload consuming 76,598 real file-read calls
+    /// instead of 211, immediately downstream of an under-sized node count read back from disk).
+    fn vanilla_inorder_walk(header: u32) -> Vec<u32> {
+        let mut visited = Vec::new();
+        let mut node = get_from_memory::<u32>(header + 8); // leftmost
+        if node == header {
+            return visited;
+        }
+        loop {
+            visited.push(node);
+            let right = get_from_memory::<u32>(node + 0xc);
+            if right != 0 {
+                node = right;
+                loop {
+                    let left = get_from_memory::<u32>(node + 8);
+                    if left == 0 {
+                        break;
+                    }
+                    node = left;
+                }
+            } else {
+                let mut parent = get_from_memory::<u32>(node + 4);
+                if node == get_from_memory::<u32>(parent + 0xc) {
+                    loop {
+                        node = parent;
+                        parent = get_from_memory::<u32>(node + 4);
+                        if node != get_from_memory::<u32>(parent + 0xc) {
+                            break;
+                        }
+                    }
+                }
+                if get_from_memory::<u32>(node + 0xc) != parent {
+                    node = parent;
+                }
+            }
+            if node == header {
+                break;
+            }
+        }
+        visited
+    }
+
+    fn keys_of(arena: &Arena, nodes: &[u32]) -> Vec<u32> {
+        nodes.iter().map(|&n| get_from_memory::<u32>(n + 0x10)).collect()
+    }
+
+    #[test]
+    fn vanilla_walk_visits_every_node_ascending_insert() {
+        let mut arena = Arena::new();
+        for key in [1, 2, 3, 4, 5, 6, 7, 8] {
+            insert(&mut arena, key);
+        }
+        let visited = vanilla_inorder_walk(arena.header_addr());
+        assert_eq!(keys_of(&arena, &visited), vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn vanilla_walk_visits_every_node_descending_insert() {
+        let mut arena = Arena::new();
+        for key in [8, 7, 6, 5, 4, 3, 2, 1] {
+            insert(&mut arena, key);
+        }
+        let visited = vanilla_inorder_walk(arena.header_addr());
+        assert_eq!(keys_of(&arena, &visited), vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn vanilla_walk_visits_every_node_mixed_insert_order() {
+        let mut arena = Arena::new();
+        for key in [50, 25, 75, 10, 30, 60, 90, 5, 15, 27, 40, 55, 65, 80, 95] {
+            insert(&mut arena, key);
+        }
+        let mut expected: Vec<u32> = vec![50, 25, 75, 10, 30, 60, 90, 5, 15, 27, 40, 55, 65, 80, 95];
+        expected.sort();
+        let visited = vanilla_inorder_walk(arena.header_addr());
+        assert_eq!(keys_of(&arena, &visited), expected);
+    }
+
+    #[test]
+    fn vanilla_walk_after_new_node_becomes_new_overall_rightmost() {
+        // Reproduces the live scenario this investigation is chasing: a tree already containing several
+        // nodes (standing in for tricks loaded from a real file, built via real vanilla's own insert) gets
+        // exactly one more node added afterwards (standing in for a single "Add" click during the live
+        // session), with the new key larger than everything already present.
+        let mut arena = Arena::new();
+        for key in [10, 20, 30, 40] {
+            insert(&mut arena, key);
+        }
+        insert(&mut arena, 999);
+        let visited = vanilla_inorder_walk(arena.header_addr());
+        assert_eq!(keys_of(&arena, &visited), vec![10, 20, 30, 40, 999]);
+    }
+
+    #[test]
+    fn vanilla_walk_single_node_tree() {
+        let mut arena = Arena::new();
+        insert(&mut arena, 42);
+        let visited = vanilla_inorder_walk(arena.header_addr());
+        assert_eq!(keys_of(&arena, &visited), vec![42]);
+    }
+
+    #[test]
+    fn vanilla_walk_empty_tree() {
+        let arena = Arena::new();
+        assert_eq!(vanilla_inorder_walk(arena.header_addr()), Vec::<u32>::new());
     }
 }

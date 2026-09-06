@@ -467,6 +467,47 @@ The build script automatically checks if Zoo Tycoon is already running before at
 
 This prevents DLL copy failures due to file locks and ensures clean testing environments.
 
+### Manual cdb Debugging
+
+For live investigation beyond `crash-capture`'s single "run to crash, dump, quit" shape (e.g. tracing a
+sequence of calls while a human plays normally, or checking whether a particular code path is even
+reached) - launch `zoo.exe` under `cdb.exe` directly rather than through `openzt.bat`:
+
+```bash
+CDB="C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\cdb.exe"   # x86 build matches zoo.exe's 32-bit target
+ZOO='C:\Program Files (x86)\Microsoft Games\Zoo Tycoon\zoo.exe'
+"$CDB" -G -c "bp <addr1> \".echo LABEL1;g\";bp <addr2> \".echo LABEL2;g\";g" "$ZOO" > trace.log 2>&1
+```
+
+Run this as a genuinely backgrounded process (not `&`/`nohup`/`disown` tacked onto a shell command - that
+combination has caused spurious early exits in this environment; let the tool's own background-run
+mechanism handle it) so the game stays interactive for a human to actually play while cdb watches
+silently in the background, then read the log afterward.
+
+**Gotchas, in order of how often they bite:**
+
+- **Only one instance can be starting/running at a time.** Relaunching (even after a `taskkill`) while a
+  previous instance is still up or still tearing down gets rejected near-instantly, with no exception and
+  no dialog - this looks exactly like a crash from the log alone, but isn't one. Confirm the previous
+  instance is genuinely gone before relaunching (see next point for how), and don't assume Windows'
+  **Fault Tolerant Heap** silently absorbing repeated crashes (see the note above) is the explanation by
+  default - check with the user, since FTH may be deliberately disabled for `zoo.exe` in their environment.
+- **`tasklist` does not reliably see `zoo.exe`/`cdb.exe` in this environment**, even while they are
+  genuinely running and visible on the user's desktop (a session boundary, most likely) - it can report
+  "no tasks running" for a process the user is actively using. Use `wmic process where "name='zoo.exe'"
+  get ProcessId,ExecutablePath` (or equivalent) instead; treat a `tasklist` "not found" result as
+  inconclusive, not proof the process exited.
+- **Never `bp` a raw address that this crate's own `#[detour(...)]` already hooks.** At runtime that
+  address holds a jump into our own Rust code, not the original vanilla bytes; cdb's `int3` patch collides
+  with it, and continuing past the breakpoint can land execution in garbage (observed: an "Access
+  violation" at `hooked_address+1`, decoding into a nonsense instruction) - a pure debugging artifact, not
+  a real bug. Only breakpoint addresses you've confirmed are genuinely un-hooked (check for a matching
+  `#[detour(NAME)]`/`generated.rs` entry first), or verify a suspicious crash isn't this artifact by
+  reproducing the same scenario with that specific breakpoint removed before trusting it.
+- Quote each `bp <addr> "<action>;g"` breakpoint action so cdb treats it as one multi-command string, and
+  pass the *entire* breakpoint set as a **single** `-c` argument (`bp ...;bp ...;g`) - cdb does not chain
+  multiple `-c` flags into a sequence, it only keeps the last one.
+
 ### Manual Testing
 
 For features not covered by integration tests:

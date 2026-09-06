@@ -320,7 +320,7 @@ fn resolve_object_own_habitat_ptr(object_ptr: u32) -> Option<u32> {
 /// buffer inside a live-battery capture window), shared by `ZTThought::save`/`ZTThoughtMgr::save`.
 fn write_dword(file: *const u32, value: u32) -> bool {
     let bytes = value.to_le_bytes();
-    unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) }
+    (unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) }) == 1
 }
 
 /// Reads a single little-endian dword via whatever is installed at the vanilla read-primitive address
@@ -480,7 +480,9 @@ impl ZTThoughtMgr {
     /// Returns the AND of every item's own `load` result (the count read's own success is only a
     /// precondition to entering the loop at all, not folded into the final result).
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
-        let Some(count) = read_dword(file) else { return false };
+        let Some(count) = read_dword(file) else {
+            return false;
+        };
         let count = count as i32;
         if count <= 0 {
             return true;
@@ -495,6 +497,12 @@ impl ZTThoughtMgr {
             ok &= loaded_ok;
             if loaded_ok && (thought.object_id == 0 || thought.object_ptr != 0) && (thought.thinker_id == 0 || thought.thinker_ptr != 0) {
                 store.push_back(thought);
+            }
+            if !loaded_ok {
+                // A corrupted/truncated stream fails every subsequent read identically - stop instead
+                // of spinning through the rest of `count` (which can be a huge garbage value read off
+                // a corrupted save).
+                break;
             }
         }
         ok

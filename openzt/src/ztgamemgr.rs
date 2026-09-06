@@ -535,18 +535,18 @@ impl ZTGameMgr {
     /// ANDed together, matching `ztawardmgr.rs`'s own `save`.
     pub fn save(&self, file: *const u32) -> bool {
         let marker: u32 = 0;
-        let mut ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(&marker as *const u32, 4, 1, file as *const i8) };
+        let mut ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(&marker as *const u32, 4, 1, file as *const i8) } == 1;
 
         let zoostatus_ptr = (self as *const Self as u32 + 0x10) as *const u32;
         let zoostatus_result = unsafe { ZOOSTATUS_SAVE.original()(zoostatus_ptr, file as *const i8) };
         ok &= zoostatus_result == 1;
 
-        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.date as *const Systemtime as *const u32, 0x10, 1, file as *const i8) };
+        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.date as *const Systemtime as *const u32, 0x10, 1, file as *const i8) } == 1;
 
-        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.cash as *const f32 as *const u32, 4, 1, file as *const i8) };
+        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.cash as *const f32 as *const u32, 4, 1, file as *const i8) } == 1;
 
         // BFGameMgr::save inlined: writes the raw elapsed_sim_ticks dword.
-        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.elapsed_sim_ticks as *const u32, 4, 1, file as *const i8) };
+        ok &= unsafe { WRITE_BYTES_TO_FILE.hooked()(&self.elapsed_sim_ticks as *const u32, 4, 1, file as *const i8) } == 1;
 
         ok
     }

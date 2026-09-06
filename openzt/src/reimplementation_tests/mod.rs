@@ -48,6 +48,13 @@ pub fn init() {
         // for what was found.
         crate::ztshowscriptmgr::init();
         crate::ztshow::init();
+        // ZTShowMgr's detours (stages 2-6: `initShowParams`, the `registerShow`/`unregisterShow`
+        // shadow/mirror pair, the `getShowInfo`/`getScriptID` read cutover, the
+        // `enterNewMonth`/`update` walk ports, and the `save`/`load` pair) - same reason as the
+        // installs above:
+        // `openzt-test-dll` never runs `openztlib::init()`, so nothing else installs them, and the
+        // ZTSHOWMGR_* tests drive the hooked addresses directly via `.hooked()`.
+        crate::ztshowmgr::init();
         crate::ztshowui::init();
 
         // ztawardmgr's own-method detours (ADD_AWARD/GET_AWARD/SAVE/LOAD/START) are deliberately NOT
@@ -138,6 +145,7 @@ mod detour_zoo_main {
         CLEAR_CONFIGURATIONS as ZTMARKETINGMGR_CLEAR_CONFIGURATIONS, LOAD_CONFIGURATIONS, UPDATE as ZTMARKETINGMGR_UPDATE, ZTMARKETING_MGR_1 as ZTMARKETINGMGR_DTOR,
     };
     use openzt_detour::generated::ztresearchbranch;
+    use openzt_detour::generated::ztshowinfo;
     use openzt_detour::generated::ztresearchbranch::GET_FUNDING_TEXT as ZTRESEARCHBRANCH_GET_FUNDING_TEXT;
     use openzt_detour::generated::ztresearchbranch::UPDATE as ZTRESEARCHBRANCH_UPDATE;
     use openzt_detour::generated::ztresearchmgr;
@@ -158,6 +166,14 @@ mod detour_zoo_main {
     use openzt_detour::generated::ztshowscriptstate::CONSTRUCTOR as CREATE_SHOW_SCRIPT_STATE;
     use openzt_detour::generated::ztshowscript::CONSTRUCTOR as ZTSHOWSCRIPT_CONSTRUCTOR;
     use openzt_detour::generated::ztshowinfo::GET_NUM_UNITS as ZTSHOWINFO_GET_NUM_UNITS;
+    use openzt_detour::generated::bfapp::GET_INSTALLED_EXPANSION as BFAPP_GET_INSTALLED_EXPANSION;
+    use openzt_detour::generated::ztshowmgr::{
+        CONSTRUCTOR as ZTSHOWMGR_CONSTRUCTOR, ENTER_NEW_MONTH as ZTSHOWMGR_ENTER_NEW_MONTH, GET_SCRIPT as ZTSHOWMGR_GET_SCRIPT,
+        GET_SCRIPT_ID as ZTSHOWMGR_GET_SCRIPT_ID, GET_SHOW_INFO as ZTSHOWMGR_GET_SHOW_INFO, IS_DOING_SHOW as ZTSHOWMGR_IS_DOING_SHOW,
+        IS_SHOW_SCRIPT_DONE as ZTSHOWMGR_IS_SHOW_SCRIPT_DONE, LOAD as ZTSHOWMGR_LOAD, REGISTER_SCRIPT as ZTSHOWMGR_REGISTER_SCRIPT,
+        REGISTER_SHOW as ZTSHOWMGR_REGISTER_SHOW, SAVE as ZTSHOWMGR_SAVE, UNREGISTER_SCRIPT as ZTSHOWMGR_UNREGISTER_SCRIPT,
+        UNREGISTER_SHOW as ZTSHOWMGR_UNREGISTER_SHOW, UPDATE as ZTSHOWMGR_UPDATE,
+    };
     use openzt_detour::generated::bfconfigfile::{CONSTRUCTOR_0 as BFCONFIGFILE_CONSTRUCTOR_0, RELEASE as BFCONFIGFILE_RELEASE};
     use openzt_detour::generated::bfworldmgr::GET_TYPE as BFWORLDMGR_GET_TYPE;
     use openzt_detour::generated::bfscenariomgr::{
@@ -194,6 +210,7 @@ mod detour_zoo_main {
         ztworldmgr::{BFEntity, IVec3, ZTAnimal, ZTUnit},
         ztshow::{self, live_support as ztshow_live_support},
         ztshowscriptmgr,
+        ztshowmgr::{self, live_support as showmgr_live_support, ZTShowMgr},
         ztshowui,
     };
 
@@ -583,6 +600,253 @@ mod detour_zoo_main {
         (records, branch_ids, category_ids, program_ids, funding_level_counts)
     }
 
+    /// A single named entry in the reimplementation-comparison battery. `early_tests`/
+    /// `always_late_tests`/`live_zoo_tests` build the three ordered lists below, which
+    /// `detour_target`/`run_on_completion_reset_test_and_exit` walk instead of the old flat sequence
+    /// of `fail_flag |= run_..._test(&mut failure_log);` lines - this is the single source of truth
+    /// both functions use to compute the battery's total expected test count for the start/finish
+    /// markers (see `write_battery_marker`), so the two stay in sync automatically as tests are added,
+    /// removed, or reordered.
+    struct RegisteredTest {
+        /// Matches the `test_name` the function itself logs under - reused to write an explicit skip
+        /// line for a `live_zoo_tests` entry when `run_load_live_zoo` fails, so a gap between the
+        /// battery's start/finish markers is always explained by a line in the log, not silence.
+        name: &'static str,
+        run: fn(&mut Option<std::fs::File>) -> bool,
+    }
+
+    /// Runs unconditionally in `detour_target`, before the inline `ZTRESEARCHMGR_*`/
+    /// `ZTRESEARCHPROGRAM_ON_COMPLETION_RESET` proptest blocks (kept inline rather than folded into
+    /// this registry, since - unlike every entry here - they share a single `proptest::TestRunner`).
+    fn early_tests() -> Vec<RegisteredTest> {
+        let mut tests = Vec::new();
+        tests.push(RegisteredTest { name: "BFENTITY_GET_FOOTPRINT", run: run_bfentity_get_footprint_tests });
+        tests.push(RegisteredTest { name: "ZTUNIT_GET_FOOTPRINT", run: run_ztunit_get_footprint_tests });
+        tests.push(RegisteredTest { name: "ZTANIMAL_GET_FOOTPRINT", run: run_ztanimal_get_footprint_tests });
+        tests.push(RegisteredTest { name: "ZTRESEARCHBRANCH_FUNDING", run: run_research_branch_funding_test });
+        tests.push(RegisteredTest { name: "ZTRESEARCHBRANCH_PCT_DAYS_REMAINING", run: run_research_branch_pct_days_remaining_test });
+        tests.push(RegisteredTest { name: "ZTMARKETING_INCREASE_FUNDING", run: run_marketing_increase_funding_test });
+        tests.push(RegisteredTest { name: "ZTMARKETING_DECREASE_FUNDING", run: run_marketing_decrease_funding_test });
+        tests.push(RegisteredTest { name: "ZTMARKETING_SET_FUNDING_LEVEL", run: run_marketing_set_funding_level_test });
+        tests.push(RegisteredTest { name: "ZTMARKETINGMGR_UPDATE", run: run_marketingmgr_update_test });
+        tests.push(RegisteredTest { name: "ZTMARKETINGMGR_SAVE", run: run_marketingmgr_save_test });
+        tests.push(RegisteredTest { name: "ZTMARKETINGMGR_LOAD", run: run_marketingmgr_load_test });
+        tests.push(RegisteredTest { name: "ZTMARKETINGMGR_CLEAR_CONFIGURATIONS", run: run_marketingmgr_clear_configurations_test });
+        tests.push(RegisteredTest { name: "ZTMARKETINGMGR_DTOR", run: run_marketingmgr_dtor_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_ADD_THOUGHT", run: run_thoughtmgr_add_thought_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_THINKER", run: run_thoughtmgr_remove_thoughts_by_thinker_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_OBJECT", run: run_thoughtmgr_remove_thoughts_by_object_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_REMOVE_THOUGHTS_BY_HABITAT", run: run_thoughtmgr_remove_thoughts_by_habitat_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_GET_THOUGHTS_BY_THINKER", run: run_thoughtmgr_get_thoughts_by_thinker_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_GET_THOUGHTS_BY_OBJECT", run: run_thoughtmgr_get_thoughts_by_object_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_GET_THOUGHTS_BY_HABITAT", run: run_thoughtmgr_get_thoughts_by_habitat_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_SAVE", run: run_thoughtmgr_save_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_LOAD", run: run_thoughtmgr_load_test });
+        tests.push(RegisteredTest { name: "ZTAWARDMGR_ADD_AWARD_SAVE_LOAD", run: run_awardmgr_add_award_save_load_test });
+        tests.push(RegisteredTest { name: "ZTAWARDMGR_START", run: run_awardmgr_start_test });
+        tests.push(RegisteredTest { name: "ZTAWARDMGR_GET_AWARD", run: run_awardmgr_get_award_test });
+        tests.push(RegisteredTest { name: "ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT", run: run_ztscenariosimplegoal_eval_award_count_test });
+        // ZTShowScriptMgr save/load wire format - independent of any live zoo/manager state, so these
+        // run from the early battery alongside the award tests above.
+        tests.push(RegisteredTest { name: "ZTSHOWSCRIPTMGR_SAVE_LOAD_ROUNDTRIP_LIVE", run: run_ztshowscriptmgr_save_load_roundtrip_live_test });
+        tests.push(RegisteredTest { name: "ZTSHOWSCRIPTMGR_LOAD_VERSION_GATES_LIVE", run: run_ztshowscriptmgr_load_version_gates_live_test });
+        tests
+    }
+
+    /// Runs unconditionally in `run_on_completion_reset_test_and_exit`, before the live-zoo gate. The
+    /// two `*_ORIGINAL_ROUTES_TO_TRAMPOLINE` entries only exist in debug builds - see `generated.rs`'s
+    /// module doc comment on `.original()`'s per-profile routing.
+    fn always_late_tests() -> Vec<RegisteredTest> {
+        let mut tests = Vec::new();
+        tests.push(RegisteredTest { name: "ZTRESEARCHBRANCH_FUNDING_TEXT", run: run_funding_text_test });
+        tests.push(RegisteredTest { name: "ZTRESEARCHBRANCH_UPDATE", run: run_branch_update_test });
+        tests.push(RegisteredTest { name: "ZTRESEARCHBRANCH_UPDATE_REIMPL_BOUNDARY_REPRO", run: run_branch_update_reimpl_boundary_test });
+        tests.push(RegisteredTest { name: "ZTRESEARCHMGR_UPDATE_BRANCHES", run: run_research_mgr_update_branches_test });
+        tests.push(RegisteredTest { name: "ZTMARKETING_UPDATE", run: run_marketing_update_test });
+        tests.push(RegisteredTest { name: "ZTMARKETING_UPDATE_BOUNDARY_REPRO", run: run_marketing_update_boundary_test });
+        tests.push(RegisteredTest { name: "ZTMARKETING_UPDATE_REIMPL_BOUNDARY_REPRO", run: run_marketing_update_reimpl_boundary_test });
+        tests.push(RegisteredTest { name: "ZTMARKETING_GET_FUNDING_TEXT", run: run_marketing_funding_text_test });
+        tests.push(RegisteredTest { name: "ZTMARKETINGMGR_LOAD_CONFIGURATIONS", run: run_marketingmgr_load_configurations_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_LOAD_MODERN", run: run_thoughtmgr_load_modern_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_ADD_THOUGHT_ANIMAL_OVERRIDE", run: run_thoughtmgr_add_thought_animal_override_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_POPULATE_THOUGHTS", run: run_thoughtmgr_populate_thoughts_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHT_GET_STRING", run: run_thought_get_string_test });
+        tests.push(RegisteredTest { name: "ZTGAMEMGR_STANDALONE_ROUNDTRIP", run: run_gamemgr_standalone_roundtrip_test });
+        tests.push(RegisteredTest { name: "MENUMUSICHANDLER_DETOURS_ENABLED", run: run_menumusichandler_detours_enabled_test });
+        #[cfg(debug_assertions)]
+        tests.push(RegisteredTest { name: "MENUMUSICHANDLER_ORIGINAL_ROUTES_TO_TRAMPOLINE", run: run_menumusichandler_original_routes_to_trampoline_test });
+        tests.push(RegisteredTest { name: "ZTSOUNDSCAPE_DETOURS_ENABLED", run: run_ztsoundscape_detours_enabled_test });
+        #[cfg(debug_assertions)]
+        tests.push(RegisteredTest { name: "ZTSOUNDSCAPE_ORIGINAL_ROUTES_TO_TRAMPOLINE", run: run_ztsoundscape_original_routes_to_trampoline_test });
+        tests.push(RegisteredTest { name: "MENUMUSICHANDLER_STANDALONE_ROUNDTRIP", run: run_menumusichandler_standalone_roundtrip_test });
+        tests.push(RegisteredTest { name: "ZTSOUNDSCAPE_STANDALONE_ROUNDTRIP", run: run_ztsoundscape_standalone_roundtrip_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_STANDALONE_ROUNDTRIP", run: run_ztshowmgr_standalone_roundtrip_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_INIT_SHOW_PARAMS", run: run_ztshowmgr_init_show_params_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_REGISTER_UNREGISTER_SHOW", run: run_ztshowmgr_register_unregister_show_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_GET_SHOW_INFO_GET_SCRIPT_ID", run: run_ztshowmgr_get_show_info_get_script_id_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_ENTER_NEW_MONTH", run: run_ztshowmgr_enter_new_month_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_UPDATE", run: run_ztshowmgr_update_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_SAVE_LOAD", run: run_ztshowmgr_save_load_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_IS_DOING_SHOW", run: run_ztshowmgr_is_doing_show_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_IS_SHOW_SCRIPT_DONE", run: run_ztshowmgr_is_show_script_done_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_REGISTER_UNREGISTER_GET_SCRIPT", run: run_ztshowmgr_register_unregister_get_script_test });
+        tests.push(RegisteredTest { name: "ZTSHOW_GET_SHOW_SCRIPT_STATE", run: run_ztshow_get_show_script_state_test });
+        tests.push(RegisteredTest { name: "ZTSOUNDSCAPE_FADE_CONSTANTS", run: run_ztsoundscape_fade_constants_test });
+        tests.push(RegisteredTest { name: "MENUMUSICHANDLER_INIT", run: run_menumusichandler_init_test });
+        tests.push(RegisteredTest { name: "MENUMUSICHANDLER_START_PLAY", run: run_menumusichandler_start_play_test });
+        tests.push(RegisteredTest { name: "MENUMUSICHANDLER_START_FADE", run: run_menumusichandler_start_fade_test });
+        tests.push(RegisteredTest { name: "MENUMUSICHANDLER_UPDATE", run: run_menumusichandler_update_test });
+        tests.push(RegisteredTest { name: "ZTGAMEMGR_SET_NEW_GAME_DEFAULTS", run: run_gamemgr_set_new_game_defaults_test });
+        tests.push(RegisteredTest { name: "ZTGAMEMGR_SAVE_LOAD", run: run_gamemgr_save_load_test });
+        tests.push(RegisteredTest { name: "ZTGAMEMGR_UPDATE_SIM", run: run_gamemgr_update_sim_test });
+        tests.push(RegisteredTest { name: "ZTGAMEMGR_FINANCE_DATE_HELPERS", run: run_gamemgr_finance_date_helpers_test });
+        tests
+    }
+
+    /// Needs `run_load_live_zoo` to have succeeded first - run from within
+    /// `run_on_completion_reset_test_and_exit`. When it hasn't, every entry here is skipped with an
+    /// explicit `Test Passed NAME (skipped: live zoo not loaded)` line instead of silently vanishing -
+    /// see the call site in `run_on_completion_reset_test_and_exit`.
+    fn live_zoo_tests() -> Vec<RegisteredTest> {
+        let mut tests = Vec::new();
+        tests.push(RegisteredTest { name: "ZTHABITATMGR_GET_HABITAT_PTR_LIVE", run: run_habitat_get_habitat_ptr_live_test });
+        // Diagnosing a real save-corruption report: round-trips whatever real show-script data
+        // run_load_live_zoo just populated (not synthetic data) through encode_mgr/load_mgr directly -
+        // run first, before any other live_zoo_tests entry (several add/mutate scripts) can change the
+        // as-loaded state being diffed.
+        tests.push(RegisteredTest { name: "ZTSHOWSCRIPTMGR_REAL_ZOO_ROUNDTRIP_LIVE", run: run_ztshowscriptmgr_real_zoo_roundtrip_live_test });
+        tests.push(RegisteredTest { name: "ZTSHOWMGR_REAL_ZOO_STORE_CONSISTENCY_LIVE", run: run_ztshowmgr_real_zoo_store_consistency_live_test });
+        tests.push(RegisteredTest { name: "ZTSHOW_PENDING_SCRIPT_TREE_REAL_ZOO_INTEGRITY_LIVE", run: run_ztshow_pending_script_tree_real_zoo_integrity_live_test });
+        tests.push(RegisteredTest { name: "ZTSHOWINFO_REAL_SAVE_LOAD_BYTE_COUNT_LIVE", run: run_ztshowinfo_real_save_load_byte_count_live_test });
+        tests.push(RegisteredTest { name: "ZTRESEARCHMGR_REAL_ZOO_SAVE_ROUNDTRIP_LIVE", run: run_ztresearchmgr_real_zoo_save_roundtrip_live_test });
+        // openzt/plans/real-zoo-save-load-roundtrip-tests-plan.md's three order-independent items: none
+        // of these three mutate real vanilla memory (marketing's real singleton round-trips its own
+        // reimplemented state; award/thought read real vanilla memory read-only and only ever mutate
+        // their own independent Rust-side stores, reset back to empty afterward where relevant).
+        tests.push(RegisteredTest { name: "ZTMARKETINGMGR_REAL_ZOO_SAVE_LOAD_ROUNDTRIP_LIVE", run: run_ztmarketingmgr_real_zoo_save_load_roundtrip_live_test });
+        tests.push(RegisteredTest { name: "ZTAWARDMGR_REAL_ZOO_SAVE_LOAD_ROUNDTRIP_LIVE", run: run_ztawardmgr_real_zoo_save_load_roundtrip_live_test });
+        tests.push(RegisteredTest { name: "ZTTHOUGHTMGR_REAL_ZOO_SAVE_ROUNDTRIP_LIVE", run: run_ztthoughtmgr_real_zoo_save_roundtrip_live_test });
+        // Risk-sequenced per ztmegatilemgr.rs's module doc comment: update() first (trivial scalar
+        // logic), then recalculate_characteristics() (in-place map mutation, no vector resize), then
+        // the category-map node-layout live check, then init() last (the only vector-resize path).
+        tests.push(RegisteredTest { name: "ZTMEGATILEMGR_UPDATE", run: run_megatilemgr_update_test });
+        tests.push(RegisteredTest { name: "ZTMEGATILEMGR_RECALCULATE_CHARACTERISTICS", run: run_megatilemgr_recalculate_characteristics_test });
+        tests.push(RegisteredTest { name: "ZTMEGATILE_CATEGORY_MAP_LAYOUT", run: run_megatile_category_map_layout_test });
+        tests.push(RegisteredTest { name: "ZTMEGATILEMGR_INIT", run: run_megatilemgr_init_test });
+        tests.push(RegisteredTest { name: "ZTADVTERRAINMGR_START", run: run_ztadvterrainmgr_start_test });
+        tests.push(RegisteredTest { name: "ZTADVTERRAINMGR_UPDATE", run: run_ztadvterrainmgr_update_test });
+        tests.push(RegisteredTest { name: "ZTGUEST_MEGATILE_METHODS_LIVE", run: run_ztguest_megatile_methods_live_test });
+        // Re-run: the early-phase call in `early_tests` skips gracefully (GLOBAL_ZTGameMgr isn't
+        // initialized yet at that injection point) - retry now that run_load_live_zoo has guaranteed a
+        // live one.
+        tests.push(RegisteredTest { name: "ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT", run: run_ztscenariosimplegoal_eval_award_count_test });
+        tests.push(RegisteredTest { name: "ZTAWARDMGR_SHOW_AWARDS", run: run_awardmgr_show_awards_test });
+        // ZTShowScriptMgr reimplementation plan, open item 11 (Stage 2 live coverage): all three need
+        // a real, loaded zoo - Group 1 (ADD_SCRIPT/CHECK_PENDING_SCRIPTS) needs a live GLOBAL_ZTGameMgr
+        // for GET_DATE, Groups 2/3 need real GLOBAL_ZTHabitatMgr/GLOBAL_ZTWorldMgr data.
+        //
+        // The ZTShowScriptMgr/ZTShow detours are now installed unconditionally near the top of this
+        // file's `init()` (alongside `research_save_reimplementation`/`marketing_save_reimplementation`)
+        // rather than only here, after `run_load_live_zoo` - see open item 1's diagnostics there for
+        // why that used to be necessary and what fixed it. **Real, session-defining finding** (from the
+        // session that first installed these two detours here, after the zoo already loaded): this
+        // crate's production entry point (`openztlib::init()`, reached via `zoo_init::init_detours()`)
+        // is never called by `openzt-test-dll`'s own `DllMain` (`openzt-test-dll/src/lib.rs` calls
+        // `openztlib::reimplementation_tests::init()` directly instead) - meaning *no* per-module
+        // detour (`ztshow`, `ztshowscriptmgr`, `ztawardmgr`, `ztthoughtmgr`, `ztmegatilemgr`, ...) was
+        // ever installed in this test harness except the handful explicitly installed in this file's
+        // own `init()`. Every "call the real, now-hooked address directly" live test in this file
+        // predating that finding (`ZTAWARDMGR_SHOW_AWARDS`, `ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT`)
+        // was therefore silently calling real, un-hooked vanilla code all along and only ever verifying
+        // "vanilla doesn't crash" - not exercising the Rust reimplementation at all, despite each one's
+        // own doc comment describing it as testing the hooked path. Confirmed live via reliable,
+        // non-tracing (`std::sync::atomic`/direct-file-write) diagnostics, after `tracing`-based
+        // `error!`/`info!` diagnostics turned out to be lossy under this battery's `std::process::exit()`
+        // end-of-run (queued-but-unflushed log lines vanish silently - `error!` calls placed early in a
+        // test function routinely never made it to `openzt.log`, while calls placed right at the end
+        // reliably did).
+        //
+        // Since fixed for these two specifically: `ztawardmgr::eval_award_count_override::init`/
+        // `ztawardmgr::show_awards_detour::init` are now installed in this file's own `init()` too
+        // (deliberately *not* the whole `ztawardmgr::init`, which would also hook `ADD_AWARD`/
+        // `GET_AWARD`/`SAVE`/`LOAD`/`START` and break the three other award tests' use of
+        // `.original()` for real-vanilla comparison), and both tests now compare against real vanilla
+        // via a `retour` trampoline (`call_real`) instead of `.original()`, which can't reach real
+        // vanilla once a function is hooked in-process (see either `call_real`'s own doc comment).
+        tests.push(RegisteredTest { name: "ZTSHOWINFO_ADD_SCRIPT_CHECK_PENDING_SCRIPTS_LIVE", run: run_ztshowinfo_add_script_check_pending_scripts_live_test });
+        tests.push(RegisteredTest { name: "ZTSHOWINFO_PENDING_SCRIPT_TREE_STRESS_LIVE", run: run_ztshowinfo_pending_script_tree_stress_live_test });
+        tests.push(RegisteredTest { name: "ZTSHOW_CHECK_OWNING_HABITAT_LIVE", run: run_ztshow_check_owning_habitat_live_test });
+        tests.push(RegisteredTest { name: "ZTSHOW_GROUP3_TRICK_LIVE", run: run_ztshow_group3_trick_live_test });
+        tests.push(RegisteredTest { name: "ZTSHOWUI_FILL_TRICK_LISTS_LIVE", run: run_ztshowui_fill_trick_lists_live_test });
+        tests.push(RegisteredTest { name: "ZTSHOWSCRIPT_CTOR_REGISTRATION_LIVE", run: run_ztshowscript_ctor_registration_live_test });
+        // Run last (see this test's own doc comment): a one-shot wiring smoke test for
+        // set_new_game_defaults's is_new_game=true branch, which calls through GLOBAL_ZTAIMgr's real
+        // vtable slot and so may have real side effects on live AI state.
+        tests.push(RegisteredTest { name: "ZTGAMEMGR_SET_NEW_GAME_DEFAULTS_IS_NEW_GAME_SMOKE", run: run_gamemgr_set_new_game_defaults_is_new_game_smoke_test });
+        // These three (only ZTGAMEMGR_START_STOP_SMOKE runs after them): need the live, zoo-loaded
+        // GLOBAL_ZTScenarioMgr registry for the four config/name getters - pre-zoo the registry is
+        // non-null-but-uninitialized and both BFConfigFile::attempt calls would fail, silently
+        // leaving the tests covering only init's defaults/tail while looking green.
+        // ZTSOUNDSCAPE_UPDATE and ZTSOUNDSCAPE_UPDATE_ATTEMPT_FAILURE additionally need the live
+        // GLOBAL_ZTGameMgr guest count.
+        tests.push(RegisteredTest { name: "ZTSOUNDSCAPE_INIT", run: run_ztsoundscape_init_test });
+        tests.push(RegisteredTest { name: "ZTSOUNDSCAPE_UPDATE", run: run_ztsoundscape_update_test });
+        tests.push(RegisteredTest { name: "ZTSOUNDSCAPE_UPDATE_ATTEMPT_FAILURE", run: run_ztsoundscape_update_attempt_failure_test });
+        // Run last (see this test's own doc comment): a one-shot wiring smoke test for start()/stop(),
+        // which read the live GLOBAL_ZTScenarioMgr/GLOBAL_ZTApp singletons, run the Rust
+        // soundscape ctor/init + vanilla destructor end to end, and call through to real vanilla
+        // unpauseGame.
+        tests.push(RegisteredTest { name: "ZTGAMEMGR_START_STOP_SMOKE", run: run_gamemgr_start_stop_smoke_test });
+        // openzt/plans/real-zoo-save-load-roundtrip-tests-plan.md's ZTGameMgr item: mutates the live
+        // singleton's cash/date/elapsed_sim_ticks in place (there's no cheap standalone copy of a
+        // fully-populated real ZTGameMgr to load into instead) - run genuinely last so nothing above
+        // depends on those fields being untouched afterward.
+        tests.push(RegisteredTest { name: "ZTGAMEMGR_REAL_ZOO_SAVE_LOAD_ROUNDTRIP_LIVE", run: run_ztgamemgr_real_zoo_save_load_roundtrip_live_test });
+        tests
+    }
+
+    /// Total number of `Test Passed`/`Test Failed`/skip lines the battery is expected to produce if it
+    /// runs to completion: the 9 always-inline proptest blocks (`BFTILE_GET_LOCAL_ELEVATION`, the six
+    /// `ZTRESEARCHMGR_*`/`ZTRESEARCHMGR_SAVE`/`LOAD`/`LOAD_CORRUPT_STREAM`/`UPDATE`/`FORCE_RESEARCH`/
+    /// `LOOKUPS`/`SET_EFFECT_DISCOUNT` blocks in `detour_target`, and `ZTRESEARCHPROGRAM_ON_COMPLETION_RESET`
+    /// in `run_on_completion_reset_test_and_exit`) plus every `RegisteredTest` entry. Bump this constant
+    /// if an inline block is ever added or removed - everything else here stays in sync automatically.
+    const INLINE_TEST_COUNT: usize = 9;
+
+    /// `run_load_live_zoo` always logs exactly one `LOAD_LIVE_ZOO` line (success or failure) but isn't
+    /// itself a `RegisteredTest` - its bool return value is what gates `live_zoo_tests`, so it's called
+    /// directly rather than through `run_registered_tests`. Counted here so it isn't silently dropped
+    /// from the expected total.
+    const LOAD_LIVE_ZOO_COUNT: usize = 1;
+
+    fn expected_test_count() -> usize {
+        INLINE_TEST_COUNT + LOAD_LIVE_ZOO_COUNT + early_tests().len() + always_late_tests().len() + live_zoo_tests().len()
+    }
+
+    /// Writes a `===`-delimited marker line to the battery's log file - used both for the
+    /// "N tests expected" line `detour_target` writes when it (re)creates the log, and the
+    /// "battery finished" line `run_on_completion_reset_test_and_exit` writes at the very end. If the
+    /// process crashes or hangs mid-battery, the log simply ends without a finish marker, and comparing
+    /// the number of `Test Passed`/`Test Failed` lines actually present against the expected count named
+    /// in the start marker shows exactly how far it got.
+    fn write_battery_marker(failure_log: &mut Option<std::fs::File>, message: &str) {
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("=== {} ===\n", message).as_bytes());
+        }
+    }
+
+    /// Runs every entry in `tests` in order, logging an `info!` trace before each call so a crash mid-test
+    /// names the last test attempted in `openzt.log`, even though the per-test pass/fail/skip line only
+    /// lands in `failure_log` on that test's own return.
+    fn run_registered_tests(tests: &[RegisteredTest], failure_log: &mut Option<std::fs::File>) -> bool {
+        let mut fail_flag = false;
+        for test in tests {
+            info!("Running {}", test.name);
+            fail_flag |= (test.run)(failure_log);
+        }
+        fail_flag
+    }
+
     // TODO: Fix this so it works with a crate/mod prefix
     #[detour(LOAD_LANG_DLLS)]
     unsafe extern "thiscall" fn detour_target(this: *const u32) -> u32 {
@@ -600,6 +864,11 @@ mod detour_zoo_main {
                 None
             }
         };
+
+        // Written before anything else runs, so a battery that crashes or hangs partway through still
+        // leaves behind how many result lines to expect - compare that count against how many
+        // `Test Passed`/`Test Failed`/skip lines actually made it into the log to see how far it got.
+        write_battery_marker(&mut failure_log, &format!("OpenZT reimplementation-test battery started: {} tests expected", expected_test_count()));
 
         let runner_config = ProptestConfig {
             failure_persistence: Some(Box::new(super::NoopFailurePersistence)),
@@ -668,39 +937,7 @@ mod detour_zoo_main {
             }
         }
 
-        fail_flag |= run_bfentity_get_footprint_tests(&mut failure_log);
-        fail_flag |= run_ztunit_get_footprint_tests(&mut failure_log);
-        fail_flag |= run_ztanimal_get_footprint_tests(&mut failure_log);
-        fail_flag |= run_research_branch_funding_test(&mut failure_log);
-        fail_flag |= run_research_branch_pct_days_remaining_test(&mut failure_log);
-        fail_flag |= run_marketing_increase_funding_test(&mut failure_log);
-        fail_flag |= run_marketing_decrease_funding_test(&mut failure_log);
-        fail_flag |= run_marketing_set_funding_level_test(&mut failure_log);
-        fail_flag |= run_marketingmgr_update_test(&mut failure_log);
-        fail_flag |= run_marketingmgr_save_test(&mut failure_log);
-        fail_flag |= run_marketingmgr_load_test(&mut failure_log);
-        fail_flag |= run_marketingmgr_clear_configurations_test(&mut failure_log);
-        fail_flag |= run_marketingmgr_dtor_test(&mut failure_log);
-
-        fail_flag |= run_thoughtmgr_add_thought_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_remove_thoughts_by_thinker_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_remove_thoughts_by_object_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_remove_thoughts_by_habitat_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_get_thoughts_by_thinker_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_get_thoughts_by_object_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_get_thoughts_by_habitat_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_save_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_load_test(&mut failure_log);
-
-        fail_flag |= run_awardmgr_add_award_save_load_test(&mut failure_log);
-        fail_flag |= run_awardmgr_start_test(&mut failure_log);
-        fail_flag |= run_awardmgr_get_award_test(&mut failure_log);
-        fail_flag |= run_ztscenariosimplegoal_eval_award_count_test(&mut failure_log);
-
-        // ZTShowScriptMgr save/load wire format - independent of any live zoo/manager state, so these
-        // run from the early battery alongside the award tests above.
-        fail_flag |= run_ztshowscriptmgr_save_load_roundtrip_live_test(&mut failure_log);
-        fail_flag |= run_ztshowscriptmgr_load_version_gates_live_test(&mut failure_log);
+        fail_flag |= run_registered_tests(&early_tests(), &mut failure_log);
 
         // ZTRESEARCHMGR_SAVE: compares the real ZTResearchMgr::save's captured output against
         // research_save_reimplementation::serialize(&snapshot_mgr(mgr)) for generated synthetic trees.
@@ -1232,122 +1469,33 @@ mod detour_zoo_main {
             }
         }
 
-        fail_flag |= run_funding_text_test(&mut failure_log);
-        fail_flag |= run_branch_update_test(&mut failure_log);
-        fail_flag |= run_branch_update_reimpl_boundary_test(&mut failure_log);
-        fail_flag |= run_research_mgr_update_branches_test(&mut failure_log);
-        fail_flag |= run_marketing_update_test(&mut failure_log);
-        fail_flag |= run_marketing_update_boundary_test(&mut failure_log);
-        fail_flag |= run_marketing_update_reimpl_boundary_test(&mut failure_log);
-        fail_flag |= run_marketing_funding_text_test(&mut failure_log);
-        fail_flag |= run_marketingmgr_load_configurations_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_load_modern_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_add_thought_animal_override_test(&mut failure_log);
-        fail_flag |= run_thoughtmgr_populate_thoughts_test(&mut failure_log);
-        fail_flag |= run_thought_get_string_test(&mut failure_log);
-        fail_flag |= run_gamemgr_standalone_roundtrip_test(&mut failure_log);
-        fail_flag |= run_menumusichandler_detours_enabled_test(&mut failure_log);
-        #[cfg(debug_assertions)]
-        {
-            fail_flag |= run_menumusichandler_original_routes_to_trampoline_test(&mut failure_log);
-        }
-        fail_flag |= run_ztsoundscape_detours_enabled_test(&mut failure_log);
-        #[cfg(debug_assertions)]
-        {
-            fail_flag |= run_ztsoundscape_original_routes_to_trampoline_test(&mut failure_log);
-        }
-        fail_flag |= run_menumusichandler_standalone_roundtrip_test(&mut failure_log);
-        fail_flag |= run_ztsoundscape_standalone_roundtrip_test(&mut failure_log);
-        fail_flag |= run_ztsoundscape_fade_constants_test(&mut failure_log);
-        fail_flag |= run_menumusichandler_init_test(&mut failure_log);
-        fail_flag |= run_menumusichandler_start_play_test(&mut failure_log);
-        fail_flag |= run_menumusichandler_start_fade_test(&mut failure_log);
-        fail_flag |= run_menumusichandler_update_test(&mut failure_log);
-        fail_flag |= run_gamemgr_set_new_game_defaults_test(&mut failure_log);
-        fail_flag |= run_gamemgr_save_load_test(&mut failure_log);
-        fail_flag |= run_gamemgr_update_sim_test(&mut failure_log);
-        fail_flag |= run_gamemgr_finance_date_helpers_test(&mut failure_log);
+        fail_flag |= run_registered_tests(&always_late_tests(), &mut failure_log);
 
         // Loads a real save file directly, so GLOBAL_ZTWorldMgr/GLOBAL_ZTHabitatMgr go from
-        // empty/synthetic to real, populated state. Everything below this line runs against that real
-        // zoo instead of a standalone/synthetic struct.
+        // empty/synthetic to real, populated state. Everything in `live_zoo_tests` runs against that
+        // real zoo instead of a standalone/synthetic struct.
+        let live_zoo = live_zoo_tests();
         if run_load_live_zoo(&mut failure_log) {
-            fail_flag |= run_habitat_get_habitat_ptr_live_test(&mut failure_log);
-            // Risk-sequenced per ztmegatilemgr.rs's module doc comment: update() first (trivial scalar
-            // logic), then recalculate_characteristics() (in-place map mutation, no vector resize), then
-            // the category-map node-layout live check, then init() last (the only vector-resize path).
-            fail_flag |= run_megatilemgr_update_test(&mut failure_log);
-            fail_flag |= run_megatilemgr_recalculate_characteristics_test(&mut failure_log);
-            fail_flag |= run_megatile_category_map_layout_test(&mut failure_log);
-            fail_flag |= run_megatilemgr_init_test(&mut failure_log);
-            fail_flag |= run_ztadvterrainmgr_start_test(&mut failure_log);
-            fail_flag |= run_ztadvterrainmgr_update_test(&mut failure_log);
-            fail_flag |= run_ztguest_megatile_methods_live_test(&mut failure_log);
-            // Re-run: the early-phase call above skips gracefully (GLOBAL_ZTGameMgr isn't initialized
-            // yet at that injection point) - retry now that run_load_live_zoo has guaranteed a live one.
-            fail_flag |= run_ztscenariosimplegoal_eval_award_count_test(&mut failure_log);
-            fail_flag |= run_awardmgr_show_awards_test(&mut failure_log);
-
-            // ZTShowScriptMgr reimplementation plan, open item 11 (Stage 2 live coverage): all three need
-            // a real, loaded zoo - Group 1 (ADD_SCRIPT/CHECK_PENDING_SCRIPTS) needs a live GLOBAL_ZTGameMgr
-            // for GET_DATE, Groups 2/3 need real GLOBAL_ZTHabitatMgr/GLOBAL_ZTWorldMgr data.
-            //
-            // The ZTShowScriptMgr/ZTShow detours are now installed unconditionally near the top of this
-            // file's `init()` (alongside `research_save_reimplementation`/`marketing_save_reimplementation`)
-            // rather than only here, after `run_load_live_zoo` - see open item 1's diagnostics there for
-            // why that used to be necessary and what fixed it. **Real, session-defining finding** (from the
-            // session that first installed these two detours here, after the zoo already loaded): this
-            // crate's production entry point (`openztlib::init()`, reached via `zoo_init::init_detours()`)
-            // is never called by `openzt-test-dll`'s own `DllMain` (`openzt-test-dll/src/lib.rs` calls
-            // `openztlib::reimplementation_tests::init()` directly instead) - meaning *no* per-module
-            // detour (`ztshow`, `ztshowscriptmgr`, `ztawardmgr`, `ztthoughtmgr`, `ztmegatilemgr`, ...) was
-            // ever installed in this test harness except the handful explicitly installed in this file's
-            // own `init()`. Every "call the real, now-hooked address directly" live test in this file
-            // predating that finding (`ZTAWARDMGR_SHOW_AWARDS`, `ZTSCENARIOSIMPLEGOAL_EVAL_AWARD_COUNT`)
-            // was therefore silently calling real, un-hooked vanilla code all along and only ever verifying
-            // "vanilla doesn't crash" - not exercising the Rust reimplementation at all, despite each one's
-            // own doc comment describing it as testing the hooked path. Confirmed live via reliable,
-            // non-tracing (`std::sync::atomic`/direct-file-write) diagnostics, after `tracing`-based
-            // `error!`/`info!` diagnostics turned out to be lossy under this battery's `std::process::exit()`
-            // end-of-run (queued-but-unflushed log lines vanish silently - `error!` calls placed early in a
-            // test function routinely never made it to `openzt.log`, while calls placed right at the end
-            // reliably did).
-            //
-            // Since fixed for these two specifically: `ztawardmgr::eval_award_count_override::init`/
-            // `ztawardmgr::show_awards_detour::init` are now installed in this file's own `init()` too
-            // (deliberately *not* the whole `ztawardmgr::init`, which would also hook `ADD_AWARD`/
-            // `GET_AWARD`/`SAVE`/`LOAD`/`START` and break the three other award tests' use of
-            // `.original()` for real-vanilla comparison), and both tests now compare against real vanilla
-            // via a `retour` trampoline (`call_real`) instead of `.original()`, which can't reach real
-            // vanilla once a function is hooked in-process (see either `call_real`'s own doc comment).
-            fail_flag |= run_ztshowinfo_add_script_check_pending_scripts_live_test(&mut failure_log);
-            fail_flag |= run_ztshowinfo_pending_script_tree_stress_live_test(&mut failure_log);
-            fail_flag |= run_ztshow_check_owning_habitat_live_test(&mut failure_log);
-            fail_flag |= run_ztshow_group3_trick_live_test(&mut failure_log);
-            fail_flag |= run_ztshowui_fill_trick_lists_live_test(&mut failure_log);
-            fail_flag |= run_ztshowscript_ctor_registration_live_test(&mut failure_log);
-
-            // Run last (see this test's own doc comment): a one-shot wiring smoke test for
-            // set_new_game_defaults's is_new_game=true branch, which calls through GLOBAL_ZTAIMgr's real
-            // vtable slot and so may have real side effects on live AI state.
-            fail_flag |= run_gamemgr_set_new_game_defaults_is_new_game_smoke_test(&mut failure_log);
-
-            // These three (only ZTGAMEMGR_START_STOP_SMOKE runs after them): need the live, zoo-loaded
-            // GLOBAL_ZTScenarioMgr registry for the four config/name getters - pre-zoo the registry is
-            // non-null-but-uninitialized and both BFConfigFile::attempt calls would fail, silently
-            // leaving the tests covering only init's defaults/tail while looking green.
-            // ZTSOUNDSCAPE_UPDATE and ZTSOUNDSCAPE_UPDATE_ATTEMPT_FAILURE additionally need the live
-            // GLOBAL_ZTGameMgr guest count.
-            fail_flag |= run_ztsoundscape_init_test(&mut failure_log);
-            fail_flag |= run_ztsoundscape_update_test(&mut failure_log);
-            fail_flag |= run_ztsoundscape_update_attempt_failure_test(&mut failure_log);
-
-            // Run last (see this test's own doc comment): a one-shot wiring smoke test for start()/stop(),
-            // which read the live GLOBAL_ZTScenarioMgr/GLOBAL_ZTApp singletons, run the Rust
-            // soundscape ctor/init + vanilla destructor end to end, and call through to real vanilla
-            // unpauseGame.
-            fail_flag |= run_gamemgr_start_stop_smoke_test(&mut failure_log);
+            fail_flag |= run_registered_tests(&live_zoo, &mut failure_log);
+        } else {
+            // Explicit per-test skip line (mirroring every other graceful skip in this file) instead of
+            // silently producing no line at all - this is exactly the ambiguity this registry-driven
+            // battery was built to remove: previously, a failed live-zoo load meant these 21 tests just
+            // never appeared in the log, indistinguishable from a mid-battery crash.
+            for test in &live_zoo {
+                info!("Skipping {}: live zoo not loaded", test.name);
+                write_success_line(&mut failure_log, &format!("{} (skipped: live zoo not loaded)", test.name));
+            }
         }
+
+        write_battery_marker(
+            &mut failure_log,
+            &format!(
+                "OpenZT reimplementation-test battery finished: {} tests expected, overall {}",
+                expected_test_count(),
+                if fail_flag { "FAILED" } else { "PASSED" }
+            ),
+        );
 
         if fail_flag {
             error!("Proptest failed for some cases, check the failure log at: {}", failure_log_path);
@@ -1719,7 +1867,1955 @@ mod detour_zoo_main {
         failed
     }
 
-    /// The three fade constants `ZTSoundscape::update` reads at runtime through data RVAs -
+    /// `ZTSHOWMGR_STANDALONE_ROUNDTRIP` - `ztshowmgr-implementation-plan.md` stage 1: builds two fresh
+    /// `0x44`-byte standalone `ZTShowMgr` blocks, runs the real vanilla constructor on one and the Rust
+    /// reimplementation ([`ZTShowMgr::construct`]) on the other, then compares them field-by-field.
+    ///
+    /// Not a whole-struct byte-diff, deliberately - three field groups *can't* legally compare equal
+    /// across two separately-constructed instances, each excluded for its own documented reason:
+    /// - `+0x8..+0x28` (the eight `initShowParams` thresholds): the real ctor's post-default values are
+    ///   config-dependent (`BFConfigFile`/`shows.cfg`, gated on expansion pack 2) - stage 2 ports that
+    ///   half. The Rust side's pre-config defaults are asserted exactly instead.
+    /// - `+0x28`/`+0x38` (both maps' `DAT_00638008`-freelist header pointers): per-instance
+    ///   allocations, and `construct` deliberately leaves them null (see its doc comment). The real
+    ///   side's nodes are instead *shape*-checked (color `0`, null parent, left/right self-referential
+    ///   - the standard empty MSVC `_Tree` header), and the reimpl side's nullness is asserted.
+    /// - `+0x30`/`+0x40` (the two tag bytes): each instance writes the high byte of *its own* address
+    ///   there, so each side is checked against its own address rather than against the other.
+    ///
+    /// Everything else compares byte-identical: both vtables (`+0x0`/`+0x34`), `+0x4` and every padding
+    /// byte, and both map sizes. Also asserts the Rust registered-shows store stays empty (standalone
+    /// construction must never touch it).
+    ///
+    /// Pole note: `ztshowmgr::CONSTRUCTOR` is deliberately never detoured (see `ztshowmgr.rs`'s module
+    /// doc comment), so `.original()` reaches real vanilla in every build profile. If that ever changes,
+    /// this test needs the `*_DETOUR.call` trampoline treatment instead - see
+    /// `ZTSOUNDSCAPE_STANDALONE_ROUNDTRIP`'s own doc comment for that exact failure mode. Since stage 2,
+    /// though, the real ctor's *internal* tail-call into `initShowParams` now lands in the stage-2 Rust
+    /// detour (the address itself is patched, in every profile) - harmless here because everything that
+    /// detour writes (the eight threshold fields) is excluded from the byte-compare groups below and
+    /// identical to what vanilla's own `initShowParams` would have written; noted so the exclusion isn't
+    /// mistaken for a vanilla-vs-vanilla guarantee. Teardown is
+    /// leak-only: the real-ctor side owns freelist nodes with no safe Rust-side return path (see
+    /// `showmgr_live_support::allocate_uninitialized`'s doc comment), so both buffers stay allocated for
+    /// the one-shot test process's lifetime.
+    fn run_ztshowmgr_standalone_roundtrip_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_STANDALONE_ROUNDTRIP";
+
+        let real_ptr = showmgr_live_support::allocate_uninitialized();
+        let reimpl_ptr = showmgr_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr).as_bytes(),
+                );
+            }
+            return true;
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+        let struct_size = size_of::<ZTShowMgr>();
+        let real_addr = real_ptr as u32;
+        let reimpl_addr = reimpl_ptr as u32;
+
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, struct_size);
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, struct_size);
+
+            ZTSHOWMGR_CONSTRUCTOR.original()(real_ptr as *const u32);
+            (*reimpl_ptr).construct();
+
+            // Byte-identical regions: everything except the three exclusion groups above.
+            let real_bytes = std::slice::from_raw_parts(real_ptr as *const u8, struct_size);
+            let reimpl_bytes = std::slice::from_raw_parts(reimpl_ptr as *const u8, struct_size);
+            const COMPARED: [(usize, usize); 5] = [(0x00, 0x08), (0x2c, 0x30), (0x34, 0x38), (0x3c, 0x40), (0x41, 0x44)];
+            for (start, end) in COMPARED {
+                for i in start..end {
+                    if real_bytes[i] != reimpl_bytes[i] {
+                        failures.push(format!("byte {:#04x}: real={:#04x} reimpl={:#04x}", i, real_bytes[i], reimpl_bytes[i]));
+                    }
+                }
+            }
+
+            // Both tag bytes carry each instance's own high address byte.
+            for (addr, name) in [(real_addr, "real"), (reimpl_addr, "reimpl")] {
+                for offset in [0x30, 0x40] {
+                    let tag = get_from_memory::<u8>(addr + offset);
+                    if tag != (addr >> 24) as u8 {
+                        failures.push(format!("{} +{:#x}: tag byte {:#04x}, expected {:#04x}", name, offset, tag, (addr >> 24) as u8));
+                    }
+                }
+            }
+
+            // Real side: both maps get a real freelist node, shaped like a standard empty MSVC
+            // `_Tree` header. Reimpl side: both stay null by design.
+            for (offset, name) in [(0x28, "ZTShowMgr map"), (0x38, "embedded ZTShowScriptMgr map")] {
+                let header = get_from_memory::<u32>(real_addr + offset);
+                if header == 0 {
+                    failures.push(format!("real {name} header is null"));
+                } else {
+                    let color = get_from_memory::<u8>(header);
+                    let parent = get_from_memory::<u32>(header + 4);
+                    let left = get_from_memory::<u32>(header + 8);
+                    let right = get_from_memory::<u32>(header + 0xc);
+                    if color != 0 || parent != 0 || left != header || right != header {
+                        failures.push(format!(
+                            "real {name} header {header:#x} is not a self-referential empty _Tree header (color={color}, parent={parent:#x}, left={left:#x}, right={right:#x})"
+                        ));
+                    }
+                }
+                let reimpl_header = get_from_memory::<u32>(reimpl_addr + offset);
+                if reimpl_header != 0 {
+                    failures.push(format!("reimpl {name} header should be null, got {reimpl_header:#x}"));
+                }
+            }
+        }
+
+        // The Rust side's pre-config threshold defaults (`initShowParams`'s own writes before its
+        // expansion-gated `shows.cfg` override).
+        const DEFAULT_THRESHOLDS: [(u32, u32); 8] =
+            [(0x8, 0), (0xc, 3), (0x10, 6), (0x14, 0x19), (0x18, 0x32), (0x1c, 0x4b), (0x20, 6), (0x24, 6)];
+        for (offset, expected) in DEFAULT_THRESHOLDS {
+            let actual = unsafe { get_from_memory::<u32>(reimpl_addr + offset) };
+            if actual != expected {
+                failures.push(format!("reimpl +{offset:#x}: {actual}, expected default {expected}"));
+            }
+        }
+
+        if ztshowmgr::registered_show_count() != 0 {
+            failures.push(format!(
+                "Rust registered-shows store should stay empty across standalone construction, has {} entries",
+                ztshowmgr::registered_show_count()
+            ));
+        }
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOWMGR_INIT_SHOW_PARAMS` - `ztshowmgr-implementation-plan.md` stage 2: builds two fresh
+    /// standalone `ZTShowMgr` blocks, runs the real vanilla `initShowParams` on one and the Rust
+    /// reimplementation ([`ZTShowMgr::init_show_params`]) on the other, then byte-compares the eight
+    /// config-loaded threshold fields at `+0x8..+0x28` (the only memory this function touches).
+    ///
+    /// Environment-sensitive by design: both sides share the same expansion-2 gate (real
+    /// `BFApp::getInstalledExpansion` on the live `GLOBAL_ZTApp`) and the same real `shows.cfg`, so
+    /// the comparison is meaningful in either state - on a machine with expansion pack 2 installed
+    /// both sides must carry identical config-override values, otherwise both must carry identical
+    /// defaults. The gate state and both sides' final values are logged so a run can tell which path
+    /// it exercised. Vanilla-allocator side effects are balanced on both sides (each constructs and
+    /// releases its own stack-local `BFConfigFile`; the Rust port also returns the config's tree-root
+    /// node to the freelist it came from - see the method's doc comment).
+    ///
+    /// Pole note: the vanilla side goes through `showmgr_live_support::call_real_init_show_params`
+    /// (the `INIT_SHOW_PARAMS_DETOUR.call` trampoline) - a release build's raw-cast `.original()`
+    /// would silently re-enter the Rust detour and degenerate the test into Rust-vs-Rust, the exact
+    /// mode `ZTSOUNDSCAPE_STANDALONE_ROUNDTRIP`'s doc comment describes. Teardown is leak-only (see
+    /// `showmgr_live_support::allocate_uninitialized`).
+    fn run_ztshowmgr_init_show_params_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_INIT_SHOW_PARAMS";
+
+        let real_ptr = showmgr_live_support::allocate_uninitialized();
+        let reimpl_ptr = showmgr_live_support::allocate_uninitialized();
+        if real_ptr.is_null() || reimpl_ptr.is_null() {
+            error!("{}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})", test_name, real_ptr, reimpl_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!("Test Failed {}: OPERATOR_NEW returned null (real={:?}, reimpl={:?})\n", test_name, real_ptr, reimpl_ptr)
+                        .as_bytes(),
+                );
+            }
+            return true;
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+
+        unsafe {
+            std::ptr::write_bytes(real_ptr as *mut u8, 0, size_of::<ZTShowMgr>());
+            std::ptr::write_bytes(reimpl_ptr as *mut u8, 0, size_of::<ZTShowMgr>());
+
+            let real_return = showmgr_live_support::call_real_init_show_params(real_ptr as *const u32);
+            let reimpl_return = (*reimpl_ptr).init_show_params();
+            // The real body's only return write is `MOV AL, 0x1` - the upper 24 bits of EAX are
+            // leftover register garbage (the `.c` decompile's own `CONCAT31(...,1)` return), so only
+            // the low byte is compared.
+            if real_return & 0xff != 1 || reimpl_return != 1 {
+                failures.push(format!(
+                    "returns differ: real={:#x} (low byte {:#04x}) reimpl={reimpl_return}",
+                    real_return,
+                    real_return & 0xff
+                ));
+            }
+
+            let real_bytes = std::slice::from_raw_parts(real_ptr as *const u8, size_of::<ZTShowMgr>());
+            let reimpl_bytes = std::slice::from_raw_parts(reimpl_ptr as *const u8, size_of::<ZTShowMgr>());
+            for i in 0x8..0x28 {
+                if real_bytes[i] != reimpl_bytes[i] {
+                    failures.push(format!("byte {:#04x}: real={:#04x} reimpl={:#04x}", i, real_bytes[i], reimpl_bytes[i]));
+                }
+            }
+        }
+
+        // Log which path the environment exercised, and surface both sides' final values so a run
+        // can tell config-override from defaults at a glance. `GLOBAL_ZTApp`'s RVA is
+        // `ztshowmgr.rs`'s own private `GLOBAL_ZTAPP_RVA` - re-declared here per the repo's
+        // no-shared-consts convention.
+        let global_ztapp_rva: u32 = 0x00638154 - 0x400000;
+        let ztapp_ptr: u32 = get_from_memory(get_module_base("zoo.exe") as u32 + global_ztapp_rva);
+        let expansion_2_installed = ztapp_ptr != 0
+            && unsafe { BFAPP_GET_INSTALLED_EXPANSION.original()(ztapp_ptr as *const u32, 2) } != 0;
+        let threshold_names = [
+            ("badTrick", 0x8),
+            ("goodTrick", 0xc),
+            ("greatTrick", 0x10),
+            ("badShow", 0x14),
+            ("goodShow", 0x18),
+            ("greatShow", 0x1c),
+            ("minIdealLength", 0x20),
+            ("maxIdealLength", 0x24),
+        ];
+        let values: Vec<String> = threshold_names
+            .iter()
+            .map(|(name, offset)| {
+                format!("{}={}", name, unsafe { get_from_memory::<u32>(real_ptr as u32 + offset) })
+            })
+            .collect();
+        let gate_state = if expansion_2_installed {
+            "OPEN (config override expected)"
+        } else {
+            "closed (defaults expected)"
+        };
+
+        if failures.is_empty() {
+            write_success_line(failure_log, &format!("{} (expansion-2 gate {}, {})", test_name, gate_state, values.join(", ")));
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOWMGR_REGISTER_UNREGISTER_SHOW` - `ztshowmgr-implementation-plan.md` stages 3+9: drives
+    /// the full `registerShow`/`unregisterShow` ports (stage 9 dropped the stage-3 shadow/mirror
+    /// call-throughs, so the hooked addresses are pure Rust now) through every branch of both
+    /// vanilla bodies (`.asm`/`.c`-verified), pinning the store content after each op. The old
+    /// cross-store diff oracle - the real vanilla tree agreeing with the store after every hooked
+    /// mutation - is gone with the dual-write it verified: hooked writers stopped maintaining the
+    /// tree in stage 9, which this test now pins *positively* (the tree must stay empty under
+    /// hooked writes, through the `GET_SHOW_INFO` trampoline).
+    ///
+    /// The op matrix covers: null-show register, preset-id register (the no-force reuse path -
+    /// counter untouched), the already-registered early return (with and without force, and never
+    /// consuming the counter), the id-0 fresh-id assignment (deterministic via a seeded counter:
+    /// the id is the post-increment counter masked to 16 bits, here exactly `0x0101`), the fresh-id
+    /// setter's embedded-`ZTShow` sync (`+0x6` id copy, `+0x10` back-pointer), force over an
+    /// unregistered preset id (fresh counter id, the preset value never entering the store), the
+    /// insert-or-assign **collision** (a force-assigned fresh id landing exactly on a registered
+    /// key overwrites that entry's value in place - the stolen show keeps its stale `field_0x70`
+    /// but is unreachable by id), path-A/B/C unregisters (both clear-flag states - `clear=true`
+    /// really executes the real `clearShowScriptStates` through path C, which targets the show
+    /// directly with no lookup), double unregister (absent-key silent success), the null+null
+    /// `AL=0` return, and the counter **wrap** semantics (`0xffff` is never assigned - counter
+    /// `0xfffe` assigns id `0`; a counter of `0xffff` wraps to `0` and also assigns id `0`; and a
+    /// `field_0x70 == 0` show whose store already holds key `0` early-returns even with force,
+    /// because vanilla's find runs before the fresh-id branch).
+    ///
+    /// `clear=true` on a standalone `ZTShowInfo` needs one piece of setup: the embedded `ZTShow`'s
+    /// script-state map header at `show_info+0x38` (read unconditionally by the real
+    /// `ZTShowState::clear`). Real vanilla keeps it as a separate `0x18`-byte freelist node
+    /// (self-referential when empty), and a zeroed buffer would crash the first clear-flag op, so
+    /// each show gets a real, leak-only, empty-tree header node allocated there - the same shape
+    /// `ZTSHOWMGR_STANDALONE_ROUNDTRIP` verifies on the real constructor's own map headers. All
+    /// teardown is leak-only (`showmgr_live_support::allocate_uninitialized`'s doc comment); the
+    /// store is drained through the hooked unregister path and asserted empty, and the counter is
+    /// restored, since both are process-global state shared with the rest of the battery.
+    fn run_ztshowmgr_register_unregister_show_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_REGISTER_UNREGISTER_SHOW";
+
+        if ztshowmgr::registered_show_count() != 0 {
+            let msg = "Rust registered-shows store should be empty when the test starts";
+            error!("{}: {} (has {} entries)", test_name, msg, ztshowmgr::registered_show_count());
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} (has {} entries)\n", test_name, msg, ztshowmgr::registered_show_count()).as_bytes());
+            }
+            return true;
+        }
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        /// Pre-initializes `show_info`'s embedded `ZTShow` script-state map header (`show_info+0x38`)
+        /// with a real, empty, self-referential `_Tree` header node - see the test's doc comment for
+        /// why a zeroed buffer can't survive the clear-flag ops. Leak-only, like everything else
+        /// this test allocates.
+        fn init_script_state_header(show_info: u32) {
+            let node = unsafe { standalone::OPERATOR_NEW.original()(0x18) } as u32;
+            unsafe { std::ptr::write_bytes(node as *mut u8, 0, 0x18) };
+            save_to_memory(node + 0x8, node);
+            save_to_memory(node + 0xc, node);
+            save_to_memory(show_info + 0x38, node);
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+        let mgr_addr = mgr as u32;
+
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        let show_a = ztshow_live_support::build_standalone_show_info();
+        let show_b = ztshow_live_support::build_standalone_show_info();
+        let show_c = ztshow_live_support::build_standalone_show_info();
+        let show_d = ztshow_live_support::build_standalone_show_info();
+        for show in [show_a, show_b, show_c, show_d] {
+            init_script_state_header(show);
+        }
+
+        // Preset ids; show_b keeps its zero-init `field_0x70` (the counter-assignment case).
+        const PRESET_ID_A: u16 = 0x1234;
+        const PRESET_ID_C: u16 = 0x4321;
+        const PRESET_ID_D: u16 = 0x9999;
+        save_to_memory(show_a + 0x70, PRESET_ID_A);
+        save_to_memory(show_c + 0x70, PRESET_ID_C);
+        save_to_memory(show_d + 0x70, PRESET_ID_D);
+
+        // All ops go through the hooked addresses (the raw function address - the detour itself,
+        // installed by `reimplementation_tests::init`'s `crate::ztshowmgr::init()`), so what is
+        // exercised is the promoted live path, not a test-side shortcut.
+        let register =
+            |show: u32, force: bool| -> u32 { unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show as *const u32, force) } };
+        let unregister =
+            |id: u16, show: u32, clear: bool| -> u32 { unsafe { ZTSHOWMGR_UNREGISTER_SHOW.hooked()(mgr as *const u32, id, show as *const u32, clear) } };
+
+        // Stage 9 pin: the standalone vanilla tree stays inert under hooked writes. Nothing in this
+        // test plants through the raw trampoline, so every id must read back empty through the real
+        // `getShowInfo` walk even while the store holds registrations - if a writer call-through
+        // ever came back, this is where it shows.
+        let assert_tree_inert = |step: &str, ids: &[u16], failures: &mut Vec<String>| {
+            for id in ids {
+                if showmgr_live_support::call_real_get_show_info(mgr_addr as *const u32, *id) != 0 {
+                    failures.push(format!("{step}: id {id:#06x} - the standalone vanilla tree should be inert (stage 9 dropped the writer call-throughs), but the real getShowInfo walk found an entry"));
+                }
+            }
+        };
+
+        // Restore point for the process-global counter; every block below seeds exact values, so
+        // the pins hold regardless of what earlier battery stages left here.
+        let counter_start = showmgr_live_support::show_id_counter();
+
+        // Null-show register: vanilla's AL=0 early return, nothing written.
+        if register(0, false) != 0 {
+            failures.push("register(null, false) should return 0".to_string());
+        }
+
+        // Preset-id register - the no-force reuse path: the id is kept and the counter is left
+        // untouched (the complementary pin to the force-fresh split below).
+        let counter_before = showmgr_live_support::show_id_counter();
+        if register(show_a, false) != 1 {
+            failures.push("register(A, false) with preset id should return 1".to_string());
+        }
+        if ztshowmgr::registered_show_for_id(PRESET_ID_A) != Some(show_a) {
+            failures.push("store[A's preset id] should be show A after register(A, false)".to_string());
+        }
+        if showmgr_live_support::show_id_counter() != counter_before {
+            failures.push("the no-force reuse path must leave the counter untouched".to_string());
+        }
+
+        // Already-registered early return - vanilla's find on the *current* field_0x70 hits,
+        // nothing written, with or without force (the force flag is only read after the miss), and
+        // the counter is never consumed.
+        if register(show_a, false) != 0 {
+            failures.push("re-register(A, false) should return 0 (already registered)".to_string());
+        }
+        if register(show_a, true) != 0 {
+            failures.push("re-register(A, true) should return 0 (already registered; force must not reach the counter)".to_string());
+        }
+        if get_from_memory::<u16>(show_a + 0x70) != PRESET_ID_A {
+            failures.push("A's field_0x70 should be untouched by the already-registered early returns".to_string());
+        }
+        if showmgr_live_support::show_id_counter() != counter_before {
+            failures.push("the already-registered early returns must leave the counter untouched".to_string());
+        }
+        assert_tree_inert("after A's ops", &[PRESET_ID_A], &mut failures);
+
+        // Id-0 fresh-id assignment, made deterministic by seeding the counter: the assigned id is
+        // the post-increment counter, exactly 0x0101 here - no wrap ambiguity.
+        showmgr_live_support::set_show_id_counter(0x0100);
+        if register(show_b, false) != 1 {
+            failures.push("register(B, false) with id 0 should return 1".to_string());
+        }
+        let id_b = get_from_memory::<u16>(show_b + 0x70);
+        if id_b != 0x0101 {
+            failures.push(format!("register(B, false) from a seeded counter of 0x0100 should assign exactly 0x0101 (INC then 16-bit read), got {id_b:#06x}"));
+        }
+        if showmgr_live_support::show_id_counter() != 0x0101 {
+            failures.push(format!(
+                "the fresh-id path should have advanced the counter 0x0100 -> 0x0101, got {:#06x}",
+                showmgr_live_support::show_id_counter()
+            ));
+        }
+        if ztshowmgr::registered_show_for_id(id_b) != Some(show_b) {
+            failures.push(format!("store[assigned id {id_b:#06x}] should be show B after register(B, false)"));
+        }
+        // The fresh id went through the ported `ZTShowInfo::setShowInfoID`: the embedded `ZTShow`'s
+        // `+0x6` id copy and `+0x10` back-pointer (was zero) must be in sync, not just `field_0x70`.
+        if get_from_memory::<u16>(show_b + 0x4 + 0x6) != id_b {
+            failures.push("the embedded ZTShow's +0x6 id copy should carry the fresh id".to_string());
+        }
+        if get_from_memory::<u32>(show_b + 0x4 + 0x10) != show_b {
+            failures.push("the embedded ZTShow's +0x10 back-pointer should point at the show".to_string());
+        }
+
+        // Force over an unregistered preset id: a fresh counter id is assigned even though C's
+        // field_0x70 was non-zero, and the preset value itself never enters the store.
+        if register(show_c, true) != 1 {
+            failures.push("register(C, true) should return 1".to_string());
+        }
+        let id_c = get_from_memory::<u16>(show_c + 0x70);
+        if id_c != 0x0102 {
+            failures.push(format!("register(C, true) should have force-assigned exactly the next counter id 0x0102, got {id_c:#06x}"));
+        }
+        if ztshowmgr::registered_show_for_id(id_c) != Some(show_c) {
+            failures.push(format!("store[force-assigned id {id_c:#06x}] should be show C after register(C, true)"));
+        }
+        if ztshowmgr::registered_show_for_id(PRESET_ID_C).is_some() {
+            failures.push("store should not hold C's preset id - force reassignment never inserts it".to_string());
+        }
+        assert_tree_inert("after B+C registers", &[PRESET_ID_A, id_b, id_c, 0x0000, 0xffff, 0x7fff, 0x8000], &mut failures);
+
+        // Insert-or-assign collision: seed the counter so D's force-assigned fresh id lands exactly
+        // on A's registered key. Vanilla's tree write overwrites the existing entry's value in
+        // place - D steals A's slot; A keeps its stale field_0x70 but is unreachable by id.
+        showmgr_live_support::set_show_id_counter(PRESET_ID_A - 1);
+        if register(show_d, true) != 1 {
+            failures.push("register(D, true) should return 1".to_string());
+        }
+        if get_from_memory::<u16>(show_d + 0x70) != PRESET_ID_A {
+            failures.push(format!(
+                "D's force-assigned id should be exactly {PRESET_ID_A:#06x} (the seeded collision), got {:#06x}",
+                get_from_memory::<u16>(show_d + 0x70)
+            ));
+        }
+        if ztshowmgr::registered_show_for_id(PRESET_ID_A) != Some(show_d) {
+            failures.push("store[A's id] should now be show D - the collision overwrites the entry's value in place".to_string());
+        }
+        if get_from_memory::<u16>(show_a + 0x70) != PRESET_ID_A {
+            failures.push("stolen show A must keep its stale field_0x70 (vanilla never repairs it)".to_string());
+        }
+        if ztshowmgr::registered_show_for_id(PRESET_ID_D).is_some() {
+            failures.push("store should not hold D's preset id - the force-fresh path replaced it before the insert".to_string());
+        }
+        if showmgr_live_support::show_id_counter() != PRESET_ID_A {
+            failures.push("the collision register should have consumed exactly one counter step".to_string());
+        }
+
+        // Path A (show == null, id != 0): erase by id alone, using B's id read back above.
+        if unregister(id_b, 0, false) != 1 {
+            failures.push(format!("unregister({id_b:#06x}, null, false) should return 1"));
+        }
+
+        // Path B (show != null, id != 0), both clear-flag states. (The clear target here is picked
+        // off the store, where each op's id has already been removed by its preceding unregister -
+        // so neither flag state reaches a real clearShowScriptStates; that stays exercised through
+        // path C below.)
+        if unregister(PRESET_ID_A, show_a, false) != 1 {
+            failures.push("unregister(A's id, A, false) should return 1".to_string());
+        }
+        if unregister(PRESET_ID_A, show_a, true) != 1 {
+            failures.push("unregister(A's id, A, true) should return 1 (absent-key erase is still success)".to_string());
+        }
+
+        // Absent-key id unregister: silent no-op success.
+        const ABSENT_PROBE_ID: u16 = 0x0bb7;
+        if unregister(ABSENT_PROBE_ID, 0, false) != 1 {
+            failures.push(format!("unregister(absent id {ABSENT_PROBE_ID:#06x}, null, false) should return 1 (silent no-op)"));
+        }
+
+        // Path C (show != null, id == 0): the id is derived from the show's own field_0x70 -
+        // deliberately stale after a prior unregister, since vanilla never zeroes that field.
+        if unregister(0, show_a, false) != 1 {
+            failures.push("unregister(0, A, false) should return 1".to_string());
+        }
+
+        // Re-register A: with field_0x70 still carrying the stale preset id and that id no longer
+        // in the store, the preset path re-registers under the very same id.
+        if register(show_a, false) != 1 {
+            failures.push("re-register(A, false) after unregister should return 1 (stale field_0x70 is reusable)".to_string());
+        }
+        if get_from_memory::<u16>(show_a + 0x70) != PRESET_ID_A {
+            failures.push("A's field_0x70 should still carry the stale preset id after unregister + re-register".to_string());
+        }
+        if ztshowmgr::registered_show_for_id(PRESET_ID_A) != Some(show_a) {
+            failures.push("store[A's preset id] should be show A again after the re-register".to_string());
+        }
+
+        // clear=true through path C: the one op that really executes the real
+        // `clearShowScriptStates` (targeted directly at the show, no lookup), running it over the
+        // pre-initialized empty header node at show+0x38.
+        if unregister(0, show_b, true) != 1 {
+            failures.push("unregister(0, B, true) should return 1".to_string());
+        }
+
+        // Double unregister: absent-key silent success again, store unchanged.
+        if unregister(0, show_b, false) != 1 {
+            failures.push("double unregister(0, B, false) should still return 1 (silent no-op)".to_string());
+        }
+
+        // Null show + null id: vanilla's AL=0 early return.
+        if unregister(0, 0, false) != 0 {
+            failures.push("unregister(0, null, false) should return 0".to_string());
+        }
+        assert_tree_inert("after the unregister matrix", &[PRESET_ID_A, id_b, id_c, ABSENT_PROBE_ID], &mut failures);
+
+        // Cleanup of the main matrix: drain through the hooked unregister (path C derives each
+        // show's own stale field_0x70, which is exactly the key each insert used).
+        for show in [show_a, show_b, show_c, show_d] {
+            unregister(0, show, false);
+        }
+
+        // Counter wrap semantics, both directions of the boundary:
+        // - from 0xfffe the increment lands on 0xffff, and 0xffff % 0xffff == 0 - so id 0xffff is
+        //   never assigned; the show registers under key 0 with field_0x70 left 0;
+        // - the next id-0 register then finds key 0 already held by the *current* field_0x70 value
+        //   (0) and early-returns - even with force, which vanilla only reads after that find;
+        // - after key 0 drains, a counter of 0xffff itself increments (word wrap) to 0 and again
+        //   assigns id 0.
+        let show_x = ztshow_live_support::build_standalone_show_info();
+        let show_y = ztshow_live_support::build_standalone_show_info();
+        showmgr_live_support::set_show_id_counter(0xfffe);
+        if register(show_x, false) != 1 {
+            failures.push("wrap: register(X, false) at counter 0xfffe should return 1".to_string());
+        }
+        if get_from_memory::<u16>(show_x + 0x70) != 0 || ztshowmgr::registered_show_for_id(0) != Some(show_x) {
+            failures.push("wrap: counter 0xfffe must assign id 0 (0xffff is never assigned) - field_0x70 and store[0] should both say so".to_string());
+        }
+        if showmgr_live_support::show_id_counter() != 0xffff {
+            failures.push(format!(
+                "wrap: the counter should now sit at 0xffff, got {:#06x}",
+                showmgr_live_support::show_id_counter()
+            ));
+        }
+        if register(show_y, false) != 0 || register(show_y, true) != 0 {
+            failures.push("wrap: an id-0 register while key 0 is held must early-return 0, with or without force".to_string());
+        }
+        if showmgr_live_support::show_id_counter() != 0xffff {
+            failures.push("wrap: the early returns must not consume the counter".to_string());
+        }
+        if unregister(0, show_x, false) != 1 {
+            failures.push("wrap: unregister(0, X) should return 1".to_string());
+        }
+        showmgr_live_support::set_show_id_counter(0xffff);
+        if register(show_y, false) != 1 {
+            failures.push("wrap: register(Y, false) at counter 0xffff should return 1".to_string());
+        }
+        if showmgr_live_support::show_id_counter() != 0 {
+            failures.push(format!(
+                "wrap: the counter should have word-wrapped 0xffff -> 0, got {:#06x}",
+                showmgr_live_support::show_id_counter()
+            ));
+        }
+        if get_from_memory::<u16>(show_y + 0x70) != 0 || ztshowmgr::registered_show_for_id(0) != Some(show_y) {
+            failures.push("wrap: the wrapped counter must assign id 0 - field_0x70 and store[0] should both say so".to_string());
+        }
+        if unregister(0, show_y, false) != 1 {
+            failures.push("wrap: unregister(0, Y) should return 1".to_string());
+        }
+        showmgr_live_support::set_show_id_counter(counter_start);
+
+        // Hygiene: the process-global store must be empty - nothing may leak into the rest of the
+        // battery.
+        let remaining = ztshowmgr::registered_show_count();
+        if remaining != 0 {
+            failures.push(format!("store should be empty after cleanup, has {} entries", remaining));
+        }
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOWMGR_GET_SHOW_INFO_GET_SCRIPT_ID` - `ztshowmgr-implementation-plan.md` stage 4 (the
+    /// read cutover): drives the store-backed `getShowInfo`/`getScriptID` detours against a
+    /// standalone, real-constructor `ZTShowMgr` (`this` stand-in - the readers ignore it) and two
+    /// standalone `ZTShowInfo`s registered through the hooked `REGISTER_SHOW`. Since stage 9 the
+    /// hooked writers maintain only the store, so that is the only copy that populates.
+    ///
+    /// Poles per probe:
+    /// - the hooked addresses (the promoted live path): `GET_SHOW_INFO.hooked()` must round-trip
+    ///   each registered show's pointer and return `0` for every absent/boundary id;
+    ///   `GET_SCRIPT_ID.hooked()` must return the found show's `+0x8` assigned-script-id u16
+    ///   zero-extended (a high-bit-set value pins the zero-extension - real vanilla leaves EAX's
+    ///   upper half as register garbage there, which no caller observes), return `0` for a *found*
+    ///   show whose `+0x8` is `0` (cross-checked against `GET_SHOW_INFO` still finding it - the
+    ///   found-but-zero vs. miss ambiguity vanilla itself has), and `0` for a miss;
+    /// - the real vanilla `getScriptID` through its own trampoline - half-real by construction: its
+    ///   body reaches `getShowInfo` by raw address (`ZTShowMgr_getScriptID.asm`'s
+    ///   `CALL ZTShowMgr::getShowInfo`), which is the detoured, store-backed reader, so it exercises
+    ///   the real ABI glue and the real `+0x8` read on top of the store's answer. Compared through a
+    ///   16-bit mask (see `cross_check_poles` - the real found path leaves the show-info pointer's
+    ///   high bits in EAX's upper half, which the port's clean zero-extension contract doesn't
+    ///   reproduce). (The sibling real-`getShowInfo` tree-walk pole this test carried during the
+    ///   dual-write phase is gone with it: since stage 9 stopped the writers maintaining the tree,
+    ///   that walk answers only raw-planted entries and can no longer agree with hooked
+    ///   registrations - `ZTSHOWMGR_REGISTER_UNREGISTER_SHOW` now pins the tree's inertness
+    ///   instead.)
+    ///
+    /// Also pins the cutover's one deliberate benign divergence: vanilla's `getShowInfo` faults on a
+    /// null `this` (unguarded `[ECX+0x28]` read); the detour never touches `this`, so a
+    /// null-manager lookup returns the store's answer instead.
+    ///
+    /// Teardown is leak-only (see `showmgr_live_support::allocate_uninitialized`'s doc comment); the
+    /// store is drained through the hooked unregister path and asserted empty.
+    fn run_ztshowmgr_get_show_info_get_script_id_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_GET_SHOW_INFO_GET_SCRIPT_ID";
+
+        if ztshowmgr::registered_show_count() != 0 {
+            let msg = "Rust registered-shows store should be empty when the test starts";
+            error!("{}: {} (has {} entries)", test_name, msg, ztshowmgr::registered_show_count());
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} (has {} entries)\n", test_name, msg, ztshowmgr::registered_show_count()).as_bytes());
+            }
+            return true;
+        }
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        /// Cross-pole agreement for every id the test has touched: the hooked reader must answer
+        /// exactly what the store holds, and the real `getScriptID` must agree with the hooked one
+        /// - through a 16-bit mask, because the real body's found path (`MOV %AX, word ptr
+        /// [EAX+0x8]`, no `movzx`) leaves the upper EAX holding the upper half of the `getShowInfo`
+        /// return (the show-info pointer's high bits), which the port's clean zero-extension
+        /// contract deliberately does not reproduce.
+        fn cross_check_poles(mgr_addr: u32, step: &str, touched_ids: &[u16], failures: &mut Vec<String>) {
+            for id in touched_ids {
+                let store = ztshowmgr::registered_show_for_id(*id).unwrap_or(0);
+                let hooked = unsafe { ZTSHOWMGR_GET_SHOW_INFO.hooked()(mgr_addr as *const u32, *id) };
+                if hooked != store {
+                    failures.push(format!("{step}: id {id:#06x} - hooked={hooked:#010x}, store={store:#010x}"));
+                }
+                let hooked_script = unsafe { ZTSHOWMGR_GET_SCRIPT_ID.hooked()(mgr_addr as *const u32, *id) };
+                let real_script = showmgr_live_support::call_real_get_script_id(mgr_addr as *const u32, *id) & 0xffff;
+                if hooked_script != real_script {
+                    failures.push(format!(
+                        "{step}: id {id:#06x} - getScriptId hooked={hooked_script:#010x}, real(trampoline)={real_script:#010x}"
+                    ));
+                }
+            }
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+        let mgr_addr = mgr as u32;
+
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        let show_a = ztshow_live_support::build_standalone_show_info();
+        let show_b = ztshow_live_support::build_standalone_show_info();
+
+        // Preset id; show_b keeps its zero-init `field_0x70` (the counter-assignment case).
+        const PRESET_ID_A: u16 = 0x1234;
+        // High bit set on purpose: proves the `+0x8` u16 comes back zero-extended, not
+        // sign-extended (vanilla's `MOV %AX` would leave the upper EAX as garbage).
+        const SCRIPT_ID_A: u16 = 0x8abc;
+        save_to_memory(show_a + 0x70, PRESET_ID_A);
+        save_to_memory(show_a + 0x8, SCRIPT_ID_A);
+        // show_b keeps its zero-init `+0x8` (the found-but-zero case).
+
+        // All reads go through the hooked addresses (the promoted live path); the real-side poles
+        // go through the stage-4 trampolines.
+        let get_show_info = |id: u16| -> u32 { unsafe { ZTSHOWMGR_GET_SHOW_INFO.hooked()(mgr as *const u32, id) } };
+        let get_script_id = |id: u16| -> u32 { unsafe { ZTSHOWMGR_GET_SCRIPT_ID.hooked()(mgr as *const u32, id) } };
+
+        // Everything both poles and the store must agree on, seeded with the boundary probes and
+        // A's preset id; B's fresh id gets pushed as the test discovers it.
+        let mut touched_ids: Vec<u16> = vec![0x0000, 0xffff, 0x7fff, 0x8000, PRESET_ID_A];
+
+        // Before any registration every pole reads empty.
+        cross_check_poles(mgr_addr, "before any registration", &touched_ids, &mut failures);
+
+        // Null-manager read: pins the cutover's one deliberate benign divergence - vanilla's own
+        // body faults here (unguarded `[ECX+0x28]`); the detour ignores `this` and answers from the
+        // store, which is empty for this id.
+        if unsafe { ZTSHOWMGR_GET_SHOW_INFO.hooked()(std::ptr::null(), PRESET_ID_A) } != 0 {
+            failures.push("hooked getShowInfo(null mgr, absent id) should return 0".to_string());
+        }
+
+        // Register A (preset id) and B (id-0 counter assignment) through the hooked REGISTER_SHOW.
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_a as *const u32, false) } != 1 {
+            failures.push("register(A, false) with preset id should return 1".to_string());
+        }
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_b as *const u32, false) } != 1 {
+            failures.push("register(B, false) with id 0 should return 1".to_string());
+        }
+        let id_b = get_from_memory::<u16>(show_b + 0x70);
+        if id_b == 0 || id_b == PRESET_ID_A {
+            failures.push(format!("register(B, false) should have assigned a fresh non-colliding id, got {id_b:#06x}"));
+        }
+        touched_ids.push(id_b);
+        if ztshowmgr::registered_show_for_id(PRESET_ID_A) != Some(show_a) {
+            failures.push("store[A's preset id] should be show A after register(A)".to_string());
+        }
+        if ztshowmgr::registered_show_for_id(id_b) != Some(show_b) {
+            failures.push(format!("store[assigned id {id_b:#06x}] should be show B after register(B)"));
+        }
+        cross_check_poles(mgr_addr, "after register(A)+register(B)", &touched_ids, &mut failures);
+
+        // Hooked reads: the cutover path round-trips each registration; the boundary probes stay
+        // absent.
+        if get_show_info(PRESET_ID_A) != show_a {
+            failures.push(format!("hooked getShowInfo(A's id) should be {show_a:#010x}, got {:#010x}", get_show_info(PRESET_ID_A)));
+        }
+        if get_show_info(id_b) != show_b {
+            failures.push(format!("hooked getShowInfo(B's id) should be {show_b:#010x}, got {:#010x}", get_show_info(id_b)));
+        }
+        for id in [0x0000u16, 0xffff, 0x7fff, 0x8000] {
+            if get_show_info(id) != 0 {
+                failures.push(format!("hooked getShowInfo(absent boundary id {id:#06x}) should return 0"));
+            }
+        }
+
+        // Hooked getScriptID: A's +0x8 script id, zero-extended; B's is the found-but-zero case.
+        if get_script_id(PRESET_ID_A) != SCRIPT_ID_A as u32 {
+            failures.push(format!(
+                "hooked getScriptId(A's id) should be {SCRIPT_ID_A:#06x} (zero-extended), got {:#010x}",
+                get_script_id(PRESET_ID_A)
+            ));
+        }
+        if get_script_id(id_b) != 0 {
+            failures.push(format!("hooked getScriptId(B's id) should be 0 (B's +0x8 is zero), got {:#010x}", get_script_id(id_b)));
+        }
+        if get_show_info(id_b) != show_b {
+            failures.push("hooked getShowInfo(B's id) should still find B - the zero script id must not read as a miss".to_string());
+        }
+        if get_script_id(0xffff) != 0 {
+            failures.push("hooked getScriptId(absent id) should return 0".to_string());
+        }
+
+        // Cleanup: drain through the hooked unregister path (path C derives each show's own stale
+        // `field_0x70`, which is exactly the key each insert used), then assert both the store and
+        // the standalone vanilla tree drained.
+        for show in [show_a, show_b] {
+            unsafe { ZTSHOWMGR_UNREGISTER_SHOW.hooked()(mgr as *const u32, 0, show as *const u32, false) };
+        }
+        cross_check_poles(mgr_addr, "after cleanup", &touched_ids, &mut failures);
+        let remaining = ztshowmgr::registered_show_count();
+        if remaining != 0 {
+            failures.push(format!("store should be empty after cleanup, has {} entries", remaining));
+        }
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOWMGR_ENTER_NEW_MONTH` - `ztshowmgr-implementation-plan.md` stage 5: the Rust walk must
+    /// visit exactly the store's registered, non-null shows and run the real, untouched
+    /// `ZTShowInfo::enterNewMonth` on each, while the real vanilla body (through the stage-5
+    /// trampoline) walks the standalone vanilla tree planted alongside the store (stage 9 stopped
+    /// the hooked writers maintaining the tree, so the tree-side registrations are made explicitly
+    /// through the raw-body trampoline).
+    ///
+    /// Both poles run the same vanilla visitor, so per-show verification rests on its observable
+    /// transform (`ZTShowInfo_enterNewMonth.c`): copy `+0x7c` into `+0x80` and zero `+0x7c`, copy
+    /// `+0x94` into `+0x98` and zero `+0x94`, copy `+0x88` into `+0x8c`, then recompute `+0x88`
+    /// through the opaque `FUN_0059e8f0` - fed the show's `field_0x70` id and, per the decompile's
+    /// `unaff_SI`, whatever the walk left in `%ESI`, so genuinely call-dependent and unpredictible
+    /// here - and add it into `+0x90`. Seeding `+0x90` to `0.0` makes that final sum exact in any
+    /// precision (`F + 0.0` stores back bit-for-bit as the same float the `+0x88` store rounded,
+    /// even through the real body's x87 float10 arithmetic), so one visit is fully characterized by
+    /// the two copy-and-zero pairs, the `+0x8c` copy, and `+0x90 == +0x88`. A second visit (the real
+    /// pole re-walking A/B) can't reuse the sum identity once `+0x90` is non-zero - its float10
+    /// double-rounding isn't reproducible from Rust - so it asserts the six precision-free fields
+    /// only.
+    ///
+    /// The differential set: A (preset id) and B (counter-assigned id) register through the hooked
+    /// `REGISTER_SHOW` into the store and are then planted into the standalone vanilla tree through
+    /// the raw `call_real_register_show` trampoline as well (hooked first, so B's store-assigned id
+    /// is already in `field_0x70` when the raw body reads it and both stores key B identically);
+    /// C (its own preset id) plants into the vanilla tree only, never the store - the Rust pole
+    /// must leave it untouched (post-cutover its reads come from the store, not the tree: the
+    /// property this pins), while the real pole must visit it. A never-registered control show must
+    /// be untouched by both poles. Each show needs a real, empty, self-referential `0x18` header
+    /// node at `+0x44`: the real callee starts its embedded pending-scripts walk at the header's
+    /// *leftmost* pointer (`header+0x8`), which `build_standalone_show_info`'s zeroed embedded
+    /// self-header leaves null - fine for `ztshow.rs`'s own root-based Rust walks, a null deref for
+    /// the real body (same node shape the stage-3 test builds for `+0x38`'s clear path). All
+    /// teardown is leak-only (`showmgr_live_support::allocate_uninitialized`'s doc comment); the
+    /// store drains through the hooked unregister path, the tree-side plants (A, B, C) drain
+    /// through the raw unregister trampoline, and a final both-poles pass over the emptied map must
+    /// produce zero deltas - the walk's empty-map no-op on both sides.
+    fn run_ztshowmgr_enter_new_month_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_ENTER_NEW_MONTH";
+
+        if ztshowmgr::registered_show_count() != 0 {
+            let msg = "Rust registered-shows store should be empty when the test starts";
+            error!("{}: {} (has {} entries)", test_name, msg, ztshowmgr::registered_show_count());
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} (has {} entries)\n", test_name, msg, ztshowmgr::registered_show_count()).as_bytes());
+            }
+            return true;
+        }
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        /// Builds a real, empty, self-referential `_Tree` header node and stores it at
+        /// `show_info+0x44` - see the test's doc comment for why the stock standalone shape can't
+        /// survive the real callee's leftmost-based walk. Leak-only, like everything else here.
+        fn init_pending_script_header(show_info: u32) {
+            let node = unsafe { standalone::OPERATOR_NEW.original()(0x18) } as u32;
+            unsafe { std::ptr::write_bytes(node as *mut u8, 0, 0x18) };
+            save_to_memory(node + 0x8, node);
+            save_to_memory(node + 0xc, node);
+            save_to_memory(show_info + 0x44, node);
+        }
+
+        /// The seven fields the real `ZTShowInfo::enterNewMonth` transform touches (f32s compared
+        /// as raw bits throughout).
+        #[derive(Clone, Copy, PartialEq)]
+        struct ShowAccumulators {
+            f7c: u32,
+            f80: u32,
+            f94: u32,
+            f98: u32,
+            f88: u32,
+            f8c: u32,
+            f90: u32,
+        }
+
+        fn snap(show: u32) -> ShowAccumulators {
+            ShowAccumulators {
+                f7c: get_from_memory(show + 0x7c),
+                f80: get_from_memory(show + 0x80),
+                f94: get_from_memory(show + 0x94),
+                f98: get_from_memory(show + 0x98),
+                f88: get_from_memory(show + 0x88),
+                f8c: get_from_memory(show + 0x8c),
+                f90: get_from_memory(show + 0x90),
+            }
+        }
+
+        fn push_mismatch(label: &str, detail: String, failures: &mut Vec<String>) {
+            failures.push(format!("{label}: {detail}"));
+        }
+
+        /// One more application of the transform on top of `prev`. `check_sum` additionally asserts
+        /// the `+0x90 += F` recompute via the seed-`0.0` identity - only valid while `prev.f90`
+        /// was zero.
+        fn assert_visited(label: &str, show: u32, prev: &ShowAccumulators, cur: &ShowAccumulators, check_sum: bool, failures: &mut Vec<String>) {
+            if cur.f80 != prev.f7c {
+                push_mismatch(label, format!("show {show:#010x} +0x80 should be old +0x7c ({:#010x}), got {:#010x}", prev.f7c, cur.f80), failures);
+            }
+            if cur.f7c != 0 {
+                push_mismatch(label, format!("show {show:#010x} +0x7c should be zeroed, got {:#010x}", cur.f7c), failures);
+            }
+            if cur.f98 != prev.f94 {
+                push_mismatch(label, format!("show {show:#010x} +0x98 should be old +0x94 ({:#010x}), got {:#010x}", prev.f94, cur.f98), failures);
+            }
+            if cur.f94 != 0 {
+                push_mismatch(label, format!("show {show:#010x} +0x94 should be zeroed, got {:#010x}", cur.f94), failures);
+            }
+            if cur.f8c != prev.f88 {
+                push_mismatch(label, format!("show {show:#010x} +0x8c should be old +0x88 ({:#010x}), got {:#010x}", prev.f88, cur.f8c), failures);
+            }
+            if check_sum && cur.f90 != cur.f88 {
+                push_mismatch(label, format!("show {show:#010x} +0x90 should equal the recomputed +0x88 ({:#010x}) with the 0.0 seed, got {:#010x}", cur.f88, cur.f90), failures);
+            }
+        }
+
+        fn assert_untouched(label: &str, show: u32, prev: &ShowAccumulators, cur: &ShowAccumulators, failures: &mut Vec<String>) {
+            if *cur != *prev {
+                push_mismatch(
+                    label,
+                    format!(
+                        "show {show:#010x} must be untouched by this pole (+0x7c {:#010x}->{:#010x}, +0x80 {:#010x}->{:#010x}, +0x94 {:#010x}->{:#010x}, +0x98 {:#010x}->{:#010x}, +0x88 {:#010x}->{:#010x}, +0x8c {:#010x}->{:#010x}, +0x90 {:#010x}->{:#010x})",
+                        prev.f7c, cur.f7c, prev.f80, cur.f80, prev.f94, cur.f94, prev.f98, cur.f98, prev.f88, cur.f88, prev.f8c, cur.f8c, prev.f90, cur.f90
+                    ),
+                    failures,
+                );
+            }
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        // Distinct seeds per show so a copy from the wrong show can never pass; `+0x90`'s explicit
+        // 0.0 documents the sum-identity premise the first-application assertions rest on.
+        let show_a = ztshow_live_support::build_standalone_show_info();
+        let show_b = ztshow_live_support::build_standalone_show_info();
+        let show_c = ztshow_live_support::build_standalone_show_info();
+        let control = ztshow_live_support::build_standalone_show_info();
+        const SEEDS: [(u32, u32, f32); 4] = [(0x2a, 0x2b, 1.5), (0x3c, 0x3d, 2.5), (0x4e, 0x4f, 3.5), (0x5f, 0x60, 4.5)];
+        for (show, (seed_7c, seed_94, seed_88)) in [show_a, show_b, show_c, control].into_iter().zip(SEEDS) {
+            init_pending_script_header(show);
+            save_to_memory(show + 0x7c, seed_7c);
+            save_to_memory(show + 0x94, seed_94);
+            save_to_memory(show + 0x88, seed_88.to_bits());
+            save_to_memory(show + 0x90, 0.0f32.to_bits());
+        }
+
+        const PRESET_ID_A: u16 = 0x1234;
+        const PRESET_ID_C: u16 = 0x4321;
+        save_to_memory(show_a + 0x70, PRESET_ID_A);
+        save_to_memory(show_c + 0x70, PRESET_ID_C);
+        // show_b keeps its zero-init `field_0x70` (the counter-assignment case); its fresh id is
+        // read back after registering.
+
+        // A and B go through the hooked register (store) and are then planted into the vanilla tree
+        // through the raw vanilla-body trampoline (hooked first: B's store-assigned id must be in
+        // field_0x70 before the raw body reads it, so both stores key B identically); C plants into
+        // the vanilla tree only - the store must never see it.
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_a as *const u32, false) } != 1 {
+            failures.push("register(A, false) should return 1".to_string());
+        }
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_b as *const u32, false) } != 1 {
+            failures.push("register(B, false) should return 1".to_string());
+        }
+        if (showmgr_live_support::call_real_register_show(mgr as *const u32, show_a as *const u32, false) & 0xff) != 1 {
+            failures.push("raw register(A, false) should return 1 (tree-side plant)".to_string());
+        }
+        if (showmgr_live_support::call_real_register_show(mgr as *const u32, show_b as *const u32, false) & 0xff) != 1 {
+            failures.push("raw register(B, false) should return 1 (tree-side plant under B's already-assigned id)".to_string());
+        }
+        if (showmgr_live_support::call_real_register_show(mgr as *const u32, show_c as *const u32, false) & 0xff) != 1 {
+            failures.push("raw register(C, false) should return 1".to_string());
+        }
+        let id_b = get_from_memory::<u16>(show_b + 0x70);
+        if id_b == 0 || id_b == PRESET_ID_A || id_b == PRESET_ID_C {
+            failures.push(format!("register(B) should have assigned a fresh non-colliding id, got {id_b:#06x}"));
+        }
+        if ztshowmgr::registered_show_for_id(PRESET_ID_A) != Some(show_a)
+            || ztshowmgr::registered_show_for_id(id_b) != Some(show_b)
+            || ztshowmgr::registered_show_for_id(PRESET_ID_C).is_some()
+        {
+            failures.push("store should hold exactly A and B after the three registrations".to_string());
+        }
+
+        // Rust pole: visits exactly the store's pair; C (tree-only) and the control stay untouched.
+        let pre_rust = [snap(show_a), snap(show_b), snap(show_c), snap(control)];
+        unsafe { ZTSHOWMGR_ENTER_NEW_MONTH.hooked()(mgr as *const u32) };
+        let post_rust = [snap(show_a), snap(show_b), snap(show_c), snap(control)];
+        assert_visited("rust pole", show_a, &pre_rust[0], &post_rust[0], true, &mut failures);
+        assert_visited("rust pole", show_b, &pre_rust[1], &post_rust[1], true, &mut failures);
+        assert_untouched("rust pole", show_c, &pre_rust[2], &post_rust[2], &mut failures);
+        assert_untouched("rust pole", control, &pre_rust[3], &post_rust[3], &mut failures);
+
+        // Real pole: the planted vanilla tree holds A+B+C, so A/B get a second application
+        // (precision-free fields only - see the doc comment) and C its first (sum identity valid).
+        let pre_real = [snap(show_a), snap(show_b), snap(show_c), snap(control)];
+        showmgr_live_support::call_real_enter_new_month(mgr as *const u32);
+        let post_real = [snap(show_a), snap(show_b), snap(show_c), snap(control)];
+        assert_visited("real pole", show_a, &pre_real[0], &post_real[0], false, &mut failures);
+        assert_visited("real pole", show_b, &pre_real[1], &post_real[1], false, &mut failures);
+        assert_visited("real pole", show_c, &pre_real[2], &post_real[2], true, &mut failures);
+        assert_untouched("real pole", control, &pre_real[3], &post_real[3], &mut failures);
+
+        // Cleanup: drain A/B from the store through the hooked unregister and A/B/C from the tree
+        // through the raw one (stage 9: the hooked path no longer touches the tree), then both
+        // poles over the emptied map must be no-ops.
+        for show in [show_a, show_b] {
+            unsafe { ZTSHOWMGR_UNREGISTER_SHOW.hooked()(mgr as *const u32, 0, show as *const u32, false) };
+        }
+        for show in [show_a, show_b, show_c] {
+            showmgr_live_support::call_real_unregister_show(mgr as *const u32, 0, show as *const u32, false);
+        }
+        let remaining = ztshowmgr::registered_show_count();
+        if remaining != 0 {
+            failures.push(format!("store should be empty after cleanup, has {remaining} entries"));
+        }
+        let pre_empty = [snap(show_a), snap(show_b), snap(show_c), snap(control)];
+        unsafe { ZTSHOWMGR_ENTER_NEW_MONTH.hooked()(mgr as *const u32) };
+        showmgr_live_support::call_real_enter_new_month(mgr as *const u32);
+        let post_empty = [snap(show_a), snap(show_b), snap(show_c), snap(control)];
+        for (i, show) in [show_a, show_b, show_c, control].into_iter().enumerate() {
+            assert_untouched("empty-map poles", show, &pre_empty[i], &post_empty[i], &mut failures);
+        }
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// The `ZTSHOWMGR_UPDATE` sentinel's visit log - recorded `this` values in call order.
+    /// Module-level so the sentinel fn can reach it; only that test touches it, and the battery is
+    /// single-threaded.
+    static ZTSHOWMGR_UPDATE_VISITS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+    /// Sentinel the `ZTSHOWMGR_UPDATE` test plants in each standalone show's fake vtable at slot
+    /// `+0x20` - the exact slot both `ZTShowMgr::update` bodies virtually dispatch through - and
+    /// which records the `this` it was called with.
+    unsafe extern "thiscall" fn ztshowmgr_update_sentinel(this: *const u32) {
+        ZTSHOWMGR_UPDATE_VISITS.lock().unwrap().push(this as u32);
+    }
+
+    /// `ZTSHOWMGR_UPDATE` - stage 5's second walk (`ztshowmgr-implementation-plan.md`), verified
+    /// through sentinel vtables rather than the real `ZTShowInfo::update` callee: that callee
+    /// virtual-calls the show's own `listen`/`cleanupEvents` vtable slots plus a slot on the
+    /// embedded `ZTShow` (`ZTShowInfo_update.c`), the whole event-list subsystem a zeroed
+    /// standalone show can't back. The sentinel measures exactly the part stage 5 owns - the walk
+    /// set, the ascending-key order, the size guard, and the dispatch convention - while the callee
+    /// behind slot `+0x20` stays real vanilla in the live game, untouched.
+    ///
+    /// The differential set is the stage-5 standard: A (preset id) and B (counter-assigned id)
+    /// register through the hooked `REGISTER_SHOW` (store) and are planted into the vanilla tree
+    /// through the raw `call_real_register_show` trampoline as well (hooked first, so B's
+    /// store-assigned id keys both stores identically - stage 9 stopped the hooked writers
+    /// maintaining the tree), C (its own preset id) through the raw trampoline only (vanilla tree),
+    /// plus a never-registered control. The Rust pole must record exactly A+B in ascending-id order
+    /// (the `BTreeMap` iteration order substituting for vanilla's in-order walk) and nothing else;
+    /// the real pole - the vanilla body through the stage-5 trampoline, walking the planted
+    /// standalone tree - must record A+B+C in ascending-id order through the *same* sentinel, which
+    /// also pins that vanilla really dispatches slot `+0x20` with `this` = the show pointer. With
+    /// the store drained and the tree emptied, both poles must record nothing - the port's
+    /// `!is_empty()` guard and vanilla's `mbr_0x2c > 0` guard both on an empty map. All teardown is
+    /// leak-only.
+    fn run_ztshowmgr_update_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_UPDATE";
+
+        if ztshowmgr::registered_show_count() != 0 {
+            let msg = "Rust registered-shows store should be empty when the test starts";
+            error!("{}: {} (has {} entries)", test_name, msg, ztshowmgr::registered_show_count());
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} (has {} entries)\n", test_name, msg, ztshowmgr::registered_show_count()).as_bytes());
+            }
+            return true;
+        }
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        /// Gives `show` a fake vtable whose only populated slot is `+0x20` (the dispatched one) -
+        /// a walk that read any other slot would call null and crash the test process rather than
+        /// pass. Leak-only, like everything else here.
+        fn install_sentinel_vtable(show: u32) {
+            let vtable = unsafe { standalone::OPERATOR_NEW.original()(0x24) } as u32;
+            unsafe { std::ptr::write_bytes(vtable as *mut u8, 0, 0x24) };
+            save_to_memory(vtable + 0x20, ztshowmgr_update_sentinel as *const () as usize as u32);
+            save_to_memory(show, vtable);
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        let show_a = ztshow_live_support::build_standalone_show_info();
+        let show_b = ztshow_live_support::build_standalone_show_info();
+        let show_c = ztshow_live_support::build_standalone_show_info();
+        let control = ztshow_live_support::build_standalone_show_info();
+        for show in [show_a, show_b, show_c, control] {
+            install_sentinel_vtable(show);
+        }
+
+        const PRESET_ID_A: u16 = 0x1234;
+        const PRESET_ID_C: u16 = 0x4321;
+        save_to_memory(show_a + 0x70, PRESET_ID_A);
+        save_to_memory(show_c + 0x70, PRESET_ID_C);
+        // show_b keeps its zero-init `field_0x70` (the counter-assignment case).
+
+        // A and B through the hooked register (store) plus the raw trampoline plant (vanilla tree,
+        // hooked first so B's store-assigned id keys both stores identically); C through the raw
+        // vanilla-body trampoline only (vanilla tree).
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_a as *const u32, false) } != 1 {
+            failures.push("register(A, false) should return 1".to_string());
+        }
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_b as *const u32, false) } != 1 {
+            failures.push("register(B, false) should return 1".to_string());
+        }
+        if (showmgr_live_support::call_real_register_show(mgr as *const u32, show_a as *const u32, false) & 0xff) != 1 {
+            failures.push("raw register(A, false) should return 1 (tree-side plant)".to_string());
+        }
+        if (showmgr_live_support::call_real_register_show(mgr as *const u32, show_b as *const u32, false) & 0xff) != 1 {
+            failures.push("raw register(B, false) should return 1 (tree-side plant under B's already-assigned id)".to_string());
+        }
+        if (showmgr_live_support::call_real_register_show(mgr as *const u32, show_c as *const u32, false) & 0xff) != 1 {
+            failures.push("raw register(C, false) should return 1 (the raw body only guarantees AL; the hooked path returns the port's cleaned 0/1)".to_string());
+        }
+        let id_b = get_from_memory::<u16>(show_b + 0x70);
+        if id_b == 0 || id_b == PRESET_ID_A || id_b == PRESET_ID_C {
+            failures.push(format!("register(B) should have assigned a fresh non-colliding id, got {id_b:#06x}"));
+        }
+        if ztshowmgr::registered_show_for_id(PRESET_ID_A) != Some(show_a)
+            || ztshowmgr::registered_show_for_id(id_b) != Some(show_b)
+            || ztshowmgr::registered_show_for_id(PRESET_ID_C).is_some()
+        {
+            failures.push("store should hold exactly A and B after the three registrations".to_string());
+        }
+
+        // Expected visit sequences, ascending by the id each show registered under (vanilla's
+        // in-order walk order, which the BTreeMap's ascending-u16 iteration reproduces).
+        let mut store_ids: Vec<(u16, u32)> = vec![(PRESET_ID_A, show_a), (id_b, show_b)];
+        store_ids.sort_unstable();
+        let mut tree_ids = store_ids.clone();
+        tree_ids.push((PRESET_ID_C, show_c));
+        tree_ids.sort_unstable();
+        let pointers = |pairs: &[(u16, u32)]| -> Vec<u32> { pairs.iter().map(|(_, ptr)| *ptr).collect() };
+
+        // Rust pole: exactly the store's pair, in ascending-id order - C (tree-only) and the
+        // control must not appear.
+        ZTSHOWMGR_UPDATE_VISITS.lock().unwrap().clear();
+        unsafe { ZTSHOWMGR_UPDATE.hooked()(mgr as *const u32) };
+        let rust_visits = ZTSHOWMGR_UPDATE_VISITS.lock().unwrap().clone();
+        if rust_visits != pointers(&store_ids) {
+            failures.push(format!(
+                "rust pole visits should be exactly the store's registrations in ascending-id order ({:#010x?}), got {rust_visits:#010x?}",
+                pointers(&store_ids)
+            ));
+        }
+
+        // Real pole: the vanilla walk over the planted tree must dispatch slot +0x20 with
+        // this = the show pointer for A+B+C, through the same sentinel.
+        ZTSHOWMGR_UPDATE_VISITS.lock().unwrap().clear();
+        showmgr_live_support::call_real_update(mgr as *const u32);
+        let real_visits = ZTSHOWMGR_UPDATE_VISITS.lock().unwrap().clone();
+        if real_visits != pointers(&tree_ids) {
+            failures.push(format!(
+                "real pole visits (vanilla walk dispatching slot +0x20) should be exactly the tree's registrations in ascending-id order ({:#010x?}), got {real_visits:#010x?}",
+                pointers(&tree_ids)
+            ));
+        }
+
+        // Cleanup: drain A/B from the store through the hooked unregister and A/B/C from the tree
+        // through the raw one (stage 9: the hooked path no longer touches the tree), then both
+        // poles over the emptied map must record nothing.
+        for show in [show_a, show_b] {
+            unsafe { ZTSHOWMGR_UNREGISTER_SHOW.hooked()(mgr as *const u32, 0, show as *const u32, false) };
+        }
+        for show in [show_a, show_b, show_c] {
+            showmgr_live_support::call_real_unregister_show(mgr as *const u32, 0, show as *const u32, false);
+        }
+        let remaining = ztshowmgr::registered_show_count();
+        if remaining != 0 {
+            failures.push(format!("store should be empty after cleanup, has {remaining} entries"));
+        }
+        ZTSHOWMGR_UPDATE_VISITS.lock().unwrap().clear();
+        unsafe { ZTSHOWMGR_UPDATE.hooked()(mgr as *const u32) };
+        showmgr_live_support::call_real_update(mgr as *const u32);
+        let leftover_visits = ZTSHOWMGR_UPDATE_VISITS.lock().unwrap().clone();
+        if !leftover_visits.is_empty() {
+            failures.push(format!("both poles on the emptied map must visit nothing, got {leftover_visits:#010x?}"));
+        }
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOWMGR_SAVE_LOAD` - stage 6 (`ztshowmgr-implementation-plan.md`): `ZTShowMgr::save`/
+    /// `load` wrap exactly two pieces - the embedded `ZTShowScriptMgr`'s own save/load (already
+    /// `ztshowscriptmgr`'s Rust store, reached through the same direct `CALL` vanilla makes) and
+    /// the 2-byte show-id-counter persistence - so the test drives those with `io_redirect`
+    /// standing in for the real file. One script is seeded into the script store and a known
+    /// counter value into **both** copies of the counter (stage 9 moved the live counter into the
+    /// Rust store, but the real save/load bodies reached through the stage-6 trampolines still
+    /// read/write the vanilla global in place - so the Rust poles exercise the store copy and the
+    /// real poles the global, seeded identically so their streams still compare). Then:
+    /// - the Rust save and the real body through the stage-6 trampoline must capture
+    ///   byte-identical streams (both delegations reach the same Rust script-store save, so the
+    ///   pole isolates each body's own tail: the Rust port's store read vs. vanilla's counter
+    ///   global read in place, and the 2-bytes/count-1 write shape). The real pole's *return
+    ///   byte* is deliberately not asserted: vanilla's body computes it via a full-EAX
+    ///   `CMP %EAX, 1` on `WriteBytesToFile`'s return (`ZTShowMgr_save.asm`), and inside a
+    ///   capture window that callee is `io_redirect`'s detour, whose Rust `bool` return defines
+    ///   only `AL` - upper EAX is register garbage, so the compare reads as failure. A pure
+    ///   test-harness artifact: the redirect path exists only inside capture windows, while the
+    ///   passthrough path (and the un-hooked real function the live game calls) returns a
+    ///   full-width 0/1. The load pole's real body returning 1 live-verifies the identical
+    ///   `SETZ`/`AND` return tail - there the other redirected callee (`DEALLOCATE`) returns a
+    ///   full-width `u32`, so vanilla's compare succeeds;
+    /// - the stream must be exactly the script store's own payload plus the counter's 2 LE bytes
+    ///   on the end - proven by replaying the prefix through `ztshowscriptmgr::load_mgr` (which
+    ///   also must recover the seeded script) and comparing the tail against the seeded value;
+    /// - replaying the full stream at version 0x100 through both poles must restore the script
+    ///   store and the counter (the store copy through the hooked pole, the global through the
+    ///   real one) - and the hooked pole's restored store counter must **continue**: a subsequent
+    ///   id-0 register through the hooked `REGISTER_SHOW` must assign exactly
+    ///   `SEEDED_COUNTER + 1`, pinning the register-after-load counter continuity stage 9 created
+    ///   (one owner, both consumers Rust-side now);
+    /// - replaying at version 0x60 (at/under the gate) must restore the scripts but leave the
+    ///   counter untouched, through both poles (each in its own copy);
+    /// - replaying only the store payload (counter bytes stripped) at version 0x100 must fail on
+    ///   `ZTShowMgr`'s own counter read and return failure with the counter untouched - the
+    ///   scriptmgr's own trailing counter inside that payload satisfies its loader, so the
+    ///   failure is specifically the outer read.
+    /// Both counter copies are saved and restored around the whole test; the script store
+    /// is reset before and after (successful replays also restore its own persisted counter -
+    /// reset away again), and the registered-shows store must still be empty at the end.
+    fn run_ztshowmgr_save_load_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_SAVE_LOAD";
+        const CURRENT_VERSION: u32 = 0x100;
+        const GATED_VERSION: u32 = 0x60;
+        const SEEDED_COUNTER: u16 = 0x0ABC;
+
+        if ztshowmgr::registered_show_count() != 0 {
+            let msg = "Rust registered-shows store should be empty when the test starts";
+            error!("{}: {} (has {} entries)", test_name, msg, ztshowmgr::registered_show_count());
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} (has {} entries)\n", test_name, msg, ztshowmgr::registered_show_count()).as_bytes());
+            }
+            return true;
+        }
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        let counter_addr = showmgr_live_support::show_id_counter_addr();
+        let original_counter = get_from_memory::<u16>(counter_addr);
+        let original_store_counter = showmgr_live_support::show_id_counter();
+
+        let mut failures: Vec<String> = Vec::new();
+        let dummy_file: u32 = 0;
+        let file_ptr = &dummy_file as *const u32;
+
+        // Seed: one script in the script store, a known show-id counter in both copies (the Rust
+        // poles read the store's, the real bodies the vanilla global).
+        ztshowscriptmgr::live_support::reset_state();
+        let script_a = make_registered_show_script(11, 101);
+        save_to_memory(counter_addr, SEEDED_COUNTER);
+        showmgr_live_support::set_show_id_counter(SEEDED_COUNTER);
+
+        // Rust save, then the real body's save - captures must be byte-identical. The real
+        // pole's return byte is deliberately unread (harness artifact, see this test's doc
+        // comment): vanilla's full-EAX compare against io_redirect's bool-returning write
+        // detour cannot succeed inside a capture window.
+        io_redirect::begin_capture();
+        let rust_save_ret = unsafe { ZTSHOWMGR_SAVE.hooked()(mgr as *const u32, file_ptr as *const i8) };
+        let rust_bytes = io_redirect::end_capture();
+        io_redirect::begin_capture();
+        let _real_save_ret = showmgr_live_support::call_real_save(mgr as *const u32, file_ptr as *const i8);
+        let real_bytes = io_redirect::end_capture();
+        if rust_save_ret != 1 {
+            failures.push(format!("hooked save should return 1, got {rust_save_ret:#010x}"));
+        }
+        if real_bytes != rust_bytes {
+            failures.push(format!(
+                "real and rust save captures must be byte-identical ({} vs {} bytes)",
+                real_bytes.len(),
+                rust_bytes.len()
+            ));
+        }
+
+        // Shape: the stream is the script store's payload (prefix decodes via load_mgr and
+        // recovers the seeded script) plus the counter's 2 LE bytes on the end.
+        if rust_bytes.len() < 6 {
+            failures.push(format!("save capture implausibly small ({} bytes), expected script payload + 2 counter bytes", rust_bytes.len()));
+        } else {
+            let (payload, counter_tail) = rust_bytes.split_at(rust_bytes.len() - 2);
+            if counter_tail != SEEDED_COUNTER.to_le_bytes() {
+                failures.push(format!(
+                    "save capture must end with the counter's 2 LE bytes ({SEEDED_COUNTER:#06x}), got {counter_tail:02x?}"
+                ));
+            }
+            ztshowscriptmgr::live_support::reset_state();
+            io_redirect::begin_replay(payload.to_vec());
+            let payload_ok = ztshowscriptmgr::load_mgr(file_ptr, CURRENT_VERSION);
+            io_redirect::end_replay();
+            if !payload_ok || !ztshowscriptmgr::script_exists_by_id(script_a) {
+                failures.push("save capture's prefix should decode as the script store's payload containing the seeded script".to_string());
+            }
+        }
+
+        // Full-stream load, version over the gate: scripts + counter restored. Rust pole first
+        // (its counter lands in the store), then the real body through the trampoline (its counter
+        // lands in the vanilla global). Both copies are clobbered to distinct sentinels before
+        // each pole so a no-op restore is detectable on the side that pole owns.
+        ztshowscriptmgr::live_support::reset_state();
+        save_to_memory(counter_addr, 1_u16);
+        showmgr_live_support::set_show_id_counter(1);
+        io_redirect::begin_replay(rust_bytes.clone());
+        let rust_load_ret = unsafe { ZTSHOWMGR_LOAD.hooked()(mgr as *const u32, file_ptr, CURRENT_VERSION) };
+        io_redirect::end_replay();
+        if rust_load_ret != 1 {
+            failures.push(format!("hooked load should return 1, got {rust_load_ret:#010x}"));
+        }
+        if !ztshowscriptmgr::script_exists_by_id(script_a) {
+            failures.push("hooked load should have restored the seeded script".to_string());
+        }
+        if showmgr_live_support::show_id_counter() != SEEDED_COUNTER {
+            failures.push(format!(
+                "hooked load should have restored the store counter to {SEEDED_COUNTER:#06x}, got {:#06x}",
+                showmgr_live_support::show_id_counter()
+            ));
+        }
+
+        // Register-after-load counter continuity: the restored store counter is the live one, so
+        // the next id-0 register must continue from it - exactly SEEDED_COUNTER + 1 (no wrap at
+        // this seed).
+        let continuity_show = ztshow_live_support::build_standalone_show_info();
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, continuity_show as *const u32, false) } != 1 {
+            failures.push("register after load should return 1".to_string());
+        }
+        if get_from_memory::<u16>(continuity_show + 0x70) != SEEDED_COUNTER + 1 {
+            failures.push(format!(
+                "register after load should assign exactly {:#06x} (the restored counter + 1), got {:#06x}",
+                SEEDED_COUNTER + 1,
+                get_from_memory::<u16>(continuity_show + 0x70)
+            ));
+        }
+        if unsafe { ZTSHOWMGR_UNREGISTER_SHOW.hooked()(mgr as *const u32, 0, continuity_show as *const u32, false) } != 1 {
+            failures.push("unregistering the continuity show should return 1".to_string());
+        }
+
+        ztshowscriptmgr::live_support::reset_state();
+        save_to_memory(counter_addr, 2_u16);
+        showmgr_live_support::set_show_id_counter(2);
+        io_redirect::begin_replay(real_bytes.clone());
+        let real_load_ret = showmgr_live_support::call_real_load(mgr as *const u32, file_ptr, CURRENT_VERSION);
+        io_redirect::end_replay();
+        if (real_load_ret & 0xff) != 1 {
+            failures.push(format!("real load should return 1 in its low byte, got {real_load_ret:#010x}"));
+        }
+        if !ztshowscriptmgr::script_exists_by_id(script_a) {
+            failures.push("real load should have restored the seeded script".to_string());
+        }
+        if get_from_memory::<u16>(counter_addr) != SEEDED_COUNTER {
+            failures.push(format!(
+                "real load should have restored the counter global to {SEEDED_COUNTER:#06x}, got {:#06x}",
+                get_from_memory::<u16>(counter_addr)
+            ));
+        }
+
+        // Version gate: at/under 0x60 the scripts still load but neither pole touches the counter.
+        ztshowscriptmgr::live_support::reset_state();
+        save_to_memory(counter_addr, 3_u16);
+        showmgr_live_support::set_show_id_counter(3);
+        io_redirect::begin_replay(rust_bytes.clone());
+        let gated_ret = unsafe { ZTSHOWMGR_LOAD.hooked()(mgr as *const u32, file_ptr, GATED_VERSION) };
+        io_redirect::end_replay();
+        if gated_ret != 1 {
+            failures.push(format!("hooked load at version 0x60 should still return 1, got {gated_ret:#010x}"));
+        }
+        if !ztshowscriptmgr::script_exists_by_id(script_a) {
+            failures.push("hooked load at version 0x60 should still have restored the seeded script".to_string());
+        }
+        if showmgr_live_support::show_id_counter() != 3 {
+            failures.push("hooked load at version 0x60 must not touch the store counter (gate not passed)".to_string());
+        }
+
+        ztshowscriptmgr::live_support::reset_state();
+        save_to_memory(counter_addr, 4_u16);
+        showmgr_live_support::set_show_id_counter(4);
+        io_redirect::begin_replay(real_bytes.clone());
+        let real_gated_ret = showmgr_live_support::call_real_load(mgr as *const u32, file_ptr, GATED_VERSION);
+        io_redirect::end_replay();
+        if (real_gated_ret & 0xff) != 1 {
+            failures.push(format!("real load at version 0x60 should still return 1 in its low byte, got {real_gated_ret:#010x}"));
+        }
+        if get_from_memory::<u16>(counter_addr) != 4 {
+            failures.push("real load at version 0x60 must not touch the counter global (gate not passed)".to_string());
+        }
+
+        // Short read: the store payload alone (its own trailing counter satisfies the scriptmgr's
+        // loader) leaves nothing for ZTShowMgr's own 2-byte read - both poles must report
+        // failure and leave their counter copy untouched.
+        let stripped = rust_bytes[..rust_bytes.len() - 2].to_vec();
+        ztshowscriptmgr::live_support::reset_state();
+        save_to_memory(counter_addr, 5_u16);
+        showmgr_live_support::set_show_id_counter(5);
+        io_redirect::begin_replay(stripped.clone());
+        let short_ret = unsafe { ZTSHOWMGR_LOAD.hooked()(mgr as *const u32, file_ptr, CURRENT_VERSION) };
+        io_redirect::end_replay();
+        if short_ret != 0 {
+            failures.push(format!("hooked load on a stream missing its counter bytes should return 0, got {short_ret:#010x}"));
+        }
+        if showmgr_live_support::show_id_counter() != 5 {
+            failures.push("a failed counter read must leave the store counter untouched".to_string());
+        }
+
+        ztshowscriptmgr::live_support::reset_state();
+        save_to_memory(counter_addr, 6_u16);
+        showmgr_live_support::set_show_id_counter(6);
+        io_redirect::begin_replay(stripped);
+        let real_short_ret = showmgr_live_support::call_real_load(mgr as *const u32, file_ptr, CURRENT_VERSION);
+        io_redirect::end_replay();
+        if (real_short_ret & 0xff) != 0 {
+            failures.push(format!("real load on a stream missing its counter bytes should return 0 in its low byte, got {real_short_ret:#010x}"));
+        }
+        if get_from_memory::<u16>(counter_addr) != 6 {
+            failures.push("a failed real counter read must leave the counter global untouched".to_string());
+        }
+
+        // Hygiene: reset the script store, put both counter copies back, and confirm the
+        // registered-shows store was never touched.
+        ztshowscriptmgr::live_support::reset_state();
+        save_to_memory(counter_addr, original_counter);
+        showmgr_live_support::set_show_id_counter(original_store_counter);
+        let remaining = ztshowmgr::registered_show_count();
+        if remaining != 0 {
+            failures.push(format!("registered-shows store should still be empty, has {remaining} entries"));
+        }
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOWMGR_IS_DOING_SHOW` - stage 7 (`ztshowmgr-implementation-plan.md`): `ZTShowMgr::
+    /// isDoingShow` composes the store-backed `getShowInfo` lookup (stage 4) with one real,
+    /// untouched `ZTShow::getShowScriptState` walk over the found show's embedded `ZTShow`, so
+    /// both poles read the same registrations out of the same store - the real body's internal
+    /// `getShowInfo` `CALL` lands in the stage-4 detour - and the differential is the glue each
+    /// pole owns: the port's clean 0/1 (macOS's body normalizes to the same full-width predicate)
+    /// against vanilla's `SETNZ %AL`-only return plus the `LEA %ECX, [EAX + 0x4]` embedded-show
+    /// hand-off.
+    ///
+    /// The state side is built by hand on a standalone show: the embedded `ZTShow`'s script-state
+    /// map is the self-referential header object at `show_info+0x38` (the same header shape the
+    /// stage-3 test builds for `ZTShowState::clear`), with one zero-padded `0x18` node hung off
+    /// its root slot at `+0x3c` - key (the unit id) at node `+0x10`, a non-null value at `+0x14`
+    /// (the real callee returns `[node+0x14]` without dereferencing it, so an opaque non-null
+    /// buffer stands in for the `ZTShowScriptState`). `AI_cls_0x404fd6::find`'s key compare is a
+    /// full 32-bit `CMP dword ptr [EAX+0x10]` (`AI_cls_0x404fd6_find.asm`), which the zeroed node
+    /// padding satisfies and which a probe crossing bit 16 must NOT match - both poles answer
+    /// through the same real walk, so that probe pins the effective key width rather than
+    /// differentiating the poles. All teardown is leak-only; the store drains through the hooked
+    /// unregister path and a final both-poles pass confirms the registration is really gone.
+    fn run_ztshowmgr_is_doing_show_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_IS_DOING_SHOW";
+
+        if ztshowmgr::registered_show_count() != 0 {
+            let msg = "Rust registered-shows store should be empty when the test starts";
+            error!("{}: {} (has {} entries)", test_name, msg, ztshowmgr::registered_show_count());
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} (has {} entries)\n", test_name, msg, ztshowmgr::registered_show_count()).as_bytes());
+            }
+            return true;
+        }
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        /// Both poles over one (unit, show) probe. The Rust pole must return exactly `expected`
+        /// (the port's clean 0/1); the real body defines only its `AL` byte (upper EAX holds the
+        /// state pointer's high bits on a hit), so its return is compared through the low-byte
+        /// mask.
+        fn check(label: &str, mgr: *mut ZTShowMgr, unit_id: u32, show_id: u16, expected: u32, failures: &mut Vec<String>) {
+            let rust_ret = unsafe { ZTSHOWMGR_IS_DOING_SHOW.hooked()(mgr as *const u32, unit_id, show_id) };
+            if rust_ret != expected {
+                failures.push(format!("{label}: rust pole should return {expected}, got {rust_ret:#010x}"));
+            }
+            let real_ret = showmgr_live_support::call_real_is_doing_show(mgr as *const u32, unit_id, show_id) & 0xff;
+            if real_ret != expected {
+                failures.push(format!("{label}: real pole should return {expected} (AL-masked), got {real_ret:#010x}"));
+            }
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        // show_a carries the seeded state (unit UNIT_A -> a non-null script-state pointer) inside
+        // its embedded ZTShow's script-state map; show_b stays stateless (empty self-referential
+        // header only). Leak-only allocations throughout.
+        const UNIT_A: u32 = 0x2a;
+        let show_a = ztshow_live_support::build_standalone_show_info();
+        let show_b = ztshow_live_support::build_standalone_show_info();
+        for show in [show_a, show_b] {
+            // The map object at show_info+0x38 doubles as its own empty header (self-sentinel) -
+            // a zeroed +0x38 would leave `find`'s header load null and crash its root read.
+            save_to_memory(show + 0x38, show + 0x38);
+        }
+        let fake_state = unsafe { standalone::OPERATOR_NEW.original()(0x20) } as u32;
+        unsafe { std::ptr::write_bytes(fake_state as *mut u8, 0, 0x20) };
+        let node = unsafe { standalone::OPERATOR_NEW.original()(0x18) } as u32;
+        unsafe { std::ptr::write_bytes(node as *mut u8, 0, 0x18) };
+        save_to_memory(node + 0x4, show_a + 0x38); // parent = header (hygiene; find never reads it)
+        save_to_memory(node + 0x10, UNIT_A); // key: the unit id; node stays zero-padded at +0x12
+        save_to_memory(node + 0x14, fake_state); // value: only null-tested by the real callee
+        save_to_memory(show_a + 0x3c, node); // the header's root slot
+
+        const PRESET_ID_A: u16 = 0x1234;
+        save_to_memory(show_a + 0x70, PRESET_ID_A);
+        // show_b keeps its zero-init `field_0x70` (the counter-assignment case).
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_a as *const u32, false) } != 1 {
+            failures.push("register(A, false) should return 1".to_string());
+        }
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_b as *const u32, false) } != 1 {
+            failures.push("register(B, false) should return 1".to_string());
+        }
+        let id_b = get_from_memory::<u16>(show_b + 0x70);
+        if id_b == 0 || id_b == PRESET_ID_A {
+            failures.push(format!("register(B) should have assigned a fresh non-colliding id, got {id_b:#06x}"));
+        }
+
+        // Unregistered probes: both poles miss on the store-backed lookup.
+        for probe in [0x0000u16, 0x8000, 0xffff] {
+            check(&format!("unregistered id {probe:#06x}"), mgr, UNIT_A, probe, 0, &mut failures);
+        }
+        // The seeded hit: UNIT_A is doing show A through both poles.
+        check("seeded state hit", mgr, UNIT_A, PRESET_ID_A, 1, &mut failures);
+        // Misses against the seeded show: unknown unit, the unit-id-0 boundary, and a key that
+        // matches only below bit 16 (the 32-bit key-compare pin).
+        check("unknown unit on seeded show", mgr, UNIT_A + 1, PRESET_ID_A, 0, &mut failures);
+        check("unit id 0 on seeded show", mgr, 0, PRESET_ID_A, 0, &mut failures);
+        check("key differing above bit 16", mgr, UNIT_A | 0x1_0000, PRESET_ID_A, 0, &mut failures);
+        // Registered but stateless: the walk runs over an empty map and misses for every unit.
+        check("stateless show, seeded unit", mgr, UNIT_A, id_b, 0, &mut failures);
+        check("stateless show, unit id 0", mgr, 0, id_b, 0, &mut failures);
+
+        // Cleanup: drain both through the hooked unregister (clear=false - the clear path is the
+        // stage-3 tests' concern), then the hit probe must miss through both poles.
+        for show in [show_a, show_b] {
+            unsafe { ZTSHOWMGR_UNREGISTER_SHOW.hooked()(mgr as *const u32, 0, show as *const u32, false) };
+        }
+        let remaining = ztshowmgr::registered_show_count();
+        if remaining != 0 {
+            failures.push(format!("store should be empty after cleanup, has {remaining} entries"));
+        }
+        check("unregistered after cleanup", mgr, UNIT_A, PRESET_ID_A, 0, &mut failures);
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOWMGR_IS_SHOW_SCRIPT_DONE` - stage 8 (`ztshowmgr-implementation-plan.md`): `ZTShowMgr::
+    /// isShowScriptDone` is structurally stage 7's sibling - the same store-backed `getShowInfo`
+    /// lookup (whose stage-4 detour the real body's raw `CALL` lands in) and the same real
+    /// `ZTShow::getShowScriptState` walk - so both poles again read the same registrations out of
+    /// the same store, and the differential is the glue each pole owns: the port's clean
+    /// zero-extended done byte against vanilla's `MOV %AL, byte ptr [EAX + 0x13]` read plus its
+    /// AL-only return.
+    ///
+    /// The state side is built exactly like the stage-7 test's (self-referential header at
+    /// `show_info+0x38`, one zero-padded `0x18` node hung off its root slot, key at `+0x10`,
+    /// non-null value at `+0x14`) with one extra dimension: unlike `isDoingShow`, stage 8
+    /// *dereferences* the state pointer, so the stand-in's `+0x13` byte is meaningful. It is swept
+    /// through `0x00`/`0x37`/`0xff`: the `0x37` probe pins that the port returns the raw byte (a
+    /// wrongly normalized 0/1 would return `1` there, and the real pole's AL-masked compare would
+    /// catch the mirror-image mistake), and `0x00` pins that a found state with a zero done byte is
+    /// indistinguishable from a miss through the observable return, exactly like vanilla. All
+    /// teardown is leak-only; the store drains through the hooked unregister path and a final
+    /// both-poles pass confirms the registration is really gone.
+    fn run_ztshowmgr_is_show_script_done_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_IS_SHOW_SCRIPT_DONE";
+
+        if ztshowmgr::registered_show_count() != 0 {
+            let msg = "Rust registered-shows store should be empty when the test starts";
+            error!("{}: {} (has {} entries)", test_name, msg, ztshowmgr::registered_show_count());
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} (has {} entries)\n", test_name, msg, ztshowmgr::registered_show_count()).as_bytes());
+            }
+            return true;
+        }
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        /// Both poles over one (script, show) probe. The Rust pole must return exactly `expected`
+        /// (the port's clean zero-extended byte); the real body defines only its `AL` byte (upper
+        /// EAX holds the state pointer's high bits on a hit), so its return is compared through the
+        /// low-byte mask.
+        fn check(label: &str, mgr: *mut ZTShowMgr, script_id: u32, show_id: u16, expected: u32, failures: &mut Vec<String>) {
+            let rust_ret = unsafe { ZTSHOWMGR_IS_SHOW_SCRIPT_DONE.hooked()(mgr as *const u32, script_id, show_id) };
+            if rust_ret != expected {
+                failures.push(format!("{label}: rust pole should return {expected}, got {rust_ret:#010x}"));
+            }
+            let real_ret = showmgr_live_support::call_real_is_show_script_done(mgr as *const u32, script_id, show_id) & 0xff;
+            if real_ret != expected {
+                failures.push(format!("{label}: real pole should return {expected} (AL-masked), got {real_ret:#010x}"));
+            }
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        // show_a carries the seeded state (unit UNIT_A -> a script-state stand-in whose +0x13 done
+        // byte is swept below) inside its embedded ZTShow's script-state map; show_b stays
+        // stateless (empty self-referential header only). Leak-only allocations throughout.
+        const UNIT_A: u32 = 0x2a;
+        let show_a = ztshow_live_support::build_standalone_show_info();
+        let show_b = ztshow_live_support::build_standalone_show_info();
+        for show in [show_a, show_b] {
+            // The map object at show_info+0x38 doubles as its own empty header (self-sentinel) -
+            // a zeroed +0x38 would leave `find`'s header load null and crash its root read.
+            save_to_memory(show + 0x38, show + 0x38);
+        }
+        let fake_state = unsafe { standalone::OPERATOR_NEW.original()(0x20) } as u32;
+        unsafe { std::ptr::write_bytes(fake_state as *mut u8, 0, 0x20) };
+        let node = unsafe { standalone::OPERATOR_NEW.original()(0x18) } as u32;
+        unsafe { std::ptr::write_bytes(node as *mut u8, 0, 0x18) };
+        save_to_memory(node + 0x4, show_a + 0x38); // parent = header (hygiene; find never reads it)
+        save_to_memory(node + 0x10, UNIT_A); // key: the unit id; node stays zero-padded at +0x12
+        save_to_memory(node + 0x14, fake_state); // value: dereferenced at +0x13 by both poles
+        save_to_memory(show_a + 0x3c, node); // the header's root slot
+
+        const PRESET_ID_A: u16 = 0x1234;
+        save_to_memory(show_a + 0x70, PRESET_ID_A);
+        // show_b keeps its zero-init `field_0x70` (the counter-assignment case).
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_a as *const u32, false) } != 1 {
+            failures.push("register(A, false) should return 1".to_string());
+        }
+        if unsafe { ZTSHOWMGR_REGISTER_SHOW.hooked()(mgr as *const u32, show_b as *const u32, false) } != 1 {
+            failures.push("register(B, false) should return 1".to_string());
+        }
+        let id_b = get_from_memory::<u16>(show_b + 0x70);
+        if id_b == 0 || id_b == PRESET_ID_A {
+            failures.push(format!("register(B) should have assigned a fresh non-colliding id, got {id_b:#06x}"));
+        }
+
+        // Unregistered probes: both poles miss on the store-backed lookup.
+        for probe in [0x0000u16, 0x8000, 0xffff] {
+            check(&format!("unregistered id {probe:#06x}"), mgr, UNIT_A, probe, 0, &mut failures);
+        }
+        // The seeded hit, with the done byte swept: the raw byte must come back through both poles
+        // unchanged (0x37 would expose a wrongly normalized 0/1 on either side).
+        for byte in [0x00u8, 0x37, 0xff] {
+            save_to_memory(fake_state + 0x13, byte);
+            check(&format!("done byte {byte:#04x}"), mgr, UNIT_A, PRESET_ID_A, byte as u32, &mut failures);
+        }
+        // Misses against the seeded show: unknown unit, the unit-id-0 boundary, and a key that
+        // matches only below bit 16 (the 32-bit key-compare pin).
+        check("unknown unit on seeded show", mgr, UNIT_A + 1, PRESET_ID_A, 0, &mut failures);
+        check("unit id 0 on seeded show", mgr, 0, PRESET_ID_A, 0, &mut failures);
+        check("key differing above bit 16", mgr, UNIT_A | 0x1_0000, PRESET_ID_A, 0, &mut failures);
+        // Registered but stateless: the walk runs over an empty map and misses for every unit.
+        check("stateless show, seeded unit", mgr, UNIT_A, id_b, 0, &mut failures);
+        check("stateless show, unit id 0", mgr, 0, id_b, 0, &mut failures);
+
+        // Cleanup: drain both through the hooked unregister (clear=false - the clear path is the
+        // stage-3 tests' concern), then the hit probe must miss through both poles.
+        for show in [show_a, show_b] {
+            unsafe { ZTSHOWMGR_UNREGISTER_SHOW.hooked()(mgr as *const u32, 0, show as *const u32, false) };
+        }
+        let remaining = ztshowmgr::registered_show_count();
+        if remaining != 0 {
+            failures.push(format!("store should be empty after cleanup, has {remaining} entries"));
+        }
+        check("unregistered after cleanup", mgr, UNIT_A, PRESET_ID_A, 0, &mut failures);
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOWMGR_REGISTER_UNREGISTER_GET_SCRIPT` - review follow-up, not part of the original
+    /// `ztshowmgr-implementation-plan.md`: `ZTShowMgr::registerScript`/`unregisterScript`/`getScript`
+    /// (the outer `ztshowmgr::REGISTER_SCRIPT`/`UNREGISTER_SCRIPT`/`GET_SCRIPT`,
+    /// `0x0046e89c`/`0x00473120`/`0x005a25b7`) are confirmed via `.asm` (`ADD ECX,0x34` + tail `CALL`)
+    /// to be genuine, un-detoured delegations into the embedded `ZTShowScriptMgr` sub-object's own
+    /// already-detoured addresses (`ztshowscriptmgr::{REGISTER_SCRIPT, UNREGISTER_SCRIPT, GET_SCRIPT}`,
+    /// exercised directly elsewhere in this battery). No prior live test drove these *outer*
+    /// addresses, so this closes that gap. The fourth delegation-shaped method,
+    /// `getShowScriptItems`, is deliberately excluded: its callee ignores the passed sub-object
+    /// pointer entirely and instead reads `GLOBAL_ZTWorldMgr`/`ZTUnitType::getTrickList`, so there is
+    /// no Rust-owned behavior for it to reach (see the implementation plan doc's "Composition with
+    /// ZTShowScriptMgr" section).
+    ///
+    /// These three outer addresses are never detoured anywhere in the repo, so `.original()` on them
+    /// is always safe here and correctly routes through vanilla into the (hooked) inner address.
+    fn run_ztshowmgr_register_unregister_get_script_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_REGISTER_UNREGISTER_GET_SCRIPT";
+
+        ztshowscriptmgr::live_support::reset_state();
+
+        let mgr = showmgr_live_support::allocate_uninitialized();
+        if mgr.is_null() {
+            error!("{}: OPERATOR_NEW returned null for the ZTShowMgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: OPERATOR_NEW returned null for the ZTShowMgr\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+
+        unsafe {
+            std::ptr::write_bytes(mgr as *mut u8, 0, size_of::<ZTShowMgr>());
+            ZTSHOWMGR_CONSTRUCTOR.original()(mgr as *const u32);
+        }
+
+        const SCRIPT_TYPE: u32 = 0x1357;
+        let alloc = unsafe { standalone::OPERATOR_NEW.original()(0x14) } as u32;
+        let script_ptr = unsafe { ZTSHOWSCRIPT_CONSTRUCTOR.original()(alloc as *const u32, SCRIPT_TYPE, false) } as u32;
+        if script_ptr == 0 {
+            failures.push("ZTShowScript CONSTRUCTOR returned null".to_string());
+        }
+
+        // Null-show register: rejected before it ever reaches the embedded sub-object.
+        if unsafe { ZTSHOWMGR_REGISTER_SCRIPT.original()(mgr as *const u32, std::ptr::null()) } != 0 {
+            failures.push("REGISTER_SCRIPT(mgr, null) should return 0".to_string());
+        }
+
+        if unsafe { ZTSHOWMGR_REGISTER_SCRIPT.original()(mgr as *const u32, script_ptr as *const u32) } != 1 {
+            failures.push("REGISTER_SCRIPT(mgr, script) should return 1".to_string());
+        }
+
+        let assigned_id = get_from_memory::<u16>(script_ptr + 0x4);
+        if !ztshowscriptmgr::script_exists_by_id(assigned_id) {
+            failures.push(format!("assigned id {assigned_id:#06x} should exist in the ztshowscriptmgr store after REGISTER_SCRIPT"));
+        }
+
+        let outer_handle = unsafe { ZTSHOWMGR_GET_SCRIPT.original()(mgr as *const u32, assigned_id) };
+        let inner_handle = ztshowscriptmgr::get_script(assigned_id);
+        if outer_handle == 0 || outer_handle != inner_handle {
+            failures.push(format!(
+                "GET_SCRIPT(mgr, {assigned_id:#06x}) should match ztshowscriptmgr::get_script and be non-null, got outer={outer_handle:#010x} inner={inner_handle:#010x}"
+            ));
+        }
+
+        if unsafe { ZTSHOWMGR_UNREGISTER_SCRIPT.original()(mgr as *const u32, script_ptr as *const u32) } != 1 {
+            failures.push("UNREGISTER_SCRIPT(mgr, script) should return 1".to_string());
+        }
+        if ztshowscriptmgr::script_exists_by_id(assigned_id) {
+            failures.push(format!("id {assigned_id:#06x} should no longer exist in the store after UNREGISTER_SCRIPT"));
+        }
+        if unsafe { ZTSHOWMGR_GET_SCRIPT.original()(mgr as *const u32, assigned_id) } != 0 {
+            failures.push(format!("GET_SCRIPT(mgr, {assigned_id:#06x}) should return 0 after unregister"));
+        }
+
+        if unsafe { ZTSHOWMGR_UNREGISTER_SCRIPT.original()(mgr as *const u32, script_ptr as *const u32) } != 0 {
+            failures.push("double UNREGISTER_SCRIPT(mgr, script) should return 0".to_string());
+        }
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
+
+    /// `ZTSHOW_GET_SHOW_SCRIPT_STATE` - review follow-up: diffs the new pure Rust
+    /// [`ztshow::get_show_script_state`] reader against the real, never-hooked
+    /// `ztshow::GET_SHOW_SCRIPT_STATE.original()` (`0x0059eb99`) over synthetic `Box::leak`'d
+    /// fixtures (read-only on both sides, so no `standalone::OPERATOR_NEW` is needed). Covers an
+    /// empty tree (self-referential header, per the same trick `ZTSHOWMGR_IS_SHOW_SCRIPT_DONE`'s
+    /// fixture uses at `show_info+0x38`), a single node (exact hit, near misses either side, and a
+    /// probe crossing bit 16 that pins the 32-bit-width key compare - a wrongly 16-bit-masked
+    /// implementation would false-hit there), and a 3-node tree (root + left + right children, exact
+    /// hits on all three plus an in-between miss - pinning this is exact-match `find`, not a
+    /// nearest/lower-bound return).
+    fn run_ztshow_get_show_script_state_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOW_GET_SHOW_SCRIPT_STATE";
+        let mut failures: Vec<String> = Vec::new();
+
+        fn leaked_bytes(size: usize) -> u32 {
+            let buf: &'static mut [u8] = Box::leak(vec![0u8; size].into_boxed_slice());
+            buf.as_mut_ptr() as u32
+        }
+
+        fn make_ztshow(header: u32) -> u32 {
+            let addr = leaked_bytes(0x38);
+            save_to_memory(addr + 0x34, header);
+            addr
+        }
+
+        fn make_header(root: u32) -> u32 {
+            let addr = leaked_bytes(0x18);
+            save_to_memory(addr + 0x4, root);
+            addr
+        }
+
+        fn make_node(key: u32, value: u32, left: u32, right: u32) -> u32 {
+            let addr = leaked_bytes(0x18);
+            save_to_memory(addr + 0x8, left);
+            save_to_memory(addr + 0xc, right);
+            save_to_memory(addr + 0x10, key);
+            save_to_memory(addr + 0x14, value);
+            addr
+        }
+
+        fn check(label: &str, ztshow_ptr: u32, key: u32, expected: u32, failures: &mut Vec<String>) {
+            let rust_ret = ztshow::get_show_script_state(ztshow_ptr, key);
+            if rust_ret != expected {
+                failures.push(format!("{label}: rust pole should return {expected:#010x}, got {rust_ret:#010x}"));
+            }
+            let real_ret = unsafe { GET_SHOW_SCRIPT_STATE.original()(ztshow_ptr as *const u32, key) };
+            if real_ret != expected {
+                failures.push(format!("{label}: real pole should return {expected:#010x}, got {real_ret:#010x}"));
+            }
+        }
+
+        // Empty tree: the header field doubles as the header node itself (self-referential), so its
+        // own root slot (at header+4, i.e. ztshow+0x38) is naturally 0 out of the zeroed allocation.
+        let empty_show = leaked_bytes(0x40);
+        save_to_memory(empty_show + 0x34, empty_show + 0x34);
+        check("empty tree, key 0", empty_show, 0, 0, &mut failures);
+        check("empty tree, key 0xffffffff", empty_show, 0xffff_ffff, 0, &mut failures);
+
+        // Single node, key chosen above bit 16 to pin the 32-bit-width compare.
+        const OPAQUE_VALUE: u32 = 0xdead_beef;
+        let node = make_node(0x1_0007, OPAQUE_VALUE, 0, 0);
+        let header = make_header(node);
+        let show = make_ztshow(header);
+        check("single node exact hit", show, 0x1_0007, OPAQUE_VALUE, &mut failures);
+        check("single node near miss below", show, 0x1_0006, 0, &mut failures);
+        check("single node near miss above", show, 0x1_0008, 0, &mut failures);
+        check("single node low-16-bits-only match", show, 0x0007, 0, &mut failures);
+
+        // 3-node tree: root + left + right children, exact hits plus an in-between miss.
+        let left = make_node(5, 0x1111, 0, 0);
+        let right = make_node(15, 0x3333, 0, 0);
+        let root = make_node(10, 0x2222, left, right);
+        let header3 = make_header(root);
+        let show3 = make_ztshow(header3);
+        check("3-node tree root hit", show3, 10, 0x2222, &mut failures);
+        check("3-node tree left hit", show3, 5, 0x1111, &mut failures);
+        check("3-node tree right hit", show3, 15, 0x3333, &mut failures);
+        check("3-node tree in-between miss", show3, 7, 0, &mut failures);
+
+        if failures.is_empty() {
+            write_success_line(failure_log, test_name);
+            false
+        } else {
+            for msg in &failures {
+                error!("{}: {}", test_name, msg);
+            }
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {}\n", test_name, failures.join("; ")).as_bytes());
+            }
+            true
+        }
+    }
     /// re-declared here per the repo's no-shared-consts precedent (`ztsoundscape.rs` carries the
     /// originals it actually uses). Values confirmed once via a manual PE-section parse of zoo.exe's
     /// `.rdata` (see `ztsoundscape.rs`'s doc comment for the derivation and the `fade_atten_a`/
@@ -2328,7 +4424,7 @@ mod detour_zoo_main {
                 &format!("{} (live guest count {}, forced to {} for the phase script)", test_name, live_guests, FORCED_GUESTS),
             );
         }
-        mismatches.is_empty()
+        !mismatches.is_empty()
     }
 
     /// `ZTSOUNDSCAPE_UPDATE_ATTEMPT_FAILURE` - a review finding, not part of the original
@@ -6764,6 +8860,81 @@ mod detour_zoo_main {
         fail_flag
     }
 
+    /// ZTSHOWSCRIPTMGR_REAL_ZOO_ROUNDTRIP_LIVE: diagnosing a real save-corruption report (load a real
+    /// zoo, save, reload -> "corrupted saved game"/a capacity-overflow panic). Unlike
+    /// `ZTSHOWSCRIPTMGR_SAVE_LOAD_ROUNDTRIP_LIVE` above, which only ever round-trips two small synthetic
+    /// scripts, this snapshots whatever *real* scripts/items `run_load_live_zoo` just populated from
+    /// `reimplementation-test-zoo.zoo` (real string content, real field values - not the hand-built
+    /// matching-type-only items every other live test in this group uses), encodes them via
+    /// `ztshowscriptmgr::encode_mgr` (through `snapshot_encoded`, bypassing `WriteBytesToFile`/
+    /// `io_redirect` entirely - only the *read* side needs the hooked-address replay mechanism), decodes
+    /// them back via the real `load_mgr` (through `io_redirect::begin_replay`, since `read_bytes`
+    /// internally calls `DEALLOCATE.hooked()`), and asserts every script's type and every item's full
+    /// field set is byte-identical before/after. Registered first in `live_zoo_tests` (before any other
+    /// entry that adds/mutates scripts) so the snapshot reflects the zoo file's own as-loaded data, not
+    /// this battery's own synthetic additions.
+    fn run_ztshowscriptmgr_real_zoo_roundtrip_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWSCRIPTMGR_REAL_ZOO_ROUNDTRIP_LIVE";
+        const CURRENT_VERSION: u32 = 0x100;
+        let mut fail_flag = false;
+
+        let before_ids = ztshowscriptmgr::live_support::all_script_ids();
+        if before_ids.is_empty() {
+            info!("{}: no real scripts registered from the loaded zoo - nothing to round-trip, skipping", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no real scripts)", test_name));
+            return false;
+        }
+
+        fn snapshot(ids: &[u16]) -> Vec<(u16, Option<u32>, Vec<ztshowscriptmgr::ShowScriptItem>)> {
+            ids.iter()
+                .map(|&id| {
+                    let script_type = ztshowscriptmgr::script_type_by_id(id);
+                    let count = ztshowscriptmgr::script_item_count_by_id(id) as u16;
+                    let items = (0..count).filter_map(|i| ztshowscriptmgr::item_full_by_id(id, i)).collect();
+                    (id, script_type, items)
+                })
+                .collect()
+        }
+
+        let before = snapshot(&before_ids);
+        let encoded = ztshowscriptmgr::live_support::snapshot_encoded();
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(
+                format!("CHECKPOINT {} scripts={} encoded_len={}\n", test_name, before_ids.len(), encoded.len()).as_bytes(),
+            );
+        }
+
+        let dummy_file: u32 = 0;
+        let file_ptr = &dummy_file as *const u32;
+        io_redirect::begin_replay(encoded);
+        let load_ok = ztshowscriptmgr::load_mgr(file_ptr, CURRENT_VERSION);
+        io_redirect::end_replay();
+
+        if !load_ok {
+            error!("{}: load_mgr returned failure re-decoding the real zoo's own encoded script data", test_name);
+            fail_flag = true;
+        }
+
+        let after_ids = ztshowscriptmgr::live_support::all_script_ids();
+        let after = snapshot(&after_ids);
+
+        if before != after {
+            error!("{}: real zoo script data did not round-trip byte-identically through encode_mgr/load_mgr", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: before={:?}\nafter={:?}\n", test_name, before, after).as_bytes());
+            }
+            fail_flag = true;
+        }
+
+        if !fail_flag {
+            info!("{}: {} real script(s) round-tripped byte-identically", test_name, before_ids.len());
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
     /// ZTSHOWSCRIPTMGR_LOAD_VERSION_GATES_LIVE: `ztshowscriptmgr::load_mgr` is already `pub fn`, so unlike
     /// the round-trip test above, this hand-builds byte buffers directly and calls it directly - no need
     /// to go through the hooked address (real `SAVE` always writes the current format, so it can never
@@ -6968,8 +9139,8 @@ mod detour_zoo_main {
         }
 
         // The very first insert for UNIT_TYPE_ID becomes the pending-scripts tree's root directly.
-        let header_self = get_from_memory::<u32>(show_info + 0x44);
-        let root = get_from_memory::<u32>(header_self + 4);
+        let header = get_from_memory::<u32>(show_info + 0x44);
+        let root = get_from_memory::<u32>(header + 4);
         if root == 0 {
             error!("{}: pending-scripts tree has no root after ADD_SCRIPT", test_name);
             fail_flag = true;
@@ -7136,11 +9307,639 @@ mod detour_zoo_main {
                 continue;
             }
             let habitat = get_from_memory::<ZTHabitat>(habitat_ptr);
-            if habitat.is_tank() && *habitat.water_level() > 0 && habitat.is_show_tank() {
-                return Some((habitat_ptr, *habitat.zt_show_info_ptr()));
+            if habitat.is_tank() && habitat.is_show_tank() {
+                // Only safe to read as a `ZTTankExhibit` because `is_tank()` above already confirmed
+                // this pointer is really a 0x1e8-byte `ZTTankExhibit`, not a plain 0x178-byte `ZTHabitat`.
+                let tank = get_from_memory::<crate::zthabitatmgr::ZTTankExhibit>(habitat_ptr);
+                if *tank.water_level() > 0 {
+                    return Some((habitat_ptr, *habitat.zt_show_info_ptr()));
+                }
             }
         }
         None
+    }
+
+    /// ZTSHOW_PENDING_SCRIPT_TREE_REAL_ZOO_INTEGRITY_LIVE: diagnosing a real save-corruption report.
+    /// The pending-scripts BST at the known show-tank's `ZTShowInfo+0x44`
+    /// (`ztshow::find_or_insert_pending_script_node`) is real, live vanilla memory this crate's code
+    /// writes to directly (unlike `ZTShowScriptMgr`'s independent store, already proven clean by
+    /// `ZTSHOWSCRIPTMGR_REAL_ZOO_ROUNDTRIP_LIVE` above) - a corrupted node/cache here would silently
+    /// keep the game running (nothing reads it except real, un-reimplemented `checkPendingScripts`/
+    /// `enterNewMonth`/etc.) until the next save serializes it. Bounded-iteration walk (matching this
+    /// codebase's own "diagnose a BST before trusting it" convention - see
+    /// `find_trick_by_id`'s doc comment for the prior real bug this exact style of check caught) over
+    /// whatever real tree `run_load_live_zoo` already populated: collects every node via `left`(`+8`)/
+    /// `right`(`+0xc`), asserting (1) the walk terminates within a generous bound (no cycle), (2) an
+    /// in-order traversal's keys (`+0x10`) come out strictly ascending (the BST invariant, not just "no
+    /// cycle"), and (3) the header's own leftmost cache (`+0x8`) - what real, un-reimplemented
+    /// `enterNewMonth`/`checkPendingScripts` start their own walk from - equals the address of whichever
+    /// node the walk found with the smallest key (the exact invariant a previous version of this
+    /// function's cache-maintenance code broke, per `find_or_insert_pending_script_node`'s own doc
+    /// comment).
+    fn run_ztshow_pending_script_tree_real_zoo_integrity_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOW_PENDING_SCRIPT_TREE_REAL_ZOO_INTEGRITY_LIVE";
+        let mut fail_flag = false;
+
+        let Some((_, show_info_ptr)) = find_real_show_tank_habitat() else {
+            error!("{}: BLOCKED - no real show-tank habitat found in test zoo", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: BLOCKED - no qualifying show-tank habitat found\n", test_name).as_bytes());
+            }
+            return false;
+        };
+
+        let header = get_from_memory::<u32>(show_info_ptr + 0x44);
+        let root = get_from_memory::<u32>(header + 4);
+
+        const MAX_NODES: usize = 10_000;
+        let mut in_order: Vec<(u32, u32)> = Vec::new(); // (addr, key)
+        let mut stack: Vec<u32> = Vec::new();
+        let mut node = root;
+        let mut iterations = 0usize;
+        // Standard iterative in-order walk: push left spine, visit, descend right.
+        while (node != 0 && node != header) || !stack.is_empty() {
+            iterations += 1;
+            if iterations > MAX_NODES {
+                error!("{}: walk exceeded {} iterations without terminating - likely a cycle in the tree", test_name, MAX_NODES);
+                fail_flag = true;
+                break;
+            }
+            if node != 0 && node != header {
+                stack.push(node);
+                node = get_from_memory::<u32>(node + 8); // left
+            } else if let Some(top) = stack.pop() {
+                let key = get_from_memory::<u32>(top + 0x10);
+                in_order.push((top, key));
+                node = get_from_memory::<u32>(top + 0xc); // right
+            }
+        }
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} header={:#010x} root={:#010x} node_count={}\n", test_name, header, root, in_order.len()).as_bytes());
+        }
+
+        if !fail_flag {
+            for pair in in_order.windows(2) {
+                if pair[0].1 >= pair[1].1 {
+                    error!(
+                        "{}: in-order keys not strictly ascending ({:#x} @ {:#010x} then {:#x} @ {:#010x}) - BST invariant violated",
+                        test_name, pair[0].1, pair[0].0, pair[1].1, pair[1].0
+                    );
+                    fail_flag = true;
+                }
+            }
+        }
+
+        if !fail_flag && !in_order.is_empty() {
+            let real_leftmost = get_from_memory::<u32>(header + 8);
+            let expected_leftmost = in_order[0].0; // smallest key, since in-order is ascending
+            if real_leftmost != expected_leftmost {
+                error!(
+                    "{}: header leftmost cache is {:#010x} but the smallest real key ({:#x}) lives at {:#010x} - stale cache (the class of bug find_or_insert_pending_script_node's own doc comment already found once)",
+                    test_name, real_leftmost, in_order[0].1, expected_leftmost
+                );
+                fail_flag = true;
+            }
+        }
+
+        if !fail_flag {
+            info!("{}: pending-script tree ({} real node(s)) is well-formed and leftmost cache is correct", test_name, in_order.len());
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTSHOWINFO_REAL_SAVE_LOAD_BYTE_COUNT_LIVE: diagnosing a real save-corruption report. Real, un-
+    /// reimplemented `ZTShowInfo::save`/`load` (`ztshowinfo::SAVE`/`LOAD`) walk the pending-scripts tree
+    /// at `ZTShowInfo+0x44` - the same tree `ztshow.rs`'s `find_or_insert_pending_script_node`/
+    /// `allocate_pending_script_node` builds. This tests the real, un-reimplemented pair directly against
+    /// each other on the real show-tank habitat's real `ZTShowInfo` (already carrying 3 real pending-
+    /// script nodes from actual gameplay, per `ZTSHOW_PENDING_SCRIPT_TREE_REAL_ZOO_INTEGRITY_LIVE` above -
+    /// deliberately not a synthetic/standalone object, which would confound the result with zeroed-out
+    /// unrelated fields `ZTShowInfo::save` also reads): captures real `SAVE`'s output
+    /// (`io_redirect::begin_capture`), then real-`LOAD`s those exact bytes back into the same live object
+    /// (`io_redirect::begin_replay`), and compares `io_redirect::replay_position()` (bytes `LOAD` actually
+    /// consumed) against the captured buffer's own length (bytes `SAVE` actually wrote). A mismatch here
+    /// pinpoints a genuine save/load byte-count asymmetry for this exact real data - and since both `SAVE`
+    /// and `LOAD` are real, untouched vanilla code, a mismatch would mean our own node construction
+    /// (`allocate_pending_script_node`'s simplified `+0x18` sub-structure, standing in for whatever real
+    /// vanilla's own node constructor builds there) makes vanilla's real save/load disagree about how much
+    /// data it wrote - not a defect in vanilla's own save/load pairing itself. Uses `version=106` (`0x6a`)
+    /// - not an arbitrary/future value - to match the exact version boundary a real save actually uses
+    /// (confirmed live via `DIAG LOAD_ENTER ZTShowMgr version=106` this session), since some of
+    /// `ZTShowInfo::load`'s per-field reads are version-gated and a different version would exercise a
+    /// different, non-representative code path. Mutates the live show-tank's `ZTShowInfo` in place (real
+    /// `LOAD` writes directly into it) - acceptable since this is a one-shot test process that exits after
+    /// the battery, matching this file's own established precedent elsewhere.
+    fn run_ztshowinfo_real_save_load_byte_count_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWINFO_REAL_SAVE_LOAD_BYTE_COUNT_LIVE";
+        let mut fail_flag = false;
+
+        let Some((_, show_info_ptr)) = find_real_show_tank_habitat() else {
+            error!("{}: BLOCKED - no real show-tank habitat found in test zoo", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: BLOCKED - no qualifying show-tank habitat found\n", test_name).as_bytes());
+            }
+            return false;
+        };
+
+        const REAL_VERSION: u32 = 106;
+        let dummy_file: u32 = 0;
+
+        io_redirect::begin_capture();
+        let save_ok = unsafe { ztshowinfo::SAVE.original()(show_info_ptr as *const u32, &dummy_file as *const u32 as *const i8) };
+        let captured_bytes = io_redirect::end_capture();
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(
+                format!("CHECKPOINT {} show_info={:#010x} save_ok={} bytes_written={}\n", test_name, show_info_ptr, save_ok, captured_bytes.len())
+                    .as_bytes(),
+            );
+        }
+        if (save_ok & 0xff) == 0 {
+            error!("{}: real ZTShowInfo::save returned failure", test_name);
+            fail_flag = true;
+        }
+
+        let written_len = captured_bytes.len();
+        io_redirect::begin_replay(captured_bytes);
+        let load_ok = unsafe { ztshowinfo::LOAD.original()(show_info_ptr as *const u32, &dummy_file as *const u32, REAL_VERSION) };
+        let consumed_len = io_redirect::replay_position();
+        io_redirect::end_replay();
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(
+                format!("CHECKPOINT {} load_ok={} bytes_consumed={} bytes_written={}\n", test_name, load_ok, consumed_len, written_len).as_bytes(),
+            );
+        }
+        if load_ok == 0 {
+            error!("{}: real ZTShowInfo::load returned failure replaying its own save's bytes", test_name);
+            fail_flag = true;
+        }
+        if consumed_len != written_len {
+            error!(
+                "{}: byte-count mismatch - real save() wrote {} bytes but real load() consumed {} bytes ({}) for the same real ZTShowInfo",
+                test_name,
+                written_len,
+                consumed_len,
+                if consumed_len > written_len { "load read PAST what save wrote" } else { "load read LESS than save wrote" }
+            );
+            fail_flag = true;
+        }
+
+        if !fail_flag {
+            info!("{}: real save()/load() agree exactly on {} bytes for the real show-tank's ZTShowInfo", test_name, written_len);
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTRESEARCHMGR_REAL_ZOO_SAVE_ROUNDTRIP_LIVE: same "real, live-loaded data" round-trip philosophy as
+    /// `ZTSHOWSCRIPTMGR_REAL_ZOO_ROUNDTRIP_LIVE` above, applied to `research_save_reimplementation`
+    /// (`ZTRESEARCHMGR_SAVE`'s own coverage is proptest-generated synthetic trees only). Captures the
+    /// real, hooked `ZTResearchMgr::save`'s output for the real, live `globals().ztresearchmgr()`
+    /// singleton (real branches/categories/programs with real funding levels/progress values - richer
+    /// than any hand-built test tree), then asserts `research_save_reimplementation::parse` recovers
+    /// exactly what `snapshot_mgr` independently read straight from that same live memory. `save()` has
+    /// no side effects (a pure `WriteBytesToFile` call), so this is safe to run against the real
+    /// singleton directly - no standalone-instance plumbing needed.
+    fn run_ztresearchmgr_real_zoo_save_roundtrip_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTRESEARCHMGR_REAL_ZOO_SAVE_ROUNDTRIP_LIVE";
+        let mut fail_flag = false;
+
+        let mgr = globals().ztresearchmgr();
+        let expected_records = research_save_reimplementation::snapshot_mgr(mgr);
+        if expected_records.is_empty() {
+            info!("{}: no real research data loaded - nothing to round-trip, skipping", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no real research data)", test_name));
+            return false;
+        }
+
+        let dummy_file: u32 = 0;
+        io_redirect::begin_capture();
+        let save_ok = mgr.save(&dummy_file as *const u32);
+        let captured_bytes = io_redirect::end_capture();
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(
+                format!("CHECKPOINT {} records={} bytes={}\n", test_name, expected_records.len(), captured_bytes.len()).as_bytes(),
+            );
+        }
+
+        if !save_ok {
+            error!("{}: real save() returned failure", test_name);
+            fail_flag = true;
+        }
+
+        match research_save_reimplementation::parse(&captured_bytes) {
+            Some(parsed) if parsed == expected_records => {}
+            other => {
+                error!("{}: parsed real save bytes don't match the independently-read real research state", test_name);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: expected={:?}\nparsed={:?}\n", test_name, expected_records, other).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        if !fail_flag {
+            info!("{}: {} real research record(s) round-tripped byte-identically", test_name, expected_records.len());
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTMARKETINGMGR_REAL_ZOO_SAVE_LOAD_ROUNDTRIP_LIVE: real-zoo round-trip coverage for
+    /// `openzt/plans/real-zoo-save-load-roundtrip-tests-plan.md`'s `ZTMarketingMgr` item - the only one
+    /// of that plan's four managers where a genuine full round-trip against the real singleton is both
+    /// safe and easy (`load` is a pure decode with a ready-made pure oracle,
+    /// `marketing_save_reimplementation::predict_load`). Snapshots the real, live
+    /// `globals().ztmarketingmgr()` singleton's current funding-level index, captures real `save()`'s
+    /// bytes (`.hooked()` - the detoured reimplementation, installed unconditionally by this battery's
+    /// own `init()`), replays them into real `load()` at the live save-format version, and asserts the
+    /// resulting index matches `predict_load`'s prediction computed from the pre-save index/table
+    /// length.
+    fn run_ztmarketingmgr_real_zoo_save_load_roundtrip_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTMARKETINGMGR_REAL_ZOO_SAVE_LOAD_ROUNDTRIP_LIVE";
+        const CURRENT_VERSION: u32 = 0x100;
+        let mut fail_flag = false;
+
+        let mgr = unsafe { &mut *globals().ztmarketingmgr_ptr() };
+        let Some(marketing) = mgr.marketing() else {
+            info!("{}: no real ZTMarketing config loaded - nothing to round-trip, skipping", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no real marketing config loaded)", test_name));
+            return false;
+        };
+        let index_before = marketing.current_funding_level();
+        let level_count = marketing.funding_levels().len();
+
+        let dummy_file: u32 = 0;
+        io_redirect::begin_capture();
+        let save_ok = mgr.save(&dummy_file as *const u32);
+        let captured_bytes = io_redirect::end_capture();
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(
+                format!("CHECKPOINT {} index_before={} level_count={} bytes={}\n", test_name, index_before, level_count, captured_bytes.len()).as_bytes(),
+            );
+        }
+
+        if !save_ok || captured_bytes.len() != 4 {
+            error!("{}: real save() failed or produced an unexpected byte count ({})", test_name, captured_bytes.len());
+            fail_flag = true;
+        }
+
+        let read_value = (captured_bytes.len() == 4).then(|| u32::from_le_bytes(captured_bytes[..4].try_into().unwrap()));
+        let (expected_ok, expected_index) = marketing_save_reimplementation::predict_load(CURRENT_VERSION, read_value, level_count, index_before);
+
+        io_redirect::begin_replay(captured_bytes);
+        let load_ok = mgr.load(&dummy_file as *const u32, CURRENT_VERSION);
+        io_redirect::end_replay();
+
+        let index_after = mgr.marketing().map(|m| m.current_funding_level());
+
+        if load_ok != expected_ok || index_after != Some(expected_index) {
+            error!(
+                "{}: real load() result didn't match predict_load's oracle (load_ok={}, expected_ok={}, index_after={:?}, expected_index={})",
+                test_name, load_ok, expected_ok, index_after, expected_index
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!(
+                        "Test Failed {}: load_ok={} expected_ok={} index_after={:?} expected_index={}\n",
+                        test_name, load_ok, expected_ok, index_after, expected_index
+                    )
+                    .as_bytes(),
+                );
+            }
+            fail_flag = true;
+        }
+
+        if !fail_flag {
+            info!("{}: real funding-level index {} round-tripped to {} matching predict_load's oracle", test_name, index_before, expected_index);
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTAWARDMGR_REAL_ZOO_SAVE_LOAD_ROUNDTRIP_LIVE: real-zoo round-trip coverage for
+    /// `openzt/plans/real-zoo-save-load-roundtrip-tests-plan.md`'s `ZTAwardMgr` item. Unlike that plan's
+    /// literal wording (which assumed `earned_ids()` - the Rust-side store - already reflected the real
+    /// zoo's earned awards), this test build never installs `ztawardmgr::award_mgr_detours` (see this
+    /// file's own `init()` doc comment on why - `.original()` needs to stay reachable for the other
+    /// `ZTAWARDMGR_*` tests' real-vanilla comparisons), so the real zoo's own `ZTAwardMgr::load` ran
+    /// genuine, undetoured vanilla code against the real singleton's own `+0xc` vector, never touching
+    /// the Rust store. This reads that real vector directly
+    /// (`award_live_support::read_vanilla_earned_ids`), captures real vanilla `save()`'s own output for
+    /// it (`.original()`, since `SAVE` is undetoured here too), replays those bytes into the Rust
+    /// reimplementation's `load()` (`crate::ztawardmgr::load`, a plain function - there's no hooked
+    /// address to go through), and asserts the reimplementation's resulting `earned_ids()` matches the
+    /// real vector, compared as sorted sets per the plan's own caution about `add_award`'s sorted-unique
+    /// re-insertion possibly reordering.
+    fn run_ztawardmgr_real_zoo_save_load_roundtrip_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTAWARDMGR_REAL_ZOO_SAVE_LOAD_ROUNDTRIP_LIVE";
+        let mut fail_flag = false;
+
+        let real_ids = award_live_support::read_vanilla_earned_ids();
+        if real_ids.is_empty() {
+            info!("{}: no real earned awards in the loaded zoo - nothing to round-trip, skipping", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no real earned awards)", test_name));
+            return false;
+        }
+
+        award_live_support::reset_reimplemented_store();
+
+        let real_ptr = award_live_support::real_ptr();
+        let dummy_file: u32 = 0;
+        io_redirect::begin_capture();
+        let save_ok = unsafe { gen_ztawardmgr::SAVE.original()(real_ptr, &dummy_file as *const u32 as *const i8) };
+        let captured_bytes = io_redirect::end_capture();
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} real_ids={:?} bytes={}\n", test_name, real_ids, captured_bytes.len()).as_bytes());
+        }
+
+        if save_ok == 0 {
+            error!("{}: real vanilla save() returned failure", test_name);
+            fail_flag = true;
+        }
+
+        io_redirect::begin_replay(captured_bytes);
+        let load_ok = ztawardmgr::load(&dummy_file as *const u32);
+        io_redirect::end_replay();
+
+        if !load_ok {
+            error!("{}: reimplementation load() returned failure replaying real vanilla save bytes", test_name);
+            fail_flag = true;
+        }
+
+        let mut after: Vec<i32> = ztawardmgr::earned_ids();
+        let mut expected: Vec<i32> = real_ids.clone();
+        after.sort_unstable();
+        expected.sort_unstable();
+
+        if after != expected {
+            error!(
+                "{}: reimplementation earned_ids() didn't match the real vanilla vector after round-tripping (expected={:?}, got={:?})",
+                test_name, expected, after
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: expected={:?}\ngot={:?}\n", test_name, expected, after).as_bytes());
+            }
+            fail_flag = true;
+        }
+
+        award_live_support::reset_reimplemented_store();
+
+        if !fail_flag {
+            info!("{}: {} real earned award(s) round-tripped through the reimplementation", test_name, real_ids.len());
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTTHOUGHTMGR_REAL_ZOO_SAVE_ROUNDTRIP_LIVE: real-zoo SAVE-only coverage for
+    /// `openzt/plans/real-zoo-save-load-roundtrip-tests-plan.md`'s `ZTThoughtMgr` item. The real zoo's
+    /// own thought list lives in real vanilla memory reachable through the live singleton's own
+    /// `sentinel_ptr` chain (this test build never installs `ztthoughtmgr`'s own detours, so real
+    /// vanilla `ZTThoughtMgr::load` populated that chain directly, never the Rust-side
+    /// `THOUGHT_STORES`) - read read-only via `thought_live_support::read_raw_chain`. Captures real
+    /// vanilla `save()`'s own output for the real singleton (`.original()`, undetoured here), then parses
+    /// those bytes independently and asserts every record matches the chain snapshot. Deliberately
+    /// SAVE-only, not a full round-trip - `ZTThoughtMgr::load`'s `version >= 0x1e` pointer-resolution
+    /// step can legitimately drop a record whose referenced object/thinker/habitat no longer resolves,
+    /// which isn't a bug (see the plan's own caution).
+    fn run_ztthoughtmgr_real_zoo_save_roundtrip_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTTHOUGHTMGR_REAL_ZOO_SAVE_ROUNDTRIP_LIVE";
+        let mut fail_flag = false;
+
+        let mgr = globals().ztthoughtmgr();
+        let expected: Vec<(u32, u32, u32, i32, i32)> = thought_live_support::read_raw_chain(mgr)
+            .iter()
+            .map(|t| (t.string_id(), t.thinker_id(), t.object_id(), t.tile_x(), t.tile_y()))
+            .collect();
+        if expected.is_empty() {
+            info!("{}: no real thoughts active in the loaded zoo - nothing to round-trip, skipping", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no real thoughts)", test_name));
+            return false;
+        }
+
+        let real_ptr = globals().ztthoughtmgr_ptr() as *const u32;
+        let dummy_file: u32 = 0;
+        io_redirect::begin_capture();
+        let save_ok = unsafe { gen_ztthoughtmgr::SAVE.original()(real_ptr, &dummy_file as *const u32) };
+        let captured_bytes = io_redirect::end_capture();
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} thoughts={} bytes={}\n", test_name, expected.len(), captured_bytes.len()).as_bytes());
+        }
+
+        if !save_ok {
+            error!("{}: real vanilla save() returned failure", test_name);
+            fail_flag = true;
+        }
+
+        fn parse(bytes: &[u8]) -> Option<Vec<(u32, u32, u32, i32, i32)>> {
+            if bytes.len() < 4 {
+                return None;
+            }
+            let count = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
+            let mut offset = 4;
+            let mut records = Vec::with_capacity(count);
+            for _ in 0..count {
+                if offset + 20 > bytes.len() {
+                    return None;
+                }
+                let read_u32 = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
+                let string_id = read_u32(offset);
+                let thinker_id = read_u32(offset + 4);
+                let object_id = read_u32(offset + 8);
+                let tile_x = read_u32(offset + 12) as i32;
+                let tile_y = read_u32(offset + 16) as i32;
+                records.push((string_id, thinker_id, object_id, tile_x, tile_y));
+                offset += 20;
+            }
+            Some(records)
+        }
+
+        match parse(&captured_bytes) {
+            Some(parsed) if parsed == expected => {}
+            other => {
+                error!("{}: parsed real save bytes don't match the real chain snapshot", test_name);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: expected={:?}\nparsed={:?}\n", test_name, expected, other).as_bytes());
+                }
+                fail_flag = true;
+            }
+        }
+
+        if !fail_flag {
+            info!("{}: {} real thought(s) round-tripped byte-identically through save()", test_name, expected.len());
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTGAMEMGR_REAL_ZOO_SAVE_LOAD_ROUNDTRIP_LIVE: real-zoo round-trip coverage for
+    /// `openzt/plans/real-zoo-save-load-roundtrip-tests-plan.md`'s `ZTGameMgr` item. Snapshots
+    /// `cash`/`date`/`elapsed_sim_ticks` directly off the real, live `globals().ztgamemgr()` singleton,
+    /// captures its own `save()`'s bytes, replays them into `load()` **in place on that same singleton**
+    /// (there's no cheap standalone copy of a fully-populated real `ZTGameMgr` to load into instead - see
+    /// the plan), and asserts the three fields match afterward. Real `ZooStatus::save`/`load`
+    /// (`.original()`, an opaque un-reimplemented vanilla sub-object at `self+0x10`) run as a side
+    /// effect of both calls - presumed safe (persisted zoo-status counters only) but not independently
+    /// verified, per the plan's own flag. Mutates the live singleton in place, so this is registered
+    /// last in `live_zoo_tests` - nothing later in the battery depends on these three fields being
+    /// untouched.
+    fn run_ztgamemgr_real_zoo_save_load_roundtrip_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTGAMEMGR_REAL_ZOO_SAVE_LOAD_ROUNDTRIP_LIVE";
+        const CURRENT_VERSION: u32 = 0x100;
+        let mut fail_flag = false;
+
+        let mgr_ptr = globals().ztgamemgr_ptr();
+        if mgr_ptr.is_null() {
+            info!("{}: GLOBAL_ZTGameMgr is null - nothing to round-trip, skipping", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no live ZTGameMgr)", test_name));
+            return false;
+        }
+        let mgr = unsafe { &mut *mgr_ptr };
+
+        let cash_before = mgr.cash();
+        let date_before = mgr.date_bytes();
+        let ticks_before = mgr.elapsed_sim_ticks();
+
+        let dummy_file: u32 = 0;
+        io_redirect::begin_capture();
+        let save_ok = mgr.save(&dummy_file as *const u32);
+        let captured_bytes = io_redirect::end_capture();
+
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(
+                format!("CHECKPOINT {} cash_before={} ticks_before={} bytes={}\n", test_name, cash_before, ticks_before, captured_bytes.len()).as_bytes(),
+            );
+        }
+
+        if !save_ok {
+            error!("{}: real save() returned failure", test_name);
+            fail_flag = true;
+        }
+
+        io_redirect::begin_replay(captured_bytes);
+        let load_ok = mgr.load(&dummy_file as *const u32, CURRENT_VERSION);
+        io_redirect::end_replay();
+
+        if !load_ok {
+            error!("{}: real load() returned failure replaying its own save bytes", test_name);
+            fail_flag = true;
+        }
+
+        let cash_after = mgr.cash();
+        let date_after = mgr.date_bytes();
+        let ticks_after = mgr.elapsed_sim_ticks();
+
+        if cash_after != cash_before || date_after != date_before || ticks_after != ticks_before {
+            error!(
+                "{}: real zoo state didn't round-trip byte-identically (cash {}->{}, ticks {}->{}, date {:?}->{:?})",
+                test_name, cash_before, cash_after, ticks_before, ticks_after, date_before, date_after
+            );
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!(
+                        "Test Failed {}: cash_before={} cash_after={} ticks_before={} ticks_after={} date_before={:?} date_after={:?}\n",
+                        test_name, cash_before, cash_after, ticks_before, ticks_after, date_before, date_after
+                    )
+                    .as_bytes(),
+                );
+            }
+            fail_flag = true;
+        }
+
+        if !fail_flag {
+            info!("{}: real ZTGameMgr cash/date/elapsed_sim_ticks round-tripped byte-identically", test_name);
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
+    }
+
+    /// ZTSHOWMGR_REAL_ZOO_STORE_CONSISTENCY_LIVE: diagnosing a real save-corruption report. Real vanilla
+    /// `ZTShowInfo::updateFromLoad` (`private/resources/decompiles/ZTShowInfo_updateFromLoad.c`) calls
+    /// `ZTShowMgr::registerShow(mgr, this, false)` for every show as the zoo loads, then - if applying
+    /// the loaded data changed `this`'s own id - `unregisterShow`s the *old* id. If
+    /// `ZTShowMgr::register_show`/`unregister_show` (the Rust ports) ever mishandle that dance, the
+    /// store would end up either missing a real show, or holding a stale entry (the same real
+    /// `show_addr` reachable under two different ids) - both invisible to the player (the game keeps
+    /// running normally) until the next save serializes whatever's now wrong into the file. Checks,
+    /// against every show `run_load_live_zoo` actually loaded:
+    /// 1. No two store entries share the same `show_addr` (a stale leftover from an old id).
+    /// 2. Every store entry's key equals the real, live object's own `field_0x70` id - i.e. the store
+    ///    and the real `ZTShowInfo` it points at still agree on that show's id.
+    /// 3. The known show-tank habitat's real `ZTShowInfo*` ([`find_real_show_tank_habitat`]) is
+    ///    registered in the store under its own real, live id.
+    fn run_ztshowmgr_real_zoo_store_consistency_live_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZTSHOWMGR_REAL_ZOO_STORE_CONSISTENCY_LIVE";
+        let mut fail_flag = false;
+
+        let entries = ztshowmgr::all_registered_shows();
+        if entries.is_empty() {
+            info!("{}: no real shows registered from the loaded zoo - nothing to check, skipping", test_name);
+            write_success_line(failure_log, &format!("{} (skipped: no real shows)", test_name));
+            return false;
+        }
+        if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("CHECKPOINT {} entries={:?}\n", test_name, entries).as_bytes());
+        }
+
+        let mut seen_addrs = std::collections::HashSet::new();
+        for &(id, addr) in &entries {
+            if !seen_addrs.insert(addr) {
+                error!("{}: show_addr {:#010x} is registered under more than one id (store={:?})", test_name, addr, entries);
+                fail_flag = true;
+            }
+            let real_id = get_from_memory::<u16>(addr + 0x70);
+            if real_id != id {
+                error!(
+                    "{}: store key {:#x} points at show {:#010x} whose own live field_0x70 says id {:#x} - store/object disagree",
+                    test_name, id, addr, real_id
+                );
+                fail_flag = true;
+            }
+        }
+
+        if let Some((_, show_info_ptr)) = find_real_show_tank_habitat() {
+            let real_id = get_from_memory::<u16>(show_info_ptr + 0x70);
+            match ztshowmgr::registered_show_for_id(real_id) {
+                Some(addr) if addr == show_info_ptr => {}
+                other => {
+                    error!(
+                        "{}: known show-tank's real ZTShowInfo {:#010x} (id {:#x}) not found under that id in the store (got {:?})",
+                        test_name, show_info_ptr, real_id, other
+                    );
+                    fail_flag = true;
+                }
+            }
+        }
+
+        if !fail_flag {
+            info!("{}: {} real show(s) all consistent between the store and their live objects", test_name, entries.len());
+            write_success_line(failure_log, test_name);
+        } else if let Some(log_file) = failure_log {
+            let _ = log_file.write_all(format!("Test Failed {}\n", test_name).as_bytes());
+        }
+        fail_flag
     }
 
     /// Scans for a real habitat that *does* satisfy `check_owning_habitat`'s blocking predicate (a real
@@ -7155,8 +9954,13 @@ mod detour_zoo_main {
                 continue;
             }
             let habitat = get_from_memory::<ZTHabitat>(habitat_ptr);
-            if habitat.is_tank() && *habitat.water_level() == 0 {
-                return Some(habitat_ptr);
+            if habitat.is_tank() {
+                // Only safe to read as a `ZTTankExhibit` because `is_tank()` above already confirmed
+                // this pointer is really a 0x1e8-byte `ZTTankExhibit`, not a plain 0x178-byte `ZTHabitat`.
+                let tank = get_from_memory::<crate::zthabitatmgr::ZTTankExhibit>(habitat_ptr);
+                if *tank.water_level() == 0 {
+                    return Some(habitat_ptr);
+                }
             }
         }
         None
@@ -7585,6 +10389,29 @@ mod detour_zoo_main {
         }
         info!("{}: FILL_TRICK_LISTS completed without crashing", test_name);
 
+        // Confirm fill_trick_lists kept the real DAT_0063ba58 vector real vanilla addTrick reads from
+        // (ztshowui::AVAILABLE_TRICK_IDS_BEGIN_RVA's own doc comment) in sync with the "available tricks"
+        // listbox - only meaningful when the listbox actually exists (see ui_present above; both functions
+        // early-return before touching it otherwise, per this file's own doc comment).
+        if ui_present {
+            let expected = ztshowui::live_support::non_sentinel_trick_count(unit_type_ptr);
+            let actual = ztshowui::live_support::available_trick_id_vector();
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(
+                    format!("CHECKPOINT {} available_trick_ids expected_len={} actual={:?}\n", test_name, expected, actual).as_bytes(),
+                );
+            }
+            if actual.len() != expected {
+                error!(
+                    "{}: real DAT_0063ba58 vector has {} entries, expected {} (non-sentinel tricks) - addTrick would read stale/out-of-bounds data on an 'Add' click",
+                    test_name, actual.len(), expected
+                );
+                fail_flag = true;
+            } else {
+                info!("{}: real DAT_0063ba58 vector has the expected {} entries after FILL_TRICK_LISTS", test_name, expected);
+            }
+        }
+
         // COPY_LIST_TO_SCRIPT (0x00475d92, standalone::COPY_LIST_TO_SCRIPT).
         let copy_list_to_script_hooked = unsafe { std::mem::transmute::<u32, extern "stdcall" fn() -> u32>(0x00475d92u32) };
         let copy_result = copy_list_to_script_hooked();
@@ -7913,9 +10740,21 @@ mod detour_zoo_main {
         encoded
     }
 
-    /// Writes `name` into `habitat`'s `exhibit_name` field (`+0x154`, a `ZTBoundedString`) by raw offset
-    /// write - same technique as `set_bfentity_name`, but `ZTBoundedString` is a 2-pointer
-    /// `start_ptr`/`end_ptr` pair with no separate `buffer_end_ptr`.
+    /// Writes `name` into `habitat`'s `exhibit_name` field (`+0x154`, a `ZTBufferString`) by raw offset
+    /// write - same technique and same 3-pointer shape as `set_bfentity_name`.
+    ///
+    /// **Previously wrote only `start`/`end` (`+0x154`/`+0x158`), modeled on `exhibit_name` as a 2-pointer
+    /// `ZTBoundedString`.** `zthabitatmgr.rs`'s own field comment on `exhibit_name` documents that this was
+    /// corrected to the 3-pointer `ZTBufferString` (`start`/`end`/`buffer_end`) - this helper was never
+    /// updated to match, leaving `buffer_end_ptr` (`+0x15c`) at whatever `build_standalone_show_info`-style
+    /// zero-init left it. `ZTBufferString::copy_to_string`'s read loop requires `char_address < buffer_end`
+    /// on every iteration, so a zeroed `buffer_end_ptr` (always less than any real `start` address) made it
+    /// read zero bytes regardless of `name`'s actual content. Live-reproduced (`ZTTHOUGHT_GET_STRING` with a
+    /// widened `cases` count): `case=Habitat("0")` against a real `%s`-shaped template gave `left: "...for
+    /// 0."` (real vanilla) vs `right: "...for ."` (reimplementation - `get_string`'s habitat branch read
+    /// back an empty exhibit name). Masked at the default case count because it only surfaces when a fuzzed
+    /// `string_id` happens to resolve to a real, loadable, `%s`-shaped template *and* the `Habitat` branch
+    /// is drawn with a non-empty name - rare enough to look "sporadic" rather than reliably reproducing.
     fn set_habitat_exhibit_name(habitat: &ZTHabitat, name: &str) -> Vec<u8> {
         let mut encoded = name.as_bytes().to_vec();
         let len = encoded.len() as u32;
@@ -7924,6 +10763,7 @@ mod detour_zoo_main {
         let habitat_addr = habitat as *const ZTHabitat as u32;
         save_to_memory::<u32>(habitat_addr + 0x154, start);
         save_to_memory::<u32>(habitat_addr + 0x158, start + len);
+        save_to_memory::<u32>(habitat_addr + 0x15c, start + encoded.len() as u32);
         encoded
     }
 

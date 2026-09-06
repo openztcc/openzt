@@ -485,7 +485,7 @@ pub(crate) mod marketing_save_reimplementation {
             let mgr = unsafe { ref_from_memory::<ZTMarketingMgr>(this) };
             let index = mgr.marketing().map(|m| m.current_funding_level()).unwrap_or(0);
             let bytes = index.to_le_bytes();
-            let ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) };
+            let ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, 4, 1, file as *const i8) } == 1;
             if !ok {
                 error!("marketing-save-reimplementation: WriteBytesToFile failed writing the funding-level index");
             }

@@ -566,6 +566,17 @@ pub fn add_item(this_ptr: u32, item: &ZTShowScriptItemRaw) -> u32 {
 
 const STRING_LENGTH_CAP: u32 = 0x1000;
 
+/// Sanity cap on a stream-read item count for one script - not a real vanilla limit (vanilla trusts the
+/// stream unconditionally, per `ZTShowScript_load.c`'s own unchecked loop), just a guard against
+/// [`read_script`] driving `Vec::with_capacity` off a garbage length read from a corrupted save file. A
+/// real script's item list is a handful of tricks; this is generous headroom, not a tight bound.
+const MAX_SCRIPT_ITEM_COUNT: u32 = 0x1000;
+
+/// Sanity cap on a stream-read script count for the whole manager - same guard as
+/// [`MAX_SCRIPT_ITEM_COUNT`] for [`load_mgr`]'s own count read. Script ids are `u16`, so the store can
+/// never legitimately hold more than `0x10000` distinct scripts.
+const MAX_SCRIPT_COUNT: u32 = 0x1_0000;
+
 fn write_string(buf: &mut Vec<u8>, s: &str) {
     let encoded = encode_to_ansi(s);
     let len = (encoded.len() as u32).min(STRING_LENGTH_CAP - 1);
@@ -626,7 +637,7 @@ fn encode_mgr(state: &ShowScriptMgrState) -> Vec<u8> {
 pub fn save_mgr(file: *const u32) -> bool {
     let state = STATE.lock().unwrap();
     let bytes = encode_mgr(&state);
-    unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }
+    (unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }) == 1
 }
 
 /// Reimplementation of the "old" `ZTShowScript::save` (real name; `ztshowscript_old` per
@@ -637,7 +648,7 @@ pub fn save_script(this_ptr: u32, file: *const u32) -> bool {
     let Some(id) = resolve(&state, this_ptr) else { return false };
     let Some(script) = state.scripts.get(&id) else { return false };
     let bytes = encode_script(id, script);
-    unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }
+    (unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }) == 1
 }
 
 fn read_bytes(file: *const u32, buf: &mut [u8]) -> bool {
@@ -718,6 +729,9 @@ fn read_script(file: *const u32, version: u32) -> Option<(u16, ShowScriptData)> 
     let sentinel = read_u32(file)?;
     let script_type = read_u32(file)?;
     let count = read_u32(file)?;
+    if count > MAX_SCRIPT_ITEM_COUNT {
+        return None;
+    }
     let mut items = Vec::with_capacity(count as usize);
     for _ in 0..count {
         items.push(read_item(file, version)?);
@@ -736,13 +750,22 @@ pub fn load_mgr(file: *const u32, version: u32) -> bool {
     if version <= 0x58 {
         return true;
     }
-    let Some(count) = read_u32(file) else { return false };
+    let Some(count) = read_u32(file) else {
+        return false;
+    };
+    if count > MAX_SCRIPT_COUNT {
+        return false;
+    }
     for _ in 0..count {
-        let Some((id, script)) = read_script(file, version) else { return false };
+        let Some((id, script)) = read_script(file, version) else {
+            return false;
+        };
         state.scripts.insert(id, script);
     }
     if version > 0x60 {
-        let Some(counter) = read_u16(file) else { return false };
+        let Some(counter) = read_u16(file) else {
+            return false;
+        };
         state.next_id_counter = counter;
     }
     true
@@ -912,6 +935,21 @@ pub(crate) mod live_support {
 
     pub(crate) fn registered_script_count() -> usize {
         STATE.lock().unwrap().scripts.len()
+    }
+
+    /// Every script id currently in the store, ascending - for a live test to snapshot which real
+    /// scripts a real zoo load populated, before/after a round-trip through [`super::encode_mgr`]/
+    /// [`super::load_mgr`] (which [`snapshot_encoded`] and the real `SAVE`/`LOAD` addresses both
+    /// exercise).
+    pub(crate) fn all_script_ids() -> Vec<u16> {
+        STATE.lock().unwrap().scripts.keys().copied().collect()
+    }
+
+    /// Pure encode of the current store state, bypassing `WriteBytesToFile`/`io_redirect` entirely -
+    /// lets a live test diff [`super::encode_mgr`]'s output against what [`super::load_mgr`] reads back
+    /// from it, directly, without needing a real or captured file handle.
+    pub(crate) fn snapshot_encoded() -> Vec<u8> {
+        super::encode_mgr(&STATE.lock().unwrap())
     }
 
     /// Reads the `makeID()` counter directly - for `ZTSHOWSCRIPTMGR_LOAD_VERSION_GATES_LIVE`'s own

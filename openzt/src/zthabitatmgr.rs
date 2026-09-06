@@ -9,7 +9,7 @@ use crate::{
     command_console::CommandError,
     globals::globals,
     lua_fn,
-    util::{get_from_memory, ref_from_memory, ZTArray, ZTBoundedString, ZTString},
+    util::{get_from_memory, ref_from_memory, ZTArray, ZTBufferString, ZTString},
     ztmapview::BFTile,
     ztworldmgr::Direction,
 };
@@ -142,15 +142,45 @@ pub struct ZTHabitat {
     created_timestamp: FileTime, // 0x120
     unknown_nt_time: FileTime,   // 0x128
     pad5: [u8; 0x24],            // ----------------------- padding: 36 bytes
-    exhibit_name: ZTBoundedString, // 0x154
-    pad6: [u8; 0x24],            // ----------------------- padding: 36 bytes
-    tank_height: u32,            // 0x184 // Actual structural tank height (ZTTankExhibit::getTankHeight/setTankHeight); not the field checkTankPlacement compares against, see water_level.
-    water_level: u32,            // 0x188 // Current water level (ZTTankExhibit::getWaterLevel); this is what checkTankPlacement's height comparisons actually use.
-    pad7: [u8; 0xc],             // ----------------------- padding: 12 bytes
-    is_filled: bool,             // 0x198 // Set true by ZTTankExhibit::fill(), false by ZTTankExhibit::drain().
+    exhibit_name: ZTBufferString, // 0x154 // 3-pointer (start/end/buffer_end) buffer string - ZTHabitat::ZTHabitat zero-inits all of field_0x154/0x158/0x15c before allocating, and field_0x160 is a distinct, separately-referenced pointer (ZTHabitat::playShowStartSound etc.) right after it. Was previously mis-typed as the 2-pointer ZTBoundedString, which shifted every field below 4 bytes early.
+    pad6: [u8; 0x18],            // ----------------------- padding: 24 bytes (0x160-0x178: a sound/show pointer plus an intrusive-list sentinel the ctor zero-inits, not yet individually reverse-engineered)
 }
 
-const _: () = assert!(std::mem::size_of::<ZTHabitat>() == 0x198);
+// `ZTHabitatMgr::createHabitat` (`ZTHabitatMgr_createHabitat.c`) allocates a plain `ZTHabitat` with
+// `operator_new(0x178)` and a `ZTTankExhibit` (single-inheritance subclass) with a *separate*
+// `operator_new(0x1e8)` - i.e. `ZTHabitat` itself is only 0x178 bytes; `tank_height`/`water_level`/
+// `is_filled` (used to live directly on this struct) only exist on the derived `ZTTankExhibit`, from
+// 0x178 onward - see that struct below. Putting them here made every full-struct copy of a real,
+// non-tank habitat (`get_from_memory::<ZTHabitat>`) over-read past its true 0x178-byte allocation.
+const _: () = assert!(std::mem::size_of::<ZTHabitat>() == 0x178);
+
+/// `ZTTankExhibit`, the single-inheritance subclass of [`ZTHabitat`] real tank/show exhibits are
+/// actually allocated as (`ZTHabitatMgr::createHabitat`'s second `operator_new(0x1e8)` call). `habitat`
+/// embeds the base class at offset 0 (matching real C++ single inheritance layout), so every
+/// `ZTHabitat` field/method is reachable through it. Only ever construct this from a pointer already
+/// confirmed via `ZTHabitat::is_tank()` - reading it from a real, plain `ZTHabitat` (0x178 bytes) would
+/// over-read past that object's actual allocation, exactly the bug this struct split fixes.
+#[derive(Debug, Getters)]
+#[repr(C)]
+#[get = "pub"]
+pub struct ZTTankExhibit {
+    habitat: ZTHabitat,   // 0x000 - 0x178
+    pad_tank1: [u8; 0xc], // ----------------------- padding: 12 bytes (0x178-0x184)
+    tank_height: u32,     // 0x184 // Actual structural tank height (ZTTankExhibit::getTankHeight/setTankHeight); not the field checkTankPlacement compares against, see water_level.
+    water_level: u32,     // 0x188 // Current water level (ZTTankExhibit::getWaterLevel); this is what checkTankPlacement's height comparisons actually use.
+    pad_tank2: [u8; 0xc], // ----------------------- padding: 12 bytes (0x18c-0x198)
+    is_filled: bool,      // 0x198 // Set true by ZTTankExhibit::fill(), false by ZTTankExhibit::drain(). Confirmed against ZTTankExhibit_fill.c/ZTTankExhibit_drain.c/ZTMapView_checkTankPlacement.c (field_0x198, checked as `this_00->field_0x198 == '\0'`) - not flipped between platforms.
+    pad_tank3: [u8; 0x4f], // ----------------------- padding: 79 bytes (0x199-0x1e8, not yet reverse-engineered)
+}
+
+const _: () = assert!(std::mem::size_of::<ZTTankExhibit>() == 0x1e8);
+
+impl std::ops::Deref for ZTTankExhibit {
+    type Target = ZTHabitat;
+    fn deref(&self) -> &ZTHabitat {
+        &self.habitat
+    }
+}
 
 impl ZTHabitat {
     const TANK_VTABLE_PTR: u32 = 0x006312bc;

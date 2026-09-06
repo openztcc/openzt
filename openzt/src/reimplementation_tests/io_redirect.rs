@@ -45,17 +45,25 @@ pub fn end_replay() {
     REDIRECT_ACTIVE.with(|active| active.set(false));
 }
 
+/// Current read position within the active replay buffer - lets a test check exactly how many bytes a
+/// real `*::load` call consumed against how many a paired `*::save` call actually produced (via
+/// `end_capture`'s returned length), pinpointing a save/load byte-count mismatch precisely instead of
+/// just observing garbage further downstream.
+pub fn replay_position() -> usize {
+    REPLAY_CURSOR.with(|cursor| cursor.borrow().1)
+}
+
 #[detour_mod]
 mod detours {
     use super::*;
 
     #[detour(WRITE_BYTES_TO_FILE)]
-    unsafe extern "cdecl" fn write_bytes_to_file(source_ptr: *const u32, size_in_bytes: u32, count: u32, file_ptr: *const i8) -> bool {
+    unsafe extern "cdecl" fn write_bytes_to_file(source_ptr: *const u32, size_in_bytes: u32, count: u32, file_ptr: *const i8) -> i32 {
         if REDIRECT_ACTIVE.with(|active| active.get()) {
             let total = (size_in_bytes as usize) * (count as usize);
             let bytes = unsafe { std::slice::from_raw_parts(source_ptr as *const u8, total) };
             CAPTURE_BUFFER.with(|buffer| buffer.borrow_mut().extend_from_slice(bytes));
-            return true;
+            return 1;
         }
         unsafe { WRITE_BYTES_TO_FILE_DETOUR.call(source_ptr, size_in_bytes, count, file_ptr) }
     }
