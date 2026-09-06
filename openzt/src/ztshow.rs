@@ -692,10 +692,6 @@ pub fn check_pending_scripts(show_info: u32) {
     let root = get_from_memory::<u32>(header + 4);
     let mut nodes = Vec::new();
     collect_pending_script_nodes(root, &mut nodes);
-    // Temporary diagnostic for ztshow-save-corruption-investigation.md: this is the only detour of ours
-    // that fires automatically every tick regardless of user action, so logging every call's node count
-    // answers whether it ever touches a specific exhibit's tree between load and save.
-    error!("DIAG CHECK_PENDING_SCRIPTS_ENTER show_info={show_info:#x} node_count={}", nodes.len());
 
     for node in nodes {
         let pending_id = get_from_memory::<u16>(node + 0x1e);
@@ -866,9 +862,27 @@ fn plan_pending_node_insert(header: u32, unit_type_id: u32) -> PendingNodeInsert
     }
 }
 
+/// `show_info + 0x48` is **not** part of the tree's own header (that lives behind the pointer at
+/// `show_info + 0x44` - a separately-allocated `AI_cls_0x404fd6` control block; `header + 4`/`header + 8` are
+/// its real root/leftmost fields, per [`plan_pending_node_insert`]'s own use of `header`). `show_info + 0x48`
+/// is a **separate cached node count** `ZTShowInfo` maintains itself: real vanilla `ZTShowInfo::save`
+/// (`ZTShowInfo_save.c` line 61-62) writes this field's raw value directly to disk immediately before the
+/// tree-walk loop, and real vanilla `ZTShowInfo::load` reads that exact file position back as the tile-record
+/// loop's iteration count (`ZTShowInfo_load.c` line 100's `local_e4`) - i.e. this field, not a tree walk, is
+/// the save format's authoritative node count. Confirmed live (`ztshowinfo-pending-scripts-tree-plan.md`):
+/// with a real tree holding 3 nodes (`pending_script_node_count` walk, matching file content), `show_info +
+/// 0x48` read directly (no indirection through `header` at all) held `2` - stale, stuck at whatever `load`
+/// originally set it to. Real vanilla's own insert helper (`AI_cls_0x404fd6::meth_0x5abe74`, not called here -
+/// this function is an independent reimplementation) must increment it on every genuine insert; not
+/// replicating that was the actual root cause of the save-corruption bug this plan document investigates.
+fn increment_pending_script_node_count(show_info: u32) {
+    let count = get_from_memory::<u32>(show_info + 0x48);
+    save_to_memory(show_info + 0x48, count + 1);
+}
+
 pub(crate) fn find_or_insert_pending_script_node(show_info: u32, unit_type_id: u32) -> (u32, bool) {
     let header = get_from_memory::<u32>(show_info + 0x44);
-    match plan_pending_node_insert(header, unit_type_id) {
+    let result = match plan_pending_node_insert(header, unit_type_id) {
         PendingNodeInsertPlan::Found(node) => (node, false),
         PendingNodeInsertPlan::NewRoot => {
             let new_node = allocate_pending_script_node(unit_type_id);
@@ -892,7 +906,11 @@ pub(crate) fn find_or_insert_pending_script_node(show_info: u32, unit_type_id: u
             save_to_memory(parent + 0xc, new_node);
             (new_node, true)
         }
+    };
+    if result.1 {
+        increment_pending_script_node_count(show_info);
     }
+    result
 }
 
 /// Reimplementation of `ZTShowInfo::addScript`, per `ZTShowInfo_addScript.c`/`.asm`. Assigns `new_script_id`
@@ -1023,24 +1041,42 @@ pub fn init() {
 pub(crate) mod live_support {
     use super::*;
 
-    /// Allocates and zero-initializes a standalone, `0xb0`-byte `ZTShowInfo` buffer via the real vanilla
+    /// Allocates and zero-initializes a standalone, `0xa8`-byte `ZTShowInfo` buffer via the real vanilla
     /// allocator (`standalone::OPERATOR_NEW`) - **without** running the real `ZTShowInfo::ZTShowInfo` ctor,
     /// which unconditionally dereferences an unconfirmed `GLOBAL_ZTAIMgr` field (see `start`'s own doc
-    /// comment on why that field is skipped project-wide). Real size `0xb0`, confirmed via
-    /// `ZTHabitat_setIsShowExhibit.c`'s own `new(0xb0)`.
+    /// comment on why that field is skipped project-wide). Real size `0xa8` on Windows, confirmed via
+    /// `ZTHabitat_setIsShowExhibit.c`'s own `new(0xa8)` (macOS uses `0xb0` - a real per-platform struct-size
+    /// difference, not a bug; this project builds for Windows).
     ///
     /// The one piece of real-ctor state this buffer *does* need is the pending-scripts tree header at
-    /// `+0x44` (`AI_cls_0x404fd6`, read by `ZTShowInfo::addScript`/`checkPendingScripts`/
-    /// `find_or_insert_pending_script_node`): its own first field is a self-pointer sentinel (confirmed via
-    /// `AI_cls_0x404fd6::find`'s decompile treating a "not found" result as "equal to the value read from
-    /// `this`'s own first field" - the standard self-referencing-header pattern), so this writes
-    /// `*(show_info+0x44) = show_info+0x44` before returning; without it, `find`/`find_or_insert_pending_
-    /// script_node` would dereference a null header and crash on the very first call. Every other field
-    /// stays zeroed, matching what the real ctor's own explicit zero-writes to `+0x50..+0xa4` already
-    /// produce (see `ZTShowInfo_ZTShowInfo.c`) - the fields this buffer's zero-init does *not* match the
-    /// real ctor for are `+0x68` (real ctor sets `1`) and the `GLOBAL_ZTAIMgr`-derived `+0x6c`/`+0x70`
-    /// fields, none of which `add_script`/`check_pending_scripts`/`check_owning_habitat` (this buffer's
-    /// intended consumers) ever read.
+    /// `+0x44`: `find_or_insert_pending_script_node`/`plan_pending_node_insert` dereference `header+4`
+    /// (root) and `header+8` (leftmost), so `+0x44` must hold a valid, writable pointer, not null.
+    ///
+    /// **Does not point `+0x44` at `show_info` itself.** An earlier version of this function wrote
+    /// `*(show_info+0x44) = show_info+0x44`, treating the header as embedded in place - modeled on
+    /// `AI_cls_0x404fd6`'s self-referencing-sentinel pattern, but that pattern describes the header
+    /// object's own internal layout, not where it lives. `ztshowinfo-pending-scripts-tree-plan.md`'s
+    /// live investigation of a *real* `ZTShowInfo` disproves the embedded reading directly: `header`'s
+    /// value (read from `this+0x44`) did **not** equal `this+0x44`, proving the header is a genuinely
+    /// separate allocation for real objects. Aliasing it onto `show_info` here made `header+4` land on
+    /// `show_info+0x48` - a real, distinct `ZTShowInfo` field (`increment_pending_script_node_count`'s
+    /// save-format node count). The very first `find_or_insert_pending_script_node` insert would then
+    /// increment that field by reading the tree's own justwritten root pointer as if it were a small
+    /// integer count and writing back `root_pointer + 1`, corrupting the root into an unmapped address -
+    /// live-reproduced via `crash-capture`: an access violation on `mov edx,[ecx+0x10]` with `ecx` a
+    /// bogus, non-heap value once the corrupted "root" was dereferenced on the next lookup.
+    ///
+    /// Fixed by allocating the header as its own, separate `0xc`-byte block (`self`/`root`/`leftmost` -
+    /// the three fields `find_or_insert_pending_script_node`'s Rust logic actually reads/writes; real
+    /// vanilla's own `AI_cls_0x404fd6::find` is never called through this buffer, so no larger real-struct
+    /// size is needed here) and storing *that* block's address at `show_info+0x44` - the same
+    /// separate-allocation shape `reimplementation_tests/mod.rs`'s `ZTSHOWMGR_ENTER_NEW_MONTH` test already
+    /// uses for its own `init_pending_script_header` helper. Every other field of `show_info` stays zeroed,
+    /// matching what the real ctor's own explicit zero-writes to `+0x50..+0xa4` already produce (see
+    /// `ZTShowInfo_ZTShowInfo.c`) - the fields this buffer's zero-init does *not* match the real ctor for
+    /// are `+0x68` (real ctor sets `1`) and the `GLOBAL_ZTAIMgr`-derived `+0x6c`/`+0x70` fields, none of
+    /// which `add_script`/`check_pending_scripts`/`check_owning_habitat` (this buffer's intended consumers)
+    /// ever read.
     ///
     /// Deliberately never freed by a matching helper here: this is a one-shot smoke-test buffer (see
     /// `reimplementation_tests/mod.rs`'s `ZTSHOWINFO_ADD_SCRIPT_CHECK_PENDING_SCRIPTS_LIVE` test), and real
@@ -1048,12 +1084,17 @@ pub(crate) mod live_support {
     /// `+0x50`/`+0x54`/`+0x58` dynamic array by the time the test finishes - freeing only the outer buffer
     /// while leaving that memory dangling would be a partial/incorrect teardown, so per CLAUDE.md's
     /// leak-only-teardown precedent (`ztthoughtmgr.rs`'s `destroy_standalone_mgr_leaking_nodes`), this
-    /// buffer and anything real vanilla code links into it are just left allocated for the rest of the
-    /// (short, one-shot) test process's lifetime instead.
+    /// buffer, its separately-allocated header block, and anything real vanilla code links into it are just
+    /// left allocated for the rest of the (short, one-shot) test process's lifetime instead.
     pub(crate) fn build_standalone_show_info() -> u32 {
-        let show_info = unsafe { OPERATOR_NEW.original()(0xb0) } as u32;
-        unsafe { std::ptr::write_bytes(show_info as *mut u8, 0, 0xb0) };
-        save_to_memory(show_info + 0x44, show_info + 0x44);
+        let show_info = unsafe { OPERATOR_NEW.original()(0xa8) } as u32;
+        unsafe { std::ptr::write_bytes(show_info as *mut u8, 0, 0xa8) };
+
+        let header = unsafe { OPERATOR_NEW.original()(0xc) } as u32;
+        unsafe { std::ptr::write_bytes(header as *mut u8, 0, 0xc) };
+        save_to_memory(header, header);
+        save_to_memory(show_info + 0x44, header);
+
         show_info
     }
 

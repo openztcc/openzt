@@ -40,7 +40,6 @@ use std::{
 };
 
 use openzt_detour::generated::standalone::{DEALLOCATE, WRITE_BYTES_TO_FILE};
-use tracing::error;
 
 use crate::{
     encoding_utils::{decode_game_text, encode_to_ansi},
@@ -638,10 +637,7 @@ fn encode_mgr(state: &ShowScriptMgrState) -> Vec<u8> {
 pub fn save_mgr(file: *const u32) -> bool {
     let state = STATE.lock().unwrap();
     let bytes = encode_mgr(&state);
-    error!("DIAG SAVE_ENTER ZTShowScriptMgr scripts={} bytes={}", state.scripts.len(), bytes.len());
-    let ok = (unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }) == 1;
-    error!("DIAG SAVE_RESULT ZTShowScriptMgr ok={ok}");
-    ok
+    (unsafe { WRITE_BYTES_TO_FILE.hooked()(bytes.as_ptr() as *const u32, bytes.len() as u32, 1, file as *const i8) }) == 1
 }
 
 /// Reimplementation of the "old" `ZTShowScript::save` (real name; `ztshowscript_old` per
@@ -748,38 +744,30 @@ fn read_script(file: *const u32, version: u32) -> Option<(u16, ShowScriptData)> 
 /// vanilla constructing load-time scripts with `autoRegister = false`), then - only for `version > 0x60`
 /// - restores the persisted `makeID` counter.
 pub fn load_mgr(file: *const u32, version: u32) -> bool {
-    error!("DIAG LOAD_ENTER ZTShowScriptMgr version={version}");
     let mut state = STATE.lock().unwrap();
     state.scripts.clear();
     state.aliases.clear();
     if version <= 0x58 {
-        error!("DIAG LOAD_RESULT ZTShowScriptMgr ok=true stage=pre-0x58-noop");
         return true;
     }
     let Some(count) = read_u32(file) else {
-        error!("DIAG LOAD_RESULT ZTShowScriptMgr ok=false stage=count");
         return false;
     };
-    error!("DIAG ZTShowScriptMgr count={count}");
     if count > MAX_SCRIPT_COUNT {
-        error!("DIAG LOAD_RESULT ZTShowScriptMgr ok=false stage=count_cap count={count}");
         return false;
     }
-    for i in 0..count {
+    for _ in 0..count {
         let Some((id, script)) = read_script(file, version) else {
-            error!("DIAG LOAD_RESULT ZTShowScriptMgr ok=false stage=script index={i}");
             return false;
         };
         state.scripts.insert(id, script);
     }
     if version > 0x60 {
         let Some(counter) = read_u16(file) else {
-            error!("DIAG LOAD_RESULT ZTShowScriptMgr ok=false stage=counter");
             return false;
         };
         state.next_id_counter = counter;
     }
-    error!("DIAG LOAD_RESULT ZTShowScriptMgr ok=true scripts={}", state.scripts.len());
     true
 }
 

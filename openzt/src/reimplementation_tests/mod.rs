@@ -9139,8 +9139,8 @@ mod detour_zoo_main {
         }
 
         // The very first insert for UNIT_TYPE_ID becomes the pending-scripts tree's root directly.
-        let header_self = get_from_memory::<u32>(show_info + 0x44);
-        let root = get_from_memory::<u32>(header_self + 4);
+        let header = get_from_memory::<u32>(show_info + 0x44);
+        let root = get_from_memory::<u32>(header + 4);
         if root == 0 {
             error!("{}: pending-scripts tree has no root after ADD_SCRIPT", test_name);
             fail_flag = true;
@@ -9307,8 +9307,13 @@ mod detour_zoo_main {
                 continue;
             }
             let habitat = get_from_memory::<ZTHabitat>(habitat_ptr);
-            if habitat.is_tank() && *habitat.water_level() > 0 && habitat.is_show_tank() {
-                return Some((habitat_ptr, *habitat.zt_show_info_ptr()));
+            if habitat.is_tank() && habitat.is_show_tank() {
+                // Only safe to read as a `ZTTankExhibit` because `is_tank()` above already confirmed
+                // this pointer is really a 0x1e8-byte `ZTTankExhibit`, not a plain 0x178-byte `ZTHabitat`.
+                let tank = get_from_memory::<crate::zthabitatmgr::ZTTankExhibit>(habitat_ptr);
+                if *tank.water_level() > 0 {
+                    return Some((habitat_ptr, *habitat.zt_show_info_ptr()));
+                }
             }
         }
         None
@@ -9949,8 +9954,13 @@ mod detour_zoo_main {
                 continue;
             }
             let habitat = get_from_memory::<ZTHabitat>(habitat_ptr);
-            if habitat.is_tank() && *habitat.water_level() == 0 {
-                return Some(habitat_ptr);
+            if habitat.is_tank() {
+                // Only safe to read as a `ZTTankExhibit` because `is_tank()` above already confirmed
+                // this pointer is really a 0x1e8-byte `ZTTankExhibit`, not a plain 0x178-byte `ZTHabitat`.
+                let tank = get_from_memory::<crate::zthabitatmgr::ZTTankExhibit>(habitat_ptr);
+                if *tank.water_level() == 0 {
+                    return Some(habitat_ptr);
+                }
             }
         }
         None
@@ -10730,9 +10740,21 @@ mod detour_zoo_main {
         encoded
     }
 
-    /// Writes `name` into `habitat`'s `exhibit_name` field (`+0x154`, a `ZTBoundedString`) by raw offset
-    /// write - same technique as `set_bfentity_name`, but `ZTBoundedString` is a 2-pointer
-    /// `start_ptr`/`end_ptr` pair with no separate `buffer_end_ptr`.
+    /// Writes `name` into `habitat`'s `exhibit_name` field (`+0x154`, a `ZTBufferString`) by raw offset
+    /// write - same technique and same 3-pointer shape as `set_bfentity_name`.
+    ///
+    /// **Previously wrote only `start`/`end` (`+0x154`/`+0x158`), modeled on `exhibit_name` as a 2-pointer
+    /// `ZTBoundedString`.** `zthabitatmgr.rs`'s own field comment on `exhibit_name` documents that this was
+    /// corrected to the 3-pointer `ZTBufferString` (`start`/`end`/`buffer_end`) - this helper was never
+    /// updated to match, leaving `buffer_end_ptr` (`+0x15c`) at whatever `build_standalone_show_info`-style
+    /// zero-init left it. `ZTBufferString::copy_to_string`'s read loop requires `char_address < buffer_end`
+    /// on every iteration, so a zeroed `buffer_end_ptr` (always less than any real `start` address) made it
+    /// read zero bytes regardless of `name`'s actual content. Live-reproduced (`ZTTHOUGHT_GET_STRING` with a
+    /// widened `cases` count): `case=Habitat("0")` against a real `%s`-shaped template gave `left: "...for
+    /// 0."` (real vanilla) vs `right: "...for ."` (reimplementation - `get_string`'s habitat branch read
+    /// back an empty exhibit name). Masked at the default case count because it only surfaces when a fuzzed
+    /// `string_id` happens to resolve to a real, loadable, `%s`-shaped template *and* the `Habitat` branch
+    /// is drawn with a non-empty name - rare enough to look "sporadic" rather than reliably reproducing.
     fn set_habitat_exhibit_name(habitat: &ZTHabitat, name: &str) -> Vec<u8> {
         let mut encoded = name.as_bytes().to_vec();
         let len = encoded.len() as u32;
@@ -10741,6 +10763,7 @@ mod detour_zoo_main {
         let habitat_addr = habitat as *const ZTHabitat as u32;
         save_to_memory::<u32>(habitat_addr + 0x154, start);
         save_to_memory::<u32>(habitat_addr + 0x158, start + len);
+        save_to_memory::<u32>(habitat_addr + 0x15c, start + encoded.len() as u32);
         encoded
     }
 

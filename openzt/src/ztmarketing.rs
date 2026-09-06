@@ -283,19 +283,13 @@ impl ZTMarketingMgr {
     /// re-enters that hook, exactly like a vanilla caller would; with no detour installed the
     /// address still holds genuine vanilla code.
     pub fn save(&self, file: *const u32) -> bool {
-        error!("DIAG SAVE_ENTER ZTMarketingMgr");
-        let ok = unsafe { ztmarketingmgr::SAVE.hooked()((self as *const Self) as *const u32, file) };
-        error!("DIAG SAVE_RESULT ZTMarketingMgr ok={ok}");
-        ok
+        unsafe { ztmarketingmgr::SAVE.hooked()((self as *const Self) as *const u32, file) }
     }
 
     /// Calls `ZTMarketingMgr::load` - the save-file counterpart to `save()`, with the same
     /// deliberate re-entry via `.hooked()`.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
-        error!("DIAG LOAD_ENTER ZTMarketingMgr version={version}");
-        let ok = unsafe { ztmarketingmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) };
-        error!("DIAG LOAD_RESULT ZTMarketingMgr ok={ok}");
-        ok
+        unsafe { ztmarketingmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) }
     }
 }
 

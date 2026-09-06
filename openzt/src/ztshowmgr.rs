@@ -652,12 +652,10 @@ impl ZTShowMgr {
     /// since the writers' cutover); the bytes are copied out under the lock and written from a
     /// local, so the store mutex is never held across the `WriteBytesToFile` call-out.
     pub fn save(&mut self, file: *const i8) -> u32 {
-        error!("DIAG SAVE_ENTER ZTShowMgr");
         let script_ok =
             unsafe { ZTSHOWSCRIPTMGR_SAVE.hooked()(&raw const self.show_script_mgr as *const u32, file) } & 0xff != 0;
         let counter: u16 = SHOW_STORE.lock().unwrap().show_id_counter;
         let write_ok = unsafe { WRITE_BYTES_TO_FILE.hooked()(&raw const counter as *const u32, 2, 1, file) } == 1;
-        error!("DIAG SAVE_RESULT ZTShowMgr script_ok={script_ok} write_ok={write_ok}");
         (script_ok & write_ok) as u32
     }
 
@@ -674,11 +672,9 @@ impl ZTShowMgr {
     /// into the store only on a successful read - the same only-on-success visibility the real
     /// body's in-place global write gave the battery's short-read pins.
     pub fn load(&mut self, file: *const u32, version: u32) -> u32 {
-        error!("DIAG LOAD_ENTER ZTShowMgr version={version}");
         let mut ok =
             unsafe { ZTSHOWSCRIPTMGR_LOAD.hooked()(&raw const self.show_script_mgr as *const u32, file, version) } & 0xff
                 != 0;
-        error!("DIAG ZTShowMgr showscriptmgr_load_ok={ok}");
         if version > 0x60 {
             let mut counter: u16 = 0;
             let read_ok =
@@ -688,7 +684,6 @@ impl ZTShowMgr {
             }
             ok &= read_ok;
         }
-        error!("DIAG LOAD_RESULT ZTShowMgr ok={ok}");
         ok as u32
     }
 

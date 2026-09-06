@@ -133,12 +133,10 @@ fn read_dword(file: *const u32) -> Option<u32> {
 /// successfully.
 pub fn save(file: *const u32) -> bool {
     let ids = AWARD_MGR.lock().unwrap().earned_ids.clone();
-    error!("DIAG SAVE_ENTER ZTAwardMgr count={}", ids.len());
     let mut ok = write_dword(file, ids.len() as u32);
     for id in ids {
         ok &= write_dword(file, id as u32);
     }
-    error!("DIAG SAVE_RESULT ZTAwardMgr ok={ok}");
     ok
 }
 
@@ -147,13 +145,10 @@ pub fn save(file: *const u32) -> bool {
 /// a malformed/duplicate save can't reintroduce duplicates. Reproduces the exact on-disk wire format
 /// (`i32` count + `i32[count]`) byte-for-byte.
 pub fn load(file: *const u32) -> bool {
-    error!("DIAG LOAD_ENTER ZTAwardMgr");
     AWARD_MGR.lock().unwrap().earned_ids.clear();
     let Some(count) = read_dword(file) else {
-        error!("DIAG LOAD_RESULT ZTAwardMgr ok=false stage=count");
         return false;
     };
-    error!("DIAG ZTAwardMgr count={count}");
     let mut ok = true;
     for _ in 0..count {
         match read_dword(file) {
@@ -167,7 +162,6 @@ pub fn load(file: *const u32) -> bool {
             }
         }
     }
-    error!("DIAG LOAD_RESULT ZTAwardMgr ok={ok}");
     ok
 }
 

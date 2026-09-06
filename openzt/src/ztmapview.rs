@@ -6,6 +6,7 @@ use tracing::info;
 use crate::bfentitytype::{BFEntityType, ZTAnimalType, ZTEntityTypeClass, ZTSceneryType, ZTUnitType, zt_entity_type_class_is};
 use crate::globals::globals;
 use crate::util::{get_from_memory, ref_from_memory, Addr, MemAddr};
+use crate::zthabitatmgr::ZTTankExhibit;
 use crate::ztworldmgr::{BFEntity, IVec3, ZTAnimal};
 // use crate::{
 //     util::get_from_memory,
@@ -309,14 +310,20 @@ impl ZTMapView {
         // info!("Entity Ptr {:#x} -> {:#x}", Addr::of(temp_entity_ptr), get_from_memory::<u32>(temp_entity_ptr));
         let temp_entity = unsafe { ref_from_memory::<BFEntity>(temp_entity_ptr) };
         let habitat_mgr = globals().zthabitatmgr();
-        let Some(habitat) = habitat_mgr.get_habitat(tile.pos.x, tile.pos.y) else {
+        let habitat_ptr = habitat_mgr.get_habitat_ptr(tile.pos.x, tile.pos.y);
+        if habitat_ptr == 0 {
             info!("No habitat found at tile position: {:?}", tile.pos);
             return Ok(());
-        };
+        }
+        let habitat = get_from_memory::<crate::zthabitatmgr::ZTHabitat>(habitat_ptr);
         // info!("Found habitat: {}", habitat.exhibit_name().to_string());
         if !habitat.is_tank(){
             return Ok(());
         }
+        // Safe only because `is_tank()` above confirmed this pointer is a real `ZTTankExhibit`
+        // (0x1e8 bytes) - see ZTTankExhibit's own doc comment for why a blind `ZTTankExhibit` read
+        // off an arbitrary, possibly-plain-`ZTHabitat` (0x178 bytes) pointer would over-read.
+        let tank = get_from_memory::<ZTTankExhibit>(habitat_ptr);
         let entity_type_class = temp_entity.entity_type_class();
         if !zt_entity_type_class_is(&entity_type_class, &ZTEntityTypeClass::Keeper) {
             if let Some(t) = habitat.get_gate_tile_in()
@@ -331,7 +338,7 @@ impl ZTMapView {
                 return Err(ErrorStringId::ObjectCannotBePlacedInTank);
             }
 
-            if scenery_entity_type.surface && *habitat.water_level() < scenery_entity_type.depth {
+            if scenery_entity_type.surface && *tank.water_level() < scenery_entity_type.depth {
                 return Err(ErrorStringId::ObjectMustBePlacedInADeeperTank);
             }
         }
@@ -344,14 +351,14 @@ impl ZTMapView {
             if *animal_entity.is_egg() && !animal_entity_type.underwater {
                 return Err(ErrorStringId::EggsMustBePlacedOnLand);
             }
-            if *habitat.water_level() < animal_entity_type.ztunit_type.bfunit_type.depth {
+            if *tank.water_level() < animal_entity_type.ztunit_type.bfunit_type.depth {
                 // TODO: Add an extra message for animals rather than objects
                 return Err(ErrorStringId::ObjectMustBePlacedInADeeperTank);
             }
             // TankWithWater check; onlyUnderwater?
             if animal_entity_type.underwater
                 && !animal_entity.is_boxed()
-                && (!habitat.is_filled() || *habitat.water_level() < 1)
+                && (!tank.is_filled() || *tank.water_level() < 1)
             {
                 return Err(ErrorStringId::AnimalMustBePlacedInATankWithWater);
             }

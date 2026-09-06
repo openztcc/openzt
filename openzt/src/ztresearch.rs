@@ -990,7 +990,17 @@ impl ZTResearchBranch {
         if rate <= 0.0 {
             return None;
         }
-        let raw = (((program.target_cost - program.current_progress) * 100.0) / program.target_cost).trunc();
+        // The subtract/multiply/divide chain runs in `f64`, not `f32`, to approximate the x87 FPU's own
+        // 80-bit extended-precision intermediates: real vanilla never rounds `(target_cost -
+        // current_progress) * 100.0` down to a 32-bit float before dividing by `target_cost`, but plain
+        // `f32` arithmetic (this project's i686 target uses SSE2, rounding after every op) does. That
+        // extra rounding is invisible for most inputs but flips the truncated integer at the boundary:
+        // live-reproduced for `target_cost=-0.7881632, current_progress=0.0` (mathematically exactly
+        // `100`), where strict per-op `f32` gives `99.99999237` (truncates to `99`) but real vanilla
+        // returns `100` - `f64` intermediates reproduce vanilla's `100` exactly.
+        let target_cost = program.target_cost as f64;
+        let current_progress = program.current_progress as f64;
+        let raw = (((target_cost - current_progress) * 100.0) / target_cost).trunc();
         Some(if raw.is_finite() { raw as i64 as i32 } else { 0 })
     }
 
@@ -1776,10 +1786,7 @@ impl ZTResearchMgr {
     /// `vanilla-research-save` feature no detour is installed and the address still holds genuine
     /// vanilla code.
     pub fn save(&self, file: *const u32) -> bool {
-        error!("DIAG SAVE_ENTER ZTResearchMgr");
-        let ok = unsafe { ztresearchmgr::SAVE.hooked()((self as *const Self) as *const u32, file) != 0 };
-        error!("DIAG SAVE_RESULT ZTResearchMgr ok={ok}");
-        ok
+        unsafe { ztresearchmgr::SAVE.hooked()((self as *const Self) as *const u32, file) != 0 }
     }
 
     /// Calls `ZTResearchMgr::load` - the save-file counterpart to `save()`. Per
@@ -1804,10 +1811,7 @@ impl ZTResearchMgr {
     /// `vanilla-research-save` feature no detour is installed and the address still holds genuine
     /// vanilla code.
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
-        error!("DIAG LOAD_ENTER ZTResearchMgr version={version}");
-        let ok = unsafe { ztresearchmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) };
-        error!("DIAG LOAD_RESULT ZTResearchMgr ok={ok}");
-        ok
+        unsafe { ztresearchmgr::LOAD.hooked()((self as *mut Self) as *const u32, file, version) }
     }
 
     /// Reimplementation of `ZTResearchMgr::forceResearch` (the class-level half of the "research

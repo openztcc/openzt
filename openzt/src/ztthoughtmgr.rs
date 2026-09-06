@@ -462,12 +462,10 @@ impl ZTThoughtMgr {
     /// front to back. Every item is visited regardless of an earlier write failing; `ok` only reflects
     /// whether everything wrote successfully.
     pub fn save(&self, file: *const u32) -> bool {
-        tracing::error!("DIAG SAVE_ENTER ZTThoughtMgr count={}", self.len());
         let mut ok = write_dword(file, self.len() as u32);
         for thought in self.iter() {
             ok &= thought.save(file);
         }
-        tracing::error!("DIAG SAVE_RESULT ZTThoughtMgr ok={ok}");
         ok
     }
 
@@ -482,15 +480,11 @@ impl ZTThoughtMgr {
     /// Returns the AND of every item's own `load` result (the count read's own success is only a
     /// precondition to entering the loop at all, not folded into the final result).
     pub fn load(&mut self, file: *const u32, version: u32) -> bool {
-        tracing::error!("DIAG LOAD_ENTER ZTThoughtMgr version={version}");
         let Some(count) = read_dword(file) else {
-            tracing::error!("DIAG LOAD_RESULT ZTThoughtMgr ok=false stage=count");
             return false;
         };
         let count = count as i32;
-        tracing::error!("DIAG ZTThoughtMgr count={count}");
         if count <= 0 {
-            tracing::error!("DIAG LOAD_RESULT ZTThoughtMgr ok=true stage=count<=0");
             return true;
         }
 
@@ -511,7 +505,6 @@ impl ZTThoughtMgr {
                 break;
             }
         }
-        tracing::error!("DIAG LOAD_RESULT ZTThoughtMgr ok={ok}");
         ok
     }
 
