@@ -195,23 +195,17 @@ mod detour_zoo_main {
         TIME_AGO as ZTGAMEMGR_TIME_AGO, UPDATE as ZTGAMEMGR_UPDATE, UPDATE_SIM as ZTGAMEMGR_UPDATE_SIM,
     };
     use openzt_detour::generated::zoostatus::{
-        BUY_PEOPLE_FOOD as ZOOSTATUS_BUY_PEOPLE_FOOD, CALCULATE_SUMS as ZOOSTATUS_CALCULATE_SUMS,
-        CHANGE_ENDOWMENT_MEMBERS as ZOOSTATUS_CHANGE_ENDOWMENT_MEMBERS, INCREASE_DONATIONS as ZOOSTATUS_INCREASE_DONATIONS,
-        INCREASE_ENDOWMENT as ZOOSTATUS_INCREASE_ENDOWMENT, INCREASE_SHOW_ADMISSION as ZOOSTATUS_INCREASE_SHOW_ADMISSION,
-        INIT as ZOOSTATUS_INIT, LOAD as ZOOSTATUS_LOAD, MESSAGE_CHECKS as ZOOSTATUS_MESSAGE_CHECKS, OVERRIDE as ZOOSTATUS_OVERRIDE,
+        BUY_ANIMAL as ZOOSTATUS_BUY_ANIMAL, BUY_PEOPLE_FOOD as ZOOSTATUS_BUY_PEOPLE_FOOD, CALCULATE_SUMS as ZOOSTATUS_CALCULATE_SUMS,
+        CHANGE_ENDOWMENT_MEMBERS as ZOOSTATUS_CHANGE_ENDOWMENT_MEMBERS, HEAL_ANIMAL as ZOOSTATUS_HEAL_ANIMAL,
+        INCREASE_ADMISSIONS as ZOOSTATUS_INCREASE_ADMISSIONS, INCREASE_ADMISSIONS_INCOME as ZOOSTATUS_INCREASE_ADMISSIONS_INCOME,
+        INCREASE_DONATIONS as ZOOSTATUS_INCREASE_DONATIONS, INCREASE_ENDOWMENT as ZOOSTATUS_INCREASE_ENDOWMENT,
+        INCREASE_SHOW_ADMISSION as ZOOSTATUS_INCREASE_SHOW_ADMISSION, INIT as ZOOSTATUS_INIT, LOAD as ZOOSTATUS_LOAD,
+        MESSAGE_CHECKS as ZOOSTATUS_MESSAGE_CHECKS, OVERRIDE as ZOOSTATUS_OVERRIDE, PURCHASE_FOOD as ZOOSTATUS_PURCHASE_FOOD,
         RATING_CHECKS as ZOOSTATUS_RATING_CHECKS, SAVE as ZOOSTATUS_SAVE,
         REFUND_ANIMAL_COST as ZOOSTATUS_REFUND_ANIMAL_COST, REFUND_CONSTRUCTION as ZOOSTATUS_REFUND_CONSTRUCTION,
         SET_ADULT_ADMISSION_PRICE as ZOOSTATUS_SET_ADULT_ADMISSION_PRICE,
         SPEND_BUILDING_UPKEEP as ZOOSTATUS_SPEND_BUILDING_UPKEEP, SPEND_CONSTRUCTION as ZOOSTATUS_SPEND_CONSTRUCTION,
         SPEND_GUIDE_WAGES as ZOOSTATUS_SPEND_GUIDE_WAGES,
-        // Regenerated (uncommitted, pre-existing before this session): the old `SPEND_KEEPER_WAGES_0`/`_1`
-        // names were an OOAnalyzer mislabeling - same addresses, real names `buyAnimal`/`spendKeeperWages`
-        // per a fresh Ghidra pass. Aliased back to the old local names since this test only needs a
-        // byte-identical real-vanilla call-through, not a semantic rename - see
-        // `zt-mgr-classes-reimplementation-roadmap.md`/this plan's own open-risks note on
-        // `SPEND_KEEPER_WAGES_0` for the tracked follow-up (whether `ZooStatus::spend_keeper_wages_0`'s own
-        // Rust port logic still matches now that the real method is known to be `buyAnimal`).
-        BUY_ANIMAL as ZOOSTATUS_SPEND_KEEPER_WAGES_0,
         SPEND_KEEPER_WAGES as ZOOSTATUS_SPEND_KEEPER_WAGES_1, SPEND_MAINT_WAGES as ZOOSTATUS_SPEND_MAINT_WAGES,
         SPEND_MARKETING as ZOOSTATUS_SPEND_MARKETING, SPEND_RESEARCH as ZOOSTATUS_SPEND_RESEARCH,
     };
@@ -241,7 +235,7 @@ mod detour_zoo_main {
         ztshowscriptmgr,
         ztshowmgr::{self, live_support as showmgr_live_support, ZTShowMgr},
         ztshowui,
-        zoostatus::{live_support as zoostatus_live_support, ZooStatus},
+        zoostatus::{live_support as zoostatus_live_support, ZooStatus, GET_STATUS_FIXED},
     };
 
     use super::io_redirect;
@@ -732,6 +726,7 @@ mod detour_zoo_main {
         tests.push(RegisteredTest { name: "ZOOSTATUS_ORIGINAL_ROUTES_TO_TRAMPOLINE", run: run_zoostatus_original_routes_to_trampoline_test });
         tests.push(RegisteredTest { name: "ZOOSTATUS_INIT", run: run_zoostatus_init_test });
         tests.push(RegisteredTest { name: "ZOOSTATUS_ACCUMULATORS", run: run_zoostatus_accumulators_test });
+        tests.push(RegisteredTest { name: "ZOOSTATUS_GET_STATUS", run: run_zoostatus_get_status_test });
         tests.push(RegisteredTest { name: "ZTGAMEMGR_SAVE_LOAD", run: run_gamemgr_save_load_test });
         tests.push(RegisteredTest { name: "ZTGAMEMGR_UPDATE_SIM", run: run_gamemgr_update_sim_test });
         tests.push(RegisteredTest { name: "ZTGAMEMGR_FINANCE_DATE_HELPERS", run: run_gamemgr_finance_date_helpers_test });
@@ -742,6 +737,7 @@ mod detour_zoo_main {
         tests.push(RegisteredTest { name: "ZOOSTATUS_SHOW_PRICES_SMOKE", run: run_zoostatus_show_prices_smoke_test });
         tests.push(RegisteredTest { name: "ZOOSTATUS_OVERRIDE", run: run_zoostatus_override_test });
         tests.push(RegisteredTest { name: "ZOOSTATUS_SAVE_LOAD", run: run_zoostatus_save_load_test });
+        tests.push(RegisteredTest { name: "ZOOSTATUS_LOAD_LEGACY", run: run_zoostatus_load_legacy_test });
         tests
     }
 
@@ -5336,7 +5332,7 @@ mod detour_zoo_main {
         }
 
         let test_name = "ZOOSTATUS_ORIGINAL_ROUTES_TO_TRAMPOLINE";
-        let hooked: [(&'static str, u32, usize); 31] = [
+        let hooked: [(&'static str, u32, usize); 36] = [
             ("INIT", zs::INIT.address, original_ptr(&zs::INIT)),
             ("OVERRIDE", zs::OVERRIDE.address, original_ptr(&zs::OVERRIDE)),
             ("RESET_FINANCE_INFO", zs::RESET_FINANCE_INFO.address, original_ptr(&zs::RESET_FINANCE_INFO)),
@@ -5368,6 +5364,11 @@ mod detour_zoo_main {
             ("UPDATE", zs::UPDATE.address, original_ptr(&zs::UPDATE)),
             ("SAVE", zs::SAVE.address, original_ptr(&zs::SAVE)),
             ("LOAD", zs::LOAD.address, original_ptr(&zs::LOAD)),
+            ("HEAL_ANIMAL", zs::HEAL_ANIMAL.address, original_ptr(&zs::HEAL_ANIMAL)),
+            ("PURCHASE_FOOD", zs::PURCHASE_FOOD.address, original_ptr(&zs::PURCHASE_FOOD)),
+            ("INCREASE_ADMISSIONS_INCOME", zs::INCREASE_ADMISSIONS_INCOME.address, original_ptr(&zs::INCREASE_ADMISSIONS_INCOME)),
+            ("INCREASE_ADMISSIONS", zs::INCREASE_ADMISSIONS.address, original_ptr(&zs::INCREASE_ADMISSIONS)),
+            ("GET_STATUS_FIXED", GET_STATUS_FIXED.address, original_ptr(&GET_STATUS_FIXED)),
         ];
 
         let mut failures: Vec<String> = Vec::new();
@@ -5508,6 +5509,16 @@ mod detour_zoo_main {
     /// full-struct byte comparison at the end catches any divergence across the whole run (no masking
     /// needed - none of these methods touch [`ZooStatus::admission_price`]/the escape timestamp, the only
     /// fields `ZOOSTATUS_INIT`'s own test had to mask).
+    ///
+    /// **Extended (Stage 10)** with the five real Windows methods a fresh Ghidra pass recovered from the
+    /// macOS-only corpus: [`ZooStatus::buy_animal`] (the renamed, previously-mislabeled
+    /// `SPEND_KEEPER_WAGES_0`), [`ZooStatus::heal_animal`], [`ZooStatus::purchase_food`],
+    /// [`ZooStatus::increase_admissions_income`] (all four fit this same shared-instance byte-diff
+    /// harness, same as every other accumulator method) and [`ZooStatus::increase_admissions`] (the
+    /// `i32`-count outlier, run once here rather than getting its own test - same reasoning as
+    /// `change_endowment_members` sharing this harness instead of a dedicated one).
+    /// [`ZooStatus::get_status`] (the sixth recovered method, a pure reader) has its own dedicated test,
+    /// `ZOOSTATUS_GET_STATUS`, since it doesn't fit this write-and-diff shape.
     fn run_zoostatus_accumulators_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZOOSTATUS_ACCUMULATORS";
 
@@ -5546,8 +5557,16 @@ mod detour_zoo_main {
             (*reimpl_zoostatus_ptr).spend_building_upkeep(42.25);
             ZOOSTATUS_SPEND_GUIDE_WAGES.original()(real_zoostatus_ptr as *const u32, 99.0);
             (*reimpl_zoostatus_ptr).spend_guide_wages(99.0);
-            ZOOSTATUS_SPEND_KEEPER_WAGES_0.original()(real_zoostatus_ptr as *const u32, 17.5);
-            (*reimpl_zoostatus_ptr).spend_keeper_wages_0(17.5);
+            ZOOSTATUS_BUY_ANIMAL.original()(real_zoostatus_ptr as *const u32, 17.5);
+            (*reimpl_zoostatus_ptr).buy_animal(17.5);
+            ZOOSTATUS_HEAL_ANIMAL.original()(real_zoostatus_ptr as *const u32, 8.25);
+            (*reimpl_zoostatus_ptr).heal_animal(8.25);
+            ZOOSTATUS_PURCHASE_FOOD.original()(real_zoostatus_ptr as *const u32, 4.5);
+            (*reimpl_zoostatus_ptr).purchase_food(4.5);
+            ZOOSTATUS_INCREASE_ADMISSIONS_INCOME.original()(real_zoostatus_ptr as *const u32, 320.0);
+            (*reimpl_zoostatus_ptr).increase_admissions_income(320.0);
+            ZOOSTATUS_INCREASE_ADMISSIONS.original()(real_zoostatus_ptr as *const u32, 7);
+            (*reimpl_zoostatus_ptr).increase_admissions(7);
             ZOOSTATUS_SPEND_KEEPER_WAGES_1.original()(real_zoostatus_ptr as *const u32, 250.0);
             (*reimpl_zoostatus_ptr).spend_keeper_wages_1(250.0);
             ZOOSTATUS_SPEND_MAINT_WAGES.original()(real_zoostatus_ptr as *const u32, 3.75);
@@ -5595,6 +5614,90 @@ mod detour_zoo_main {
 
         gamemgr_live_support::destroy_standalone_mgr(real_mgr_ptr);
         gamemgr_live_support::destroy_standalone_mgr(reimpl_mgr_ptr);
+        failed
+    }
+
+    /// `ZOOSTATUS_GET_STATUS` - `zoostatus-implementation-plan.md` Stage 10's live comparison for
+    /// [`ZooStatus::get_status`], the one recovered macOS-only method that's a pure reader rather than a
+    /// mutator, so it doesn't fit `ZOOSTATUS_ACCUMULATORS`' write-and-diff harness. Builds a single
+    /// standalone `ZTGameMgr` block (same harness the other `ZOOSTATUS_*` tests use), zeroes its embedded
+    /// `ZooStatus` sub-region, then fills every 4-byte word of the whole struct with a distinct non-zero
+    /// float (`index + 0.5`) - not representative game data, just enough that a wrong offset/stride reads
+    /// back a detectably different value instead of coincidentally matching a zeroed neighbor - and seeds
+    /// [`ZooStatus::current_month_index`]/[`ZooStatus::current_year_index`] to non-default values (`5`/`7`,
+    /// matching `ZOOSTATUS_ACCUMULATORS`' own convention) to exercise the `index == -1` default-cursor
+    /// path for real.
+    ///
+    /// Calls real vanilla [`GET_STATUS_FIXED`] (the locally-corrected `FunctionDef` - see its own doc
+    /// comment for why `generated.rs`'s own `GET_STATUS` entry can't be used) and [`ZooStatus::get_status`]
+    /// against the *same* memory for a spread of `(category, when, index)` triples: monthly (`when = 0`)
+    /// and yearly (`when = 1`) each with an explicit `index` and with `index = -1` (default-cursor), at
+    /// category `0` (the row-0 discrepancy case - see [`ZooStatus::get_status`]'s own doc comment), a
+    /// mid-range category, and category `30` (the last row, right up against the region boundary); flat
+    /// (`when = 2`) at a few categories; and `when = 3` to hit the real fallback branch (returns
+    /// `zoostatus.rs`'s `raw_globals::ATTENDANCE_VS_RESEARCH_THRESHOLD_RVA` global unconditionally).
+    /// Every category/index value here stays within the struct's real bounds (verified by hand against
+    /// `get_status`'s own addressing - see that method's doc comment), so this never reads outside the
+    /// allocated block.
+    fn run_zoostatus_get_status_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZOOSTATUS_GET_STATUS";
+
+        let mgr_ptr = gamemgr_live_support::build_standalone_mgr();
+        if mgr_ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null", test_name);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null\n", test_name).as_bytes());
+            }
+            return true;
+        }
+
+        let zoostatus_size = size_of::<ZooStatus>();
+        let zoostatus_ptr = (mgr_ptr as u32 + 0x10) as *mut ZooStatus;
+
+        unsafe {
+            std::ptr::write_bytes(zoostatus_ptr as *mut u8, 0, zoostatus_size);
+            for i in 0..(zoostatus_size / 4) {
+                save_to_memory(zoostatus_ptr as u32 + (i * 4) as u32, (i as f32) + 0.5);
+            }
+            save_to_memory(zoostatus_ptr as u32 + 0x14c, 5i32);
+            save_to_memory(zoostatus_ptr as u32 + 0x150, 7i32);
+        }
+
+        let cases: &[(i32, i32, i32)] = &[
+            (0, 0, 0),
+            (0, 0, -1),
+            (5, 0, 3),
+            (30, 0, 11),
+            (0, 1, 0),
+            (0, 1, -1),
+            (5, 1, 12),
+            (30, 1, 19),
+            (0, 2, -1),
+            (5, 2, -1),
+            (30, 2, -1),
+            (0, 3, -1),
+        ];
+
+        let mut mismatches: Vec<(i32, i32, i32, f32, f32)> = Vec::new();
+        for &(category, when, index) in cases {
+            let real = unsafe { GET_STATUS_FIXED.original()(zoostatus_ptr as *const u32, category, when, index) };
+            let reimpl = unsafe { (*zoostatus_ptr).get_status(category, when, index) };
+            if real != reimpl {
+                mismatches.push((category, when, index, real, reimpl));
+            }
+        }
+
+        let failed = !mismatches.is_empty();
+        if failed {
+            error!("{}: {} mismatch(es) (category, when, index, real, reimpl): {:?}", test_name, mismatches.len(), mismatches);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} mismatch(es): {:?}\n", test_name, mismatches.len(), mismatches).as_bytes());
+            }
+        } else {
+            write_success_line(failure_log, test_name);
+        }
+
+        gamemgr_live_support::destroy_standalone_mgr(mgr_ptr);
         failed
     }
 
@@ -6280,6 +6383,217 @@ mod detour_zoo_main {
         failed
     }
 
+    /// Builds a synthetic pre-`0x47` `ZooStatus::load` byte stream by hand, following real vanilla's own
+    /// exact per-version read order (`ZooStatus_load.c`/`.asm`, see [`ZooStatus::load`]'s own doc comment
+    /// for the full per-threshold breakdown this mirrors): every field/slot a given `version` actually
+    /// reads gets a distinct, recognizable value (`category*100+month`-style for history slots) so an
+    /// offset/loop-bound bug anywhere surfaces as a mismatch rather than being masked by a shared value.
+    /// `version < 0x26` slots are encoded as raw `i32` (matching that range's genuine `FILD` int->float
+    /// conversion); `version >= 0x26` slots are encoded as literal `f32` bytes (matching that range's plain
+    /// reinterpreting read) - using the wrong encoding for a given version would make real vanilla's own
+    /// `LOAD.original()` interpret the stream differently than intended, so this distinction is load-bearing
+    /// for the test's own correctness, not just style.
+    fn build_legacy_load_bytes(version: u32, category_count: i32, year_count: i32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        if version <= 0xc {
+            return buf;
+        }
+
+        buf.extend_from_slice(&111i32.to_le_bytes()); // rating_check_elapsed
+        buf.extend_from_slice(&222i32.to_le_bytes()); // message_check_elapsed
+        buf.extend_from_slice(&333i32.to_le_bytes()); // newguest_check_elapsed
+
+        if version < 0x17 {
+            buf.extend_from_slice(&400_000i32.to_le_bytes()); // > 360000 -> finance_check_pending = true
+        } else {
+            buf.push(1u8); // finance_check_pending
+        }
+
+        buf.extend_from_slice(&42i32.to_le_bytes()); // zoo_rating_current
+        buf.extend_from_slice(&3i32.to_le_bytes()); // field_0x48
+        buf.extend_from_slice(&555i32.to_le_bytes()); // field_0x50
+        buf.extend_from_slice(&666i32.to_le_bytes()); // field_0x54
+
+        if version < 0x18 {
+            buf.extend_from_slice(&0xdeadi32.to_le_bytes()); // discarded
+        }
+
+        buf.extend_from_slice(&12.5f32.to_le_bytes()); // donation_count_this_period
+
+        if version < 0x17 {
+            return buf;
+        }
+
+        buf.extend_from_slice(&5i32.to_le_bytes()); // current_month_index
+        buf.extend_from_slice(&7i32.to_le_bytes()); // current_year_index
+        buf.extend_from_slice(&category_count.to_le_bytes());
+        buf.extend_from_slice(&year_count.to_le_bytes());
+
+        if version < 0x26 {
+            for category in 0..category_count.max(0) {
+                for month in 0..12 {
+                    buf.extend_from_slice(&(category * 100 + month).to_le_bytes());
+                }
+            }
+            for category in 0..category_count.max(0) {
+                for year in 0..year_count.max(0) {
+                    buf.extend_from_slice(&(category * 1000 + year * 10).to_le_bytes());
+                }
+            }
+            for category in 0..category_count.max(0) {
+                buf.extend_from_slice(&(category * 7).to_le_bytes());
+            }
+        } else {
+            for category in 0..category_count.max(0) {
+                for month in 0..12 {
+                    buf.extend_from_slice(&(category as f32 * 100.0 + month as f32).to_le_bytes());
+                }
+            }
+            for category in 0..category_count.max(0) {
+                for year in 0..year_count.max(0) {
+                    buf.extend_from_slice(&(category as f32 * 1000.0 + year as f32 * 10.0).to_le_bytes());
+                }
+            }
+            for category in 0..category_count.max(0) {
+                buf.extend_from_slice(&(category as f32 * 7.5).to_le_bytes());
+            }
+        }
+
+        if version >= 0x27 {
+            buf.extend_from_slice(&49.5f32.to_le_bytes()); // admission_price
+        }
+
+        if version < 0x47 {
+            return buf;
+        }
+
+        buf.extend_from_slice(&0xdeadbeefu32.to_le_bytes());
+        buf.extend_from_slice(&0x12345678u32.to_le_bytes());
+
+        buf
+    }
+
+    /// `ZOOSTATUS_LOAD_LEGACY` - Stage 9 of `zoostatus-implementation-plan.md`: live comparison of
+    /// [`ZooStatus::load`]'s full pre-`0x47` version range (`ZOOSTATUS_SAVE_LOAD` already covers the
+    /// `>= 0x47` current-format path). For each `(version, category_count, year_count)` below - chosen to
+    /// exercise every threshold this stage added, plus the `category_count`/`year_count` edge shapes real
+    /// old saves could plausibly hit - builds a synthetic byte stream via [`build_legacy_load_bytes`],
+    /// replays the identical bytes into a fresh, zeroed-then-identically-seeded standalone `ZooStatus` via
+    /// both real `LOAD.original()` and this port's [`ZooStatus::load`], and full-struct byte-compares the
+    /// result (masking the escape timestamp for `version < 0x47`, since both sides re-seed it from a live,
+    /// non-deterministic [`GET_OLD_DATE`] call rather than reading it from the stream).
+    ///
+    /// Cases, by what each is chosen to exercise:
+    /// - `version = 8`: below the `0xc` floor - nothing read at all, seeded sentinel values must survive
+    ///   untouched.
+    /// - `version = 0x10`: header-scalars-only path (`< 0x17`), including the `raw > 360_000` derivation
+    ///   for `finance_check_pending` and the pre-`0x18` discard read.
+    /// - `version = 0x17`, `category_count = 10`, `year_count = 15`: enters the real migration path
+    ///   (`< 0x26`) with the pre-`0x19` row-14 differencing active, and `category_count < 15` so row 14's
+    ///   differenced value is never clobbered by that category's own straight write (see
+    ///   [`ZooStatus::load`]'s own doc comment for why `>= 15` would clobber it).
+    /// - `version = 0x19`, `category_count = 35`, `year_count = 25`: still the migration path but past the
+    ///   differencing cutoff (pure `i32`->`f32` conversion only), with `category_count`/`year_count` both
+    ///   deliberately over this struct's own `31`/`20` geometry to exercise per-slot discard.
+    /// - `version = 0x26`, `category_count = 5`, `year_count = 3`: the new generalized-but-permissive
+    ///   straight-copy path, short enough to exercise the trailing zero-fill.
+    /// - `version = 0x2a`, `category_count = 31`, `year_count = 20`: same path at this struct's own exact
+    ///   geometry, past the `0x27` admission-price-read threshold.
+    /// - `version = 0x46`: same path, right at the boundary below the already-covered `0x47` fast path.
+    fn run_zoostatus_load_legacy_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZOOSTATUS_LOAD_LEGACY";
+        let dummy_file: u32 = 0;
+        let zoostatus_size = size_of::<ZooStatus>();
+
+        let cases: [(u32, i32, i32); 7] = [
+            (8, 0, 0),
+            (0x10, 0, 0),
+            (0x17, 10, 15),
+            (0x19, 35, 25),
+            (0x26, 5, 3),
+            (0x2a, 31, 20),
+            (0x46, 31, 20),
+        ];
+
+        let mut any_failed = false;
+
+        for (version, category_count, year_count) in cases {
+            let real_mgr_ptr = gamemgr_live_support::build_standalone_mgr();
+            let reimpl_mgr_ptr = gamemgr_live_support::build_standalone_mgr();
+            if real_mgr_ptr.is_null() || reimpl_mgr_ptr.is_null() {
+                error!("{}: CREATE_ZTGAME_MGR returned null for version {:#x} (real={:?}, reimpl={:?})", test_name, version, real_mgr_ptr, reimpl_mgr_ptr);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null for version {:#x}\n", test_name, version).as_bytes());
+                }
+                if !real_mgr_ptr.is_null() {
+                    gamemgr_live_support::destroy_standalone_mgr(real_mgr_ptr);
+                }
+                if !reimpl_mgr_ptr.is_null() {
+                    gamemgr_live_support::destroy_standalone_mgr(reimpl_mgr_ptr);
+                }
+                any_failed = true;
+                continue;
+            }
+
+            let real_zoostatus_ptr = (real_mgr_ptr as u32 + 0x10) as *mut ZooStatus;
+            let reimpl_zoostatus_ptr = (reimpl_mgr_ptr as u32 + 0x10) as *mut ZooStatus;
+            unsafe {
+                std::ptr::write_bytes(real_zoostatus_ptr as *mut u8, 0, zoostatus_size);
+                std::ptr::write_bytes(reimpl_zoostatus_ptr as *mut u8, 0, zoostatus_size);
+            }
+            // Seed a recognizable non-zero baseline on both sides identically, so a version whose real
+            // control flow leaves some region untouched (e.g. `version <= 0xc`, or any category/year row
+            // past `category_count`/`year_count`) proves it by both sides keeping this sentinel, not by
+            // both merely staying zero (which a bug that skips a *write* could also produce).
+            seed_zoostatus_for_save_load(real_zoostatus_ptr);
+            seed_zoostatus_for_save_load(reimpl_zoostatus_ptr);
+
+            let bytes = build_legacy_load_bytes(version, category_count, year_count);
+
+            io_redirect::begin_replay(bytes.clone());
+            let real_ok = unsafe { ZOOSTATUS_LOAD.original()(real_zoostatus_ptr as *const u32, &dummy_file as *const u32 as *const u8, version) };
+            io_redirect::end_replay();
+
+            io_redirect::begin_replay(bytes);
+            let reimpl_ok = unsafe { (*reimpl_zoostatus_ptr).load(&dummy_file as *const u32, version) };
+            io_redirect::end_replay();
+
+            let mut failed = false;
+            if (real_ok & 0xff != 0) != (reimpl_ok & 0xff != 0) {
+                error!("{}: version {:#x} load ok mismatch (real={:#x}, reimpl={:#x})", test_name, version, real_ok, reimpl_ok);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: version {:#x} load ok mismatch (real={:#x}, reimpl={:#x})\n", test_name, version, real_ok, reimpl_ok).as_bytes());
+                }
+                failed = true;
+            }
+
+            let real_bytes_after = unsafe { std::slice::from_raw_parts(real_zoostatus_ptr as *const u8, zoostatus_size) };
+            let reimpl_bytes_after = unsafe { std::slice::from_raw_parts(reimpl_zoostatus_ptr as *const u8, zoostatus_size) };
+            let timestamp_offset = std::mem::offset_of!(ZooStatus, last_animal_escape_timestamp_low);
+            let mismatches: Vec<(usize, u8, u8)> = (0..zoostatus_size)
+                .filter(|&i| version >= 0x47 || !(timestamp_offset..timestamp_offset + 8).contains(&i))
+                .filter_map(|i| if real_bytes_after[i] != reimpl_bytes_after[i] { Some((i, real_bytes_after[i], reimpl_bytes_after[i])) } else { None })
+                .collect();
+            if !mismatches.is_empty() {
+                let shown = &mismatches[..mismatches.len().min(32)];
+                error!("{}: version {:#x} (category_count={}, year_count={}) {} byte mismatch(es) (offset, real, reimpl), first {}: {:?}", test_name, version, category_count, year_count, mismatches.len(), shown.len(), shown);
+                if let Some(log_file) = failure_log {
+                    let _ = log_file.write_all(format!("Test Failed {}: version {:#x} (category_count={}, year_count={}) {} byte mismatch(es), first {}: {:?}\n", test_name, version, category_count, year_count, mismatches.len(), shown.len(), shown).as_bytes());
+                }
+                failed = true;
+            }
+
+            gamemgr_live_support::destroy_standalone_mgr(real_mgr_ptr);
+            gamemgr_live_support::destroy_standalone_mgr(reimpl_mgr_ptr);
+            any_failed |= failed;
+        }
+
+        if !any_failed {
+            write_success_line(failure_log, test_name);
+        }
+        any_failed
+    }
+
     /// Canonicalizes a `cash` bit pattern for `ZTGAMEMGR_SAVE_LOAD`'s comparison: any NaN collapses to a
     /// single representative bit pattern, sidestepping both IEEE-754 `NaN != NaN` on direct equality *and*
     /// a real, root-caused x87-vs-SSE2 NaN-canonicalization artifact this test's own failures surfaced.
@@ -6476,6 +6790,15 @@ mod detour_zoo_main {
     /// `ZTSoundscape::update`/`MenuMusicHandler::update` call-through branches never run, live or
     /// otherwise. Acceptable since both delegate entirely to still-out-of-scope classes with no logic of
     /// `ZTGameMgr`'s own to verify, but genuinely untested rather than intentionally skipped.
+    ///
+    /// One more branch is deliberately disabled rather than left to chance, added after this test crashed
+    /// the live battery: `update_sim` calls `ZooStatus::update` unconditionally every tick, which can roll
+    /// a real vanilla `fChance` and fire `ZooStatus::f_grant_donation` - a genuine UI-dialog path in the
+    /// same family the paragraph above already avoids, just reached through a different call chain
+    /// (`ZooStatus::update`, not `update_sim` itself). Both standalone instances get
+    /// `donation_chance_percent` forced to `0` right after `set_new_game_defaults`, before the proptest
+    /// loop starts, so that roll is always a deterministic no. See the field-zeroing code's own comment
+    /// for the crash this reproduces and root-causes.
     fn run_gamemgr_update_sim_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZTGAMEMGR_UPDATE_SIM";
 
@@ -6510,6 +6833,26 @@ mod detour_zoo_main {
             (*reimpl_ptr).set_new_game_defaults(config_ptr, false);
         }
         unsafe { BFCONFIGFILE_RELEASE.original()(config_ptr) };
+
+        // `set_new_game_defaults`'s real `economy.cfg`-driven `override` gives both instances a
+        // genuinely non-zero `donation_chance_percent`, and `ZooStatus::update` (called unconditionally
+        // every `update_sim`) rolls it via real vanilla `fChance` whenever `cash` is below
+        // `DAT_00635128` - true for a fresh instance's starting `cash`. Across up to 256 proptest cases
+        // that roll eventually lands, firing `f_grant_donation`, which - per its own doc comment - grants
+        // through the *live* `GLOBAL_ZTGameMgr` (not `self`) and loads real localized strings via
+        // `ZTApp::getApp`/`BFApp::loadString`. Both are unsafe to exercise here: `always_late_tests` (this
+        // test's own group) runs on `ZTApp::updateSim`'s first tick, before `run_load_live_zoo` loads a
+        // real zoo - `GLOBAL_ZTGameMgr` isn't the live game's own manager yet, and the string
+        // registry/`BFApp` singleton isn't necessarily fully populated, which crashed this test live
+        // (confirmed via `crash-capture`: `ZooStatus::f_grant_donation` -> `load_localized_string` ->
+        // `CStr::from_ptr` walking off the end of a not-null-terminated 512-byte stack buffer). Zeroing
+        // `donation_chance_percent` on both instances makes every `fChance(0)` roll deterministically
+        // false, so `f_grant_donation` never fires - the same "keep a real UI-dialog condition false"
+        // discipline `ZOOSTATUS_CHECKS`'s own doc comment already established for this exact hazard.
+        unsafe {
+            (*((real_ptr as u32 + 0x10) as *mut ZooStatus)).donation_chance_percent = 0;
+            (*((reimpl_ptr as u32 + 0x10) as *mut ZooStatus)).donation_chance_percent = 0;
+        }
 
         let dat_006394b8_addr = get_module_base("zoo.exe") as u32 + (0x006394b8u32 - 0x400000u32);
 

@@ -37,10 +37,10 @@ use openzt_detour::generated::{
     uielement::{DISABLE, ENABLE},
     zoostatus::{
         ADMISSION_MESSAGE, ANIMAL_ESCAPED, BUY_ANIMAL, BUY_PEOPLE_FOOD, CALCULATE_SUMS, CHANGE_ENDOWMENT_MEMBERS, F_CHANCE, F_CREATE_GUEST,
-        F_GRANT_DONATION, F_ZOO_MESSAGE, FINANCE_CHECKS, INCREASE_DONATIONS, INCREASE_ENDOWMENT, INCREASE_SHOW_ADMISSION, INIT, LOAD,
-        MESSAGE_CHECKS, NEWGUEST_CHECKS, OVERRIDE, RATING_CHECKS, REFUND_ANIMAL_COST, REFUND_CONSTRUCTION, RESET_FINANCE_INFO, SAVE,
-        SET_ADULT_ADMISSION_PRICE, SHOW_PRICES, SPEND_BUILDING_UPKEEP, SPEND_CONSTRUCTION, SPEND_GUIDE_WAGES, SPEND_KEEPER_WAGES,
-        SPEND_MAINT_WAGES, SPEND_MARKETING, SPEND_RESEARCH, UPDATE,
+        F_GRANT_DONATION, F_ZOO_MESSAGE, FINANCE_CHECKS, HEAL_ANIMAL, INCREASE_ADMISSIONS, INCREASE_ADMISSIONS_INCOME, INCREASE_DONATIONS,
+        INCREASE_ENDOWMENT, INCREASE_SHOW_ADMISSION, INIT, LOAD, MESSAGE_CHECKS, NEWGUEST_CHECKS, OVERRIDE, PURCHASE_FOOD, RATING_CHECKS,
+        REFUND_ANIMAL_COST, REFUND_CONSTRUCTION, RESET_FINANCE_INFO, SAVE, SET_ADULT_ADMISSION_PRICE, SHOW_PRICES, SPEND_BUILDING_UPKEEP,
+        SPEND_CONSTRUCTION, SPEND_GUIDE_WAGES, SPEND_KEEPER_WAGES, SPEND_MAINT_WAGES, SPEND_MARKETING, SPEND_RESEARCH, UPDATE,
     },
     ztapp::GET_APP,
     zthabitat::GET_NUM_ANIMALS,
@@ -650,6 +650,20 @@ impl Drop for VanillaString {
 /// sanctioned workaround ([`FunctionDef::new`]) until a future regen fixes the real entry.
 const GET_FLOAT_LIST_FIXED: FunctionDef<unsafe extern "thiscall" fn(*const u32, *mut u32, u32, u32) -> *mut u32> = FunctionDef::new(0x00591a5a);
 
+/// Real vanilla `ZooStatus::getStatus` (`0x0041dd64`), corrected locally rather than via `generated.rs`'s
+/// own `zoostatus::GET_STATUS` entry, which declares the return type `*const f32`. `ZooStatus_getStatus.c`'s
+/// own `float10 *` return type is the same return-by-hidden-pointer decompiler artifact this plan's
+/// Status header already flagged when the regen first landed (an x87/`float10` scalar return rendered as
+/// a pointer) - but `ZooStatus_getStatus.asm` (read in full, the `.c` decompile itself is unusable, pure
+/// pointer-arithmetic noise on a `float10*`) settles it unambiguously: every path ends in a plain `FLD
+/// float ptr [...]` immediately before `RET 0xc`, the standard x87-register (`ST(0)`) scalar-float return
+/// convention every other `-> f32` `FunctionDef` in this codebase already uses (e.g. `ztguest.rs`'s
+/// `F_ESTHETIC_BONUS_MEGATILE`, already hooked live) - never a return-by-pointer/RVO convention. Per
+/// `CLAUDE.md`, `generated.rs` itself is never hand-edited for this - this local, corrected `FunctionDef`
+/// is the sanctioned workaround ([`FunctionDef::new`]) until a future regen fixes the real entry. `pub(crate)`
+/// so `reimplementation_tests` can drive the real vanilla pole directly for `ZOOSTATUS_GET_STATUS`.
+pub(crate) const GET_STATUS_FIXED: FunctionDef<unsafe extern "thiscall" fn(*const u32, i32, i32, i32) -> f32> = FunctionDef::new(0x0041dd64);
+
 /// A real, vanilla-allocator-owned `std::vector<float>` - the standard MSVC 3-pointer layout
 /// (`{begin, end, cap_end}`, 12 bytes) [`GET_FLOAT_LIST_FIXED`] constructs into via the same
 /// hidden-return-pointer (RVO) convention [`VanillaString::rvo_target`] uses.
@@ -1176,10 +1190,119 @@ impl ZooStatus {
         self.accumulate(0x390, 0x3f0, 0xae4, 0xb84, 0x1104, 0x110c, amount, -1.0);
     }
 
-    /// `ZooStatus::spendKeeperWages_0` (`0x004e1fde`). Monthly `0x1b0`/`0x3f0`, yearly `0x7c4`/`0xb84`,
-    /// flat `0x10dc`/`0x110c`.
-    pub fn spend_keeper_wages_0(&mut self, amount: f32) {
+    /// `ZooStatus::buyAnimal` (`0x004e1fde`). Monthly `0x1b0`/`0x3f0`, yearly `0x7c4`/`0xb84`, flat
+    /// `0x10dc`/`0x110c`.
+    ///
+    /// **Renamed (Stage 10)**, same bytes/offsets/logic: `generated.rs` originally mislabeled this
+    /// address `SPEND_KEEPER_WAGES_0` (an OOAnalyzer artifact) - Stage 3 ported these exact bytes under
+    /// that wrong name. A fresh Windows Ghidra pass plus a macOS-caller cross-check (see the plan's "The
+    /// macOS-only methods" section) confirmed the real method is `buyAnimal`, byte-identical to the macOS
+    /// `_ZooStatus__buyAnimal.c` export, and the regen landed the correction (`generated.rs`'s
+    /// `SPEND_KEEPER_WAGES_0` constant is gone, replaced by `BUY_ANIMAL` at the same address). No other
+    /// call site needed touching - Stage 3's own accumulator group has no `ZTGameMgr` call-through site
+    /// for this method.
+    pub fn buy_animal(&mut self, amount: f32) {
         self.accumulate(0x1b0, 0x3f0, 0x7c4, 0xb84, 0x10dc, 0x110c, amount, -1.0);
+    }
+
+    /// Reimplementation of `ZooStatus::healAnimal` (`0x0047039e`), Stage 10 - one of the five real
+    /// Windows methods a fresh Ghidra pass recovered from the macOS-only corpus (see the plan's "The
+    /// macOS-only methods - resolved" section). Per `ZooStatus_healAnimal.asm` (read in full): the same
+    /// `spend*`-shape [`Self::accumulate`] call as Stage 3's group - own slot `+= amount` (monthly `0x180`,
+    /// yearly `0x774`, flat `0x10d8`), shared slot `-= amount` (the same `spend*`-family shared triple,
+    /// monthly/yearly/flat `0x3f0`/`0xb84`/`0x110c`). Called from `ZTGoalHealAnimal::complete`
+    /// (`0x00470261`, still a vanilla call-through - `ZTGoal*` isn't reimplemented).
+    pub fn heal_animal(&mut self, amount: f32) {
+        self.accumulate(0x180, 0x3f0, 0x774, 0xb84, 0x10d8, 0x110c, amount, -1.0);
+    }
+
+    /// Reimplementation of `ZooStatus::purchaseFood` (`0x0048f7e9`), Stage 10 - see [`Self::heal_animal`]'s
+    /// doc comment for the macOS-recovery context. Per `ZooStatus_purchaseFood.asm` (read in full): own
+    /// slot `+= amount` (monthly `0x150`, yearly `0x724`, flat `0x10d4`), shared slot `-= amount` (the
+    /// same `spend*`-family shared triple). Called from `ZTGoalPuttingFood::complete` (`0x0048f624`, a
+    /// vanilla call-through).
+    ///
+    /// **Monthly own base is `0x150`, not `0x154`** - a real, confirmed-in-`.asm` 4-byte offset from this
+    /// struct's own [`Self::monthly_history`] field (whose declared base comes from `init`'s zero-loop
+    /// start). Not a bug in this port: [`Self::get_status`]'s own `.asm`-derived addressing computes the
+    /// exact same `0x150` row-0 base independently (see its doc comment for the full evidence and why the
+    /// aliased slot - which overlaps [`Self::current_year_index`]'s own 4 bytes at `index == 0` - is dead
+    /// in real play, since [`Self::current_month_index`] defaults to `1` and this codebase has no evidence
+    /// it's ever `0`). This port reproduces vanilla's raw addressing exactly, matching every other
+    /// accumulator method in this file (`Self::accumulate`'s own raw byte offsets, not the named array
+    /// fields), rather than "fixing" what isn't a divergence from real vanilla.
+    pub fn purchase_food(&mut self, amount: f32) {
+        self.accumulate(0x150, 0x3f0, 0x724, 0xb84, 0x10d4, 0x110c, amount, -1.0);
+    }
+
+    /// Reimplementation of `ZooStatus::increaseAdmissionsIncome` (`0x004f7da4`), Stage 10 - see
+    /// [`Self::heal_animal`]'s doc comment for the macOS-recovery context. Per
+    /// `ZooStatus_increaseAdmissionsIncome.asm` (read in full): the "income" sign pattern (own **and**
+    /// shared slots both `+= amount`, like [`Self::increase_donations`]/[`Self::increase_endowment`]) -
+    /// own monthly `0x240`, yearly `0x8b4`, flat `0x10e8`; shared monthly/yearly/flat
+    /// `0x3f0`/`0xb84`/`0x110c`. Called from `fCreateGuest`, which stays a vanilla call-through (see
+    /// [`Self::update`]'s doc comment) - this method itself has no native caller yet, only its own detour.
+    pub fn increase_admissions_income(&mut self, amount: f32) {
+        self.accumulate(0x240, 0x3f0, 0x8b4, 0xb84, 0x10e8, 0x110c, amount, 1.0);
+    }
+
+    /// Reimplementation of `ZooStatus::increaseAdmissions` (`0x004f7e2f`), Stage 10 - see
+    /// [`Self::heal_animal`]'s doc comment for the macOS-recovery context. Per
+    /// `ZooStatus_increaseAdmissions.asm` (read in full, `i32` guest count, not a pre-converted `f32`):
+    /// writes `count` (int-to-float converted) into **four** slots, not [`Self::accumulate`]'s usual six -
+    /// monthly `0x210`, yearly `0x864`, flat `0x10e4`, plus a **second** monthly write at `0x5d0` - no
+    /// shared-slot writes at all, the one accumulator method in this file that fits neither the
+    /// `spend*`/`refund*`-family sign pattern nor the plain "income" pattern. Same shape as
+    /// [`Self::change_endowment_members`]'s own hand-rolled write loop, for the same reason (doesn't fit
+    /// [`Self::accumulate`]'s six-slot signature).
+    pub fn increase_admissions(&mut self, count: i32) {
+        let amount = count as f32;
+        let base = self as *mut Self as u32;
+        let month_offset = self.current_month_index as u32 * 4;
+        let year_offset = self.current_year_index as u32 * 4;
+
+        for addr in [base + 0x210 + month_offset, base + 0x864 + year_offset, base + 0x10e4, base + 0x5d0 + month_offset] {
+            save_to_memory(addr, get_from_memory::<f32>(addr) + amount);
+        }
+    }
+
+    /// Reimplementation of `ZooStatus::getStatus` (`0x0041dd64`), Stage 10 - the last of the six real
+    /// Windows methods a fresh Ghidra pass recovered from the macOS-only corpus (see the plan's "The
+    /// macOS-only methods - resolved" section). A generic history-region reader the zoo-status UI graph
+    /// renderers (`_updateGraphs`/`_updateAttendanceGraph`/etc., all now decompiled) pull every series
+    /// through - `when` selects the region (`0` = monthly, row stride `0x30`, row-0 base `0x150`; `1` =
+    /// yearly, row stride `0x50`, row-0 base `0x724`; `2` = flat, row base `0x10d4`, `index` ignored;
+    /// anything else returns [`raw_globals::ATTENDANCE_VS_RESEARCH_THRESHOLD_RVA`]'s live value
+    /// unconditionally - real vanilla's own fallback, not an error path this port invented), `index == -1`
+    /// defaults to the region's own rolling write cursor ([`Self::current_month_index`]/
+    /// [`Self::current_year_index`]) for the monthly/yearly cases. Derived directly from
+    /// `ZooStatus_getStatus.asm` (read in full - the `.c` decompile is unusable, pure pointer-arithmetic
+    /// noise on a `float10*` return type, see [`GET_STATUS_FIXED`]'s own doc comment for that artifact).
+    ///
+    /// **A genuine 4-byte discrepancy with this struct's own [`Self::monthly_history`] field is real, not
+    /// a bug in this port**: `monthly_history` declares base `0x154` (from `init`'s zero-loop start), but
+    /// `getStatus`'s own monthly row-0 base is `0x150` - one slot before. [`Self::current_month_index`]
+    /// defaults to `1` and this codebase has no evidence it's ever `0` in real play, so the aliased slot
+    /// (`0x150`, which overlaps [`Self::current_year_index`]'s own 4 bytes when `index == 0`) is dead in
+    /// practice; this port reproduces the raw `.asm` addressing exactly rather than "fixing" it, the same
+    /// way [`Self::purchase_food`]'s own row-0 base does (see its doc comment - both were derived
+    /// independently and agree). No such discrepancy exists for the yearly/flat regions (`0x724`/`0x10d4`
+    /// match [`Self::yearly_history`]/[`Self::flat_totals`]'s own declared bases exactly).
+    pub fn get_status(&self, category: i32, when: i32, index: i32) -> f32 {
+        let base = self as *const Self as u32;
+        let addr = match when {
+            0 => {
+                let idx = if index == -1 { self.current_month_index } else { index };
+                (base as i32 + 0x150 + category * 0x30 + idx * 4) as u32
+            }
+            1 => {
+                let idx = if index == -1 { self.current_year_index } else { index };
+                (base as i32 + 0x724 + category * 0x50 + idx * 4) as u32
+            }
+            2 => (base as i32 + 0x10d4 + category * 4) as u32,
+            _ => return get_from_memory(get_module_base("zoo.exe") as u32 + raw_globals::ATTENDANCE_VS_RESEARCH_THRESHOLD_RVA),
+        };
+        get_from_memory(addr)
     }
 
     /// `ZooStatus::spendKeeperWages_1` (`0x005ad038`). Monthly `0x360`/`0x3f0`, yearly `0xa94`/`0xb84`,
@@ -1436,7 +1559,11 @@ impl ZooStatus {
         };
 
         let chance = unsafe { F_CHANCE.original()(chance_param) };
-        if chance == 0 {
+        // Only the low byte is defined when `chance_param == 0` (real vanilla's own `fChance` leaves the
+        // upper 3 bytes as leftover EAX garbage in that case) - `ZooStatus_newguestChecks.asm`'s own real
+        // caller tests `TEST %AL, %AL`, never the full `EAX`. See [`Self::update`]'s own doc comment for
+        // the fuller evidence trail (a live crash from the same untruncated-comparison bug elsewhere).
+        if chance & 0xff == 0 {
             return;
         }
         unsafe { F_CREATE_GUEST.original()(self as *mut Self as *const u32) };
@@ -2125,7 +2252,18 @@ impl ZooStatus {
         let donation_threshold: f32 = get_from_memory(get_module_base("zoo.exe") as u32 + raw_globals::DONATION_CASH_THRESHOLD_RVA);
         if cash < donation_threshold {
             let chance = unsafe { F_CHANCE.original()(self.donation_chance_percent) };
-            if chance != 0 {
+            // Only the low byte is a defined result - real vanilla's own `fChance` (`ZooStatus_fChance.c`)
+            // returns `in_EAX & 0xffffff00` (upper 3 bytes untouched leftover garbage, only ever cleared
+            // to 0 in the low byte) when its `param_1` (== `donation_chance_percent`) is `0`, and its own
+            // real caller here (`zoostatus_update.asm`) tests the result with `TEST %AL, %AL`, never the
+            // full `EAX`. Comparing the untruncated `u32` (this port's original Stage-4 code) let stale
+            // upper-byte garbage make `donation_chance_percent == 0` spuriously "roll true" and fire
+            // `f_grant_donation` - crashed a live standalone-`ZTGameMgr` test, since `f_grant_donation`
+            // grants through the *live* `GLOBAL_ZTGameMgr` (not `self`) and calls real vanilla
+            // `BFApp::loadString`, both unsafe this early/against a non-live instance. Fixed to match the
+            // real caller's own `TEST AL, AL` - see `ztgamemgr.rs`'s `update_sim`/`zoostatus_result & 0xff`
+            // for the same established masking convention elsewhere in this codebase.
+            if chance & 0xff != 0 {
                 self.f_grant_donation();
             }
         }
@@ -2185,52 +2323,113 @@ impl ZooStatus {
         ok as u32
     }
 
-    /// Stage 7 port of `ZooStatus::load` (`0x0059497f`, per `ZooStatus_load.c`/`.asm`, read in full) -
-    /// **current-version path only** (`version >= 0x47`), per the plan's own "flagged as hardest"
-    /// scoping (`zoostatus-implementation-plan.md`'s `save`/`load` section). Every one of vanilla's
-    /// version thresholds below `0x47` (`0xc`/`0x17`/`0x18`/`0x19`/`0x26`/`0x27`) gates either a real
-    /// *migration* adjustment (arithmetically remapping an older save's differently-shaped history data
-    /// into the current layout) or a *default* (skipping a read the current format still has) - for any
-    /// `version >= 0x47` every one of those thresholds is already satisfied, so vanilla's own control
-    /// flow for a current-version save collapses to a single straight-line read with no branching left
-    /// to replicate. Loading an older save is an explicit, tracked follow-up (Stage 9); this method
-    /// fails cleanly (returns `0` without touching `self`) rather than guessing at un-ported migration
-    /// math.
+    /// Stage 9 port of `ZooStatus::load` (`0x0059497f`, per `ZooStatus_load.c`/`.asm`, both read in
+    /// full for this stage) - the full version range, down to the `0xc`-byte minimum, per the plan's
+    /// own "flagged as hardest" scoping (`zoostatus-implementation-plan.md`'s `save`/`load` section).
+    /// Six thresholds gate vanilla's own control flow (`0xc`/`0x17`/`0x18`/`0x19`/`0x26`/`0x27`,
+    /// `0x47` staying the boundary Stage 7 already covered):
+    ///
+    /// - `version <= 0xc`: nothing at all is read - every field this method could touch keeps whatever
+    ///   [`Self::init`] already put there. Real vanilla control flow skips straight past the entire
+    ///   scalar/array region to the tail (`ZooStatus_load.asm`'s very first `CMP EAX,0xd; JC .13d5bc`).
+    /// - `0xc < version < 0x17`: the header scalars only ([`Self::rating_check_elapsed`] through
+    ///   [`Self::donation_count_this_period`]) - the array regions and their own cursor fields
+    ///   ([`Self::current_month_index`]/[`Self::current_year_index`]) are never read at all, so this
+    ///   port's default/`init`-seeded values pass through unchanged for a save this old. Two of those
+    ///   header reads are themselves conditional: [`Self::finance_check_pending`] is read as a raw
+    ///   `i32` and derived (`value > 360_000`) rather than read as a `bool` byte for `version < 0x17`,
+    ///   and one extra `i32` is read-and-discarded for `version < 0x18` (a field the current format no
+    ///   longer stores at that position).
+    /// - `0x17 <= version < 0x26`: the real migration path. Every `(category, month)`/`(category,
+    ///   year)`/`category` slot is read as a raw `i32` (`FILD`, a genuine int->float *conversion* -
+    ///   `ZooStatus_load.asm`'s `.184eba`/`.184f84`/`.18505c` blocks - unlike every other version range,
+    ///   which reads the stored bytes as an already-IEEE754 `f32` via a plain reinterpreting copy). For
+    ///   `version < 0x19` specifically, every one of those same raw values *also* feeds a second,
+    ///   independent adjustment against a single shared accumulator - real, `.asm`-confirmed category
+    ///   row **14** of each region (`monthly_history[14]`/`yearly_history[14]`/`flat_totals[14]`,
+    ///   resolved directly from literal displacements `this+0x3f4`/`this+0xb84`/`this+0x110c`, *not*
+    ///   from the decompile's own `local_14[2].mbr_0x14c`-style pseudo-array indexing - that guessed
+    ///   stride is wrong here the same way the plan's "history-array region" section already found it
+    ///   wrong elsewhere). Which of add/subtract/skip applies is decided per outer-loop position (the
+    ///   region's own flat float-index for monthly/yearly, the bare category index for flat) against a
+    ///   five-threshold band lifted verbatim from `.asm`'s literal `CMP`/`JLE`/`JL`/`JGE` chain (see
+    ///   [`Self::legacy_band`]) - not re-derived algebraically, to avoid an off-by-one against real
+    ///   vanilla's own branch structure. Because this accumulator is a real struct field rather than
+    ///   scratch memory, a save whose `category_count` reaches row 14 (`>= 15`) has that row's migrated
+    ///   value overwritten by its own straight read on that category's own turn - real vanilla behavior
+    ///   this port reproduces exactly rather than "fixes", confirmed intentional-shaped: row 14's own
+    ///   band position (linear index `0x55+14*12=0xfd` monthly, category `14` flat) always falls outside
+    ///   every add/subtract band, so it never re-differences itself either way. No zero-fill tail here -
+    ///   unlike every other reachable branch, an unreachable `[15..31)` region for a genuinely old save
+    ///   simply keeps whatever [`Self::init`]/[`Self::reset_finance_info`] already zeroed it to.
+    /// - `0x26 <= version < 0x47`: the same array shape [`Self::load`]'s Stage 7 fast path already
+    ///   covers (raw reinterpreting `f32` reads, no int conversion, no migration adjustment - i.e. every
+    ///   nested `if (param_2 < 0x19)` inside `ZooStatus_load.c`'s own `else` branch is unreachable dead
+    ///   code once `version >= 0x26`, since `0x26 > 0x19`), but *without* this struct's own `>= 0x47`
+    ///   fast path's hard `category_count`/`year_count` validation - vanilla's own bound checks here are
+    ///   purely per-slot (`iVar17 < 0x1c9`/`iVar13 < 0x435`/`iVar17 < 0x1f`), silently discarding
+    ///   whatever doesn't fit rather than failing the whole load, which matters for real backward
+    ///   compatibility with saves whose category/year counts may not be this port's own `31`/`20`.
+    /// - `version < 0x27`: [`Self::admission_price`] defaults to `49.0` (`0x42440000`) instead of being
+    ///   read.
+    /// - `version < 0x47`: [`Self::last_animal_escape_timestamp_low`]/`_high` are re-seeded from
+    ///   [`GET_OLD_DATE`] instead of being read, and `load` returns immediately afterward without
+    ///   attempting any further read - matching `ZooStatus_load.c`'s own early `return` in that branch.
     ///
     /// Two `i32` markers, written by [`Self::save`] as the fixed `31`/`20` constants matching this
-    /// struct's own array geometry, are read back as `category_count`/`year_count` and used as this
-    /// read's own loop bounds - matching vanilla's `local_8`/`local_4` exactly (`ZooStatus_load.c`'s
-    /// `>= 0x26` branch, the only array-read shape reachable once `version >= 0x47` has already gated
-    /// out every migration branch). Vanilla bails out immediately, without touching the array regions
+    /// struct's own array geometry for a save *this port* produces, are read back for `version >= 0x17`
+    /// as `category_count`/`year_count` and used as the array-region read's own loop bounds - matching
+    /// vanilla's `local_8`/`local_4`. Vanilla bails out immediately, without touching the array regions
     /// or the tail fields at all, if any read up to and including these two markers fails
-    /// (`if (local_19 == 0) return ...`) - reproduced here as an early `return 0`.
+    /// (`if (local_19 == 0) return ...`) - reproduced here as an early `return 0`, reachable only once
+    /// `version >= 0x17` (older saves never read these markers, so never hit this check).
     ///
-    /// A `category_count`/`year_count` that doesn't fit this struct's own `31`-category/`20`-year
-    /// regions is treated as a hard failure rather than reproducing vanilla's own behavior for that case
-    /// (silently reading - and discarding - out-of-bounds elements to keep the stream cursor aligned,
-    /// or zero-filling missing trailing rows for a shorter save): every save this port's own
+    /// This struct's own `>= 0x47` fast path keeps its Stage 7 hard-failure behavior for a
+    /// `category_count`/`year_count` that doesn't fit `31`/`20` unchanged (every save this port's own
     /// [`Self::save`] produces is exactly `31`/`20` by construction, and no other producer of a
-    /// `version >= 0x47` save is expected to differ, so this divergence is unreachable in practice for
-    /// this stage's scope. The one real vanilla behavior kept faithfully is the trailing zero-fill for
-    /// a `category_count` smaller than `31` (`ZooStatus_load.c`'s own tail `do`/`while` loop) - genuine,
-    /// non-migration behavior, cheap to keep even though this port's own round-trip never exercises it.
+    /// `version >= 0x47` save is expected to differ - see that branch's own history, kept verbatim). The
+    /// `0x26 <= version < 0x47` and `0x17 <= version < 0x26` branches added this stage instead follow
+    /// vanilla's own genuinely more permissive discard/zero-fill behavior throughout, since backward
+    /// compatibility with a real foreign/historical save's differently-shaped region is the entire point
+    /// of porting them. One deliberate, narrow divergence from a literal transcription: the `version <
+    /// 0x19` migration's yearly-region accumulator write is guarded to `year < 20` (this struct's own
+    /// row width) rather than replicated unguarded - a `year_count > 20` old save would have vanilla's
+    /// own accumulator pointer walk *past* `yearly_history[14]`'s real bounds into adjacent struct
+    /// memory, which this port cannot safely reproduce without genuine unsafe out-of-bounds writes for
+    /// an edge case no real save is expected to hit (year counts only ever grew *to* 20, never past it).
     pub fn load(&mut self, file: *const u32, version: u32) -> u32 {
-        if version < 0x47 {
-            error!(
-                "ZooStatus::load: save version {version:#x} predates the supported current-format path (>= 0x47) - old-format migration is a tracked follow-up (Stage 9), not yet ported"
-            );
-            return 0;
+        if version <= 0xc {
+            return self.load_tail(version, file, true);
         }
 
         let mut ok = read_bytes(&mut self.rating_check_elapsed, file);
         ok &= read_bytes(&mut self.message_check_elapsed, file);
         ok &= read_bytes(&mut self.newguest_check_elapsed, file);
-        ok &= read_bytes(&mut self.finance_check_pending, file);
+
+        if version < 0x17 {
+            let mut raw: i32 = 0;
+            ok &= read_bytes(&mut raw, file);
+            self.finance_check_pending = raw > 360_000;
+        } else {
+            ok &= read_bytes(&mut self.finance_check_pending, file);
+        }
+
         ok &= read_bytes(&mut self.zoo_rating_current, file);
         ok &= read_bytes(&mut self.field_0x48, file);
         ok &= read_bytes(&mut self.field_0x50, file);
         ok &= read_bytes(&mut self.field_0x54, file);
+
+        if version < 0x18 {
+            let mut discard: i32 = 0;
+            ok &= read_bytes(&mut discard, file);
+        }
+
         ok &= read_bytes(&mut self.donation_count_this_period, file);
+
+        if version < 0x17 {
+            return self.load_tail(version, file, ok);
+        }
+
         ok &= read_bytes(&mut self.current_month_index, file);
         ok &= read_bytes(&mut self.current_year_index, file);
 
@@ -2243,50 +2442,206 @@ impl ZooStatus {
             return 0;
         }
 
-        if category_count < 0
-            || year_count < 0
-            || category_count as usize > self.monthly_history.len()
-            || year_count as usize > self.yearly_history[0].len()
-        {
-            error!(
-                "ZooStatus::load: category_count={category_count}/year_count={year_count} out of range for this port's {}-category/{}-year history regions",
-                self.monthly_history.len(),
-                self.yearly_history[0].len()
-            );
-            return 0;
-        }
-        let category_count = category_count as usize;
-        let year_count = year_count as usize;
+        if version < 0x26 {
+            ok &= self.load_history_legacy_migration(file, version, category_count, year_count);
+        } else if version < 0x47 {
+            ok &= self.load_history_compat(file, category_count, year_count);
+        } else {
+            if category_count < 0
+                || year_count < 0
+                || category_count as usize > self.monthly_history.len()
+                || year_count as usize > self.yearly_history[0].len()
+            {
+                error!(
+                    "ZooStatus::load: category_count={category_count}/year_count={year_count} out of range for this port's {}-category/{}-year history regions",
+                    self.monthly_history.len(),
+                    self.yearly_history[0].len()
+                );
+                return 0;
+            }
+            let category_count = category_count as usize;
+            let year_count = year_count as usize;
 
-        for row in &mut self.monthly_history[..category_count] {
-            for month in row.iter_mut() {
-                ok &= read_bytes(month, file);
+            for row in &mut self.monthly_history[..category_count] {
+                for month in row.iter_mut() {
+                    ok &= read_bytes(month, file);
+                }
+            }
+            for row in &mut self.yearly_history[..category_count] {
+                for year in &mut row[..year_count] {
+                    ok &= read_bytes(year, file);
+                }
+            }
+            for slot in &mut self.flat_totals[..category_count] {
+                ok &= read_bytes(slot, file);
+            }
+
+            // Vanilla zero-fills every remaining category/year row when an older/foreign save wrote
+            // fewer than this struct's own 31 categories (`ZooStatus_load.c`'s tail `do`/`while`) -
+            // real behavior, not a migration guess. Never exercised by this port's own round-trip
+            // (`save` always writes `31`/`20`), kept for a save written by some other build with a
+            // shorter region.
+            for row in &mut self.monthly_history[category_count..] {
+                *row = [0.0; 12];
+            }
+            for row in &mut self.yearly_history[category_count..] {
+                *row = [0.0; 20];
+            }
+            for slot in &mut self.flat_totals[category_count..] {
+                *slot = 0.0;
             }
         }
-        for row in &mut self.yearly_history[..category_count] {
-            for year in &mut row[..year_count] {
-                ok &= read_bytes(year, file);
+
+        self.load_tail(version, file, ok)
+    }
+
+    /// `0x26 <= version < 0x47` array-region read for [`Self::load`]: the same shape as `load`'s own
+    /// `>= 0x47` fast path (raw reinterpreting `f32` reads, no migration adjustment - real vanilla's own
+    /// nested `if (param_2 < 0x19)` is dead code once `version >= 0x26`), but bounds-checked per slot
+    /// rather than hard-failing on an out-of-range `category_count`/`year_count`, matching
+    /// `ZooStatus_load.c`'s own `else` branch (`iVar17 < 0x1c9`/`iVar13 < 0x435`/`iVar17 < 0x1f` inline
+    /// discards) - real backward-compatibility behavior for a foreign/historical save whose region
+    /// doesn't match this port's own `31`-category/`20`-year geometry. Every slot is still read
+    /// (discarded if out of bounds) to keep the file cursor aligned with vanilla's own read count, and
+    /// every row from `category_count` up to `31` is zero-filled afterward exactly like the `>= 0x47`
+    /// path's own tail loop (`ZooStatus_load.c`'s shared tail `do`/`while`, `.asm` label `.1599a3`).
+    fn load_history_compat(&mut self, file: *const u32, category_count: i32, year_count: i32) -> bool {
+        let mut ok = true;
+
+        for category in 0..category_count.max(0) {
+            for month in 0..12 {
+                let mut raw: f32 = 0.0;
+                ok &= read_bytes(&mut raw, file);
+                if (category as usize) < 31 {
+                    self.monthly_history[category as usize][month] = raw;
+                }
             }
         }
-        for slot in &mut self.flat_totals[..category_count] {
-            ok &= read_bytes(slot, file);
+        for category in 0..category_count.max(0) {
+            for year in 0..year_count.max(0) {
+                let mut raw: f32 = 0.0;
+                ok &= read_bytes(&mut raw, file);
+                if (category as usize) < 31 && (year as usize) < 20 {
+                    self.yearly_history[category as usize][year as usize] = raw;
+                }
+            }
+        }
+        for category in 0..category_count.max(0) {
+            let mut raw: f32 = 0.0;
+            ok &= read_bytes(&mut raw, file);
+            if (category as usize) < 31 {
+                self.flat_totals[category as usize] = raw;
+            }
         }
 
-        // Vanilla zero-fills every remaining category/year row when an older/foreign save wrote fewer
-        // than this struct's own 31 categories (`ZooStatus_load.c`'s tail `do`/`while`) - real
-        // behavior, not a migration guess. Never exercised by this port's own round-trip (`save`
-        // always writes `31`/`20`), kept for a save written by some other build with a shorter region.
-        for row in &mut self.monthly_history[category_count..] {
+        let filled = category_count.clamp(0, 31) as usize;
+        for row in &mut self.monthly_history[filled..] {
             *row = [0.0; 12];
         }
-        for row in &mut self.yearly_history[category_count..] {
+        for row in &mut self.yearly_history[filled..] {
             *row = [0.0; 20];
         }
-        for slot in &mut self.flat_totals[category_count..] {
+        for slot in &mut self.flat_totals[filled..] {
             *slot = 0.0;
         }
 
-        ok &= read_bytes(&mut self.admission_price, file);
+        ok
+    }
+
+    /// `0x17 <= version < 0x26` array-region read for [`Self::load`] - the real pre-migration path, see
+    /// [`Self::load`]'s own doc comment for the full evidence trail (`.asm` labels `.184eba`
+    /// monthly/`.184f84` yearly/`.18505c` flat). Every slot is a genuine `i32`->`f32` *conversion*
+    /// (`FILD`, not a reinterpreting copy), written into row/column `category`/`month`|`year` if it
+    /// fits this struct's own `31`-category/`20`-year geometry (discarded, not hard-failed, otherwise -
+    /// real vanilla saves from this era could exceed either), and, for `version < 0x19` only, also folds
+    /// into the shared row-14 accumulator per [`Self::legacy_band`]'s verdict for that slot's position.
+    /// No zero-fill tail - see [`Self::load`]'s own doc comment for why none is needed here.
+    fn load_history_legacy_migration(&mut self, file: *const u32, version: u32, category_count: i32, year_count: i32) -> bool {
+        let mut ok = true;
+
+        for category in 0..category_count.max(0) {
+            let row_base = 0x55 + category * 0xc;
+            for month in 0..12usize {
+                let mut raw: i32 = 0;
+                ok &= read_bytes(&mut raw, file);
+                if (category as usize) < 31 {
+                    self.monthly_history[category as usize][month] = raw as f32;
+                }
+                if version < 0x19 && let Some(add) = Self::legacy_band(row_base, 0x79, 0xd9, 0xf1, 0x91, 0xcd) {
+                    let target = &mut self.monthly_history[14][month];
+                    *target = if add { *target + raw as f32 } else { *target - raw as f32 };
+                }
+            }
+        }
+        for category in 0..category_count.max(0) {
+            let row_base = 0x1c9 + category * 0x14;
+            for year in 0..year_count.max(0) as usize {
+                let mut raw: i32 = 0;
+                ok &= read_bytes(&mut raw, file);
+                if (category as usize) < 31 && year < 20 {
+                    self.yearly_history[category as usize][year] = raw as f32;
+                }
+                if version < 0x19 && year < 20 && let Some(add) = Self::legacy_band(row_base, 0x205, 0x2a5, 0x2cd, 0x22d, 0x291) {
+                    let target = &mut self.yearly_history[14][year];
+                    *target = if add { *target + raw as f32 } else { *target - raw as f32 };
+                }
+            }
+        }
+        for category in 0..category_count.max(0) {
+            let mut raw: i32 = 0;
+            ok &= read_bytes(&mut raw, file);
+            if (category as usize) < 31 {
+                self.flat_totals[category as usize] = raw as f32;
+            }
+            if version < 0x19 && let Some(add) = Self::legacy_band(category, 3, 0xb, 0xd, 5, 0xa) {
+                let target = &mut self.flat_totals[14];
+                *target = if add { *target + raw as f32 } else { *target - raw as f32 };
+            }
+        }
+
+        ok
+    }
+
+    /// Mirrors `ZooStatus_load.asm`'s literal band-check control flow used by the pre-`0x19` history
+    /// migration (`.184efe`-`.184f3a` for monthly, `.184fd5`-`.185014` for yearly, `.185089`-`.1850cb`
+    /// for flat) - same five-threshold shape in all three, different literal thresholds per region.
+    /// `x` is the region's own outer-loop position (a flat float-index for monthly/yearly, the bare
+    /// category index for flat). Returns `Some(true)` to add, `Some(false)` to subtract, `None` to
+    /// leave the target untouched - matching the real `CMP`/`JLE`/`JL`/`JGE` chain exactly rather than
+    /// an algebraically-simplified re-derivation, to avoid an off-by-one against real vanilla.
+    fn legacy_band(x: i32, subtract_le: i32, subtract_ge: i32, subtract_le2: i32, add_ge: i32, add_le: i32) -> Option<bool> {
+        if x <= subtract_le {
+            return Some(false);
+        }
+        if x >= subtract_ge && x <= subtract_le2 {
+            return Some(false);
+        }
+        if x < add_ge || x > add_le {
+            return None;
+        }
+        Some(true)
+    }
+
+    /// Shared tail for every [`Self::load`] version range (`ZooStatus_load.asm`'s `.13d5bc`/`.13d5b8`
+    /// labels, reached by every branch above): [`Self::admission_price`] for `version >= 0x27`, else a
+    /// hardcoded `49.0` default; then, for `version >= 0x47`, [`Self::last_animal_escape_timestamp_low`]/
+    /// `_high` read from file and the accumulated `ok` returned, or for `version < 0x47`, those two
+    /// fields re-seeded from [`GET_OLD_DATE`] and an **immediate** return - vanilla's own `version < 0x47`
+    /// branch returns right after the seed with no further read, which this mirrors exactly.
+    fn load_tail(&mut self, version: u32, file: *const u32, mut ok: bool) -> u32 {
+        if version < 0x27 {
+            self.admission_price = 49.0;
+        } else {
+            ok &= read_bytes(&mut self.admission_price, file);
+        }
+
+        if version < 0x47 {
+            let old_date = unsafe { GET_OLD_DATE.original()() } as u64;
+            self.last_animal_escape_timestamp_low = old_date as u32;
+            self.last_animal_escape_timestamp_high = (old_date >> 32) as u32;
+            return ok as u32;
+        }
+
         ok &= unsafe {
             DEALLOCATE.hooked()(&mut self.last_animal_escape_timestamp_low as *mut u32 as *const u32, 8, 1, file as *const u8) == 1
         };
@@ -2295,19 +2650,19 @@ impl ZooStatus {
     }
 }
 
-/// Stage 8 of the implementation plan: real detours for the 31 of `zoostatus`'s 34
-/// pre-macOS-regen `generated.rs` addresses this file has a Rust port for, each routed onto the
+/// Stage 8 (extended by Stage 10) of the implementation plan: real detours for 36 of `zoostatus`'s 39
+/// post-macOS-regen `generated.rs` addresses this file has a Rust port for, each routed onto the
 /// `impl ZooStatus` method (or free function, for [`F_ZOO_MESSAGE`]'s this-less helper) of the same
 /// name. Deliberately left un-hooked: the three addresses the plan's Status header documents as
 /// real-vanilla call-throughs ([`FINANCE_CHECKS`]/[`F_CREATE_GUEST`]/[`F_CHANCE`] - blocked on
 /// `ZTWorldMgr`/`ZTBuilding` reimplementation or on shared-RNG-stream parity, see [`ZooStatus::update`]'s
-/// own doc comment), and the five Stage-10 macOS-only methods (`GET_STATUS`/`HEAL_ANIMAL`/
-/// `PURCHASE_FOOD`/`INCREASE_ADMISSIONS`/`INCREASE_ADMISSIONS_INCOME`), which have no Rust port yet.
-///
-/// [`BUY_ANIMAL`]/[`SPEND_KEEPER_WAGES`] are `generated.rs`'s regenerated names for the two addresses
-/// this file still calls [`ZooStatus::spend_keeper_wages_0`]/[`ZooStatus::spend_keeper_wages_1`] under
-/// their original (`spend_keeper_wages_0` partly wrong - see its own doc comment) Stage 3 names -
-/// renaming the Rust side to match is Stage 10's job, not this one's.
+/// own doc comment). Stage 10 added the last five real Windows methods a fresh Ghidra pass recovered from
+/// the macOS-only corpus (`GET_STATUS`/`HEAL_ANIMAL`/`PURCHASE_FOOD`/`INCREASE_ADMISSIONS`/
+/// `INCREASE_ADMISSIONS_INCOME`) and renamed [`BUY_ANIMAL`]'s detour function from its old, partly-wrong
+/// Stage 3 name (`spend_keeper_wages_0`) to [`ZooStatus::buy_animal`] - see that method's own doc comment
+/// for the mislabeling this corrects. `GET_STATUS`'s detour uses the locally-corrected
+/// [`GET_STATUS_FIXED`] `FunctionDef`, not `generated.rs`'s own entry (wrong return type) - see its doc
+/// comment.
 ///
 /// No destructor to worry about (see the module's "Style decision" - `ZooStatus` has no vtable, no
 /// separate constructor, and lives/dies with its enclosing `ZTGameMgr` block), so this is a single flat
@@ -2346,11 +2701,9 @@ mod zoostatus_detours {
         unsafe { mut_from_memory::<ZooStatus>(this) }.spend_guide_wages(amount);
     }
 
-    /// Real name `buyAnimal` (see the module doc comment) - still ported under its original Stage 3
-    /// name here.
     #[detour(BUY_ANIMAL)]
-    unsafe extern "thiscall" fn spend_keeper_wages_0(this: *const u32, amount: f32) {
-        unsafe { mut_from_memory::<ZooStatus>(this) }.spend_keeper_wages_0(amount);
+    unsafe extern "thiscall" fn buy_animal(this: *const u32, amount: f32) {
+        unsafe { mut_from_memory::<ZooStatus>(this) }.buy_animal(amount);
     }
 
     #[detour(SPEND_KEEPER_WAGES)]
@@ -2480,8 +2833,35 @@ mod zoostatus_detours {
         unsafe { mut_from_memory::<ZooStatus>(this) }.load(file as *const u32, version)
     }
 
+    #[detour(HEAL_ANIMAL)]
+    unsafe extern "thiscall" fn heal_animal(this: *const u32, amount: f32) {
+        unsafe { mut_from_memory::<ZooStatus>(this) }.heal_animal(amount);
+    }
+
+    #[detour(PURCHASE_FOOD)]
+    unsafe extern "thiscall" fn purchase_food(this: *const u32, amount: f32) {
+        unsafe { mut_from_memory::<ZooStatus>(this) }.purchase_food(amount);
+    }
+
+    #[detour(INCREASE_ADMISSIONS_INCOME)]
+    unsafe extern "thiscall" fn increase_admissions_income(this: *const u32, amount: f32) {
+        unsafe { mut_from_memory::<ZooStatus>(this) }.increase_admissions_income(amount);
+    }
+
+    #[detour(INCREASE_ADMISSIONS)]
+    unsafe extern "thiscall" fn increase_admissions(this: *const u32, count: i32) {
+        unsafe { mut_from_memory::<ZooStatus>(this) }.increase_admissions(count);
+    }
+
+    /// Uses [`GET_STATUS_FIXED`] (the locally-corrected `FunctionDef`), not `generated.rs`'s own
+    /// `GET_STATUS` entry - see its doc comment for why.
+    #[detour(GET_STATUS_FIXED)]
+    unsafe extern "thiscall" fn get_status(this: *const u32, category: i32, when: i32, index: i32) -> f32 {
+        unsafe { ref_from_memory::<ZooStatus>(this) }.get_status(category, when, index)
+    }
+
     /// Live-test access to each detour's installation state. Once `init_detours()` has patched these
-    /// 31 addresses, `.original()` on them re-enters the Rust detours above instead of reaching vanilla
+    /// 36 addresses, `.original()` on them re-enters the Rust detours above instead of reaching vanilla
     /// in release builds (a raw address cast there); debug builds route `.original()` through the hook
     /// registry's trampolines instead, unaffected by hook state - see
     /// `ztgamemgr_menumusichandler.rs`'s `menu_music_handler_detours::test_real` doc comment for the
@@ -2489,9 +2869,9 @@ mod zoostatus_detours {
     /// macro-generated `*_DETOUR` statics are module-private.
     #[cfg(feature = "reimplementation-tests")]
     pub(crate) mod test_real {
-        /// `(name, is_enabled)` per detour - the battery asserts all 31 to catch a silently-failed
+        /// `(name, is_enabled)` per detour - the battery asserts all 36 to catch a silently-failed
         /// `init_detours()` (error logged, game continues on vanilla).
-        pub(crate) fn status() -> [(&'static str, bool); 31] {
+        pub(crate) fn status() -> [(&'static str, bool); 36] {
             [
                 ("INIT", super::INIT_DETOUR.is_enabled()),
                 ("OVERRIDE", super::OVERRIDE_DETOUR.is_enabled()),
@@ -2524,12 +2904,17 @@ mod zoostatus_detours {
                 ("UPDATE", super::UPDATE_DETOUR.is_enabled()),
                 ("SAVE", super::SAVE_DETOUR.is_enabled()),
                 ("LOAD", super::LOAD_DETOUR.is_enabled()),
+                ("HEAL_ANIMAL", super::HEAL_ANIMAL_DETOUR.is_enabled()),
+                ("PURCHASE_FOOD", super::PURCHASE_FOOD_DETOUR.is_enabled()),
+                ("INCREASE_ADMISSIONS_INCOME", super::INCREASE_ADMISSIONS_INCOME_DETOUR.is_enabled()),
+                ("INCREASE_ADMISSIONS", super::INCREASE_ADMISSIONS_DETOUR.is_enabled()),
+                ("GET_STATUS_FIXED", super::GET_STATUS_FIXED_DETOUR.is_enabled()),
             ]
         }
     }
 }
 
-/// Registers this module's 31 live detours (see [`zoostatus_detours`]'s own doc comment for what's
+/// Registers this module's 36 live detours (see [`zoostatus_detours`]'s own doc comment for what's
 /// deliberately excluded).
 pub fn init() {
     if let Err(e) = unsafe { zoostatus_detours::init_detours() } {
@@ -2543,7 +2928,7 @@ pub(crate) mod live_support {
     use super::*;
 
     /// `(name, is_enabled)` per detour - see `zoostatus_detours::test_real::status`.
-    pub(crate) fn detour_status() -> [(&'static str, bool); 31] {
+    pub(crate) fn detour_status() -> [(&'static str, bool); 36] {
         zoostatus_detours::test_real::status()
     }
 }
