@@ -51,6 +51,7 @@ use tracing::error;
 
 use crate::{
     globals::{get_module_base, globals},
+    lua_fn,
     util::{get_from_memory, mut_from_memory, ref_from_memory, save_to_memory},
     ztworldmgr::IVec3,
 };
@@ -773,6 +774,244 @@ fn entity_type_matches(entity_ptr: u32, type_check_arg_rva: u32) -> bool {
     let check_fn = unsafe { mem::transmute::<u32, extern "thiscall" fn(u32, u32) -> bool>(get_from_memory::<u32>(vtable + 0x1c)) };
     let arg = get_module_base("zoo.exe") as u32 + type_check_arg_rva;
     check_fn(entity_type_ptr, arg)
+}
+
+/// Console diagnostic (`check_calc_sums_fixture()`) for whoever next builds a live-populated-world
+/// comparison test for [`Self::calculate_sums`]/[`Self::message_checks`]/[`Self::rating_checks`] (the
+/// existing `ZOOSTATUS_CALCULATE_SUMS`/`ZOOSTATUS_CHECKS` tests run before `run_load_live_zoo`, so today
+/// they only exercise the zero-entity/zero-research degenerate branches - see
+/// `zoostatus-implementation-plan.md`'s open live-test items). Read-only: walks
+/// `GLOBAL_ZTWorldMgr`'s live entity array and map tiles exactly the way [`Self::calculate_sums`] does,
+/// plus the live `GLOBAL_ZTResearchMgr` tree, and reports whether the *currently loaded* zoo actually
+/// hits every condition a real comparison test would need to exercise - never writes to any entity or to
+/// any `ZooStatus`. Meant to be run against a candidate test-save zoo (`OPENZT_TEST_ZOO`/
+/// `reimplementation-test-zoo.zoo`) before wiring it into the battery, to confirm it's worth the effort
+/// rather than discovering after the fact that (say) no guest is ever below the hunger threshold.
+fn describe_calculate_sums_fixture() -> String {
+    let base = get_module_base("zoo.exe") as u32;
+    let need_threshold: i32 = get_from_memory(base + raw_globals::GUEST_NEED_THRESHOLD_RVA);
+
+    let world = globals().ztworldmgr();
+
+    let (mut guest_count, mut animal_count, mut building_count) = (0u32, 0u32, 0u32);
+    let (mut guests_over_hunger, mut guests_under_hunger) = (0u32, 0u32);
+    let (mut guests_over_thirst, mut guests_under_thirst) = (0u32, 0u32);
+    let (mut guests_over_restroom, mut guests_under_restroom) = (0u32, 0u32);
+    let (mut guests_over_tired, mut guests_under_tired) = (0u32, 0u32);
+    let mut guest_flag_0x33c_count = 0u32;
+    let mut guest_subflag_0x26c_count = 0u32;
+    let mut animal_flag_0x3a7_count = 0u32;
+
+    let mut entity_addr = world.entity_array_start();
+    while entity_addr != world.entity_array_end() {
+        let entity_ptr: u32 = get_from_memory(entity_addr);
+        entity_addr += 4;
+        if entity_ptr == 0 {
+            continue;
+        }
+
+        if entity_type_matches(entity_ptr, raw_globals::GUEST_TYPE_CHECK_RVA) {
+            guest_count += 1;
+
+            let hunger: i32 = get_from_memory(entity_ptr + 0x2b0);
+            if hunger > need_threshold { guests_over_hunger += 1 } else { guests_under_hunger += 1 }
+            let thirst: i32 = get_from_memory(entity_ptr + 0x2b8);
+            if thirst > need_threshold { guests_over_thirst += 1 } else { guests_under_thirst += 1 }
+            let restroom: i32 = get_from_memory(entity_ptr + 0x2c8);
+            if restroom > need_threshold { guests_over_restroom += 1 } else { guests_under_restroom += 1 }
+            let tired: i32 = get_from_memory(entity_ptr + 0x2c0);
+            if tired > need_threshold { guests_over_tired += 1 } else { guests_under_tired += 1 }
+
+            let flag: u8 = get_from_memory(entity_ptr + 0x33c);
+            if flag != 0 {
+                guest_flag_0x33c_count += 1;
+            }
+            let sub_object: u32 = get_from_memory(entity_ptr + 0x26c);
+            let sub_flag: i32 = get_from_memory(sub_object + 0x10);
+            if sub_flag != 0 {
+                guest_subflag_0x26c_count += 1;
+            }
+        } else if entity_type_matches(entity_ptr, raw_globals::ANIMAL_TYPE_CHECK_RVA) {
+            animal_count += 1;
+            let flag: u8 = get_from_memory(entity_ptr + 0x3a7);
+            if flag != 0 {
+                animal_flag_0x3a7_count += 1;
+            }
+        } else if entity_type_matches(entity_ptr, raw_globals::BUILDING_TYPE_CHECK_RVA) {
+            building_count += 1;
+        }
+    }
+
+    let mut blank_tiles: u32 = 0;
+    for y in 0..world.map_y_size {
+        for x in 0..world.map_x_size {
+            let Some(tile) = world.get_tile_from_pos(IVec3::new(x as i32, y as i32, 0)) else { continue };
+            let tile_addr = world.get_ptr_from_bftile(&tile);
+            let a: u32 = get_from_memory(tile_addr + 4);
+            let b: u32 = get_from_memory(tile_addr + 8);
+            let c: u32 = get_from_memory(tile_addr + 0xc);
+            let entity_ptr: u32 = get_from_memory(tile_addr + 0x10);
+            if a == 0 && b == 0 && c == 0 && entity_ptr == 0 {
+                blank_tiles += 1;
+            }
+        }
+    }
+    let total_tiles = world.map_x_size * world.map_y_size;
+    let non_blank_tiles = total_tiles.saturating_sub(blank_tiles);
+
+    let num_species: i32 = unsafe { GET_NUM_SPECIES.original()(globals().zthabitatmgr_ptr() as *const u32) };
+
+    let (mut research_total, mut research_complete) = (0i32, 0i32);
+    for branch in globals().ztresearchmgr().branches() {
+        for category in branch.categories() {
+            for program in category.programs() {
+                research_total += 1;
+                if program.is_complete() {
+                    research_complete += 1;
+                }
+            }
+        }
+    }
+
+    let line = |ok: bool, label: &str, detail: String| format!("[{}] {label}: {detail}\n", if ok { "OK" } else { "MISSING" });
+
+    let mut out = String::from("=== calculate_sums / message_checks / rating_checks live-test fixture check ===\n");
+    out.push_str(&line(guest_count > 0, "guests present", format!("{guest_count} guest(s)")));
+    out.push_str(&line(
+        guests_over_hunger > 0 && guests_under_hunger > 0,
+        "hunger spread",
+        format!("{guests_over_hunger} over / {guests_under_hunger} under threshold ({need_threshold})"),
+    ));
+    out.push_str(&line(
+        guests_over_thirst > 0 && guests_under_thirst > 0,
+        "thirst spread",
+        format!("{guests_over_thirst} over / {guests_under_thirst} under threshold ({need_threshold})"),
+    ));
+    out.push_str(&line(
+        guests_over_restroom > 0 && guests_under_restroom > 0,
+        "restroom-need spread",
+        format!("{guests_over_restroom} over / {guests_under_restroom} under threshold ({need_threshold})"),
+    ));
+    out.push_str(&line(
+        guests_over_tired > 0 && guests_under_tired > 0,
+        "tiredness spread",
+        format!("{guests_over_tired} over / {guests_under_tired} under threshold ({need_threshold})"),
+    ));
+    out.push_str(&line(
+        guest_flag_0x33c_count > 0,
+        "guest_condition_counter_1 (guest +0x33c flag)",
+        format!("{guest_flag_0x33c_count} guest(s) flagged"),
+    ));
+    out.push_str(&line(
+        guest_subflag_0x26c_count > 0,
+        "guest_condition_counter_2 (guest +0x26c sub-object flag)",
+        format!("{guest_subflag_0x26c_count} guest(s) flagged"),
+    ));
+    out.push_str(&line(animal_count > 0, "animals present", format!("{animal_count} animal(s)")));
+    out.push_str(&line(
+        animal_flag_0x3a7_count > 0,
+        "animal_condition_counter_1 (animal +0x3a7 flag)",
+        format!("{animal_flag_0x3a7_count} animal(s) flagged"),
+    ));
+    out.push_str(&line(building_count > 0, "buildings present", format!("{building_count} building(s)")));
+    out.push_str(&line(
+        non_blank_tiles > 0,
+        "non-blank map tiles present",
+        format!("{non_blank_tiles} non-blank / {total_tiles} total tiles ({}x{})", world.map_x_size, world.map_y_size),
+    ));
+    out.push_str(&line(num_species > 0, "species present", format!("{num_species} species")));
+    out.push_str(&line(research_total > 0, "research programs present", format!("{research_total} program(s)")));
+    out.push_str(&line(
+        research_complete > 0 && research_complete < research_total,
+        "research mix (some complete, some not)",
+        format!("{research_complete}/{research_total} complete"),
+    ));
+
+    out
+}
+
+/// Console diagnostic (`fixup_calc_sums_fixture()`), companion to [`describe_calculate_sums_fixture`]/
+/// `check_calc_sums_fixture()`. Mutates the *values* on guest/animal entities already present in the
+/// currently loaded zoo so the value-based conditions [`describe_calculate_sums_fixture`] checks for
+/// pass - alternates existing guests between "every tracked need urgent" and "every tracked need
+/// satisfied" (also setting one guest's `+0x33c` flag and one guest's `+0x26c` sub-object flag along the
+/// way) and sets one animal's `+0x3a7` flag. After running this, save the game normally through the
+/// game's own UI/`save()` to bake the changes into a `.zoo` file for `OPENZT_TEST_ZOO`.
+///
+/// **Deliberately does not touch anything else the checklist covers**, and this is a real scope
+/// boundary, not laziness:
+/// - **Guest/animal/building *presence*, and non-blank map tiles** can't be fabricated by a memory
+///   write - creating a new entity needs `ZTWorldMgr`'s entity-creation path, which is the exact
+///   cross-allocator/freelist hazard [`ZooStatus::f_create_guest`]'s/`financeChecks`'s own doc comments
+///   already track as unsafe to do from Rust today (see `zoostatus-implementation-plan.md`'s "Open
+///   risks"). If the checklist reports these missing, place more of that entity type in-game before
+///   saving - there's no safe shortcut here.
+/// - **The research completion mix** is left alone here too, even though no entity creation is
+///   involved: forcing `current_progress >= target_cost` on a live `ZTResearchProgram` changes real,
+///   vanilla-owned state that vanilla's own update loop polls and reacts to (`on_completion` dispatch -
+///   building unlocks, discounts, etc.) - letting real research funding complete something naturally
+///   (or loading a save that already has mixed progress) is the safe way to get this condition, not a
+///   poke from here.
+fn fixup_calc_sums_fixture() -> String {
+    let base = get_module_base("zoo.exe") as u32;
+    let need_threshold: i32 = get_from_memory(base + raw_globals::GUEST_NEED_THRESHOLD_RVA);
+    let above = need_threshold.saturating_add(1);
+    let below = (need_threshold - 1).max(0);
+
+    let world = globals().ztworldmgr();
+
+    let mut guest_index = 0u32;
+    let mut animal_touched = false;
+    let mut guest_flag_0x33c_set = false;
+    let mut guest_flag_0x26c_set = false;
+
+    let mut entity_addr = world.entity_array_start();
+    while entity_addr != world.entity_array_end() {
+        let entity_ptr: u32 = get_from_memory(entity_addr);
+        entity_addr += 4;
+        if entity_ptr == 0 {
+            continue;
+        }
+
+        if entity_type_matches(entity_ptr, raw_globals::GUEST_TYPE_CHECK_RVA) {
+            let value = if guest_index.is_multiple_of(2) { above } else { below };
+            save_to_memory(entity_ptr + 0x2b0, value);
+            save_to_memory(entity_ptr + 0x2b8, value);
+            save_to_memory(entity_ptr + 0x2c8, value);
+            save_to_memory(entity_ptr + 0x2c0, value);
+            guest_index += 1;
+
+            if !guest_flag_0x33c_set {
+                save_to_memory(entity_ptr + 0x33c, 1u8);
+                guest_flag_0x33c_set = true;
+            }
+            if !guest_flag_0x26c_set {
+                let sub_object: u32 = get_from_memory(entity_ptr + 0x26c);
+                if sub_object != 0 {
+                    save_to_memory(sub_object + 0x10, 1i32);
+                    guest_flag_0x26c_set = true;
+                }
+            }
+        } else if !animal_touched && entity_type_matches(entity_ptr, raw_globals::ANIMAL_TYPE_CHECK_RVA) {
+            save_to_memory(entity_ptr + 0x3a7, 1u8);
+            animal_touched = true;
+        }
+    }
+
+    let mut out = String::from("=== calculate_sums fixture fixup ===\n");
+    out.push_str(&format!("guests rewritten: {guest_index} (needs threshold {need_threshold}, alternating {above}/{below})\n"));
+    if guest_index < 2 {
+        out.push_str("  NOTE: fewer than 2 guests present - a needs spread needs at least 2 to show both sides of the threshold\n");
+    }
+    out.push_str(&format!("guest +0x33c flag set: {guest_flag_0x33c_set}\n"));
+    out.push_str(&format!(
+        "guest +0x26c sub-object flag set: {guest_flag_0x26c_set}{}\n",
+        if guest_flag_0x26c_set { "" } else { " (no guest had a non-null +0x26c sub-object)" }
+    ));
+    out.push_str(&format!("animal +0x3a7 flag set: {animal_touched}\n"));
+    out.push_str("Not touched (arrange in-game before saving, see this function's own doc comment): guest/animal/building presence, non-blank tiles, research completion mix.\n");
+    out.push_str("Save the game now (normal in-game save) to bake these changes into a .zoo file.\n");
+    out
 }
 
 /// Writes `value`'s raw bytes through real vanilla `WriteBytesToFile` (`standalone::WRITE_BYTES_TO_FILE`,
@@ -2920,6 +3159,20 @@ pub fn init() {
     if let Err(e) = unsafe { zoostatus_detours::init_detours() } {
         error!("Failed to initialise zoostatus detours: {e:?}");
     }
+
+    lua_fn!(
+        "check_calc_sums_fixture",
+        "Checks whether the currently loaded zoo exercises every ZooStatus::calculate_sums/message_checks/rating_checks branch (for authoring live reimplementation tests)",
+        "check_calc_sums_fixture()",
+        || { Ok(describe_calculate_sums_fixture()) }
+    );
+
+    lua_fn!(
+        "fixup_calc_sums_fixture",
+        "Rewrites existing guest/animal entities' need/condition values so check_calc_sums_fixture()'s value-based conditions pass - save the game afterward to bake it into a .zoo",
+        "fixup_calc_sums_fixture()",
+        || { Ok(fixup_calc_sums_fixture()) }
+    );
 }
 
 /// Live-comparison test support for `reimplementation_tests`.
