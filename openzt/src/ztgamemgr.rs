@@ -52,7 +52,7 @@ use crate::{
     util::{get_from_memory, mut_from_memory, ref_from_memory, save_to_memory},
     ztgamemgr_menumusichandler::MenuMusicHandler,
     ztsoundscape::ZTSoundscape,
-    zoostatus::ZooStatus,
+    zoostatus::{self, ZooStatus},
 };
 
 /// `DAT_006394b8`'s RVA (Ghidra VA `0x006394b8` minus the default load base `0x400000`) - a raw, signed
@@ -221,7 +221,8 @@ fn ticks_to_filetime(ticks: u64) -> FILETIME {
 /// before calling `ZTUI::main::set{Animal,Guest}Rating` - `0` outright if `population` (the corresponding
 /// `num_animals`/`guest_tile_count` count, matching vanilla's own byte-identical read - see
 /// `zoostatus.rs`) is `0`, otherwise
-/// `(metric + 100) * 100 / 200`. Pulled out as its own
+/// `(metric + 100) * 100 / 200` (via [`zoostatus::scaled_rating_metric`], shared with `ZooStatus::ratingChecks`'
+/// own animal/guest score contributions - same formula, different scale constant). Pulled out as its own
 /// pure function because the live `ZTGAMEMGR_UPDATE_SIM` comparison test can never actually exercise this
 /// branch: it drives a standalone instance whose `delta` is bounded `0..=0x3e9` against a tick accumulator
 /// reset to `0` immediately before each call, so the accumulator can only ever equal `delta` itself - never
@@ -231,7 +232,7 @@ fn rating_from_metric(metric: i32, population: u16) -> i32 {
     if population == 0 {
         0
     } else {
-        (metric + 100) * 100 / 200
+        zoostatus::scaled_rating_metric(metric, 100)
     }
 }
 

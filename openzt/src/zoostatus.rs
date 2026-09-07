@@ -177,8 +177,8 @@ pub struct ZooStatus {
     /// (`BFConfigFile::getInt`). Default `0` (`init.asm`).
     pub(crate) angry_animals_sick_change: i32, // 0x6c
     /// One of eight per-need-counter message-frequency thresholds `messageChecks` `FMUL`s against a
-    /// small tile-condition counter before a `fZooMessage` call. Default `0.5`. Exact counter pairing
-    /// not yet resolved (needs `messageChecks`'s full `.c`, not just `.asm`) - see the plan's own note.
+    /// small tile-condition counter before a `fZooMessage` call. Default `0.5`. Counter pairing resolved -
+    /// see [`Self::message_checks`]'s own doc comment for the full per-field mapping.
     /// **Resolved (Stage 6)**: `override`'s `[characteristics]`/`cPctSick` key (`BFConfigFile::getFloat`).
     pub(crate) message_threshold_0x70: f32,
     /// See [`Self::message_threshold_0x70`] - `override`'s `cPctProtestors` key.
@@ -706,6 +706,41 @@ impl VanillaFloatVector {
         }
         let len = unsafe { self.end.offset_from(self.begin) } as usize;
         unsafe { std::slice::from_raw_parts(self.begin, len) }
+    }
+}
+
+/// The vanilla `((x + 100) * scale) / 200` idiom, shared by two independent call sites that would
+/// otherwise be two hand-written transcriptions of the same formula with different scale constants:
+/// [`Self::rating_checks`]' own animal/guest score contributions (`scale = 25`, unconditional) and
+/// `ztgamemgr.rs`'s `rating_from_metric` (`scale = 100`, gated behind a population != 0 check before
+/// calling this). Pulled out so a future edit to one can't silently diverge from the other.
+pub(crate) fn scaled_rating_metric(metric: i32, scale: i32) -> i32 {
+    (metric + 100) * scale / 200
+}
+
+/// The three outcomes [`ZooStatus::f_grant_donation`] picks between, given `count_after_increment`
+/// (`donation_count_this_period` immediately after this call's own `+= 1.0`) and `bound`
+/// (`donation_count_bound`). Pulled out as its own pure function so this branch selection has direct unit
+/// test coverage independent of any live call - see [`ZooStatus::f_grant_donation`]'s own doc comment for
+/// why a live comparison test can't safely exercise the two message-firing variants.
+#[derive(Debug, PartialEq, Eq)]
+enum DonationOutcome {
+    /// This call's increment pushed the counter exactly one past the bound - the one-time "no more
+    /// donations this period" message trigger.
+    BoundJustCrossed,
+    /// Counter is still within bound - roll and grant a donation.
+    Grant,
+    /// Counter was already past the bound before this call - silent no-op.
+    AlreadyPastBound,
+}
+
+fn donation_outcome(count_after_increment: f32, bound: i32) -> DonationOutcome {
+    if count_after_increment == (bound + 1) as f32 {
+        DonationOutcome::BoundJustCrossed
+    } else if count_after_increment > bound as f32 {
+        DonationOutcome::AlreadyPastBound
+    } else {
+        DonationOutcome::Grant
     }
 }
 
@@ -1918,12 +1953,10 @@ impl ZooStatus {
             if (self.guest_tile_count as f32) * self.message_threshold_0xa8 < self.guest_condition_counter_2 as f32 {
                 zoo_message(0x2720, 2);
             }
-            let field_0xf4: i32 = get_from_memory(self as *const Self as u32 + 0xf4);
-            if field_0xf4 <= self.guest_rating_metric {
+            if self.high_avg_guest_happy_threshold <= self.guest_rating_metric {
                 zoo_message(0x2725, 1);
             }
-            let field_0xfc: i32 = get_from_memory(self as *const Self as u32 + 0xfc);
-            if self.guest_rating_metric <= field_0xfc {
+            if self.guest_rating_metric <= self.low_avg_guest_happy_threshold {
                 zoo_message(0x2726, 2);
             }
         }
@@ -1984,8 +2017,8 @@ impl ZooStatus {
             rating += (capped * 10) / self.species_rating_cap;
         }
 
-        rating += ((self.animal_rating_metric + 100) * 25) / 200;
-        rating += ((self.guest_rating_metric + 100) * 25) / 200;
+        rating += scaled_rating_metric(self.animal_rating_metric, 25);
+        rating += scaled_rating_metric(self.guest_rating_metric, 25);
 
         let clamped_config = self.config_budget_0x0_4c_clamped();
         rating += (clamped_config * 10) / 30000;
@@ -2064,86 +2097,49 @@ impl ZooStatus {
     /// implies 3 once combined with the preceding `getMoneyText` call) is done in Rust instead via
     /// [`str::replace`], sidestepping that ambiguity entirely - same displayed text either way, since the
     /// only thing being substituted is [`format_money_text`]'s own already-vanilla-formatted output.
+    ///
+    /// The three-way branch above is dispatched through [`donation_outcome`], a pure function pulled out
+    /// purely so its branch selection has direct unit-test coverage (see its own doc comment) - **no live
+    /// comparison test exercises the message-firing branches (`BoundJustCrossed`/`Grant`) at all**: both
+    /// call through to real vanilla `BFUIMgr::displayMessage`, and an earlier `message_checks` live test
+    /// that accidentally reached that same call live hung the whole reimplementation-test battery (see
+    /// `ZOOSTATUS_CHECKS`'s own doc comment) - the same "keep a real UI-dialog condition false" discipline
+    /// applies here. `ZOOSTATUS_F_GRANT_DONATION_NO_OP` (`reimplementation_tests/mod.rs`) does cover the
+    /// silent `AlreadyPastBound` branch live, since it never reaches a message call.
     pub fn f_grant_donation(&mut self) {
         self.donation_count_this_period += 1.0;
         let bound = self.donation_count_bound;
 
-        if self.donation_count_this_period == (bound + 1) as f32 {
-            let message = load_localized_string(0x3a9b);
-            let vanilla_str = VanillaString::new(&message);
-            display_message_string(vanilla_str.as_ptr(), 5);
-            return;
+        match donation_outcome(self.donation_count_this_period, bound) {
+            DonationOutcome::BoundJustCrossed => {
+                let message = load_localized_string(0x3a9b);
+                let vanilla_str = VanillaString::new(&message);
+                display_message_string(vanilla_str.as_ptr(), 5);
+            }
+            DonationOutcome::AlreadyPastBound => {}
+            DonationOutcome::Grant => {
+                let range = self.donation_amount_max - self.donation_amount_min;
+                let amount = if range > 0 {
+                    self.donation_amount_min + (unsafe { RAND.original()() } as i32 % range)
+                } else {
+                    self.donation_amount_min
+                };
+                let amount_f = amount as f32;
+
+                let ztgamemgr_ptr = globals().ztgamemgr_ptr();
+                let global_zoostatus_ptr = (ztgamemgr_ptr as u32 + 0x10) as *mut ZooStatus;
+                unsafe { (*global_zoostatus_ptr).increase_donations(amount_f) };
+                unsafe { (*ztgamemgr_ptr).add_cash(amount_f) };
+
+                let template = load_localized_string(0x3a9a);
+                let money_text = format_money_text(amount as u32);
+                let message = template.replace("%s", &money_text);
+                let vanilla_str = VanillaString::new(&message);
+                display_message_string(vanilla_str.as_ptr(), 4);
+            }
         }
-
-        if self.donation_count_this_period > bound as f32 {
-            return;
-        }
-
-        let range = self.donation_amount_max - self.donation_amount_min;
-        let amount = if range > 0 {
-            self.donation_amount_min + (unsafe { RAND.original()() } as i32 % range)
-        } else {
-            self.donation_amount_min
-        };
-        let amount_f = amount as f32;
-
-        let ztgamemgr_ptr = globals().ztgamemgr_ptr();
-        let global_zoostatus_ptr = (ztgamemgr_ptr as u32 + 0x10) as *mut ZooStatus;
-        unsafe { (*global_zoostatus_ptr).increase_donations(amount_f) };
-        unsafe { (*ztgamemgr_ptr).add_cash(amount_f) };
-
-        let template = load_localized_string(0x3a9a);
-        let money_text = format_money_text(amount as u32);
-        let message = template.replace("%s", &money_text);
-        let vanilla_str = VanillaString::new(&message);
-        display_message_string(vanilla_str.as_ptr(), 4);
     }
 
-    /// Reimplementation of `ZooStatus::update` (per `generated.rs`'s `UPDATE` entry), Stage 4. Per
-    /// `zoostatus_update.c`/`.asm` (both read in full and cross-checked instruction-by-instruction - no
-    /// ambiguity here, every field is a direct, already-named offset):
-    ///
-    /// 1. Advances three independent "ticks since last check" accumulators
-    ///    ([`Self::rating_check_elapsed`]/[`Self::message_check_elapsed`]/[`Self::newguest_check_elapsed`])
-    ///    by `delta`, comparing each against its own configured interval
-    ///    ([`Self::rating_check_interval`]/[`Self::message_check_interval`]/
-    ///    [`Self::newguest_check_interval`]) to decide
-    ///    whether [`Self::rating_checks`]/[`Self::message_checks`]/vanilla `newguestChecks` should run
-    ///    this tick - [`Self::rating_checks`]'s own trigger is additionally OR'd with
-    ///    [`Self::finance_check_pending`] (read *before* `financeChecks` would clear it later in this same
-    ///    call, matching vanilla's own read-before-call ordering).
-    /// 2. Calls the already-reimplemented `ZTMegatileMgr::update` on the live `GLOBAL_ZTMegatileMgr`
-    ///    singleton (direct Rust call, not an address call-through - same no-address-call-through
-    ///    rationale `ztgamemgr.rs`'s own `update`/`update_sim` use for their embedded reimplemented
-    ///    sub-objects).
-    /// 3. Dispatches the three interval checks (native [`Self::rating_checks`]/[`Self::message_checks`],
-    ///    real vanilla `newguestChecks` call-through - see below), then real vanilla `financeChecks` if
-    ///    [`Self::finance_check_pending`] is set, then a donation roll (`fChance` real vanilla
-    ///    call-through, native [`Self::f_grant_donation`]) gated on the live budget being below
-    ///    [`raw_globals::DONATION_CASH_THRESHOLD_RVA`].
-    ///
-    /// **Deliberate scope reduction from the implementation plan, applied here**: `financeChecks` stays a
-    /// real vanilla call-through this stage, not reimplemented, despite the plan originally scoping it
-    /// into Stage 4 (`newguestChecks`/`fZooMessage`/`fGrantDonation` were three more deferred methods in
-    /// earlier passes - `newguestChecks` unblocked by a Ghidra re-decompile cleaning up its control-flow
-    /// ambiguity, see [`Self::newguest_checks`]'s own doc comment; `fZooMessage` and `fGrantDonation`
-    /// unblocked once `GLOBAL_BFUIMgr`'s address was resolved and, for `fGrantDonation`, once a further
-    /// regen resolved `FUN_0040f103` as `msvc_std::RAND` - see [`Self::f_grant_donation`]'s own doc
-    /// comment for both). `financeChecks` and [`Self::newguest_checks`]'s own `fCreateGuest` call share the
-    /// exact risk profile `ztgamemgr.rs`'s own `removedZooDoo` attempt already hit and explicitly backed
-    /// out from (see that module's doc comment) - **a real, tracked follow-up, not a dead end**: once
-    /// `ZTWorldMgr`'s building list/`ZTBuilding` (for `financeChecks`) or `ZTWorldMgr`'s entity-creation
-    /// path (for `fCreateGuest`) are themselves reimplemented and this codebase genuinely owns those
-    /// structures/freelists, both become safe to port - see `zoostatus-implementation-plan.md`'s "Open
-    /// risks" section for the tracked entry. `financeChecks` walks `ZTWorldMgr::getBuildingList`'s
-    /// freelist-backed building list via a real vanilla `std::string` tag construction, exactly the
-    /// pattern that made `removedZooDoo` "too much unverified surface for a single pass"; `fCreateGuest`
-    /// builds a scratch tile-search buffer through the same small-object freelist
-    /// (`&DAT_00638000`-indexed) `removedZooDoo` got stuck on, then live-spawns a new guest entity via an
-    /// un-ported vtable "create instance" call into `ZTWorldMgr`. Calling `financeChecks` through its
-    /// real, un-detoured address against this live, vanilla-layout-compatible struct is always safe (same
-    /// call-through convention as `override`/`save`/`load`'s migration paths elsewhere in this module) -
-    /// this is a documented, deliberate deferral, not an oversight.
     /// Reimplementation of `ZooStatus::setAdultAdmissionPrice` (per `generated.rs`'s
     /// `SET_ADULT_ADMISSION_PRICE` entry), Stage 5. Per `ZooStatus_setAdultAdmissionPrice.c`/`.asm`
     /// (both read in full): clamps `price` into
@@ -2460,6 +2456,51 @@ impl ZooStatus {
         self.research_completion_percent = if total != 0 { completed * 100 / total } else { 100 };
     }
 
+    /// Reimplementation of `ZooStatus::update` (per `generated.rs`'s `UPDATE` entry), Stage 4. Per
+    /// `zoostatus_update.c`/`.asm` (both read in full and cross-checked instruction-by-instruction - no
+    /// ambiguity here, every field is a direct, already-named offset):
+    ///
+    /// 1. Advances three independent "ticks since last check" accumulators
+    ///    ([`Self::rating_check_elapsed`]/[`Self::message_check_elapsed`]/[`Self::newguest_check_elapsed`])
+    ///    by `delta`, comparing each against its own configured interval
+    ///    ([`Self::rating_check_interval`]/[`Self::message_check_interval`]/
+    ///    [`Self::newguest_check_interval`]) to decide
+    ///    whether [`Self::rating_checks`]/[`Self::message_checks`]/vanilla `newguestChecks` should run
+    ///    this tick - [`Self::rating_checks`]'s own trigger is additionally OR'd with
+    ///    [`Self::finance_check_pending`] (read *before* `financeChecks` would clear it later in this same
+    ///    call, matching vanilla's own read-before-call ordering).
+    /// 2. Calls the already-reimplemented `ZTMegatileMgr::update` on the live `GLOBAL_ZTMegatileMgr`
+    ///    singleton (direct Rust call, not an address call-through - same no-address-call-through
+    ///    rationale `ztgamemgr.rs`'s own `update`/`update_sim` use for their embedded reimplemented
+    ///    sub-objects).
+    /// 3. Dispatches the three interval checks (native [`Self::rating_checks`]/[`Self::message_checks`],
+    ///    real vanilla `newguestChecks` call-through - see below), then real vanilla `financeChecks` if
+    ///    [`Self::finance_check_pending`] is set, then a donation roll (`fChance` real vanilla
+    ///    call-through, native [`Self::f_grant_donation`]) gated on the live budget being below
+    ///    [`raw_globals::DONATION_CASH_THRESHOLD_RVA`].
+    ///
+    /// **Deliberate scope reduction from the implementation plan, applied here**: `financeChecks` stays a
+    /// real vanilla call-through this stage, not reimplemented, despite the plan originally scoping it
+    /// into Stage 4 (`newguestChecks`/`fZooMessage`/`fGrantDonation` were three more deferred methods in
+    /// earlier passes - `newguestChecks` unblocked by a Ghidra re-decompile cleaning up its control-flow
+    /// ambiguity, see [`Self::newguest_checks`]'s own doc comment; `fZooMessage` and `fGrantDonation`
+    /// unblocked once `GLOBAL_BFUIMgr`'s address was resolved and, for `fGrantDonation`, once a further
+    /// regen resolved `FUN_0040f103` as `msvc_std::RAND` - see [`Self::f_grant_donation`]'s own doc
+    /// comment for both). `financeChecks` and [`Self::newguest_checks`]'s own `fCreateGuest` call share the
+    /// exact risk profile `ztgamemgr.rs`'s own `removedZooDoo` attempt already hit and explicitly backed
+    /// out from (see that module's doc comment) - **a real, tracked follow-up, not a dead end**: once
+    /// `ZTWorldMgr`'s building list/`ZTBuilding` (for `financeChecks`) or `ZTWorldMgr`'s entity-creation
+    /// path (for `fCreateGuest`) are themselves reimplemented and this codebase genuinely owns those
+    /// structures/freelists, both become safe to port - see `zoostatus-implementation-plan.md`'s "Open
+    /// risks" section for the tracked entry. `financeChecks` walks `ZTWorldMgr::getBuildingList`'s
+    /// freelist-backed building list via a real vanilla `std::string` tag construction, exactly the
+    /// pattern that made `removedZooDoo` "too much unverified surface for a single pass"; `fCreateGuest`
+    /// builds a scratch tile-search buffer through the same small-object freelist
+    /// (`&DAT_00638000`-indexed) `removedZooDoo` got stuck on, then live-spawns a new guest entity via an
+    /// un-ported vtable "create instance" call into `ZTWorldMgr`. Calling `financeChecks` through its
+    /// real, un-detoured address against this live, vanilla-layout-compatible struct is always safe (same
+    /// call-through convention as `override`/`save`/`load`'s migration paths elsewhere in this module) -
+    /// this is a documented, deliberate deferral, not an oversight.
     pub fn update(&mut self, delta: i32) {
         let this_ptr = self as *mut Self as *const u32;
 
@@ -3550,5 +3591,17 @@ mod tests {
 
         status.set_adult_admission_price(10.0);
         assert_eq!(status.admission_price, 10.0, "== min: the <= min branch stores min itself");
+    }
+
+    #[test]
+    fn donation_outcome_covers_all_three_branches() {
+        // count_after_increment == bound + 1: the one-time "no more donations" trigger.
+        assert_eq!(donation_outcome(5.0, 4), DonationOutcome::BoundJustCrossed);
+        // count_after_increment <= bound: grant, including the boundary itself.
+        assert_eq!(donation_outcome(3.0, 4), DonationOutcome::Grant);
+        assert_eq!(donation_outcome(4.0, 4), DonationOutcome::Grant);
+        // count_after_increment > bound + 1: already past, silent no-op on every later call this period.
+        assert_eq!(donation_outcome(6.0, 4), DonationOutcome::AlreadyPastBound);
+        assert_eq!(donation_outcome(100.0, 4), DonationOutcome::AlreadyPastBound);
     }
 }

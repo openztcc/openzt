@@ -196,11 +196,13 @@ mod detour_zoo_main {
     };
     use openzt_detour::generated::zoostatus::{
         BUY_ANIMAL as ZOOSTATUS_BUY_ANIMAL, BUY_PEOPLE_FOOD as ZOOSTATUS_BUY_PEOPLE_FOOD, CALCULATE_SUMS as ZOOSTATUS_CALCULATE_SUMS,
-        CHANGE_ENDOWMENT_MEMBERS as ZOOSTATUS_CHANGE_ENDOWMENT_MEMBERS, HEAL_ANIMAL as ZOOSTATUS_HEAL_ANIMAL,
+        CHANGE_ENDOWMENT_MEMBERS as ZOOSTATUS_CHANGE_ENDOWMENT_MEMBERS, F_GRANT_DONATION as ZOOSTATUS_F_GRANT_DONATION,
+        HEAL_ANIMAL as ZOOSTATUS_HEAL_ANIMAL,
         INCREASE_ADMISSIONS as ZOOSTATUS_INCREASE_ADMISSIONS, INCREASE_ADMISSIONS_INCOME as ZOOSTATUS_INCREASE_ADMISSIONS_INCOME,
         INCREASE_DONATIONS as ZOOSTATUS_INCREASE_DONATIONS, INCREASE_ENDOWMENT as ZOOSTATUS_INCREASE_ENDOWMENT,
         INCREASE_SHOW_ADMISSION as ZOOSTATUS_INCREASE_SHOW_ADMISSION, INIT as ZOOSTATUS_INIT, LOAD as ZOOSTATUS_LOAD,
-        MESSAGE_CHECKS as ZOOSTATUS_MESSAGE_CHECKS, OVERRIDE as ZOOSTATUS_OVERRIDE, PURCHASE_FOOD as ZOOSTATUS_PURCHASE_FOOD,
+        MESSAGE_CHECKS as ZOOSTATUS_MESSAGE_CHECKS, NEWGUEST_CHECKS as ZOOSTATUS_NEWGUEST_CHECKS, OVERRIDE as ZOOSTATUS_OVERRIDE,
+        PURCHASE_FOOD as ZOOSTATUS_PURCHASE_FOOD,
         RATING_CHECKS as ZOOSTATUS_RATING_CHECKS, SAVE as ZOOSTATUS_SAVE,
         REFUND_ANIMAL_COST as ZOOSTATUS_REFUND_ANIMAL_COST, REFUND_CONSTRUCTION as ZOOSTATUS_REFUND_CONSTRUCTION,
         SET_ADULT_ADMISSION_PRICE as ZOOSTATUS_SET_ADULT_ADMISSION_PRICE,
@@ -731,6 +733,7 @@ mod detour_zoo_main {
         tests.push(RegisteredTest { name: "ZTGAMEMGR_UPDATE_SIM", run: run_gamemgr_update_sim_test });
         tests.push(RegisteredTest { name: "ZTGAMEMGR_FINANCE_DATE_HELPERS", run: run_gamemgr_finance_date_helpers_test });
         tests.push(RegisteredTest { name: "ZOOSTATUS_CHECKS", run: run_zoostatus_checks_test });
+        tests.push(RegisteredTest { name: "ZOOSTATUS_F_GRANT_DONATION_NO_OP", run: run_zoostatus_f_grant_donation_no_op_test });
         tests.push(RegisteredTest { name: "ZOOSTATUS_NEWGUEST_CHECKS_SMOKE", run: run_zoostatus_newguest_checks_smoke_test });
         tests.push(RegisteredTest { name: "ZOOSTATUS_PRICING", run: run_zoostatus_pricing_test });
         tests.push(RegisteredTest { name: "ZOOSTATUS_CALCULATE_SUMS", run: run_zoostatus_calculate_sums_test });
@@ -5277,7 +5280,7 @@ mod detour_zoo_main {
     }
 
     /// `ZOOSTATUS_DETOURS_ENABLED` - wiring check: `reimplementation_tests::init()` installs
-    /// `zoostatus::init()`, and this asserts all 31 of its detours actually report enabled (see
+    /// `zoostatus::init()`, and this asserts all 36 of its detours actually report enabled (see
     /// `zoostatus.rs`'s own `zoostatus_detours` module doc comment for the full list and for the three
     /// addresses deliberately left un-hooked). Without it, a silently-failed `init_detours()` (error
     /// logged, game continues on vanilla) would leave the whole battery green while every hooked
@@ -5308,7 +5311,7 @@ mod detour_zoo_main {
     /// `ZOOSTATUS_ORIGINAL_ROUTES_TO_TRAMPOLINE` - debug-only anti-regression for `openzt-detour`'s
     /// hook registry, mirroring `MENUMUSICHANDLER_ORIGINAL_ROUTES_TO_TRAMPOLINE`'s own doc comment:
     /// `FunctionDef::original()` must return the *real vanilla* function (routed through the detour's
-    /// trampoline) even for the 31 addresses this battery has itself hooked, not silently re-enter our
+    /// trampoline) even for the 36 addresses this battery has itself hooked, not silently re-enter our
     /// own Rust detours. For each of them, asserts the registry holds a trampoline, that `.original()`
     /// returns exactly that pointer value, and that it differs from the raw address (`zoo.exe` has no
     /// ASLR, so an un-routed raw cast would compare equal - pointer equality can't pass vacuously here).
@@ -5702,47 +5705,81 @@ mod detour_zoo_main {
     }
 
     /// `ZOOSTATUS_NEWGUEST_CHECKS_SMOKE` - `zoostatus-implementation-plan.md` Stage 4's live coverage for
-    /// [`ZooStatus::newguest_checks`]. **Not** a byte-comparison against real vanilla
-    /// `NEWGUEST_CHECKS.original()` like `ZOOSTATUS_CHECKS` above - `newguest_checks` calls through to
-    /// real vanilla `fChance`, which advances the shared global RNG seed (`DAT_00638060`) every call.
-    /// Running the real pole then the reimplemented pole back to back would almost always roll
-    /// *different* random outcomes (the real pole's own `fChance` call consumes RNG state before the
-    /// reimplemented pole's call reads it), so a mismatch on whether `fCreateGuest`/`admissionMessage`
-    /// fired would be RNG divergence, not a porting bug - the decision *logic* that actually needs
-    /// verifying (the price-tier bucketing and the band/tier dispatch table) is exhaustively covered
-    /// instead by `#[cfg(test)]`'s `price_tier_matches_the_confirmed_boundary_chain`/
-    /// `newguest_dispatch_matches_the_derived_band_tier_table`, which don't need live state at all.
-    ///
-    /// What this test *does* verify: that running [`ZooStatus::newguest_checks`] against a real, live
-    /// `GLOBAL_ZTHabitatMgr`/`GLOBAL_ZTMarketingMgr`/escaped-animal-list doesn't crash or hang - real
-    /// vanilla `ZTHabitat::getNumAnimals`/`fChance`/`fCreateGuest` calls included, exercising the exact
-    /// same call shape a real game tick would. This exists because an earlier draft of this stage's
-    /// `ZOOSTATUS_CHECKS` test hung the whole reimplementation-test battery by accidentally triggering a
-    /// real `BFUIMgr::displayMessage` call (see that test's own doc comment) - `newguest_checks` also has
-    /// a real UI-message path ([`ZooStatus::admission_message`]), so this test exists to catch a repeat of
-    /// that failure mode specifically, even though it can't byte-compare the RNG-dependent tail.
+    /// [`ZooStatus::newguest_checks`]. Upgraded from a crash/hang-only smoke test to a real full-struct
+    /// byte comparison against real vanilla `ZOOSTATUS_NEWGUEST_CHECKS.original()`, by forcing
+    /// [`Self::guest_type_arrival_multiplier`] to `[0; 5]` on both poles - whichever of the five entries
+    /// [`Self::newguest_dispatch`] would otherwise select, this pins `F_CHANCE`'s roll parameter to `0`,
+    /// which (per [`Self::newguest_checks`]'s own doc comment on the `& 0xff == 0` masking) deterministically
+    /// fails on both poles regardless of the real, shared `fChance` RNG stream's actual draw - so
+    /// `F_CREATE_GUEST` (the cross-allocator freelist hazard) and [`Self::admission_message`]'s real UI
+    /// path (the hang this test's earlier smoke-only form was added to guard against - see
+    /// `ZOOSTATUS_CHECKS`'s own doc comment for the incident) are both **provably never reached**, on
+    /// either pole, independent of live `GLOBAL_ZTHabitatMgr`/`GLOBAL_ZTMarketingMgr`/escaped-animal-list
+    /// state. Both poles still read that same live state identically, so whichever branch it steers them
+    /// into (early return on no occupied habitats/an escaped animal, or the full price-tier write +
+    /// band/tier dispatch), they take the *same* branch - giving a genuine byte-for-byte comparison of
+    /// [`Self::newguest_check_elapsed`]'s reset and [`Self::field_0x48`]'s tier write whenever live state
+    /// happens to reach that path, and of the early-return no-op otherwise. The band/tier dispatch
+    /// *table* itself stays additionally covered independent of live state by `#[cfg(test)]`'s
+    /// `price_tier_matches_the_confirmed_boundary_chain`/`newguest_dispatch_matches_the_derived_band_tier_table`.
     fn run_zoostatus_newguest_checks_smoke_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZOOSTATUS_NEWGUEST_CHECKS_SMOKE";
 
-        let mgr_ptr = gamemgr_live_support::build_standalone_mgr();
-        if mgr_ptr.is_null() {
-            error!("{}: CREATE_ZTGAME_MGR returned null", test_name);
+        let real_mgr_ptr = gamemgr_live_support::build_standalone_mgr();
+        let reimpl_mgr_ptr = gamemgr_live_support::build_standalone_mgr();
+        if real_mgr_ptr.is_null() || reimpl_mgr_ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})", test_name, real_mgr_ptr, reimpl_mgr_ptr);
             if let Some(log_file) = failure_log {
-                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null\n", test_name).as_bytes());
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})\n", test_name, real_mgr_ptr, reimpl_mgr_ptr).as_bytes());
+            }
+            if !real_mgr_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(real_mgr_ptr);
+            }
+            if !reimpl_mgr_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(reimpl_mgr_ptr);
             }
             return true;
         }
 
-        let zoostatus_ptr = (mgr_ptr as u32 + 0x10) as *mut ZooStatus;
+        let zoostatus_size = size_of::<ZooStatus>();
+        let real_zoostatus_ptr = (real_mgr_ptr as u32 + 0x10) as *mut ZooStatus;
+        let reimpl_zoostatus_ptr = (reimpl_mgr_ptr as u32 + 0x10) as *mut ZooStatus;
+
         unsafe {
-            std::ptr::write_bytes(zoostatus_ptr as *mut u8, 0, size_of::<ZooStatus>());
-            (*zoostatus_ptr).init(std::ptr::null());
-            (*zoostatus_ptr).newguest_checks();
+            std::ptr::write_bytes(real_zoostatus_ptr as *mut u8, 0, zoostatus_size);
+            std::ptr::write_bytes(reimpl_zoostatus_ptr as *mut u8, 0, zoostatus_size);
+
+            for ptr in [real_zoostatus_ptr, reimpl_zoostatus_ptr] {
+                (*ptr).init(std::ptr::null());
+                // Pins F_CHANCE's roll parameter to 0 - see this function's own doc comment.
+                (*ptr).guest_type_arrival_multiplier = [0; 5];
+            }
+
+            ZOOSTATUS_NEWGUEST_CHECKS.original()(real_zoostatus_ptr as *const u32);
+            (*reimpl_zoostatus_ptr).newguest_checks();
         }
 
-        write_success_line(failure_log, test_name);
-        gamemgr_live_support::destroy_standalone_mgr(mgr_ptr);
-        false
+        let real_bytes = unsafe { std::slice::from_raw_parts(real_zoostatus_ptr as *const u8, zoostatus_size) };
+        let reimpl_bytes = unsafe { std::slice::from_raw_parts(reimpl_zoostatus_ptr as *const u8, zoostatus_size) };
+
+        let mismatches: Vec<(usize, u8, u8)> = (0..zoostatus_size)
+            .filter_map(|i| if real_bytes[i] != reimpl_bytes[i] { Some((i, real_bytes[i], reimpl_bytes[i])) } else { None })
+            .collect();
+
+        let failed = !mismatches.is_empty();
+        if failed {
+            let shown = &mismatches[..mismatches.len().min(32)];
+            error!("{}: {} byte mismatch(es) (offset, real, reimpl), first {}: {:?}", test_name, mismatches.len(), shown.len(), shown);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} byte mismatch(es), first {}: {:?}\n", test_name, mismatches.len(), shown.len(), shown).as_bytes());
+            }
+        } else {
+            write_success_line(failure_log, test_name);
+        }
+
+        gamemgr_live_support::destroy_standalone_mgr(real_mgr_ptr);
+        gamemgr_live_support::destroy_standalone_mgr(reimpl_mgr_ptr);
+        failed
     }
 
     /// `ZOOSTATUS_CHECKS` - `zoostatus-implementation-plan.md` Stage 4's live comparison for the two
@@ -5866,6 +5903,82 @@ mod detour_zoo_main {
 
         let mismatches: Vec<(usize, u8, u8)> = (0..zoostatus_size)
             .filter(|i| !excluded_ranges.iter().any(|r| r.contains(i)))
+            .filter_map(|i| if real_bytes[i] != reimpl_bytes[i] { Some((i, real_bytes[i], reimpl_bytes[i])) } else { None })
+            .collect();
+
+        let failed = !mismatches.is_empty();
+        if failed {
+            let shown = &mismatches[..mismatches.len().min(32)];
+            error!("{}: {} byte mismatch(es) (offset, real, reimpl), first {}: {:?}", test_name, mismatches.len(), shown.len(), shown);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: {} byte mismatch(es), first {}: {:?}\n", test_name, mismatches.len(), shown.len(), shown).as_bytes());
+            }
+        } else {
+            write_success_line(failure_log, test_name);
+        }
+
+        gamemgr_live_support::destroy_standalone_mgr(real_mgr_ptr);
+        gamemgr_live_support::destroy_standalone_mgr(reimpl_mgr_ptr);
+        failed
+    }
+
+    /// `ZOOSTATUS_F_GRANT_DONATION_NO_OP` - live comparison for [`ZooStatus::f_grant_donation`]'s
+    /// `AlreadyPastBound` branch (see `zoostatus.rs`'s own `donation_outcome` doc comment for the
+    /// three-way split it dispatches through). This is deliberately the *only* branch of that function
+    /// this battery compares live: the other two (`BoundJustCrossed`/`Grant`) both call through to real
+    /// vanilla `BFUIMgr::displayMessage`, which `ZOOSTATUS_CHECKS`'s own doc comment already documents
+    /// hanging the whole reimplementation-test run when accidentally reached live - not a risk worth
+    /// re-taking here. The two message-firing branches instead get direct, live-call-free coverage from
+    /// `donation_outcome`'s own `#[cfg(test)]` unit test in `zoostatus.rs`.
+    ///
+    /// Builds two standalone `ZTGameMgr` blocks (same harness `ZOOSTATUS_INIT`/`ZOOSTATUS_ACCUMULATORS`
+    /// use), zeroes each one's embedded `ZooStatus` sub-region, seeds `donation_count_this_period`/
+    /// `donation_count_bound` on both so the post-increment count (`11.0`) is neither `<= bound` (`3`) nor
+    /// exactly `bound + 1` (`4`) - guaranteeing the silent no-op branch and nothing else - then runs real
+    /// vanilla `F_GRANT_DONATION.original()` against one and [`ZooStatus::f_grant_donation`] against the
+    /// other, with a full-struct byte comparison after. No masking needed: this branch touches nothing but
+    /// `donation_count_this_period` itself, on `self` - never the live `GLOBAL_ZTGameMgr` singleton.
+    fn run_zoostatus_f_grant_donation_no_op_test(failure_log: &mut Option<std::fs::File>) -> bool {
+        let test_name = "ZOOSTATUS_F_GRANT_DONATION_NO_OP";
+
+        let real_mgr_ptr = gamemgr_live_support::build_standalone_mgr();
+        let reimpl_mgr_ptr = gamemgr_live_support::build_standalone_mgr();
+        if real_mgr_ptr.is_null() || reimpl_mgr_ptr.is_null() {
+            error!("{}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})", test_name, real_mgr_ptr, reimpl_mgr_ptr);
+            if let Some(log_file) = failure_log {
+                let _ = log_file.write_all(format!("Test Failed {}: CREATE_ZTGAME_MGR returned null (real={:?}, reimpl={:?})\n", test_name, real_mgr_ptr, reimpl_mgr_ptr).as_bytes());
+            }
+            if !real_mgr_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(real_mgr_ptr);
+            }
+            if !reimpl_mgr_ptr.is_null() {
+                gamemgr_live_support::destroy_standalone_mgr(reimpl_mgr_ptr);
+            }
+            return true;
+        }
+
+        let zoostatus_size = size_of::<ZooStatus>();
+        let real_zoostatus_ptr = (real_mgr_ptr as u32 + 0x10) as *mut ZooStatus;
+        let reimpl_zoostatus_ptr = (reimpl_mgr_ptr as u32 + 0x10) as *mut ZooStatus;
+
+        unsafe {
+            std::ptr::write_bytes(real_zoostatus_ptr as *mut u8, 0, zoostatus_size);
+            std::ptr::write_bytes(reimpl_zoostatus_ptr as *mut u8, 0, zoostatus_size);
+
+            for ptr in [real_zoostatus_ptr, reimpl_zoostatus_ptr] {
+                let status = &mut *ptr;
+                status.donation_count_this_period = 10.0;
+                status.donation_count_bound = 3;
+            }
+
+            ZOOSTATUS_F_GRANT_DONATION.original()(real_zoostatus_ptr as *const u32);
+            (*reimpl_zoostatus_ptr).f_grant_donation();
+        }
+
+        let real_bytes = unsafe { std::slice::from_raw_parts(real_zoostatus_ptr as *const u8, zoostatus_size) };
+        let reimpl_bytes = unsafe { std::slice::from_raw_parts(reimpl_zoostatus_ptr as *const u8, zoostatus_size) };
+
+        let mismatches: Vec<(usize, u8, u8)> = (0..zoostatus_size)
             .filter_map(|i| if real_bytes[i] != reimpl_bytes[i] { Some((i, real_bytes[i], reimpl_bytes[i])) } else { None })
             .collect();
 
@@ -6797,8 +6910,10 @@ mod detour_zoo_main {
     /// same family the paragraph above already avoids, just reached through a different call chain
     /// (`ZooStatus::update`, not `update_sim` itself). Both standalone instances get
     /// `donation_chance_percent` forced to `0` right after `set_new_game_defaults`, before the proptest
-    /// loop starts, so that roll is always a deterministic no. See the field-zeroing code's own comment
-    /// for the crash this reproduces and root-causes.
+    /// loop starts, so that roll is always a deterministic no - `finance_check_pending` is forced `false`
+    /// alongside it, defensively, since `ZooStatus::update`'s `financeChecks` call-through carries the same
+    /// cross-allocator risk class. See the field-zeroing code's own comment for the crash this reproduces
+    /// and root-causes.
     fn run_gamemgr_update_sim_test(failure_log: &mut Option<std::fs::File>) -> bool {
         let test_name = "ZTGAMEMGR_UPDATE_SIM";
 
@@ -6849,9 +6964,19 @@ mod detour_zoo_main {
         // `donation_chance_percent` on both instances makes every `fChance(0)` roll deterministically
         // false, so `f_grant_donation` never fires - the same "keep a real UI-dialog condition false"
         // discipline `ZOOSTATUS_CHECKS`'s own doc comment already established for this exact hazard.
+        //
+        // `finance_check_pending` is forced `false` alongside it for the same reason, defensively:
+        // `set_new_game_defaults`/`init` already leave it `false` and nothing in this test's call path
+        // sets it `true`, but `ZooStatus::update`'s `financeChecks` call-through walks `ZTWorldMgr`'s
+        // freelist-backed building list - the same cross-allocator risk class as the donation-roll crash
+        // this guard's sibling above was added for. An explicit write here, rather than relying on it
+        // staying false by construction, means a future caller change can't silently reintroduce that
+        // hazard into this test unnoticed.
         unsafe {
             (*((real_ptr as u32 + 0x10) as *mut ZooStatus)).donation_chance_percent = 0;
             (*((reimpl_ptr as u32 + 0x10) as *mut ZooStatus)).donation_chance_percent = 0;
+            (*((real_ptr as u32 + 0x10) as *mut ZooStatus)).finance_check_pending = false;
+            (*((reimpl_ptr as u32 + 0x10) as *mut ZooStatus)).finance_check_pending = false;
         }
 
         let dat_006394b8_addr = get_module_base("zoo.exe") as u32 + (0x006394b8u32 - 0x400000u32);
